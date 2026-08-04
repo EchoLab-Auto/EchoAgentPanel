@@ -3,162 +3,165 @@
 一个用 Rust 编写的 **AI Agent 框架**，支持通过 [OneBot v11](https://github.com/botuniverse/onebot-11) 协议接入 QQ（[NapCat](https://napcat.napneko.icu/)），内置 **OpenCode 风格 TUI 终端界面**。
 
 ```
-                    ┌──────────────────────────────────────┐
-QQ 用户 ──> NapCat ──反向 WebSocket──> echo-server ──> HandlerRegistry
- (登录端)                               │                  └──> AgentHandler
-                                       │                       │
-                    ┌──────────────────┼───────────────────────┘
-                    │                  ▼
-                    │            echo-agent (Agent 框架)
-                    │            LLM Provider / Tools / Skills / Memory
-                    │                  │
-                    │        BackendBridge (mpsc)
-                    │                  ▼
-                    └──> TUI ──> echo-tui (ratatui, opencode 风格)
+                    ┌────────────────────────────────────────┐
+QQ 用户 ──> NapCat ──反向 WS──> echo-server ──> HandlerRegistry
+ (登录端)                               │                  └──> QqHandler
+                                        │                       │
+                                        ▼                       ▼
+                                 echo-agent (Agent 框架)     过滤管道
+                                 LLM / Tools / Skills / Memory  │
+                                        │                       │
+                               BackendBridge (mpsc / WS)       │
+                                        │                       │
+                                        ▼                       ▼
+                                 echo-tui (TUI 终端)    QQ 门控配置
 ```
 
 ## 架构
 
-Cargo workspace 五个 crate，源码位于 `source/`：
+Cargo workspace，源码位于 `source/`：
 
 | crate | 路径 | 职责 |
 |---|---|---|
-| `echo-core` | `source/backend/echo-core` | OneBot v11 协议类型：事件、动作、消息段（纯 serde，无 I/O） |
-| `echo-server` | `source/backend/echo-server` | 反向 WebSocket 服务端：连接管理、handler 分发、API 调用关联 |
-| `echo-agent` | `source/backend/echo-agent` | **Agent 框架**：LLM Provider、工具、技能、会话记忆、Agent 循环 |
-| `echo-tui` | `source/tui/echo-tui` | **终端 UI**：聊天区、会话侧边栏、命令面板、按键帮助 |
-| `echo` | `source/echo` | 可执行程序 `echo-agent-panel`：配置加载、接线、`--headless` 模式 |
-
-依赖关系：`echo ──> echo-tui ──> echo-agent ──> echo-server ──> echo-core`
+| `echo-core` | `source/backend/echo-core` | OneBot v11 协议类型（纯 serde，无 I/O） |
+| `echo-server` | `source/backend/echo-server` | 反向 WebSocket 服务端 |
+| `echo-adapter` | `source/backend/echo-adapter` | 适配器 trait、消息类型、过滤管道、注册中心 |
+| `echo-agent` | `source/backend/echo-agent` | Agent 框架：LLM Provider、工具、技能、会话记忆 |
+| `echo-adapter-qq` | `source/backend/echo-adapter-qq` | QQ/OneBot 适配器：消息处理、过滤配置、NapCat API |
+| `echo-tui` | `source/tui/echo-tui` | 终端 UI：聊天区、命令系统、交互式表单、鼠标选区 |
+| `echo` | `source/echo` | 可执行程序：配置加载、接线、多运行模式 |
 
 ## 快速开始
 
-### 1. 部署 NapCat（QQ 登录端）
+### 1. 部署 NapCat
 
 ```bash
 docker run -d -p 6099:6099 -p 3000:3000 -p 3001:3001 mlikiowa/napcat-docker:latest
 ```
 
-打开 `http://<服务器IP>:6099`（WebUI），用手机 QQ 扫码登录（⚠️ 不要用常用大号，有风控风险）。
+打开 `http://<服务器IP>:6099`（WebUI），用手机 QQ 扫码登录。
 
-### 2. 配置 NapCat 反向 WebSocket
-
-WebUI → 网络配置 → 新建 → **WebSocket 客户端**：
-
-| 配置项 | 值 |
-|---|---|
-| 地址 | `ws://<EchoAgentPanel 地址>:3131` |
-| 消息格式 | Array |
-| 心跳间隔 | 5000（毫秒） |
-| Token（可选） | 与 `config/echo-agent-panel.toml` 的 `access_token` 一致 |
-
-### 3. 配置 LLM 并运行
+### 2. 配置并运行
 
 ```bash
 cp config/echo-agent-panel.toml config/echo-agent-panel.local.toml
-# 编辑 [agent] 段：provider / model / api_key（或设 OPENAI_API_KEY 环境变量）
+# 编辑 [agent]：provider / model / api_key
 
-# 带 TUI 启动（默认）
+# 完整模式（Core + TUI 同进程）
 cargo run --release -- --config config/echo-agent-panel.local.toml
 
-# 无头模式（仅服务端）
+# 仅 Core（无头模式）
 cargo run --release -- --config config/echo-agent-panel.local.toml --headless
+
+# 仅 TUI（连接远程 Core）
+cargo run --release -- --connect ws://127.0.0.1:3132
 ```
 
-### 4. 验证
+### 3. 验证
 
-- 用另一个 QQ 号**私聊**机器人任意消息 → Agent 自动回复（LLM 生成）
+- **私聊**机器人任意消息 → Agent 自动回复
 - **群聊** @机器人 → Agent 回复
-- 命令：`/echo hello`、`/help`、`/status`（管理员）、`/shutdown`（管理员）
+- TUI 中输入 `/qq login` 查看扫码状态
 
 ## TUI 用法
 
-界面为全屏模式（alternate screen），布局：顶部状态栏 + 全宽聊天区 + 底部输入框（无侧边栏）。
+全屏模式，布局：`状态栏 | 聊天区 | 输入框`。
 
 | 按键 | 功能 |
 |---|---|
-| `Tab` | 选中输入框（先选中再输入） |
-| `Esc` | 取消输入框选中 |
+| 直接输入 | 打字即可输入，无需先按 Tab |
 | `Enter` / `Shift+Enter` | 发送消息 / 换行 |
-| `Ctrl+P` | 命令面板（命令 / 切换会话列表） |
-| `Ctrl+X` 然后 `o` / `s` / `?` | 切换会话 / 配置 API / 按键帮助 |
-| `Ctrl+C`（连按两次） | 退出程序（第一次提示确认，2 秒内再按生效） |
+| `Ctrl+P` | 命令面板 |
+| `Ctrl+X` 然后 `o` / `s` / `?` | 切换会话 / API 配置 / 按键帮助 |
+| `Ctrl+C`（连按两次） | 退出程序 |
 | `PgUp` / `PgDn` / `Home` / `End` | 聊天区滚动 |
+| 鼠标滚轮 | 聊天区滚动 |
+| 鼠标拖拽 | 选中文字（松开即复制到剪贴板） |
 
-- 会话切换：`Ctrl+P` → 切换会话（或 `Ctrl+X` 然后 `o`），列表按最近活跃排序，当前会话预选
-- 输入框 slash 命令：`/help` `/api` `/switch` `/clear` `/quit`
-- 状态栏动效：LLM 思考中 spinner、工具执行指示、断开时连接点闪烁
-- TUI 中发送的消息会进入本地会话（`user_0`），回复通过后端事件流实时显示
+### Slash 命令
 
-## 技能系统（Skills）
+| 命令 | 功能 |
+|---|---|
+| `/help` | 显示按键帮助 |
+| `/api` | 交互式 API 配置 |
+| `/clear` | 清空当前会话 |
+| `/resume` | 恢复历史会话 |
+| `/adapters` | 查看适配器状态 |
+| `/qq login` | QQ 扫码登录 |
+| `/qq setting` | QQ 设置（门控模式 + 白名单/黑名单管理） |
+| `/quit` | 退出程序 |
 
-技能是 `skills/<name>/SKILL.md`，YAML frontmatter + Markdown 说明：
+### QQ 门控管理 (`/qq setting`)
 
-```markdown
----
-name: web-search
-description: 搜索网页获取最新信息
-keywords: [搜索, 天气, 新闻]
----
-# 使用说明
-...
+```
+/qq setting
+  └── 门控模式（三选一，互斥）
+      ├── ○ 无约束 — 所有人可用
+      ├── ● 白名单模式 — 仅白名单中的用户/群可用
+      └── ○ 黑名单模式 — 禁止黑名单中的用户/群
+  └── 名单管理
+      ├── 🔒 管理白名单 → 显示 QQ 群列表，Enter 切换
+      └── 🚫 管理黑名单 → 同上
 ```
 
-- **渐进披露**：Tier 1（name/description/keywords）注入系统提示词；消息命中关键词时加载完整指令（Tier 2）
-- 内置示例：`skills/calculator`（配合 `calculator` 工具）、`skills/web-search`
-
-## LLM Provider
-
-| provider | 说明 | 环境变量 |
-|---|---|---|
-| `openai` | OpenAI 及所有兼容端点（DeepSeek、Moonshot、vLLM…） | `OPENAI_API_KEY` |
-| `deepseek` | 同上（OpenAI 兼容） | `OPENAI_API_KEY` |
-| `anthropic` | Claude Messages API | `ANTHROPIC_API_KEY` |
-| `ollama` | 本地模型 | 无需 key |
-
-支持工具调用（function calling），Agent 循环内最多执行 `max_tool_iterations` 轮工具。
+门控配置持久化到 `[adapters.qq.gate]` 和 `[adapters.qq.filter]`，重启后保留。
 
 ## 配置说明
 
 ```toml
-[logging]
-level = "info"                  # trace | debug | info | warn | error
-format = "text"                 # text | json
-log_file = ""                   # 留空自动：TUI 模式写 logs/echo-agent-panel.log，headless 写 stdout
+[core]
+management_address = "127.0.0.1:3132"  # Panel 连接地址（Core/Panel 分离模式）
 
-[server]
-bind_address = "0.0.0.0:3131"   # 反向 WS 监听地址
-access_token = ""               # 与 NapCat Token 一致；也可用环境变量 ECHO_ACCESS_TOKEN
-heartbeat_interval = 30         # 心跳探测秒数，0 禁用
+[logging]
+level = "info"
+format = "text"
+
+[adapters.qq]
+enabled = true
+owner_qq = 0                            # 管理员 QQ（0=禁用，管理员消息绕过所有过滤）
+command_prefix = "/"
+napcat_webui_url = "http://localhost:6099"
+
+[adapters.qq.server]
+bind_address = "0.0.0.0:3131"
+access_token = ""
+heartbeat_interval = 30
+
+[adapters.qq.trigger]
+dm_auto_reply = true                    # 私聊自动回复
+group_at_reply = true                   # 群聊仅 @ 回复
+
+[adapters.qq.filter.allowlist]          # 白名单（运行时可通过 /qq setting 修改）
+user_ids = []
+group_ids = []
+
+[adapters.qq.filter.denylist]           # 黑名单
+user_ids = []
+group_ids = []
 
 [agent]
-provider = "openai"             # openai | deepseek | anthropic | ollama
-model = "gpt-4o-mini"
-base_url = ""                   # 留空用 provider 默认值
-api_key = ""                    # 留空读环境变量
-system_prompt = "..."           # 机器人人设
-max_tool_iterations = 5
-dm_auto_reply = true            # 私聊自动回复
-group_at_reply = true           # 群聊仅 @回复
+provider = "deepseek"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com/anthropic"
+api_key = ""
+system_prompt = "请你使用中文"
+max_tool_iterations = 1024
+memory_limit = 40
 skills_dir = "skills"
-memory_limit = 40               # 会话保留消息数
 
 [tui]
-enabled = true                  # --headless 可强制关闭
-theme = "dark"                  # dark | light
+enabled = true
+theme = "dark"
 ```
 
-## Docker 部署
+## LLM Provider
 
-```bash
-docker build -t echo-agent-panel .
-docker run -d -p 3131:3131 \
-  -v $PWD/config:/app/config \
-  -e OPENAI_API_KEY=sk-xxx \
-  echo-agent-panel
-```
-
-容器内以 `--headless` 运行（无 TTY）。
+| provider | 说明 | 端点 |
+|---|---|---|
+| `openai` | OpenAI 及兼容端点 | `https://api.openai.com/v1` |
+| `deepseek` | DeepSeek（OpenAI/Anthropic 兼容） | `https://api.deepseek.com/anthropic` |
+| `anthropic` | Claude Messages API | `https://api.anthropic.com/v1` |
+| `ollama` | 本地模型 | `http://localhost:11434/v1` |
 
 ## 测试
 
@@ -166,24 +169,28 @@ docker run -d -p 3131:3131 \
 cargo test --workspace
 ```
 
-- `echo-core`：OneBot v11 样本 JSON 的 serde 往返测试
-- `echo-server`：集成测试——mock NapCat 反向 WS 连接，验证事件分发与 API echo 关联、鉴权
-- `echo-agent`：Agent 循环、记忆边界、技能关键词匹配、SKILL.md 解析、计算器工具
+## 目录结构
 
-## 扩展点
+```
+source/
+├── backend/
+│   ├── echo-core/          # OneBot v11 协议类型
+│   ├── echo-server/        # 反向 WS 服务端
+│   ├── echo-adapter/       # 适配器 trait + 过滤管道
+│   ├── echo-agent/         # Agent 框架
+│   └── echo-adapter-qq/    # QQ 适配器
+├── tui/
+│   └── echo-tui/           # TUI 终端界面
+└── echo/                   # 可执行程序入口
 
-- **新 Handler**：实现 `echo_server::Handler` 注册到 `HandlerRegistry`（AgentHandler 即如此）
-- **新工具**：实现 `echo_agent::Tool` trait 注册到 `ToolRegistry`
-- **新技能**：添加 `skills/<name>/SKILL.md`
-- **新 Provider**：实现 `echo_agent::LlmProvider` trait，在 `llm::create_provider` 注册
-
-## 路线图
-
-- [x] 接入 LLM（`echo-agent` crate：对话记忆 + 工具调用）
-- [x] OpenCode 风格 TUI（`echo-tui` crate）
-- [ ] 群管理命令（禁言/踢人/名片）
-- [ ] 消息发送限速
-- [ ] 会话持久化（SQLite）
+doc/
+├── develop/
+│   ├── adapter/qq/gating.md        # QQ 门控设计
+│   ├── tui/design.md               # TUI 架构设计
+│   └── config/persistence.md       # 配置持久化
+└── design/
+    └── adapter/qq/gating.md        # 门控设计精简版
+```
 
 ## 参考
 

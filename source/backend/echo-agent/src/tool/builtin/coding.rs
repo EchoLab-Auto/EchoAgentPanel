@@ -261,7 +261,7 @@ impl Tool for EditFileTool {
 
         let original = std::fs::read_to_string(&path)
             .map_err(|e| ToolError::Execution(format!("read: {e}")))?;
-        let mut lines: Vec<&str> = original.lines().collect();
+        let lines: Vec<&str> = original.lines().collect();
         let total = lines.len();
         if start > total {
             return Err(ToolError::Execution(format!("start_line {start} exceeds file length {total}")));

@@ -796,6 +796,7 @@ dependencies = [
  "rxing",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "tui-textarea",
  "unicode-width 0.2.0",
