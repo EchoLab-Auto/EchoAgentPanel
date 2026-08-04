@@ -21,7 +21,7 @@ pub mod skill;
 pub mod tool;
 
 pub use agent::Agent;
-pub use bridge::{create_bridge, BackendBridge, BackendHandle};
+pub use bridge::{create_bridge, BackendBridge, BackendHandle, FanoutHandle};
 pub use command::BackendCommand;
 pub use config::AgentConfig;
 pub use event::{ApiProfileInfo, BackendEvent, BackendState, GroupInfo, SessionInfo};

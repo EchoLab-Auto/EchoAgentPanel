@@ -18,6 +18,7 @@ pub struct Config {
     pub bot: BotSection,
     pub agent: echo_agent::AgentConfig,
     pub tui: TuiSection,
+    pub core: CoreSection,
     /// New adapter configuration.
     #[serde(alias = "adapters")]
     pub adapters_section: Option<AdaptersSection>,
@@ -90,6 +91,19 @@ impl Default for BotSection {
 pub struct TuiSection {
     pub enabled: bool,
     pub theme: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CoreSection {
+    /// WebSocket address for Panel connections (default: 127.0.0.1:3132).
+    pub management_address: String,
+}
+
+impl Default for CoreSection {
+    fn default() -> Self {
+        Self { management_address: "127.0.0.1:3132".into() }
+    }
 }
 
 impl Default for TuiSection {

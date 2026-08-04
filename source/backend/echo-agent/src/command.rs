@@ -1,7 +1,7 @@
 //! Commands sent by the TUI / API layer into the agent backend.
 
 /// Commands from the frontend to the agent backend.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BackendCommand {
     /// Send a message into a session (as if from the local user).
     SendMessage { session_id: String, content: String },

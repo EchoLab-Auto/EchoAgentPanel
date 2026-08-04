@@ -33,7 +33,7 @@ pub struct SessionInfo {
 }
 
 /// Events flowing from the backend to the TUI.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BackendEvent {
     // ---- Adapter lifecycle ----
     /// An adapter's connection state changed.

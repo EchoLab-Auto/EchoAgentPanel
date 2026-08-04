@@ -29,6 +29,10 @@ struct Args {
     /// Run without the terminal UI (server only).
     #[arg(long)]
     headless: bool,
+    /// Connect to a remote Core via WebSocket instead of running in-process.
+    /// e.g. `--connect ws://127.0.0.1:3132`
+    #[arg(long)]
+    connect: Option<String>,
 }
 
 #[tokio::main]
@@ -161,20 +165,36 @@ async fn main() -> Result<()> {
     // (server_task cleanup removed; adapter manages its own lifecycle)
 
     // ---- TUI ----
-    let tui_task = match bridge {
-        Some(bridge) => {
-            let theme = if config.tui.theme == "light" {
-                echo_tui::Theme::light()
-            } else {
-                echo_tui::Theme::dark()
-            };
-            Some(tokio::spawn(async move {
-                if let Err(e) = echo_tui::run_tui(bridge, theme).await {
-                    warn!(error = %e, "tui terminated");
+    let tui_theme = if config.tui.theme == "light" {
+        echo_tui::Theme::light()
+    } else {
+        echo_tui::Theme::dark()
+    };
+
+    let tui_task = if let Some(ref core_url) = args.connect {
+        // Panel mode: connect to remote Core via WebSocket.
+        let url = core_url.clone();
+        let theme = tui_theme;
+        Some(tokio::spawn(async move {
+            match echo_tui::Backend::connect_ws(&url).await {
+                Ok(backend) => {
+                    if let Err(e) = echo_tui::run_tui_ws(backend, theme).await {
+                        warn!(error = %e, "tui terminated");
+                    }
                 }
-            }))
-        }
-        None => None,
+                Err(e) => warn!(error = %e, "failed to connect to Core"),
+            }
+        }))
+    } else if let Some(bridge) = bridge {
+        // In-process mode.
+        Some(tokio::spawn(async move {
+            if let Err(e) = echo_tui::run_tui(bridge, tui_theme).await {
+                warn!(error = %e, "tui terminated");
+            }
+        }))
+    } else {
+        // Headless mode — TUI not started.
+        None
     };
 
     // ---- Main loop ----

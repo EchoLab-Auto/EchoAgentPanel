@@ -38,10 +38,17 @@ impl Drop for TermGuard {
     }
 }
 
-/// Run the TUI until the user quits. Owns terminal setup/teardown.
-///
-/// 全屏模式：进入 alternate screen 独占整个终端，退出时恢复原画面。
+/// Run the TUI with an in-process mpsc bridge.
 pub async fn run_tui(bridge: echo_agent::BackendBridge, theme: Theme) -> anyhow::Result<()> {
+    run_tui_inner(Backend::new(bridge), theme).await
+}
+
+/// Run the TUI with a pre-connected WebSocket backend.
+pub async fn run_tui_ws(backend: Backend, theme: Theme) -> anyhow::Result<()> {
+    run_tui_inner(backend, theme).await
+}
+
+async fn run_tui_inner(backend: Backend, theme: Theme) -> anyhow::Result<()> {
     use crossterm::cursor::Hide;
     use crossterm::event::EnableMouseCapture;
     use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
@@ -55,7 +62,7 @@ pub async fn run_tui(bridge: echo_agent::BackendBridge, theme: Theme) -> anyhow:
     let mut stdout = std::io::stdout();
     crossterm::execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    let mut app = App::new(Backend::new(bridge), theme, crate::keybindings::Keybindings::default());
+    let mut app = App::new(backend, theme, crate::keybindings::Keybindings::default());
     // 捕获 TUI 主循环 panic 并写入日志：否则任务 panic 会被 JoinError 吞掉，
     // 主进程"干净退出"，bug 极难定位。
     let result = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(app.run(&mut terminal))).await;
