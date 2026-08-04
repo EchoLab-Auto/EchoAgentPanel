@@ -350,41 +350,41 @@ impl QqAdapter {
     fn persist_filter(&self) {
         let path = match self.inner.config_path.lock().expect("poisoned").clone() {
             Some(p) => p,
-            None => return,
+            None => {
+                tracing::warn!("QQ filter persist skipped: no config path set");
+                return;
+            }
         };
 
         let cfg = self.get_filter_config();
-        let mode = self.get_gate_mode();
+        let mode_str = match self.get_gate_mode() {
+            QqGateMode::Allowlist => "allowlist",
+            QqGateMode::Denylist => "denylist",
+            QqGateMode::None => "none",
+        };
 
-        // Build the [adapters.qq.gate] section.
-        let gate_section = format!(
-            "[adapters.qq.gate]\nmode = \"{}\"\n",
-            match mode {
-                QqGateMode::Allowlist => "allowlist",
-                QqGateMode::Denylist => "denylist",
-                QqGateMode::None => "none",
-            }
-        );
-
-        // Build the [adapters.qq.filter] section.
         let au = cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
         let ag = cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
         let du = cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
         let dg = cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
-        let filter_section = format!(
-            "[adapters.qq.filter]\n\
-             [adapters.qq.filter.allowlist]\nuser_ids = [{au}]\ngroup_ids = [{ag}]\n\
-             [adapters.qq.filter.denylist]\nuser_ids = [{du}]\ngroup_ids = [{dg}]\n"
-        );
 
-        let new_block = format!("{gate_section}\n{filter_section}");
+        // Write each section separately so `replace_toml_section` can
+        // find and replace the exact marker, or append if missing.
+        let gate_block = format!("[adapters.qq.gate]\nmode = \"{mode_str}\"\n");
+        let allowlist_block = format!(
+            "[adapters.qq.filter.allowlist]\nuser_ids = [{au}]\ngroup_ids = [{ag}]\n"
+        );
+        let denylist_block = format!(
+            "[adapters.qq.filter.denylist]\nuser_ids = [{du}]\ngroup_ids = [{dg}]\n"
+        );
 
         // Atomic write: tmp → rename.
         let tmp = format!("{path}.tmp");
         let result: Result<(), String> = (|| {
             let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let updated = replace_toml_section(&content, "adapters.qq.gate", &gate_section);
-            let updated = replace_toml_section(&updated, "adapters.qq.filter", &filter_section);
+            let mut updated = replace_toml_section(&content, "adapters.qq.gate", &gate_block);
+            updated = replace_toml_section(&updated, "adapters.qq.filter.allowlist", &allowlist_block);
+            updated = replace_toml_section(&updated, "adapters.qq.filter.denylist", &denylist_block);
             std::fs::write(&tmp, &updated).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
             Ok(())
@@ -392,7 +392,7 @@ impl QqAdapter {
         if let Err(e) = result {
             tracing::warn!(error = %e, "failed to persist QQ filter config");
         } else {
-            tracing::info!("QQ filter config persisted");
+            tracing::info!(mode = mode_str, au = %au, ag = %ag, "QQ filter config persisted");
         }
     }
 
