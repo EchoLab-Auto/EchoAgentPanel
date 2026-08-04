@@ -22,6 +22,9 @@ pub struct QqAdapterConfig {
     pub command_prefix: String,
     /// Filter configuration.
     pub filter: QqFilterConfig,
+    /// Gate mode configuration.
+    #[serde(default)]
+    pub gate: QqGateConfig,
     /// NapCat WebUI URL for API integration.
     /// Default `http://localhost:6099`.
     #[serde(default = "default_napcat_url")]
@@ -41,6 +44,7 @@ impl Default for QqAdapterConfig {
             owner_qq: 0,
             command_prefix: "/".into(),
             filter: QqFilterConfig::default(),
+            gate: QqGateConfig::default(),
             napcat_webui_url: default_napcat_url(),
         }
     }
@@ -212,4 +216,18 @@ pub struct KeywordConfig {
 #[serde(default)]
 pub struct ContentConfig {
     pub max_length: usize,
+}
+
+/// Gate mode — persisted across restarts.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct QqGateConfig {
+    /// "none" | "allowlist" | "denylist"
+    pub mode: String,
+}
+
+impl Default for QqGateConfig {
+    fn default() -> Self {
+        Self { mode: "none".into() }
+    }
 }

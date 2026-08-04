@@ -53,6 +53,8 @@ struct QqInner {
     runtime_denylist_groups: StdMutex<Vec<i64>>,
     /// Current gating mode (mutually exclusive).
     gate_mode: StdMutex<QqGateMode>,
+    /// Path to the config file for persisting gate changes.
+    config_path: StdMutex<Option<String>>,
 }
 
 /// Wrapper to make a boxed handler satisfy the `Handler` trait constraint.
@@ -82,6 +84,11 @@ impl QqAdapter {
         let ag = config.filter.allowlist.group_ids.clone();
         let du = config.filter.denylist.user_ids.clone();
         let dg = config.filter.denylist.group_ids.clone();
+        let gate_mode = match config.gate.mode.as_str() {
+            "allowlist" => QqGateMode::Allowlist,
+            "denylist" => QqGateMode::Denylist,
+            _ => QqGateMode::None,
+        };
         Self {
             name: "qq".into(),
             inner: Arc::new(QqInner {
@@ -101,7 +108,8 @@ impl QqAdapter {
                 runtime_allowlist_groups: StdMutex::new(ag),
                 runtime_denylist_users: StdMutex::new(du),
                 runtime_denylist_groups: StdMutex::new(dg),
-                gate_mode: StdMutex::new(QqGateMode::None),
+                gate_mode: StdMutex::new(gate_mode),
+                config_path: StdMutex::new(None),
             }),
         }
     }
@@ -315,26 +323,84 @@ impl QqAdapter {
         *self.inner.filter.lock().expect("filter poisoned") = Some(Arc::new(pipeline));
     }
 
-    /// Update the runtime allowlist. Changes take effect immediately.
+    /// Update the runtime allowlist. Changes take effect immediately and persist.
     pub fn update_allowlist(&self, user_ids: Vec<i64>, group_ids: Vec<i64>) {
         *self.inner.runtime_allowlist_users.lock().expect("poisoned") = user_ids;
         *self.inner.runtime_allowlist_groups.lock().expect("poisoned") = group_ids;
         self.rebuild_filter_pipeline();
-        tracing::info!("QQ allowlist updated and filter pipeline rebuilt");
+        self.persist_filter();
+        tracing::info!("QQ allowlist updated");
     }
 
-    /// Update the runtime denylist. Changes take effect immediately.
+    /// Update the runtime denylist. Changes take effect immediately and persist.
     pub fn update_denylist(&self, user_ids: Vec<i64>, group_ids: Vec<i64>) {
         *self.inner.runtime_denylist_users.lock().expect("poisoned") = user_ids;
         *self.inner.runtime_denylist_groups.lock().expect("poisoned") = group_ids;
         self.rebuild_filter_pipeline();
-        tracing::info!("QQ denylist updated and filter pipeline rebuilt");
+        self.persist_filter();
+        tracing::info!("QQ denylist updated");
     }
 
-    /// Set the gating mode. Rebuilds the filter pipeline immediately.
+    /// Set the path to the config file for persisting gate changes.
+    pub fn set_config_path(&self, path: String) {
+        *self.inner.config_path.lock().expect("poisoned") = Some(path);
+    }
+
+    /// Persist the current filter config and gate mode to the config file.
+    fn persist_filter(&self) {
+        let path = match self.inner.config_path.lock().expect("poisoned").clone() {
+            Some(p) => p,
+            None => return,
+        };
+
+        let cfg = self.get_filter_config();
+        let mode = self.get_gate_mode();
+
+        // Build the [adapters.qq.gate] section.
+        let gate_section = format!(
+            "[adapters.qq.gate]\nmode = \"{}\"\n",
+            match mode {
+                QqGateMode::Allowlist => "allowlist",
+                QqGateMode::Denylist => "denylist",
+                QqGateMode::None => "none",
+            }
+        );
+
+        // Build the [adapters.qq.filter] section.
+        let au = cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+        let ag = cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+        let du = cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+        let dg = cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+        let filter_section = format!(
+            "[adapters.qq.filter]\n\
+             [adapters.qq.filter.allowlist]\nuser_ids = [{au}]\ngroup_ids = [{ag}]\n\
+             [adapters.qq.filter.denylist]\nuser_ids = [{du}]\ngroup_ids = [{dg}]\n"
+        );
+
+        let new_block = format!("{gate_section}\n{filter_section}");
+
+        // Atomic write: tmp → rename.
+        let tmp = format!("{path}.tmp");
+        let result: Result<(), String> = (|| {
+            let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let updated = replace_toml_section(&content, "adapters.qq.gate", &gate_section);
+            let updated = replace_toml_section(&updated, "adapters.qq.filter", &filter_section);
+            std::fs::write(&tmp, &updated).map_err(|e| e.to_string())?;
+            std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "failed to persist QQ filter config");
+        } else {
+            tracing::info!("QQ filter config persisted");
+        }
+    }
+
+    /// Set the gating mode. Rebuilds the filter pipeline and persists.
     pub fn set_gate_mode(&self, mode: QqGateMode) {
         *self.inner.gate_mode.lock().expect("poisoned") = mode;
         self.rebuild_filter_pipeline();
+        self.persist_filter();
         tracing::info!(mode = ?mode, "QQ gate mode updated");
     }
 
@@ -855,4 +921,41 @@ impl Adapter for QqAdapter {
             QqGateMode::None => "none".into(),
         }
     }
+}
+
+// ── TOML section replacer ─────────────────────────────────────────────────
+
+/// Replace (or insert) a TOML section in `content`.
+fn replace_toml_section(content: &str, section: &str, new_block: &str) -> String {
+    let marker = format!("[{section}]");
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.iter().position(|l| l.trim() == marker);
+    let Some(start) = start else {
+        let mut out = content.trim_end().to_string();
+        if !out.is_empty() { out.push('\n'); }
+        out.push_str(new_block);
+        if !new_block.ends_with('\n') { out.push('\n'); }
+        return out;
+    };
+    let array_sub = format!("[[{section}");
+    let dotted_sub = format!("[{section}.");
+    let mut end = lines.len();
+    for i in (start + 1)..lines.len() {
+        let t = lines[i].trim_start();
+        let is_sub = t.starts_with(&array_sub) || t.starts_with(&dotted_sub);
+        if t.starts_with('[') && !is_sub && t != marker { end = i; break; }
+    }
+    let mut out = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        if i == start {
+            out.push_str(new_block);
+            if !new_block.ends_with('\n') { out.push('\n'); }
+        } else if i > start && i < end {
+            // skip old section body
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }

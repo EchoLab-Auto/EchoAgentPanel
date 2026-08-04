@@ -129,6 +129,7 @@ async fn main() -> Result<()> {
     agent.start_session_save_task();
 
     // ---- Wire agent into QQ adapter ----
+    qq_adapter.set_config_path(args.config.to_string_lossy().to_string());
     qq_adapter.set_agent(agent.clone());
     qq_adapter.add_handler(Box::new(handlers::EchoHandler::new(&config.bot.command_prefix)));
     qq_adapter.add_handler(Box::new(handlers::HelpHandler::new(&config.bot.command_prefix)));
