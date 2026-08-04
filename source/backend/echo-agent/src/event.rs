@@ -108,6 +108,8 @@ pub enum BackendEvent {
         denylist_users: Vec<i64>,
         denylist_groups: Vec<i64>,
     },
+    /// QQ gate mode changed.
+    QqGateMode { mode: String },
 }
 
 /// QQ group info for display.

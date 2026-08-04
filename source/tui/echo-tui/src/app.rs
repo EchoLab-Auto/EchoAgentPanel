@@ -481,6 +481,15 @@ impl App {
                     KeyCode::Enter => {
                         if let Some(val) = self.state.form_overlay.confirm() {
                             match fo.form_kind {
+                                // QQ setting: gate mode switch.
+                                FormKind::QqFilter if val.starts_with("gate_mode:") => {
+                                    let mode = val.strip_prefix("gate_mode:").unwrap_or("none");
+                                    self.backend.send(BackendCommand::SetQqGateMode { mode: mode.to_string() });
+                                    self.backend.send(BackendCommand::RequestQqFilterConfig);
+                                    self.state.qq_gate_mode = mode.to_string();
+                                    // Refresh form to show updated radio state.
+                                    crate::slash_commands::qq::setting(&mut self.state, &self.backend);
+                                }
                                 // QQ setting submenu navigation.
                                 FormKind::QqFilter if val == "qq_allowlist" => {
                                     crate::slash_commands::qq::allowlist(&mut self.state, &self.backend);
@@ -772,6 +781,9 @@ impl App {
                     .into_iter()
                     .map(|g| (g.group_id, g.group_name))
                     .collect();
+            }
+            BackendEvent::QqGateMode { mode } => {
+                self.state.qq_gate_mode = mode;
             }
             BackendEvent::QqFilterConfig {
                 allowlist_users,

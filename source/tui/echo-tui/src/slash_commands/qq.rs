@@ -133,25 +133,55 @@ fn render(qr: &QrCode, container: &str, stale: bool) -> Vec<String> {
 
 use crate::components::form_overlay::{FormKind, FormOverlay, SelectItem};
 
-/// Open the QQ settings submenu.
+/// Open the QQ settings submenu with gate mode switch.
 pub fn setting(state: &mut AppState, backend: &Backend) {
-    let items = vec![
+    backend.send(BackendCommand::RequestQqFilterConfig);
+
+    let mode = &state.qq_gate_mode;
+    let mode_label = |m: &str, label: &str| -> String {
+        if mode == m { format!("● {label}") } else { format!("○ {label}") }
+    };
+
+    let mut items = vec![
         SelectItem {
-            label: "🔒 白名单管理（允许哪些用户/群使用）".into(),
+            label: "── 门控模式（互斥，选一） ──".into(),
+            value: "__info__".into(),
+        },
+        SelectItem {
+            label: mode_label("none", "无约束 — 所有人可用"),
+            value: "gate_mode:none".into(),
+        },
+        SelectItem {
+            label: mode_label("allowlist", "白名单模式 — 仅白名单用户/群可用"),
+            value: "gate_mode:allowlist".into(),
+        },
+        SelectItem {
+            label: mode_label("denylist", "黑名单模式 — 禁止黑名单用户/群"),
+            value: "gate_mode:denylist".into(),
+        },
+        SelectItem {
+            label: String::new(),
+            value: "__info__".into(),
+        },
+        SelectItem {
+            label: "── 名单管理 ──".into(),
+            value: "__info__".into(),
+        },
+        SelectItem {
+            label: "🔒 管理白名单".into(),
             value: "qq_allowlist".into(),
         },
         SelectItem {
-            label: "🚫 黑名单管理（禁止哪些用户/群使用）".into(),
+            label: "🚫 管理黑名单".into(),
             value: "qq_denylist".into(),
         },
     ];
 
     let mut fo = FormOverlay::default();
-    fo.activate("QQ 设置 (↑↓选择 Enter进入 Esc退出)", items, FormKind::QqFilter);
+    fo.activate("QQ 设置 (↑↓选择 Enter切换 Esc退出)", items, FormKind::QqFilter);
     state.form_overlay = fo;
     state.menu_msg_idx = -1;
     state.refresh_menu_msg();
-    state.pending_action = Some("qq_setting:".into());
 }
 
 /// Build a filter management form shared by allowlist and denylist.

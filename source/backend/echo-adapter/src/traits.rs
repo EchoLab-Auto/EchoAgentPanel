@@ -137,4 +137,12 @@ pub trait Adapter: Send + Sync {
     fn get_filter_info(&self) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
         (vec![], vec![], vec![], vec![])
     }
+
+    /// Set the gating mode ("none", "allowlist", "denylist").  Default: no-op.
+    fn set_gate_mode(&self, _mode: &str) {}
+
+    /// Get the current gating mode.  Default: "none".
+    fn get_gate_mode(&self) -> String {
+        "none".into()
+    }
 }

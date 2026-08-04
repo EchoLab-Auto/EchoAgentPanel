@@ -517,6 +517,21 @@ impl Agent {
                     });
                 }
             }
+            BackendCommand::SetQqGateMode { mode } => {
+                if let Some(adapter) = self.adapters.get("qq") {
+                    adapter.set_gate_mode(&mode);
+                    self.emit(BackendEvent::QqGateMode { mode: adapter.get_gate_mode() });
+                    let label = match mode.as_str() {
+                        "allowlist" => "白名单模式",
+                        "denylist" => "黑名单模式",
+                        _ => "无约束模式",
+                    };
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: format!("QQ 门控模式已切换为: {label}"),
+                    });
+                }
+            }
             BackendCommand::RequestQqFilterConfig => {
                 if let Some(adapter) = self.adapters.get("qq") {
                     let (au, ag, du, dg) = adapter.get_filter_info();

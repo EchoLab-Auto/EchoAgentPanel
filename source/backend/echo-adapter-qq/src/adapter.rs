@@ -18,6 +18,17 @@ use echo_agent;
 
 use crate::config::QqAdapterConfig;
 
+/// Gating mode — mutually exclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QqGateMode {
+    /// No filtering — everyone can interact.
+    None,
+    /// Only allowlisted users/groups can interact.
+    Allowlist,
+    /// Denylisted users/groups are blocked; everyone else allowed.
+    Denylist,
+}
+
 /// Shared inner state — lives in an Arc so the server task can reference it.
 struct QqInner {
     config: QqAdapterConfig,
@@ -40,6 +51,8 @@ struct QqInner {
     /// Runtime denylist overrides.
     runtime_denylist_users: StdMutex<Vec<i64>>,
     runtime_denylist_groups: StdMutex<Vec<i64>>,
+    /// Current gating mode (mutually exclusive).
+    gate_mode: StdMutex<QqGateMode>,
 }
 
 /// Wrapper to make a boxed handler satisfy the `Handler` trait constraint.
@@ -88,6 +101,7 @@ impl QqAdapter {
                 runtime_allowlist_groups: StdMutex::new(ag),
                 runtime_denylist_users: StdMutex::new(du),
                 runtime_denylist_groups: StdMutex::new(dg),
+                gate_mode: StdMutex::new(QqGateMode::None),
             }),
         }
     }
@@ -130,28 +144,37 @@ impl QqAdapter {
             })
             .collect();
 
-        // Apply allowlist/denylist filtering to the group list.
-        // Denylist takes priority per design: a group in both lists is excluded.
-        let cfg = self.get_filter_config();
-        let allow_groups: std::collections::HashSet<i64> =
-            cfg.allowlist.group_ids.iter().cloned().collect();
-        let deny_groups: std::collections::HashSet<i64> =
-            cfg.denylist.group_ids.iter().cloned().collect();
-
-        let mut filtered = groups;
-        if !allow_groups.is_empty() {
-            filtered = filtered
-                .into_iter()
-                .filter(|(gid, _)| allow_groups.contains(gid))
-                .collect();
+        // Apply gate-mode filtering to the group list.
+        let mode = self.get_gate_mode();
+        if mode != QqGateMode::None {
+            let cfg = self.get_filter_config();
+            let mut filtered = groups;
+            match mode {
+                QqGateMode::Allowlist => {
+                    let allow_groups: std::collections::HashSet<i64> =
+                        cfg.allowlist.group_ids.iter().cloned().collect();
+                    if !allow_groups.is_empty() {
+                        filtered = filtered
+                            .into_iter()
+                            .filter(|(gid, _)| allow_groups.contains(gid))
+                            .collect();
+                    }
+                }
+                QqGateMode::Denylist => {
+                    let deny_groups: std::collections::HashSet<i64> =
+                        cfg.denylist.group_ids.iter().cloned().collect();
+                    if !deny_groups.is_empty() {
+                        filtered = filtered
+                            .into_iter()
+                            .filter(|(gid, _)| !deny_groups.contains(gid))
+                            .collect();
+                    }
+                }
+                QqGateMode::None => {}
+            }
+            return Ok(filtered);
         }
-        if !deny_groups.is_empty() {
-            filtered = filtered
-                .into_iter()
-                .filter(|(gid, _)| !deny_groups.contains(gid))
-                .collect();
-        }
-        Ok(filtered)
+        Ok(groups)
     }
 
     /// Get group member info via the active QQ connection.
@@ -160,17 +183,29 @@ impl QqAdapter {
         group_id: i64,
         user_id: i64,
     ) -> Result<String, String> {
-        // ── Allowlist / denylist gating ──
-        let cfg = self.get_filter_config();
-        let allow_groups: std::collections::HashSet<i64> =
-            cfg.allowlist.group_ids.iter().cloned().collect();
-        let deny_groups: std::collections::HashSet<i64> =
-            cfg.denylist.group_ids.iter().cloned().collect();
-        if !deny_groups.is_empty() && deny_groups.contains(&group_id) {
-            return Err(format!("group {group_id} is denylisted"));
-        }
-        if !allow_groups.is_empty() && !allow_groups.contains(&group_id) {
-            return Err(format!("group {group_id} is not allowlisted"));
+        // ── Gate mode check ──
+        {
+            let mode = self.get_gate_mode();
+            if mode != QqGateMode::None {
+                let cfg = self.get_filter_config();
+                match mode {
+                    QqGateMode::Allowlist => {
+                        let allow_groups: std::collections::HashSet<i64> =
+                            cfg.allowlist.group_ids.iter().cloned().collect();
+                        if !allow_groups.is_empty() && !allow_groups.contains(&group_id) {
+                            return Err(format!("group {group_id} is not allowlisted"));
+                        }
+                    }
+                    QqGateMode::Denylist => {
+                        let deny_groups: std::collections::HashSet<i64> =
+                            cfg.denylist.group_ids.iter().cloned().collect();
+                        if !deny_groups.is_empty() && deny_groups.contains(&group_id) {
+                            return Err(format!("group {group_id} is denylisted"));
+                        }
+                    }
+                    QqGateMode::None => {}
+                }
+            }
         }
         let _ = user_id; // reserved for future per-user gating
 
@@ -213,20 +248,30 @@ impl QqAdapter {
             pipeline.push(Box::new(admin_filter));
         }
 
-        let allowlist = echo_adapter::filter::AllowlistFilter::new(
-            filter_cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
-            filter_cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
-        );
-        if allowlist.is_active() {
-            pipeline.push(Box::new(allowlist));
-        }
-
-        let denylist = echo_adapter::filter::DenylistFilter::new(
-            filter_cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
-            filter_cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
-        );
-        if denylist.is_active() {
-            pipeline.push(Box::new(denylist));
+        // Gate mode — allowlist and denylist are mutually exclusive.
+        let mode = self.get_gate_mode();
+        match mode {
+            QqGateMode::Allowlist => {
+                let allowlist = echo_adapter::filter::AllowlistFilter::new(
+                    filter_cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
+                    filter_cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
+                );
+                if allowlist.is_active() {
+                    pipeline.push(Box::new(allowlist));
+                }
+            }
+            QqGateMode::Denylist => {
+                let denylist = echo_adapter::filter::DenylistFilter::new(
+                    filter_cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
+                    filter_cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+                );
+                if denylist.is_active() {
+                    pipeline.push(Box::new(denylist));
+                }
+            }
+            QqGateMode::None => {
+                // No allowlist or denylist filtering.
+            }
         }
 
         // Rate limit, keyword, content length from static config.
@@ -284,6 +329,18 @@ impl QqAdapter {
         *self.inner.runtime_denylist_groups.lock().expect("poisoned") = group_ids;
         self.rebuild_filter_pipeline();
         tracing::info!("QQ denylist updated and filter pipeline rebuilt");
+    }
+
+    /// Set the gating mode. Rebuilds the filter pipeline immediately.
+    pub fn set_gate_mode(&self, mode: QqGateMode) {
+        *self.inner.gate_mode.lock().expect("poisoned") = mode;
+        self.rebuild_filter_pipeline();
+        tracing::info!(mode = ?mode, "QQ gate mode updated");
+    }
+
+    /// Get the current gating mode.
+    pub fn get_gate_mode(&self) -> QqGateMode {
+        *self.inner.gate_mode.lock().expect("poisoned")
     }
 
     /// Return the current effective filter config (runtime overrides merged).
@@ -625,61 +682,55 @@ impl Adapter for QqAdapter {
             });
         }
 
-        // ── Allowlist / denylist gating ──
+        // ── Gate mode check ──
         {
-            let cfg = self.get_filter_config();
-            let allow_users: std::collections::HashSet<i64> =
-                cfg.allowlist.user_ids.iter().cloned().collect();
-            let allow_groups: std::collections::HashSet<i64> =
-                cfg.allowlist.group_ids.iter().cloned().collect();
-            let deny_users: std::collections::HashSet<i64> =
-                cfg.denylist.user_ids.iter().cloned().collect();
-            let deny_groups: std::collections::HashSet<i64> =
-                cfg.denylist.group_ids.iter().cloned().collect();
+            let mode = self.get_gate_mode();
+            if mode != QqGateMode::None {
+                let cfg = self.get_filter_config();
+                let user_id: i64 = target.user_id.parse().unwrap_or(0);
+                let group_id: Option<i64> = match &target.channel {
+                    ChannelType::Group { group_id } => group_id.parse().ok(),
+                    ChannelType::Direct => None,
+                };
 
-            let user_id: i64 = target.user_id.parse().unwrap_or(0);
-            let group_id: Option<i64> = match &target.channel {
-                ChannelType::Group { group_id } => group_id.parse().ok(),
-                ChannelType::Direct => None,
-            };
-
-            // Denylist check (takes priority per design).
-            if !deny_users.is_empty() && user_id != 0 && deny_users.contains(&user_id) {
-                return Ok(SendResult {
-                    message_id: None,
-                    success: false,
-                    error: Some(format!("user {user_id} is denylisted")),
-                });
-            }
-            if !deny_groups.is_empty() {
-                if let Some(gid) = group_id {
-                    if deny_groups.contains(&gid) {
-                        return Ok(SendResult {
-                            message_id: None,
-                            success: false,
-                            error: Some(format!("group {gid} is denylisted")),
-                        });
+                match mode {
+                    QqGateMode::Allowlist => {
+                        let allow_users: std::collections::HashSet<i64> =
+                            cfg.allowlist.user_ids.iter().cloned().collect();
+                        let allow_groups: std::collections::HashSet<i64> =
+                            cfg.allowlist.group_ids.iter().cloned().collect();
+                        if !allow_users.is_empty() && user_id != 0 && !allow_users.contains(&user_id) {
+                            return Ok(SendResult { message_id: None, success: false,
+                                error: Some(format!("user {user_id} is not allowlisted")) });
+                        }
+                        if !allow_groups.is_empty() {
+                            if let Some(gid) = group_id {
+                                if !allow_groups.contains(&gid) {
+                                    return Ok(SendResult { message_id: None, success: false,
+                                        error: Some(format!("group {gid} is not allowlisted")) });
+                                }
+                            }
+                        }
                     }
-                }
-            }
-
-            // Allowlist check.
-            if !allow_users.is_empty() && user_id != 0 && !allow_users.contains(&user_id) {
-                return Ok(SendResult {
-                    message_id: None,
-                    success: false,
-                    error: Some(format!("user {user_id} is not allowlisted")),
-                });
-            }
-            if !allow_groups.is_empty() {
-                if let Some(gid) = group_id {
-                    if !allow_groups.contains(&gid) {
-                        return Ok(SendResult {
-                            message_id: None,
-                            success: false,
-                            error: Some(format!("group {gid} is not allowlisted")),
-                        });
+                    QqGateMode::Denylist => {
+                        let deny_users: std::collections::HashSet<i64> =
+                            cfg.denylist.user_ids.iter().cloned().collect();
+                        let deny_groups: std::collections::HashSet<i64> =
+                            cfg.denylist.group_ids.iter().cloned().collect();
+                        if !deny_users.is_empty() && user_id != 0 && deny_users.contains(&user_id) {
+                            return Ok(SendResult { message_id: None, success: false,
+                                error: Some(format!("user {user_id} is denylisted")) });
+                        }
+                        if !deny_groups.is_empty() {
+                            if let Some(gid) = group_id {
+                                if deny_groups.contains(&gid) {
+                                    return Ok(SendResult { message_id: None, success: false,
+                                        error: Some(format!("group {gid} is denylisted")) });
+                                }
+                            }
+                        }
                     }
+                    QqGateMode::None => unreachable!(),
                 }
             }
         }
@@ -786,5 +837,22 @@ impl Adapter for QqAdapter {
             cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
             cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
         )
+    }
+
+    fn set_gate_mode(&self, mode: &str) {
+        let m = match mode {
+            "allowlist" => QqGateMode::Allowlist,
+            "denylist" => QqGateMode::Denylist,
+            _ => QqGateMode::None,
+        };
+        self.set_gate_mode(m);
+    }
+
+    fn get_gate_mode(&self) -> String {
+        match self.get_gate_mode() {
+            QqGateMode::Allowlist => "allowlist".into(),
+            QqGateMode::Denylist => "denylist".into(),
+            QqGateMode::None => "none".into(),
+        }
     }
 }

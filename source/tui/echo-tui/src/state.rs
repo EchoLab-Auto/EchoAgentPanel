@@ -170,6 +170,8 @@ pub struct AppState {
     pub pending_action: Option<String>,
     pub menu_msg_idx: isize,
     pub qq_filter: QqFilterCache,
+    /// Current QQ gate mode.
+    pub qq_gate_mode: String,
     /// Cached QQ group list (fetched from adapter on request).
     pub qq_groups: Vec<(i64, String)>,
     // Mouse text selection
@@ -218,6 +220,7 @@ impl AppState {
             pending_action: None,
             menu_msg_idx: -1,
             qq_filter: QqFilterCache::default(),
+            qq_gate_mode: "none".into(),
             qq_groups: Vec::new(),
             selecting: false,
             sel_anchor: None,

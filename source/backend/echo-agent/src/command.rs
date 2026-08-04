@@ -52,4 +52,6 @@ pub enum BackendCommand {
     UpdateQqDenylist { user_ids: Vec<i64>, group_ids: Vec<i64> },
     /// Request current QQ filter config.
     RequestQqFilterConfig,
+    /// Set QQ gating mode ("none" / "allowlist" / "denylist").
+    SetQqGateMode { mode: String },
 }
