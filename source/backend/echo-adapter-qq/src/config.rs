@@ -121,6 +121,60 @@ impl QqAdapterConfig {
 
         pipeline
     }
+
+    /// Build the filter pipeline respecting a gate mode (allowlist-only,
+    /// denylist-only, or neither). The default [`build_filter_pipeline`]
+    /// pushes both unconditionally.
+    pub fn build_filter_pipeline_gated(&self, mode: &str) -> FilterPipeline {
+        let mut pipeline = FilterPipeline::new();
+
+        // Admin bypass.
+        let admin_ids: Vec<String> = if self.owner_qq > 0 {
+            vec![self.owner_qq.to_string()]
+        } else {
+            vec![]
+        };
+        let admin_filter = AdminBypassFilter::new(admin_ids);
+        if admin_filter.is_active() {
+            pipeline.push(Box::new(admin_filter));
+        }
+
+        // Allowlist / Denylist — mutually exclusive based on gate mode.
+        match mode {
+            "allowlist" => {
+                let f = AllowlistFilter::new(
+                    self.filter.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
+                    self.filter.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
+                );
+                if f.is_active() { pipeline.push(Box::new(f)); }
+            }
+            "denylist" => {
+                let f = DenylistFilter::new(
+                    self.filter.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
+                    self.filter.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+                );
+                if f.is_active() { pipeline.push(Box::new(f)); }
+            }
+            _ => {} // none — no allowlist or denylist
+        }
+
+        // Rate limit, keyword, content length — shared.
+        let rate_limiter = RateLimitFilter::new(
+            self.filter.rate_limit.per_user.as_ref().map(|r| RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
+            self.filter.rate_limit.per_group.as_ref().map(|r| RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
+            self.filter.rate_limit.global.as_ref().map(|r| RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
+        );
+        if rate_limiter.is_active() { pipeline.push(Box::new(rate_limiter)); }
+
+        let keyword = KeywordBlockFilter::new(self.filter.keyword.block_keywords.clone(), &self.filter.keyword.block_regex);
+        if keyword.is_active() { pipeline.push(Box::new(keyword)); }
+
+        if self.filter.content.max_length > 0 {
+            pipeline.push(Box::new(ContentLengthFilter::new(self.filter.content.max_length)));
+        }
+
+        pipeline
+    }
 }
 
 // ---------------------------------------------------------------------------

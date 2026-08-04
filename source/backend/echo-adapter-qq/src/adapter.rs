@@ -227,95 +227,20 @@ impl QqAdapter {
 
     /// Rebuild the filter pipeline from config + runtime overrides and store it.
     fn rebuild_filter_pipeline(&self) {
-        let allowlist_users = self.inner.runtime_allowlist_users.lock().expect("poisoned").clone();
-        let allowlist_groups = self.inner.runtime_allowlist_groups.lock().expect("poisoned").clone();
-        let denylist_users = self.inner.runtime_denylist_users.lock().expect("poisoned").clone();
-        let denylist_groups = self.inner.runtime_denylist_groups.lock().expect("poisoned").clone();
+        // Merge runtime overrides into config.
+        let mut cfg = self.inner.config.clone();
+        cfg.filter.allowlist.user_ids = self.inner.runtime_allowlist_users.lock().expect("poisoned").clone();
+        cfg.filter.allowlist.group_ids = self.inner.runtime_allowlist_groups.lock().expect("poisoned").clone();
+        cfg.filter.denylist.user_ids = self.inner.runtime_denylist_users.lock().expect("poisoned").clone();
+        cfg.filter.denylist.group_ids = self.inner.runtime_denylist_groups.lock().expect("poisoned").clone();
 
-        // Build a filter config with runtime overrides.
-        let mut filter_cfg = self.inner.config.filter.clone();
-        filter_cfg.allowlist.user_ids = allowlist_users;
-        filter_cfg.allowlist.group_ids = allowlist_groups;
-        filter_cfg.denylist.user_ids = denylist_users;
-        filter_cfg.denylist.group_ids = denylist_groups;
-
-        // Rebuild pipeline using the same logic as QqAdapterConfig.
-        let mut pipeline = FilterPipeline::new();
-
-        let admin_ids: Vec<String> = if self.inner.config.owner_qq > 0 {
-            vec![self.inner.config.owner_qq.to_string()]
-        } else {
-            vec![]
+        let mode_str = match self.get_gate_mode() {
+            QqGateMode::Allowlist => "allowlist",
+            QqGateMode::Denylist => "denylist",
+            _ => "none",
         };
-        let admin_filter = echo_adapter::filter::AdminBypassFilter::new(admin_ids);
-        if admin_filter.is_active() {
-            pipeline.push(Box::new(admin_filter));
-        }
 
-        // Gate mode — allowlist and denylist are mutually exclusive.
-        let mode = self.get_gate_mode();
-        match mode {
-            QqGateMode::Allowlist => {
-                let allowlist = echo_adapter::filter::AllowlistFilter::new(
-                    filter_cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
-                    filter_cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
-                );
-                if allowlist.is_active() {
-                    pipeline.push(Box::new(allowlist));
-                }
-            }
-            QqGateMode::Denylist => {
-                let denylist = echo_adapter::filter::DenylistFilter::new(
-                    filter_cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
-                    filter_cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
-                );
-                if denylist.is_active() {
-                    pipeline.push(Box::new(denylist));
-                }
-            }
-            QqGateMode::None => {
-                // No allowlist or denylist filtering.
-            }
-        }
-
-        // Rate limit, keyword, content length from static config.
-        if let Some(ref r) = self.inner.config.filter.rate_limit.per_user {
-            let f = echo_adapter::filter::RateLimitFilter::new(
-                Some(echo_adapter::filter::RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
-                None, None,
-            );
-            if f.is_active() { pipeline.push(Box::new(f)); }
-        }
-        if let Some(ref r) = self.inner.config.filter.rate_limit.per_group {
-            let f = echo_adapter::filter::RateLimitFilter::new(
-                None,
-                Some(echo_adapter::filter::RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
-                None,
-            );
-            if f.is_active() { pipeline.push(Box::new(f)); }
-        }
-        if let Some(ref r) = self.inner.config.filter.rate_limit.global {
-            let f = echo_adapter::filter::RateLimitFilter::new(
-                None, None,
-                Some(echo_adapter::filter::RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
-            );
-            if f.is_active() { pipeline.push(Box::new(f)); }
-        }
-
-        let keyword = echo_adapter::filter::KeywordBlockFilter::new(
-            self.inner.config.filter.keyword.block_keywords.clone(),
-            &self.inner.config.filter.keyword.block_regex,
-        );
-        if keyword.is_active() {
-            pipeline.push(Box::new(keyword));
-        }
-
-        if self.inner.config.filter.content.max_length > 0 {
-            pipeline.push(Box::new(echo_adapter::filter::ContentLengthFilter::new(
-                self.inner.config.filter.content.max_length,
-            )));
-        }
-
+        let pipeline = cfg.build_filter_pipeline_gated(mode_str);
         *self.inner.filter.lock().expect("filter poisoned") = Some(Arc::new(pipeline));
     }
 
