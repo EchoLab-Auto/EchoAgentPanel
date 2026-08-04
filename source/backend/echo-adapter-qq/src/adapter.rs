@@ -370,20 +370,26 @@ impl QqAdapter {
             let mut root: toml::Value =
                 toml::from_str(&content).map_err(|e| format!("TOML parse: {e}"))?;
 
-            // Patch gate mode.
-            root["adapters"]["qq"]["gate"]["mode"] = toml::Value::String(mode_str.to_string());
+            // Ensure intermediate tables exist (don't panic on missing keys).
+            let root_t = match &mut root {
+                toml::Value::Table(t) => t,
+                _ => return Err("root not a table".into()),
+            };
+            let qq = ensure_table(ensure_table(root_t, "adapters"), "qq");
 
-            // Patch allowlist.
-            root["adapters"]["qq"]["filter"]["allowlist"]["user_ids"] =
-                toml::Value::Array(filter_cfg.allowlist.user_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
-            root["adapters"]["qq"]["filter"]["allowlist"]["group_ids"] =
-                toml::Value::Array(filter_cfg.allowlist.group_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
+            qq["gate"] = toml::Value::Table({
+                let mut t = toml::Table::new();
+                t.insert("mode".into(), toml::Value::String(mode_str.to_string()));
+                t
+            });
 
-            // Patch denylist.
-            root["adapters"]["qq"]["filter"]["denylist"]["user_ids"] =
-                toml::Value::Array(filter_cfg.denylist.user_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
-            root["adapters"]["qq"]["filter"]["denylist"]["group_ids"] =
-                toml::Value::Array(filter_cfg.denylist.group_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
+            let filter = ensure_table(qq, "filter");
+            filter["allowlist"] = toml::Value::Table(build_list_table(
+                &filter_cfg.allowlist.user_ids, &filter_cfg.allowlist.group_ids,
+            ));
+            filter["denylist"] = toml::Value::Table(build_list_table(
+                &filter_cfg.denylist.user_ids, &filter_cfg.denylist.group_ids,
+            ));
 
             let updated = toml::to_string_pretty(&root).map_err(|e| format!("TOML serialize: {e}"))?;
             std::fs::write(&tmp, &updated).map_err(|e| e.to_string())?;
@@ -922,6 +928,27 @@ impl Adapter for QqAdapter {
             QqGateMode::None => "none".into(),
         }
     }
+}
+
+// ── TOML helpers ───────────────────────────────────────────────────────────
+
+/// Get or create a sub-table inside `parent`.
+fn ensure_table<'a>(parent: &'a mut toml::Table, key: &str) -> &'a mut toml::Table {
+    if !parent.contains_key(key) {
+        parent.insert(key.into(), toml::Value::Table(toml::Table::new()));
+    }
+    match parent.get_mut(key).unwrap() {
+        toml::Value::Table(t) => t,
+        _ => unreachable!(),
+    }
+}
+
+/// Build an allowlist / denylist TOML table.
+fn build_list_table(user_ids: &[i64], group_ids: &[i64]) -> toml::Table {
+    let mut t = toml::Table::new();
+    t.insert("user_ids".into(), toml::Value::Array(user_ids.iter().map(|&id| toml::Value::Integer(id)).collect()));
+    t.insert("group_ids".into(), toml::Value::Array(group_ids.iter().map(|&id| toml::Value::Integer(id)).collect()));
+    t
 }
 
 // ── TOML section replacer ─────────────────────────────────────────────────
