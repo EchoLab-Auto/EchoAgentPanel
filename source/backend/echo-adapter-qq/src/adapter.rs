@@ -346,7 +346,9 @@ impl QqAdapter {
         *self.inner.config_path.lock().expect("poisoned") = Some(path);
     }
 
-    /// Persist the current filter config and gate mode to the config file.
+    /// Persist the current gate mode, allowlist, and denylist to the config
+    /// file by replacing the entire `[adapters.qq]` section in-place so the
+    /// TOML parser can re-read it on next startup.
     fn persist_filter(&self) {
         let path = match self.inner.config_path.lock().expect("poisoned").clone() {
             Some(p) => p,
@@ -356,35 +358,31 @@ impl QqAdapter {
             }
         };
 
-        let cfg = self.get_filter_config();
+        // Build a QqAdapterConfig reflecting the current runtime state so we
+        // can serialise it back and replace the whole `[adapters.qq]` block.
+        let filter_cfg = self.get_filter_config();
         let mode_str = match self.get_gate_mode() {
             QqGateMode::Allowlist => "allowlist",
             QqGateMode::Denylist => "denylist",
             QqGateMode::None => "none",
         };
 
-        let au = cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
-        let ag = cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
-        let du = cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
-        let dg = cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+        let mut persist_cfg = self.inner.config.clone();
+        persist_cfg.gate.mode = mode_str.to_string();
+        persist_cfg.filter = filter_cfg;
 
-        // Write each section separately so `replace_toml_section` can
-        // find and replace the exact marker, or append if missing.
-        let gate_block = format!("[adapters.qq.gate]\nmode = \"{mode_str}\"\n");
-        let allowlist_block = format!(
-            "[adapters.qq.filter.allowlist]\nuser_ids = [{au}]\ngroup_ids = [{ag}]\n"
-        );
-        let denylist_block = format!(
-            "[adapters.qq.filter.denylist]\nuser_ids = [{du}]\ngroup_ids = [{dg}]\n"
-        );
+        let new_block = match toml::to_string_pretty(&persist_cfg) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to serialize QQ config for persist");
+                return;
+            }
+        };
 
-        // Atomic write: tmp → rename.
         let tmp = format!("{path}.tmp");
         let result: Result<(), String> = (|| {
             let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let mut updated = replace_toml_section(&content, "adapters.qq.gate", &gate_block);
-            updated = replace_toml_section(&updated, "adapters.qq.filter.allowlist", &allowlist_block);
-            updated = replace_toml_section(&updated, "adapters.qq.filter.denylist", &denylist_block);
+            let updated = replace_toml_section(&content, "adapters.qq", &new_block);
             std::fs::write(&tmp, &updated).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
             Ok(())
@@ -392,7 +390,7 @@ impl QqAdapter {
         if let Err(e) = result {
             tracing::warn!(error = %e, "failed to persist QQ filter config");
         } else {
-            tracing::info!(mode = mode_str, au = %au, ag = %ag, "QQ filter config persisted");
+            tracing::info!(mode = mode_str, "QQ filter config persisted");
         }
     }
 
