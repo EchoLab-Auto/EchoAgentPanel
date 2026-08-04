@@ -69,6 +69,10 @@ pub struct FanoutHandle {
     command_rx: Mutex<mpsc::UnboundedReceiver<BackendCommand>>,
 }
 
+impl Default for FanoutHandle {
+    fn default() -> Self { Self::new() }
+}
+
 impl FanoutHandle {
     pub fn new() -> Self {
         let (command_tx, command_rx) = mpsc::unbounded_channel();

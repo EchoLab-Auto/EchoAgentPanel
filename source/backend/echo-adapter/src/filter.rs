@@ -154,7 +154,7 @@ impl MessageFilter for AllowlistFilter {
         let user_ok = self.user_ids.is_empty() || self.user_ids.contains(&msg.user_id);
         let group_ok = self.group_ids.is_empty()
             || match msg.channel.group_id() {
-                Some(gid) => self.group_ids.contains(&gid.to_string()),
+                Some(gid) => self.group_ids.contains(gid),
                 None => true, // DMs always pass group filter
             };
         if user_ok && group_ok {
@@ -200,7 +200,7 @@ impl MessageFilter for DenylistFilter {
         }
         let user_blocked = !self.user_ids.is_empty() && self.user_ids.contains(&msg.user_id);
         let group_blocked = match msg.channel.group_id() {
-            Some(gid) => !self.group_ids.is_empty() && self.group_ids.contains(&gid.to_string()),
+            Some(gid) => !self.group_ids.is_empty() && self.group_ids.contains(gid),
             None => false,
         };
         if user_blocked || group_blocked {
