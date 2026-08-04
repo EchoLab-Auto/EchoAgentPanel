@@ -24,24 +24,16 @@ owner_qq = 0
 command_prefix = "/"
 
 [agent]
-# ⚠️ API 配置默认为空。
-# 推荐在 TUI 中配置：/api（或 Ctrl+X s / Ctrl+P → 配置 API），
-# 支持多配置存储与一键切换，保存后自动持久化到本文件。
-# 也可直接填写（支持 [[agent.api_profiles]] 多配置 + active_api 指定激活项）。
-provider = ""
-model = ""
-# 留空用 provider 默认端点（openai→api.openai.com、deepseek→api.deepseek.com、
-# anthropic→api.anthropic.com、ollama→localhost:11434）。
-# 注意：若 base_url 以 /anthropic 结尾（如 DeepSeek 的 https://api.deepseek.com/anthropic），
-# 自动按 Anthropic Messages 格式请求，无需改 provider。
-base_url = ""
+# DeepSeek（默认）。支持多配置存储与一键切换（/api），保存后自动持久化。
+provider = "deepseek"
+model = "deepseek-v4-flash"
+# DeepSeek Anthropic 兼容端点
+base_url = "https://api.deepseek.com/anthropic"
 api_key = ""
-dm_auto_reply = true
-group_at_reply = true
-max_tool_iterations = 5
+max_tool_iterations = 1024
 memory_limit = 40
 skills_dir = "skills"
-system_prompt = "你是一个友好、乐于助人的 QQ 助手。回答简洁清晰，使用中文。"
+system_prompt = "请你使用中文"
 [tui]
 # 是否启动终端 UI（--headless 可强制关闭）
 enabled = true
