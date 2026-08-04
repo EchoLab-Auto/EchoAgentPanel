@@ -245,7 +245,6 @@ async fn shutdown_signal() {
 /// TUI occupies stdout, so logs must avoid it: TUI mode → file, headless → stdout.
 /// Minimal tracing setup for Panel-only mode (logs to stderr).
 fn init_tracing_simple() -> anyhow::Result<()> {
-    use tracing_subscriber::fmt::MakeWriter;
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with_writer(std::io::stderr)
