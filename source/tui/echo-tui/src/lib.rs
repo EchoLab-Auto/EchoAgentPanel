@@ -42,17 +42,7 @@ impl Drop for TermGuard {
 
 /// Run the TUI with an in-process mpsc bridge.
 pub async fn run_tui(bridge: Arc<echo_agent::BackendBridge>, theme: Theme) -> anyhow::Result<()> {
-    let inner = match Arc::try_unwrap(bridge) {
-        Ok(b) => Backend::new(b),
-        Err(arc) => Backend::new(echo_agent::BackendBridge {
-            command_tx: arc.command_tx.clone(),
-            event_rx: tokio::sync::Mutex::new({
-                // Can't clone receiver; fallback to WS path
-                panic!("BackendBridge Arc still referenced")
-            }),
-        }),
-    };
-    run_tui_inner(inner, theme).await
+    run_tui_inner(Backend::new(Arc::try_unwrap(bridge).ok().unwrap()), theme).await
 }
 
 /// Run the TUI with a pre-connected WebSocket backend.

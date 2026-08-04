@@ -23,6 +23,7 @@ use crate::event::BackendEvent;
 // ── In-process bridge ──────────────────────────────────────────────────────
 
 /// Frontend side (held by the TUI).
+#[derive(Debug)]
 pub struct BackendBridge {
     pub command_tx: mpsc::UnboundedSender<BackendCommand>,
     pub event_rx: Mutex<mpsc::UnboundedReceiver<BackendEvent>>,
