@@ -1,6 +1,6 @@
 //! /help command.
 
-use crate::app::{AppState, ToastKind};
+use crate::state::{AppState, ToastKind};
 
 /// /help — show keybinding and slash command reference.
 pub fn run(state: &mut AppState) {

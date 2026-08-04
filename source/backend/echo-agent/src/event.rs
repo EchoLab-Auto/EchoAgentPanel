@@ -101,6 +101,13 @@ pub enum BackendEvent {
     GroupList {
         groups: Vec<GroupInfo>,
     },
+    /// Current QQ filter configuration (allowlist/denylist).
+    QqFilterConfig {
+        allowlist_users: Vec<i64>,
+        allowlist_groups: Vec<i64>,
+        denylist_users: Vec<i64>,
+        denylist_groups: Vec<i64>,
+    },
 }
 
 /// QQ group info for display.

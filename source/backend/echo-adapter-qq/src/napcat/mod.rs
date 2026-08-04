@@ -72,8 +72,21 @@ impl NapCatClient {
         }
     }
 
-    /// Query NapCat's login status via the WebUI API.
+    /// Query NapCat's login status.
+    ///
+    /// 优先使用 OneBot HTTP API（docker-compose 将容器 3000 端口映射到宿主机）。
+    /// 这与 TUI 的 `/qq login` 完全一致，已验证能正确识别登录状态。
+    /// 仅当 OneBot API 不可达时，才回退到 NapCat WebUI API。
     pub async fn login_status(&self) -> Result<NapCatStatus, String> {
+        // 1) 优先 OneBot HTTP API —— 与 /qq login 行为一致
+        match self.login_status_via_onebot().await {
+            Ok(status) => return Ok(status),
+            Err(e) => tracing::debug!(error = %e, "OneBot API unavailable, trying WebUI"),
+        }
+
+        // 2) 回退：NapCat WebUI /api/login/status
+        // 注意：该接口的 data 里登录字段名（online/isLogin 等）在不同版本不一致，
+        // 且未带 token 时可能返回 code!=0，因此仅作 fallback。
         let url = format!("{}/api/login/status", self.base_url);
         let resp = self
             .client
@@ -81,18 +94,28 @@ impl NapCatClient {
             .send()
             .await
             .map_err(|e| format!("HTTP error: {e}"))?;
-        if !resp.status().is_success() {
-            // Try legacy OneBot API as fallback.
-            return self.login_status_via_onebot().await;
+        if resp.status().is_success() {
+            let raw: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| format!("parse error: {e}"))?;
+            let code = raw.get("code").and_then(|c| c.as_i64());
+            if code == Some(0) {
+                if let Some(data) = raw.get("data") {
+                    let status: NapCatStatus = serde_json::from_value(data.clone())
+                        .map_err(|e| format!("data parse error: {e}"))?;
+                    if status.online {
+                        return Ok(status);
+                    }
+                    tracing::warn!(body = %raw, "WebUI reports offline — trusting OneBot API result");
+                }
+            }
+            tracing::warn!(body = %raw, "NapCat WebUI status response not usable");
         }
-        let status: NapCatStatus = resp
-            .json()
-            .await
-            .map_err(|e| format!("parse error: {e}"))?;
-        Ok(status)
+        // 3) 最终再尝试一次 OneBot API
+        self.login_status_via_onebot().await
     }
 
-    /// Fallback: use OneBot `get_login_info` to check login.
     async fn login_status_via_onebot(&self) -> Result<NapCatStatus, String> {
         // OneBot HTTP API is typically on port 3000 inside the container.
         // Try localhost:3000 (common port mapping).

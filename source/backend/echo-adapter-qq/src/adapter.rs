@@ -27,13 +27,19 @@ struct QqInner {
     connected: AtomicBool,
     self_id: StdMutex<Option<String>>,
     subscribers: StdMutex<Vec<mpsc::UnboundedSender<AdapterEvent>>>,
-    filter: Option<FilterPipeline>,
+    filter: StdMutex<Option<Arc<FilterPipeline>>>,
     shutdown_tx: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
     tracker: echo_server::ConnectionTracker,
     /// Agent reference (set externally before start).
     agent: StdMutex<Option<Arc<echo_agent::Agent>>>,
     /// Extra handlers to register alongside the internal QQ handler.
     extra_handlers: StdMutex<Vec<Box<dyn echo_server::Handler>>>,
+    /// Runtime allowlist overrides (takes precedence over config file values).
+    runtime_allowlist_users: StdMutex<Vec<i64>>,
+    runtime_allowlist_groups: StdMutex<Vec<i64>>,
+    /// Runtime denylist overrides.
+    runtime_denylist_users: StdMutex<Vec<i64>>,
+    runtime_denylist_groups: StdMutex<Vec<i64>>,
 }
 
 /// Wrapper to make a boxed handler satisfy the `Handler` trait constraint.
@@ -58,6 +64,11 @@ pub struct QqAdapter {
 impl QqAdapter {
     pub fn new(config: QqAdapterConfig) -> Self {
         let filter = config.build_filter_pipeline();
+        // Seed runtime override fields from config.
+        let au = config.filter.allowlist.user_ids.clone();
+        let ag = config.filter.allowlist.group_ids.clone();
+        let du = config.filter.denylist.user_ids.clone();
+        let dg = config.filter.denylist.group_ids.clone();
         Self {
             name: "qq".into(),
             inner: Arc::new(QqInner {
@@ -68,11 +79,15 @@ impl QqAdapter {
                 connected: AtomicBool::new(false),
                 self_id: StdMutex::new(None),
                 subscribers: StdMutex::new(Vec::new()),
-                filter: Some(filter),
+                filter: StdMutex::new(Some(Arc::new(filter))),
                 shutdown_tx: StdMutex::new(None),
                 tracker: echo_server::ConnectionTracker::default(),
                 agent: StdMutex::new(None),
                 extra_handlers: StdMutex::new(Vec::new()),
+                runtime_allowlist_users: StdMutex::new(au),
+                runtime_allowlist_groups: StdMutex::new(ag),
+                runtime_denylist_users: StdMutex::new(du),
+                runtime_denylist_groups: StdMutex::new(dg),
             }),
         }
     }
@@ -114,7 +129,29 @@ impl QqAdapter {
                 Some((gid, name))
             })
             .collect();
-        Ok(groups)
+
+        // Apply allowlist/denylist filtering to the group list.
+        // Denylist takes priority per design: a group in both lists is excluded.
+        let cfg = self.get_filter_config();
+        let allow_groups: std::collections::HashSet<i64> =
+            cfg.allowlist.group_ids.iter().cloned().collect();
+        let deny_groups: std::collections::HashSet<i64> =
+            cfg.denylist.group_ids.iter().cloned().collect();
+
+        let mut filtered = groups;
+        if !allow_groups.is_empty() {
+            filtered = filtered
+                .into_iter()
+                .filter(|(gid, _)| allow_groups.contains(gid))
+                .collect();
+        }
+        if !deny_groups.is_empty() {
+            filtered = filtered
+                .into_iter()
+                .filter(|(gid, _)| !deny_groups.contains(gid))
+                .collect();
+        }
+        Ok(filtered)
     }
 
     /// Get group member info via the active QQ connection.
@@ -123,6 +160,20 @@ impl QqAdapter {
         group_id: i64,
         user_id: i64,
     ) -> Result<String, String> {
+        // ── Allowlist / denylist gating ──
+        let cfg = self.get_filter_config();
+        let allow_groups: std::collections::HashSet<i64> =
+            cfg.allowlist.group_ids.iter().cloned().collect();
+        let deny_groups: std::collections::HashSet<i64> =
+            cfg.denylist.group_ids.iter().cloned().collect();
+        if !deny_groups.is_empty() && deny_groups.contains(&group_id) {
+            return Err(format!("group {group_id} is denylisted"));
+        }
+        if !allow_groups.is_empty() && !allow_groups.contains(&group_id) {
+            return Err(format!("group {group_id} is not allowlisted"));
+        }
+        let _ = user_id; // reserved for future per-user gating
+
         let ctx = self
             .inner
             .active_context
@@ -133,6 +184,116 @@ impl QqAdapter {
         let request = echo_core::action::actions::get_group_member_info(group_id, user_id);
         let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
         serde_json::to_string(&resp.data).map_err(|e| e.to_string())
+    }
+
+    /// Rebuild the filter pipeline from config + runtime overrides and store it.
+    fn rebuild_filter_pipeline(&self) {
+        let allowlist_users = self.inner.runtime_allowlist_users.lock().expect("poisoned").clone();
+        let allowlist_groups = self.inner.runtime_allowlist_groups.lock().expect("poisoned").clone();
+        let denylist_users = self.inner.runtime_denylist_users.lock().expect("poisoned").clone();
+        let denylist_groups = self.inner.runtime_denylist_groups.lock().expect("poisoned").clone();
+
+        // Build a filter config with runtime overrides.
+        let mut filter_cfg = self.inner.config.filter.clone();
+        filter_cfg.allowlist.user_ids = allowlist_users;
+        filter_cfg.allowlist.group_ids = allowlist_groups;
+        filter_cfg.denylist.user_ids = denylist_users;
+        filter_cfg.denylist.group_ids = denylist_groups;
+
+        // Rebuild pipeline using the same logic as QqAdapterConfig.
+        let mut pipeline = FilterPipeline::new();
+
+        let admin_ids: Vec<String> = if self.inner.config.owner_qq > 0 {
+            vec![self.inner.config.owner_qq.to_string()]
+        } else {
+            vec![]
+        };
+        let admin_filter = echo_adapter::filter::AdminBypassFilter::new(admin_ids);
+        if admin_filter.is_active() {
+            pipeline.push(Box::new(admin_filter));
+        }
+
+        let allowlist = echo_adapter::filter::AllowlistFilter::new(
+            filter_cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
+            filter_cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
+        );
+        if allowlist.is_active() {
+            pipeline.push(Box::new(allowlist));
+        }
+
+        let denylist = echo_adapter::filter::DenylistFilter::new(
+            filter_cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
+            filter_cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+        );
+        if denylist.is_active() {
+            pipeline.push(Box::new(denylist));
+        }
+
+        // Rate limit, keyword, content length from static config.
+        if let Some(ref r) = self.inner.config.filter.rate_limit.per_user {
+            let f = echo_adapter::filter::RateLimitFilter::new(
+                Some(echo_adapter::filter::RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
+                None, None,
+            );
+            if f.is_active() { pipeline.push(Box::new(f)); }
+        }
+        if let Some(ref r) = self.inner.config.filter.rate_limit.per_group {
+            let f = echo_adapter::filter::RateLimitFilter::new(
+                None,
+                Some(echo_adapter::filter::RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
+                None,
+            );
+            if f.is_active() { pipeline.push(Box::new(f)); }
+        }
+        if let Some(ref r) = self.inner.config.filter.rate_limit.global {
+            let f = echo_adapter::filter::RateLimitFilter::new(
+                None, None,
+                Some(echo_adapter::filter::RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
+            );
+            if f.is_active() { pipeline.push(Box::new(f)); }
+        }
+
+        let keyword = echo_adapter::filter::KeywordBlockFilter::new(
+            self.inner.config.filter.keyword.block_keywords.clone(),
+            &self.inner.config.filter.keyword.block_regex,
+        );
+        if keyword.is_active() {
+            pipeline.push(Box::new(keyword));
+        }
+
+        if self.inner.config.filter.content.max_length > 0 {
+            pipeline.push(Box::new(echo_adapter::filter::ContentLengthFilter::new(
+                self.inner.config.filter.content.max_length,
+            )));
+        }
+
+        *self.inner.filter.lock().expect("filter poisoned") = Some(Arc::new(pipeline));
+    }
+
+    /// Update the runtime allowlist. Changes take effect immediately.
+    pub fn update_allowlist(&self, user_ids: Vec<i64>, group_ids: Vec<i64>) {
+        *self.inner.runtime_allowlist_users.lock().expect("poisoned") = user_ids;
+        *self.inner.runtime_allowlist_groups.lock().expect("poisoned") = group_ids;
+        self.rebuild_filter_pipeline();
+        tracing::info!("QQ allowlist updated and filter pipeline rebuilt");
+    }
+
+    /// Update the runtime denylist. Changes take effect immediately.
+    pub fn update_denylist(&self, user_ids: Vec<i64>, group_ids: Vec<i64>) {
+        *self.inner.runtime_denylist_users.lock().expect("poisoned") = user_ids;
+        *self.inner.runtime_denylist_groups.lock().expect("poisoned") = group_ids;
+        self.rebuild_filter_pipeline();
+        tracing::info!("QQ denylist updated and filter pipeline rebuilt");
+    }
+
+    /// Return the current effective filter config (runtime overrides merged).
+    pub fn get_filter_config(&self) -> crate::config::QqFilterConfig {
+        let mut cfg = self.inner.config.filter.clone();
+        cfg.allowlist.user_ids = self.inner.runtime_allowlist_users.lock().expect("poisoned").clone();
+        cfg.allowlist.group_ids = self.inner.runtime_allowlist_groups.lock().expect("poisoned").clone();
+        cfg.denylist.user_ids = self.inner.runtime_denylist_users.lock().expect("poisoned").clone();
+        cfg.denylist.group_ids = self.inner.runtime_denylist_groups.lock().expect("poisoned").clone();
+        cfg
     }
 
     fn convert_message(event: &OneBotEvent) -> Option<IncomingMessage> {
@@ -257,8 +418,10 @@ impl Adapter for QqAdapter {
                     return echo_server::HandleResult::Pass;
                 }
 
-                // Filter pipeline.
-                if let Some(ref pipeline) = self.inner.filter {
+                // Filter pipeline — clone Arc out of the lock so the guard
+                // is dropped before .await.
+                let pipeline_opt = self.inner.filter.lock().expect("filter poisoned").clone();
+                if let Some(pipeline) = pipeline_opt {
                     let (accepted, block_reply) = pipeline.should_accept(&msg).await;
                     if !accepted {
                         if let Some(reply) = block_reply {
@@ -462,6 +625,65 @@ impl Adapter for QqAdapter {
             });
         }
 
+        // ── Allowlist / denylist gating ──
+        {
+            let cfg = self.get_filter_config();
+            let allow_users: std::collections::HashSet<i64> =
+                cfg.allowlist.user_ids.iter().cloned().collect();
+            let allow_groups: std::collections::HashSet<i64> =
+                cfg.allowlist.group_ids.iter().cloned().collect();
+            let deny_users: std::collections::HashSet<i64> =
+                cfg.denylist.user_ids.iter().cloned().collect();
+            let deny_groups: std::collections::HashSet<i64> =
+                cfg.denylist.group_ids.iter().cloned().collect();
+
+            let user_id: i64 = target.user_id.parse().unwrap_or(0);
+            let group_id: Option<i64> = match &target.channel {
+                ChannelType::Group { group_id } => group_id.parse().ok(),
+                ChannelType::Direct => None,
+            };
+
+            // Denylist check (takes priority per design).
+            if !deny_users.is_empty() && user_id != 0 && deny_users.contains(&user_id) {
+                return Ok(SendResult {
+                    message_id: None,
+                    success: false,
+                    error: Some(format!("user {user_id} is denylisted")),
+                });
+            }
+            if !deny_groups.is_empty() {
+                if let Some(gid) = group_id {
+                    if deny_groups.contains(&gid) {
+                        return Ok(SendResult {
+                            message_id: None,
+                            success: false,
+                            error: Some(format!("group {gid} is denylisted")),
+                        });
+                    }
+                }
+            }
+
+            // Allowlist check.
+            if !allow_users.is_empty() && user_id != 0 && !allow_users.contains(&user_id) {
+                return Ok(SendResult {
+                    message_id: None,
+                    success: false,
+                    error: Some(format!("user {user_id} is not allowlisted")),
+                });
+            }
+            if !allow_groups.is_empty() {
+                if let Some(gid) = group_id {
+                    if !allow_groups.contains(&gid) {
+                        return Ok(SendResult {
+                            message_id: None,
+                            success: false,
+                            error: Some(format!("group {gid} is not allowlisted")),
+                        });
+                    }
+                }
+            }
+        }
+
         let ctx = self
             .inner
             .active_context
@@ -530,7 +752,10 @@ impl Adapter for QqAdapter {
     }
 
     fn filter_pipeline(&self) -> Option<&FilterPipeline> {
-        self.inner.filter.as_ref()
+        // The filter pipeline is behind a mutex for runtime updates and can't
+        // be borrowed through this trait method.  Return None — the real
+        // filtering happens inside QqHandler::handle().
+        None
     }
 
     async fn get_groups(&self) -> Result<Vec<(i64, String)>, AdapterError> {
@@ -539,5 +764,27 @@ impl Adapter for QqAdapter {
 
     fn has_group_list(&self) -> bool {
         true
+    }
+
+    fn update_allowlist(&self, user_ids: Vec<String>, group_ids: Vec<String>) {
+        let users: Vec<i64> = user_ids.iter().filter_map(|s| s.parse().ok()).collect();
+        let groups: Vec<i64> = group_ids.iter().filter_map(|s| s.parse().ok()).collect();
+        self.update_allowlist(users, groups);
+    }
+
+    fn update_denylist(&self, user_ids: Vec<String>, group_ids: Vec<String>) {
+        let users: Vec<i64> = user_ids.iter().filter_map(|s| s.parse().ok()).collect();
+        let groups: Vec<i64> = group_ids.iter().filter_map(|s| s.parse().ok()).collect();
+        self.update_denylist(users, groups);
+    }
+
+    fn get_filter_info(&self) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
+        let cfg = self.get_filter_config();
+        (
+            cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
+            cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
+            cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
+            cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+        )
     }
 }

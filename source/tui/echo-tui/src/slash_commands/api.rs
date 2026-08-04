@@ -1,8 +1,8 @@
 //! /api — interactive API configuration with select list + form fields in chat.
 
 use echo_agent::BackendCommand;
-use crate::app::{AppState, ConversationMode, ToastKind};
-use crate::components::form_overlay::SelectItem;
+use crate::state::{AppState, ConversationMode, ToastKind};
+use crate::components::form_overlay::{FormKind, SelectItem};
 use crate::backend::Backend;
 
 /// /api — enter interactive API config mode.
@@ -31,7 +31,7 @@ pub fn populate_form(state: &mut AppState) {
 
     let active = if s.active_api.is_empty() { "默认".to_string() } else { s.active_api.clone() };
     let title = format!("API 配置 [当前: {} / {} / {}]", st.provider, st.model, active);
-    state.form_overlay.activate(&title, items);
+    state.form_overlay.activate(&title, items, FormKind::ApiConfig);
     state.form_overlay.select_idx = s.profiles.iter().position(|p| p.name == s.active_api).unwrap_or(0);
 }
 

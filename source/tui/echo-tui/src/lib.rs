@@ -6,17 +6,21 @@
 
 pub mod app;
 pub mod backend;
+pub mod clipboard;
 pub mod components;
 pub mod event;
 pub mod keybindings;
 pub mod slash_commands;
+pub mod state;
 pub mod theme;
+pub mod util;
 
 use ratatui::Terminal;
 
-pub use app::{App, AppState};
+pub use app::App;
 pub use backend::Backend;
 pub use event::Event;
+pub use state::AppState;
 pub use theme::Theme;
 
 /// Drop 时恢复终端：任务被取消（如 /shutdown、SIGTERM）或 panic 时，

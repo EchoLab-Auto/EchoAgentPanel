@@ -471,6 +471,63 @@ impl Agent {
                 });
                 self.emit_adapter_list();
             }
+            BackendCommand::UpdateQqAllowlist { user_ids, group_ids } => {
+                let user_strs: Vec<String> = user_ids.iter().map(|id| id.to_string()).collect();
+                let group_strs: Vec<String> = group_ids.iter().map(|id| id.to_string()).collect();
+                if let Some(adapter) = self.adapters.get("qq") {
+                    adapter.update_allowlist(user_strs, group_strs);
+                    let (au, ag, du, dg) = adapter.get_filter_info();
+                    self.emit(BackendEvent::QqFilterConfig {
+                        allowlist_users: au.iter().filter_map(|s| s.parse().ok()).collect(),
+                        allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 白名单已更新".into(),
+                    });
+                } else {
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 适配器未找到".into(),
+                    });
+                }
+            }
+            BackendCommand::UpdateQqDenylist { user_ids, group_ids } => {
+                let user_strs: Vec<String> = user_ids.iter().map(|id| id.to_string()).collect();
+                let group_strs: Vec<String> = group_ids.iter().map(|id| id.to_string()).collect();
+                if let Some(adapter) = self.adapters.get("qq") {
+                    adapter.update_denylist(user_strs, group_strs);
+                    let (au, ag, du, dg) = adapter.get_filter_info();
+                    self.emit(BackendEvent::QqFilterConfig {
+                        allowlist_users: au.iter().filter_map(|s| s.parse().ok()).collect(),
+                        allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 黑名单已更新".into(),
+                    });
+                } else {
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 适配器未找到".into(),
+                    });
+                }
+            }
+            BackendCommand::RequestQqFilterConfig => {
+                if let Some(adapter) = self.adapters.get("qq") {
+                    let (au, ag, du, dg) = adapter.get_filter_info();
+                    self.emit(BackendEvent::QqFilterConfig {
+                        allowlist_users: au.iter().filter_map(|s| s.parse().ok()).collect(),
+                        allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                }
+            }
             BackendCommand::RequestGroupList => {
                 let groups = match self.adapters.get("qq") {
                     Some(adapter) => match adapter.get_groups().await {

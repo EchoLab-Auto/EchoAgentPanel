@@ -1,7 +1,7 @@
 //! /adapter and /adapters commands.
 
 use echo_agent::BackendCommand;
-use crate::app::{AppState, ToastKind};
+use crate::state::{AppState, ToastKind};
 use crate::backend::Backend;
 
 /// /adapters — show adapter status with connection details.

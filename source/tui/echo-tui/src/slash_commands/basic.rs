@@ -1,7 +1,7 @@
 //! Basic slash commands: /clear, /quit.
 
 use echo_agent::BackendCommand;
-use crate::app::AppState;
+use crate::state::AppState;
 use crate::backend::Backend;
 
 /// /clear — clear the current session's history.

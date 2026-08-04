@@ -1,6 +1,5 @@
 //! UI components. Each handles its own rendering and input.
 
-pub mod adapter_popup;
 pub mod chat_view;
 pub mod form_overlay;
 pub mod command_palette;
@@ -13,7 +12,7 @@ pub mod toast;
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
-use crate::app::AppState;
+use crate::state::AppState;
 use crate::event::Event;
 
 /// Outcome of routing an event to a component.

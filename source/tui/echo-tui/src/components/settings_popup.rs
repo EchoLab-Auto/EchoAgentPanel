@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListSt
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
-use crate::app::AppState;
+use crate::state::AppState;
 use crate::event::Event;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

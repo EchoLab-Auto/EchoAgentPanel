@@ -284,6 +284,80 @@ impl Tool for EditFileTool {
     }
 }
 
+// ── RunCommandTool ──
+
+pub struct RunCommandTool {
+    workspace: PathBuf,
+}
+
+impl RunCommandTool {
+    pub fn new(workspace: PathBuf) -> Self { Self { workspace } }
+}
+
+#[async_trait]
+impl Tool for RunCommandTool {
+    fn name(&self) -> &str { "run_command" }
+    fn description(&self) -> &str {
+        "Run a terminal command in the project workspace. Returns stdout and stderr. Use for git operations, cargo builds, file operations, and other shell commands. Timeout: 30s."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The shell command to run (e.g. 'cargo build', 'git status', 'ls -la')"},
+                "timeout_secs": {"type": "integer", "description": "Timeout in seconds (default 30, max 120)"}
+            },
+            "required": ["command"]
+        })
+    }
+    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+        let cmd = args["command"].as_str().unwrap_or("");
+        if cmd.is_empty() { return Err(ToolError::InvalidArguments("command required".into())); }
+        let timeout_secs = args["timeout_secs"].as_u64().unwrap_or(30).min(120) as u64;
+
+        // Block dangerous patterns.
+        let lower = cmd.to_lowercase();
+        for dangerous in &["rm -rf /", "mkfs.", "dd if=", ":(){ :|:& };:", "> /dev/sda"] {
+            if lower.contains(dangerous) {
+                return Err(ToolError::Execution(format!("blocked dangerous command pattern: {dangerous}")));
+            }
+        }
+
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd)
+                .current_dir(&self.workspace)
+                .output(),
+        ).await;
+
+        match output {
+            Ok(Ok(out)) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let mut result = format!("$ {cmd}\n");
+                if !stdout.trim().is_empty() {
+                    let truncated: String = stdout.chars().take(4096).collect();
+                    result.push_str(&truncated);
+                    if stdout.chars().count() > 4096 { result.push_str("\n... (truncated)"); }
+                }
+                if !stderr.trim().is_empty() {
+                    let truncated: String = stderr.chars().take(1024).collect();
+                    result.push_str(&format!("\n[stderr]\n{truncated}"));
+                }
+                if out.status.success() {
+                    Ok(result)
+                } else {
+                    Ok(format!("{result}\n[exit code: {}]", out.status.code().unwrap_or(-1)))
+                }
+            }
+            Ok(Err(e)) => Err(ToolError::Execution(format!("command failed: {e}"))),
+            Err(_) => Err(ToolError::Execution(format!("timeout after {timeout_secs}s"))),
+        }
+    }
+}
+
 // ── Helpers ──
 
 fn human_size(bytes: u64) -> String {
@@ -299,5 +373,6 @@ pub fn register_coding_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
     registry.register(Arc::new(ListFilesTool::new(workspace.clone())));
     registry.register(Arc::new(SearchCodeTool::new(workspace.clone())));
     registry.register(Arc::new(WriteFileTool::new(workspace.clone())));
-    registry.register(Arc::new(EditFileTool::new(workspace)));
+    registry.register(Arc::new(EditFileTool::new(workspace.clone())));
+    registry.register(Arc::new(RunCommandTool::new(workspace)));
 }

@@ -1,25 +1,9 @@
 //! 对话内嵌表单组件 — 二级交互（选择列表 → 表单编辑）。
 //!
-//! ## 状态机
-//! ```text
-//!                /api              Esc/Ctrl+C
-//! Inactive ──────────> Selecting ─────────────> Inactive
-//!    ▲                    │  ▲
-//!    │  Ctrl+C×2          │  │ Esc / Ctrl+C
-//!    │                    │  │
-//!    │              Enter │  │ e
-//!    │                    ▼  │
-//!    │               (执行操作)│
-//!    │                       │
-//!    ├───────────────────────┤
-//!    │         Ctrl+C×2      │
-//!    │                        ▼
-//!    └────────────── Editing ─┘
-//!                         │
-//!                    Ctrl+S│
-//!                         ▼
-//!                      Selecting (保存后返回)
-//! ```
+//! Supports multiple form kinds via [`FormKind`]:
+//! - `ApiConfig`: API configuration (multi-field editing, Ctrl+S save)
+//! - `QqFilter`: QQ allowlist/denylist management (single QQ-number prompt)
+//! - `SessionSelect`: Session switching (Enter to switch, no editing)
 //!
 //! ## 操作
 //! - Selecting: ↑↓导航 Enter执行 e编辑 Esc退出 Ctrl+C退出
@@ -31,6 +15,18 @@ use echo_agent::BackendCommand;
 use crate::backend::Backend;
 
 // ── Types ──
+
+/// 表单类型 — determines editing behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FormKind {
+    /// API configuration form (multi-field: provider, model, url, key, prompt).
+    #[default]
+    ApiConfig,
+    /// QQ allowlist/denylist form (single-field: QQ number).
+    QqFilter,
+    /// Session selection form (Enter to switch, no editing).
+    SessionSelect,
+}
 
 /// 表单状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +67,8 @@ pub struct FormOverlay {
     pub fields: Vec<FormField>,
     pub field_idx: usize,
     pub edit_label: String,
+    /// Which kind of form this is.
+    pub form_kind: FormKind,
 }
 
 impl Default for FormOverlay {
@@ -83,6 +81,7 @@ impl Default for FormOverlay {
             fields: Vec::new(),
             field_idx: 0,
             edit_label: String::new(),
+            form_kind: FormKind::default(),
         }
     }
 }
@@ -92,13 +91,14 @@ impl FormOverlay {
 
     pub fn is_active(&self) -> bool { self.state != FormState::Inactive }
 
-    pub fn activate(&mut self, title: &str, items: Vec<SelectItem>) {
+    pub fn activate(&mut self, title: &str, items: Vec<SelectItem>, kind: FormKind) {
         self.state = FormState::Selecting;
         self.title = title.to_string();
         self.select_items = items;
         self.select_idx = 0;
         self.fields.clear();
         self.field_idx = 0;
+        self.form_kind = kind;
     }
 
     pub fn deactivate(&mut self) {
@@ -134,8 +134,11 @@ impl FormOverlay {
         self.state = FormState::Editing;
     }
 
-    /// Save form fields to backend.
+    /// Save form fields to backend. Only meaningful for ApiConfig.
     pub fn save(&mut self, backend: &Backend) {
+        if self.form_kind != FormKind::ApiConfig {
+            return;
+        }
         let vals: Vec<String> = self.fields.iter().map(|f| f.value.clone()).collect();
         let provider = vals.get(0).cloned().unwrap_or_default();
         let model = vals.get(1).cloned().unwrap_or_default();
@@ -200,18 +203,38 @@ impl FormOverlay {
                     lines.push(format!("{mark}{}: {}", field.label, display));
                 }
                 lines.push(String::new());
-                lines.push("↑↓选字段  直接输入改值  Ctrl+S保存  Ctrl+C×1返回  Ctrl+C×2退出".into());
+                match self.form_kind {
+                    FormKind::ApiConfig => {
+                        lines.push("↑↓选字段  直接输入改值  Ctrl+S保存  Ctrl+C×1返回  Ctrl+C×2退出".into());
+                    }
+                    FormKind::QqFilter => {
+                        lines.push("输入QQ号后 Enter确认  Esc取消".into());
+                    }
+                    FormKind::SessionSelect => {
+                        lines.push("选择会话后 Enter切换  Esc取消".into());
+                    }
+                }
             }
             FormState::Selecting => {
                 lines.push(format!("── {} ──", self.title));
                 lines.push(String::new());
                 for (i, item) in self.select_items.iter().enumerate() {
                     let mark = if i == self.select_idx { "▸" } else { " " };
-                    let radio = if item.value.is_empty() { " " } else { "●" };
+                    let radio = if item.value == "__info__" { " " } else { "●" };
                     lines.push(format!(" {mark}{radio} {}", item.label));
                 }
                 lines.push(String::new());
-                lines.push("↑↓选择  Enter切换  e编辑  Ctrl+C×2退出".into());
+                match self.form_kind {
+                    FormKind::ApiConfig => {
+                        lines.push("↑↓选择  Enter切换  e编辑  Ctrl+C×2退出".into());
+                    }
+                    FormKind::QqFilter => {
+                        lines.push("↑↓选择  Enter/e执行  Ctrl+C×2退出".into());
+                    }
+                    FormKind::SessionSelect => {
+                        lines.push("↑↓选择  Enter切换  Ctrl+C×2退出".into());
+                    }
+                }
             }
             FormState::Inactive => {}
         }
@@ -222,28 +245,29 @@ impl FormOverlay {
 
     /// Handle a key event. Returns `true` if the key was consumed.
     /// Handle key events that DON'T need AppState access.
-    /// Returns `Some(true)` if key was consumed, `None` if caller should handle.
     pub fn handle_key(&mut self, key: &KeyEvent, backend: &Backend) -> bool {
         if !self.is_active() { return false; }
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
             // Ctrl+C handling is done in app.rs (double-press logic).
-            // Here we just handle the state transitions triggered by app.rs.
-            return false; // Let app.rs handle it.
+            return false;
         }
 
         match self.state {
             FormState::Selecting => match key.code {
                 KeyCode::Up => { self.navigate(-1); return true; }
                 KeyCode::Down => { self.navigate(1); return true; }
-                // Enter and e are handled in app.rs (need AppState access)
                 _ => {}
             },
             FormState::Editing => match key.code {
                 KeyCode::Up => { self.navigate(-1); return true; }
                 KeyCode::Down => { self.navigate(1); return true; }
-                KeyCode::Char('s') if ctrl => { self.save(backend); return true; }
+                // Ctrl+S only meaningful for ApiConfig forms.
+                KeyCode::Char('s') if ctrl && self.form_kind == FormKind::ApiConfig => {
+                    self.save(backend);
+                    return true;
+                }
                 _ => {}
             },
             _ => {}

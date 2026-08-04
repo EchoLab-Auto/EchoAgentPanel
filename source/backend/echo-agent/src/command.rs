@@ -46,4 +46,10 @@ pub enum BackendCommand {
     StartAllAdapters,
     /// Stop all running adapters.
     StopAllAdapters,
+    /// Update QQ adapter allowlist at runtime.
+    UpdateQqAllowlist { user_ids: Vec<i64>, group_ids: Vec<i64> },
+    /// Update QQ adapter denylist at runtime.
+    UpdateQqDenylist { user_ids: Vec<i64>, group_ids: Vec<i64> },
+    /// Request current QQ filter config.
+    RequestQqFilterConfig,
 }

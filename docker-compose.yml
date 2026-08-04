@@ -24,6 +24,10 @@ services:
     environment:
       - NAPCAT_UID=0
       - NAPCAT_GID=0
+    # 让容器内能解析 host.docker.internal 指向宿主机，
+    # 否则 NapCat 无法连回宿主机的反向 WS 端口 (3131)。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - napcat_data:/app/napcat/data
       - napcat_config:/app/napcat/config

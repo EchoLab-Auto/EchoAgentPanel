@@ -20,3 +20,4 @@ futures-util.workspace = true
 qrcode.workspace = true
 rxing.workspace = true
 serde_json.workspace = true
+unicode-width = "0.2"

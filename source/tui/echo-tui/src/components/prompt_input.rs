@@ -13,7 +13,7 @@ use ratatui::Frame;
 use tui_textarea::{Input, Key, TextArea};
 
 use super::{Component, ComponentResult};
-use crate::app::AppState;
+use crate::state::AppState;
 use crate::event::Event;
 use crate::slash_commands::{SlashAction, SLASH_COMMANDS};
 
@@ -118,8 +118,7 @@ impl Component for PromptInput {
             self.render_slash_menu(f, area, state);
         }
 
-        // 选中（input_focused）时高亮边框，未选中时弱化并提示如何进入输入。
-        let focused = state.input_focused;
+        let focused = true;
         let title = match state.active_session() {
             Some(s) => format!(" 消息输入 (发送给 {}) ", s.nickname),
             None => " 消息输入 ".to_string(),

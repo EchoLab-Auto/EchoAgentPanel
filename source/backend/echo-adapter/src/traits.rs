@@ -124,4 +124,17 @@ pub trait Adapter: Send + Sync {
     fn has_group_list(&self) -> bool {
         false
     }
+
+    /// Update the adapter's runtime allowlist.  Default: no-op.
+    fn update_allowlist(&self, _user_ids: Vec<String>, _group_ids: Vec<String>) {}
+
+    /// Update the adapter's runtime denylist.  Default: no-op.
+    fn update_denylist(&self, _user_ids: Vec<String>, _group_ids: Vec<String>) {}
+
+    /// Return the current filter config (allowlist_users, allowlist_groups,
+    /// denylist_users, denylist_groups).  All IDs are strings.
+    /// Default: empty.
+    fn get_filter_info(&self) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
+        (vec![], vec![], vec![], vec![])
+    }
 }

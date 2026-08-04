@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
-use crate::app::AppState;
+use crate::state::AppState;
 use crate::event::Event;
 
 #[derive(Debug, Default)]

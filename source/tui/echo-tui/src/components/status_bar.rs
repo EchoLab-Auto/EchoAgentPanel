@@ -10,7 +10,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
-use crate::app::{AppState, SPINNER};
+use crate::state::{AppState, SPINNER};
 use crate::event::Event;
 
 #[derive(Debug, Default)]
