@@ -43,12 +43,12 @@ impl App {
         Self {
             state: AppState::new(theme, keybindings),
             backend,
-            status_bar: StatusBar::default(),
-            chat_view: ChatView::default(),
+            status_bar: StatusBar,
+            chat_view: ChatView,
             prompt_input: PromptInput::default(),
-            command_palette: command_palette::CommandPalette::default(),
-            settings_popup: SettingsPopup::default(),
-            help_popup: HelpPopup::default(),
+            command_palette: command_palette::CommandPalette,
+            settings_popup: SettingsPopup,
+            help_popup: HelpPopup,
         }
     }
 
@@ -346,21 +346,21 @@ impl App {
         // Modals take priority.
         if self.state.show_help {
             let _ = self.help_popup.handle_event(
-                &Event::Input(crossterm::event::Event::Key(key.clone())),
+                &Event::Input(crossterm::event::Event::Key(*key)),
                 &mut self.state,
             );
             return;
         }
         if self.state.show_settings {
             let _ = self.settings_popup.handle_event(
-                &Event::Input(crossterm::event::Event::Key(key.clone())),
+                &Event::Input(crossterm::event::Event::Key(*key)),
                 &mut self.state,
             );
             return;
         }
         if self.state.show_palette {
             let _ = self.command_palette.handle_event(
-                &Event::Input(crossterm::event::Event::Key(key.clone())),
+                &Event::Input(crossterm::event::Event::Key(*key)),
                 &mut self.state,
             );
             self.dispatch_palette(key);
@@ -368,7 +368,7 @@ impl App {
         }
         if self.state.show_slash {
             let _ = self.prompt_input.handle_event(
-                &Event::Input(crossterm::event::Event::Key(key.clone())),
+                &Event::Input(crossterm::event::Event::Key(*key)),
                 &mut self.state,
             );
             return;
@@ -393,7 +393,7 @@ impl App {
             || key.code == kb.scroll_bottom.code
         {
             let _ = self.chat_view.handle_event(
-                &Event::Input(crossterm::event::Event::Key(key.clone())),
+                &Event::Input(crossterm::event::Event::Key(*key)),
                 &mut self.state,
             );
             return;
@@ -401,7 +401,7 @@ impl App {
 
         // Everything else → prompt input.
         let _ = self.prompt_input.handle_event(
-            &Event::Input(crossterm::event::Event::Key(key.clone())),
+            &Event::Input(crossterm::event::Event::Key(*key)),
             &mut self.state,
         );
     }
@@ -444,39 +444,33 @@ impl App {
                     && !is_direct_remove
                     && !current_val.ends_with("__info__");
                 match key.code {
-                    KeyCode::Char('e') if needs_text_input => match fo.form_kind {
-                        FormKind::QqFilter => {
-                            let val = fo.confirm().unwrap_or_default();
-                            self.state.form_overlay.set_fields(vec![FormField {
-                                label: "QQ号".into(),
-                                value: String::new(),
-                                kind: FieldKind::Text,
-                            }]);
-                            self.state.form_overlay.edit_label = val;
-                            self.state.form_overlay.enter_edit();
-                            self.state.mode = ConversationMode::Normal;
-                        }
-                        _ => {}
+                    KeyCode::Char('e') if needs_text_input => if fo.form_kind == FormKind::QqFilter {
+                        let val = fo.confirm().unwrap_or_default();
+                        self.state.form_overlay.set_fields(vec![FormField {
+                            label: "QQ号".into(),
+                            value: String::new(),
+                            kind: FieldKind::Text,
+                        }]);
+                        self.state.form_overlay.edit_label = val;
+                        self.state.form_overlay.enter_edit();
+                        self.state.mode = ConversationMode::Normal;
                     },
-                    KeyCode::Char('e') => match fo.form_kind {
-                        FormKind::ApiConfig => {
-                            let label = fo
-                                .select_items
-                                .get(fo.select_idx)
-                                .map(|s| s.label.clone())
-                                .unwrap_or_default();
-                            let st = &self.state.status;
-                            self.state.form_overlay.set_fields(vec![
-                                FormField { label: "Provider".into(), value: st.provider.clone(), kind: FieldKind::Text },
-                                FormField { label: "Model".into(), value: st.model.clone(), kind: FieldKind::Text },
-                                FormField { label: "BaseURL".into(), value: st.base_url.clone(), kind: FieldKind::Text },
-                                FormField { label: "APIKey".into(), value: String::new(), kind: FieldKind::Password },
-                                FormField { label: "Prompt".into(), value: st.system_prompt.clone(), kind: FieldKind::Text },
-                            ]);
-                            self.state.form_overlay.edit_label = label;
-                            self.state.form_overlay.enter_edit();
-                        }
-                        _ => {}
+                    KeyCode::Char('e') => if fo.form_kind == FormKind::ApiConfig {
+                        let label = fo
+                            .select_items
+                            .get(fo.select_idx)
+                            .map(|s| s.label.clone())
+                            .unwrap_or_default();
+                        let st = &self.state.status;
+                        self.state.form_overlay.set_fields(vec![
+                            FormField { label: "Provider".into(), value: st.provider.clone(), kind: FieldKind::Text },
+                            FormField { label: "Model".into(), value: st.model.clone(), kind: FieldKind::Text },
+                            FormField { label: "BaseURL".into(), value: st.base_url.clone(), kind: FieldKind::Text },
+                            FormField { label: "APIKey".into(), value: String::new(), kind: FieldKind::Password },
+                            FormField { label: "Prompt".into(), value: st.system_prompt.clone(), kind: FieldKind::Text },
+                        ]);
+                        self.state.form_overlay.edit_label = label;
+                        self.state.form_overlay.enter_edit();
                     },
                     KeyCode::Enter => {
                         if let Some(val) = self.state.form_overlay.confirm() {

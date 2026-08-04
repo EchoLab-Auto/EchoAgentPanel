@@ -10,7 +10,7 @@ pub fn register_all(
     adapters: std::sync::Arc<echo_adapter::AdapterRegistry>,
     workspace: std::path::PathBuf,
 ) {
-    registry.register(std::sync::Arc::new(calculator::CalculatorTool::default()));
+    registry.register(std::sync::Arc::new(calculator::CalculatorTool));
     adapter::register_adapter_tools(registry, adapters);
     coding::register_coding_tools(registry, workspace);
 }

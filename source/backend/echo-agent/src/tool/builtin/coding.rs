@@ -313,7 +313,7 @@ impl Tool for RunCommandTool {
     async fn execute(&self, args: Value) -> Result<String, ToolError> {
         let cmd = args["command"].as_str().unwrap_or("");
         if cmd.is_empty() { return Err(ToolError::InvalidArguments("command required".into())); }
-        let timeout_secs = args["timeout_secs"].as_u64().unwrap_or(30).min(120) as u64;
+        let timeout_secs = args["timeout_secs"].as_u64().unwrap_or(30).min(120);
 
         // Block dangerous patterns.
         let lower = cmd.to_lowercase();

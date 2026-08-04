@@ -36,9 +36,7 @@ pub fn login(state: &mut AppState, backend: &Backend) {
     {
         Ok(o) if o.status.success() && !o.stdout.is_empty() => o.stdout,
         _ => {
-            state.toast(format!(
-                "QR 码尚未生成。NapCat 可能正在启动中。\n请稍后重试 /qq login\nWebUI: http://localhost:6099"
-            ), ToastKind::Error);
+            state.toast("QR 码尚未生成。NapCat 可能正在启动中。\n请稍后重试 /qq login\nWebUI: http://localhost:6099".to_string(), ToastKind::Error);
             return;
         }
     };
@@ -125,7 +123,7 @@ fn render(qr: &QrCode, container: &str, stale: bool) -> Vec<String> {
     lines.push("".into());
     lines.push("用手机 QQ 扫描上方二维码登录".into());
     lines.push("QR 有效期约 2 分钟，过期后重新 /qq login".into());
-    lines.push(format!("WebUI: http://localhost:6099 (容器: {container})").into());
+    lines.push(format!("WebUI: http://localhost:6099 (容器: {container})"));
     lines
 }
 

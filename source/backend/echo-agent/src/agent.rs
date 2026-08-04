@@ -217,7 +217,7 @@ impl Agent {
             arguments: call.arguments.clone(),
         });
         let args = serde_json::from_str(&call.arguments)
-            .unwrap_or_else(|_| serde_json::Value::Null);
+            .unwrap_or(serde_json::Value::Null);
         let result = match self.tools.execute(&call.name, args).await {
             Ok(r) => r,
             Err(e) => format!("error: {}", e),

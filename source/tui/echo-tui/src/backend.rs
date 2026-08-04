@@ -46,7 +46,7 @@ impl Backend {
         // Background writer task: send queued strings to WS.
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
-                let _ = write.send(tungstenite::Message::Text(msg.into())).await;
+                let _ = write.send(tungstenite::Message::Text(msg)).await;
             }
         });
 

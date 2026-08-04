@@ -164,20 +164,14 @@ impl QqAdapter {
                     let allow_groups: std::collections::HashSet<i64> =
                         cfg.allowlist.group_ids.iter().cloned().collect();
                     if !allow_groups.is_empty() {
-                        filtered = filtered
-                            .into_iter()
-                            .filter(|(gid, _)| allow_groups.contains(gid))
-                            .collect();
+                        filtered.retain(|(gid, _)| allow_groups.contains(gid));
                     }
                 }
                 QqGateMode::Denylist => {
                     let deny_groups: std::collections::HashSet<i64> =
                         cfg.denylist.group_ids.iter().cloned().collect();
                     if !deny_groups.is_empty() {
-                        filtered = filtered
-                            .into_iter()
-                            .filter(|(gid, _)| !deny_groups.contains(gid))
-                            .collect();
+                        filtered.retain(|(gid, _)| !deny_groups.contains(gid));
                     }
                 }
                 QqGateMode::None => {}
@@ -703,7 +697,7 @@ impl Adapter for QqAdapter {
         // Auto-configure NapCat reverse WebSocket (background).
         // NapCat runs in Docker — use host.docker.internal to reach the host.
         let napcat_url = self.inner.config.napcat_webui_url.clone();
-        let port = bind_addr.split(':').last().unwrap_or("3131");
+        let port = bind_addr.split(':').next_back().unwrap_or("3131");
         let ws_url = format!("ws://host.docker.internal:{port}");
         let token = self.inner.config.server.access_token.clone();
         tokio::spawn(async move {
@@ -894,7 +888,7 @@ impl Adapter for QqAdapter {
     }
 
     async fn get_groups(&self) -> Result<Vec<(i64, String)>, AdapterError> {
-        self.get_group_list().await.map_err(|e| AdapterError::Internal(e))
+        self.get_group_list().await.map_err(AdapterError::Internal)
     }
 
     fn has_group_list(&self) -> bool {

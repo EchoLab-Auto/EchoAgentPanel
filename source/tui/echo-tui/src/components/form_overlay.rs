@@ -140,7 +140,7 @@ impl FormOverlay {
             return;
         }
         let vals: Vec<String> = self.fields.iter().map(|f| f.value.clone()).collect();
-        let provider = vals.get(0).cloned().unwrap_or_default();
+        let provider = vals.first().cloned().unwrap_or_default();
         let model = vals.get(1).cloned().unwrap_or_default();
         let url = vals.get(2).cloned().unwrap_or_default();
         let key = vals.get(3).cloned().unwrap_or_default();

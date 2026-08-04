@@ -37,9 +37,9 @@ pub fn populate_form(state: &mut AppState) {
 
 /// Handle text input in API config mode.
 pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> bool {
-    let parts: Vec<&str> = msg.trim().split_whitespace().collect();
+    let parts: Vec<&str> = msg.split_whitespace().collect();
 
-    match parts.get(0).map(|s| *s) {
+    match parts.first().copied() {
         Some("q") | Some("/q") | Some("quit") => {
             state.mode = ConversationMode::Normal;
             state.form_overlay.deactivate();
@@ -63,52 +63,52 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
     }
 
     match parts.as_slice() {
-        ["switch", name] | ["s", name] => { backend.send(BackendCommand::SwitchApi { name: name.to_string() }); return true; }
-        ["delete", name] | ["d", name] => { backend.send(BackendCommand::DeleteApi { name: name.to_string() }); return true; }
+        ["switch", name] | ["s", name] => { backend.send(BackendCommand::SwitchApi { name: name.to_string() }); true}
+        ["delete", name] | ["d", name] => { backend.send(BackendCommand::DeleteApi { name: name.to_string() }); true}
         ["new", name, prov, model] | ["n", name, prov, model] => {
             backend.send(BackendCommand::UpdateApiConfig {
                 name: name.to_string(), provider: prov.to_string(), model: model.to_string(),
                 base_url: String::new(), api_key: String::new(),
             });
-            return true;
+            true
         }
-        ["new", ..] | ["n", ..] => { state.toast("用法: new <name> <provider> <model>", ToastKind::Error); return true; }
+        ["new", ..] | ["n", ..] => { state.toast("用法: new <name> <provider> <model>", ToastKind::Error); true}
         ["provider", val] | ["p", val] => {
             backend.send(BackendCommand::UpdateApiConfig {
                 name: String::new(), provider: val.to_string(), model: String::new(),
                 base_url: String::new(), api_key: String::new(),
-            }); return true;
+            }); true
         }
         ["model", val] | ["m", val] => {
             backend.send(BackendCommand::UpdateApiConfig {
                 name: String::new(), provider: String::new(), model: val.to_string(),
                 base_url: String::new(), api_key: String::new(),
-            }); return true;
+            }); true
         }
         ["url", val] | ["u", val] => {
             backend.send(BackendCommand::UpdateApiConfig {
                 name: String::new(), provider: String::new(), model: String::new(),
                 base_url: val.to_string(), api_key: String::new(),
-            }); return true;
+            }); true
         }
         ["key", val] | ["k", val] => {
             backend.send(BackendCommand::UpdateApiConfig {
                 name: String::new(), provider: String::new(), model: String::new(),
                 base_url: String::new(), api_key: val.to_string(),
-            }); return true;
+            }); true
         }
         ["prompt", ..] | ["s", ..] => {
-            let prompt = msg.trim().splitn(2, ' ').nth(1).unwrap_or("").trim().to_string();
+            let prompt = msg.trim().split_once(' ').map(|x| x.1).unwrap_or("").trim().to_string();
             if prompt.is_empty() { state.toast("用法: prompt <文本>", ToastKind::Error); }
             else { backend.send(BackendCommand::SetSystemPrompt { prompt }); }
-            return true;
+            true
         }
         ["h"] | ["help"] | ["?"] => {
             state.toast("↑↓选择 ←→切换区域 Enter确认 Esc退出\n数字切换profile 文本命令: switch/del/new/key/url/prompt q退出", ToastKind::Info);
-            return true;
+            true
         }
-        [""] => { populate_form(state); state.refresh_menu_msg(); return true; }
-        _ => { state.toast(format!("未知: {msg}  (h帮助 q退出)"), ToastKind::Error); return true; }
+        [""] => { populate_form(state); state.refresh_menu_msg(); true}
+        _ => { state.toast(format!("未知: {msg}  (h帮助 q退出)"), ToastKind::Error); true}
     }
 }
 

@@ -204,17 +204,11 @@ async fn main() -> Result<()> {
         echo_tui::Theme::dark()
     };
 
-    let tui_task = if let Some(bridge) = bridge {
-        // In-process mode.
-        Some(tokio::spawn(async move {
+    let tui_task = bridge.map(|bridge| tokio::spawn(async move {
             if let Err(e) = echo_tui::run_tui(bridge, tui_theme).await {
                 warn!(error = %e, "tui terminated");
             }
-        }))
-    } else {
-        // Headless mode — TUI not started.
-        None
-    };
+        }));
 
     // ---- Main loop ----
     let tui_exit = async {
@@ -289,7 +283,7 @@ fn init_tracing(cfg: &config::LoggingSection, tui_running: bool) -> Result<()> {
         eprintln!("logging to: {}", path.display());
         init_subscriber(cfg, filter, std::sync::Mutex::new(file), false)
     } else {
-        init_subscriber(cfg, filter, || std::io::stdout(), true)
+        init_subscriber(cfg, filter, std::io::stdout, true)
     }
 }
 

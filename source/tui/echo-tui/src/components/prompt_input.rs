@@ -18,6 +18,7 @@ use crate::event::Event;
 use crate::slash_commands::{SlashAction, SLASH_COMMANDS};
 
 #[derive(Debug)]
+#[derive(Default)]
 pub struct PromptInput {
     textarea: TextArea<'static>,
     history: Vec<String>,
@@ -25,16 +26,6 @@ pub struct PromptInput {
     draft: String,
 }
 
-impl Default for PromptInput {
-    fn default() -> Self {
-        Self {
-            textarea: TextArea::default(),
-            history: Vec::new(),
-            history_idx: None,
-            draft: String::new(),
-        }
-    }
-}
 
 impl PromptInput {
     /// 输入内容若以 `/` 开头则返回命令过滤串（支持多词命令如 /adapter start）。

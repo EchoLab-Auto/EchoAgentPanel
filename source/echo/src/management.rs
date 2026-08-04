@@ -46,10 +46,10 @@ pub async fn serve(
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     bridge: Arc<BackendBridge>,
-    agent: Arc<echo_agent::Agent>,
+    _agent: Arc<echo_agent::Agent>,
 ) -> anyhow::Result<()> {
     let ws = tokio_tungstenite::accept_async(stream).await?;
-    let (mut write, mut read) = ws.split();
+    let (write, mut read) = ws.split();
 
     // Forward events from Agent → Panel.
     let write_lock = Arc::new(Mutex::new(write));
@@ -62,7 +62,7 @@ async fn handle_connection(
                 while let Ok(ev) = rx.try_recv() {
                     let text = echo_agent::bridge::serialize_event(&ev);
                     let _ = wl.lock().await
-                        .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+                        .send(tokio_tungstenite::tungstenite::Message::Text(text))
                         .await;
                 }
             }

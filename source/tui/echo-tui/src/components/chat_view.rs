@@ -168,7 +168,7 @@ fn render_message(
         Style::default().fg(color).bold()
     };
     let header = Line::from(vec![
-        Span::styled(format!("{label}"), header_style),
+        Span::styled(label.to_string(), header_style),
         Span::styled(time_str, Style::default().fg(theme.faint)),
     ]);
     let mut out = vec![header];
