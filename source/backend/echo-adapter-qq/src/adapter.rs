@@ -78,7 +78,6 @@ pub struct QqAdapter {
 
 impl QqAdapter {
     pub fn new(config: QqAdapterConfig) -> Self {
-        let filter = config.build_filter_pipeline();
         // Seed runtime override fields from config.
         let au = config.filter.allowlist.user_ids.clone();
         let ag = config.filter.allowlist.group_ids.clone();
@@ -89,7 +88,7 @@ impl QqAdapter {
             "denylist" => QqGateMode::Denylist,
             _ => QqGateMode::None,
         };
-        Self {
+        let adapter = Self {
             name: "qq".into(),
             inner: Arc::new(QqInner {
                 config,
@@ -99,7 +98,7 @@ impl QqAdapter {
                 connected: AtomicBool::new(false),
                 self_id: StdMutex::new(None),
                 subscribers: StdMutex::new(Vec::new()),
-                filter: StdMutex::new(Some(Arc::new(filter))),
+                filter: StdMutex::new(None), // built below via rebuild_filter_pipeline
                 shutdown_tx: StdMutex::new(None),
                 tracker: echo_server::ConnectionTracker::default(),
                 agent: StdMutex::new(None),
@@ -111,7 +110,10 @@ impl QqAdapter {
                 gate_mode: StdMutex::new(gate_mode),
                 config_path: StdMutex::new(None),
             }),
-        }
+        };
+        // Build the pipeline respecting gate mode.
+        adapter.rebuild_filter_pipeline();
+        adapter
     }
 
     /// Set the agent reference — must be called before start().
