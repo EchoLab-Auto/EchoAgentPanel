@@ -377,19 +377,19 @@ impl QqAdapter {
             };
             let qq = ensure_table(ensure_table(root_t, "adapters"), "qq");
 
-            qq["gate"] = toml::Value::Table({
+            qq.insert("gate".into(), toml::Value::Table({
                 let mut t = toml::Table::new();
                 t.insert("mode".into(), toml::Value::String(mode_str.to_string()));
                 t
-            });
+            }));
 
             let filter = ensure_table(qq, "filter");
-            filter["allowlist"] = toml::Value::Table(build_list_table(
+            filter.insert("allowlist".into(), toml::Value::Table(build_list_table(
                 &filter_cfg.allowlist.user_ids, &filter_cfg.allowlist.group_ids,
-            ));
-            filter["denylist"] = toml::Value::Table(build_list_table(
+            )));
+            filter.insert("denylist".into(), toml::Value::Table(build_list_table(
                 &filter_cfg.denylist.user_ids, &filter_cfg.denylist.group_ids,
-            ));
+            )));
 
             let updated = toml::to_string_pretty(&root).map_err(|e| format!("TOML serialize: {e}"))?;
             std::fs::write(&tmp, &updated).map_err(|e| e.to_string())?;
