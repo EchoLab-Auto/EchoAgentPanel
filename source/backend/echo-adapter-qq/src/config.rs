@@ -1,0 +1,215 @@
+//! Configuration types for the QQ adapter.
+
+use echo_adapter::filter::{
+    AdminBypassFilter, AllowlistFilter, ContentLengthFilter, DenylistFilter, FilterPipeline,
+    KeywordBlockFilter, RateLimitEntry, RateLimitFilter,
+};
+use serde::{Deserialize, Serialize};
+
+/// Full QQ adapter configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct QqAdapterConfig {
+    /// Whether this adapter is enabled.
+    pub enabled: bool,
+    /// Reverse-WS server settings.
+    pub server: QqServerConfig,
+    /// Trigger gating (what messages auto-reply to).
+    pub trigger: QqTriggerConfig,
+    /// Owner QQ number for admin bypass.
+    pub owner_qq: i64,
+    /// Command prefix for built-in commands.
+    pub command_prefix: String,
+    /// Filter configuration.
+    pub filter: QqFilterConfig,
+    /// NapCat WebUI URL for API integration.
+    /// Default `http://localhost:6099`.
+    #[serde(default = "default_napcat_url")]
+    pub napcat_webui_url: String,
+}
+
+fn default_napcat_url() -> String {
+    "http://localhost:6099".into()
+}
+
+impl Default for QqAdapterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            server: QqServerConfig::default(),
+            trigger: QqTriggerConfig::default(),
+            owner_qq: 0,
+            command_prefix: "/".into(),
+            filter: QqFilterConfig::default(),
+            napcat_webui_url: default_napcat_url(),
+        }
+    }
+}
+
+impl QqAdapterConfig {
+    /// Build the filter pipeline from this config.
+    pub fn build_filter_pipeline(&self) -> FilterPipeline {
+        let mut pipeline = FilterPipeline::new();
+
+        // Admin bypass filter (runs first).
+        let admin_ids: Vec<String> = if self.owner_qq > 0 {
+            vec![self.owner_qq.to_string()]
+        } else {
+            vec![]
+        };
+        let admin_filter = AdminBypassFilter::new(admin_ids);
+        if admin_filter.is_active() {
+            pipeline.push(Box::new(admin_filter));
+        }
+
+        // Allowlist.
+        let allowlist = AllowlistFilter::new(
+            self.filter.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
+            self.filter.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
+        );
+        if allowlist.is_active() {
+            pipeline.push(Box::new(allowlist));
+        }
+
+        // Denylist.
+        let denylist = DenylistFilter::new(
+            self.filter.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
+            self.filter.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+        );
+        if denylist.is_active() {
+            pipeline.push(Box::new(denylist));
+        }
+
+        // Rate limit.
+        let rate_limiter = RateLimitFilter::new(
+            self.filter.rate_limit.per_user.as_ref().map(|r| RateLimitEntry {
+                max_requests: r.max_requests,
+                window_seconds: r.window_seconds,
+            }),
+            self.filter.rate_limit.per_group.as_ref().map(|r| RateLimitEntry {
+                max_requests: r.max_requests,
+                window_seconds: r.window_seconds,
+            }),
+            self.filter.rate_limit.global.as_ref().map(|r| RateLimitEntry {
+                max_requests: r.max_requests,
+                window_seconds: r.window_seconds,
+            }),
+        );
+        if rate_limiter.is_active() {
+            pipeline.push(Box::new(rate_limiter));
+        }
+
+        // Keyword blocking.
+        let keyword = KeywordBlockFilter::new(
+            self.filter.keyword.block_keywords.clone(),
+            &self.filter.keyword.block_regex,
+        );
+        if keyword.is_active() {
+            pipeline.push(Box::new(keyword));
+        }
+
+        // Content length.
+        if self.filter.content.max_length > 0 {
+            pipeline.push(Box::new(ContentLengthFilter::new(
+                self.filter.content.max_length,
+            )));
+        }
+
+        pipeline
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-configs
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct QqServerConfig {
+    pub bind_address: String,
+    pub access_token: String,
+    pub heartbeat_interval: u64,
+}
+
+impl Default for QqServerConfig {
+    fn default() -> Self {
+        Self {
+            bind_address: "0.0.0.0:3131".into(),
+            access_token: String::new(),
+            heartbeat_interval: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct QqTriggerConfig {
+    /// Auto-reply to private messages.
+    pub dm_auto_reply: bool,
+    /// Reply to group messages only when @-mentioned.
+    pub group_at_reply: bool,
+}
+
+impl Default for QqTriggerConfig {
+    fn default() -> Self {
+        Self {
+            dm_auto_reply: true,
+            group_at_reply: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Filter config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct QqFilterConfig {
+    pub allowlist: AllowlistConfig,
+    pub denylist: DenylistConfig,
+    pub rate_limit: RateLimitConfig,
+    pub keyword: KeywordConfig,
+    pub content: ContentConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct AllowlistConfig {
+    pub user_ids: Vec<i64>,
+    pub group_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct DenylistConfig {
+    pub user_ids: Vec<i64>,
+    pub group_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct RateLimitConfig {
+    pub per_user: Option<RateLimitEntryConfig>,
+    pub per_group: Option<RateLimitEntryConfig>,
+    pub global: Option<RateLimitEntryConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RateLimitEntryConfig {
+    pub max_requests: u32,
+    pub window_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct KeywordConfig {
+    pub block_keywords: Vec<String>,
+    pub block_regex: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct ContentConfig {
+    pub max_length: usize,
+}

@@ -1,0 +1,123 @@
+//! SKILL.md parser: YAML-ish frontmatter + markdown body.
+//!
+//! Frontmatter is a small subset of YAML — line-oriented `key: value` and
+//! `key: [a, b]` lists — enough for skill definitions without pulling in a
+//! YAML crate.
+
+use std::path::Path;
+
+use crate::skill::{Skill, SkillError, SkillMetadata};
+
+/// Parse a SKILL.md file.
+///
+/// ```markdown
+/// ---
+/// name: web-search
+/// description: 搜索网页获取最新信息
+/// keywords: [天气, 新闻, 搜索]
+/// ---
+/// # 技能说明
+/// ...
+/// ```
+pub fn load_skill(path: &Path) -> Result<Skill, SkillError> {
+    let text = std::fs::read_to_string(path).map_err(|e| SkillError::Load {
+        path: path.display().to_string(),
+        err: e.to_string(),
+    })?;
+    parse_skill(path, &text)
+}
+
+fn parse_skill(path: &Path, text: &str) -> Result<Skill, SkillError> {
+    let (frontmatter, body) = split_frontmatter(text);
+    let (mut name, mut description, mut keywords) = (String::new(), String::new(), Vec::new());
+    for line in frontmatter.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else { continue };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "name" => name = value.trim_matches('"').trim_matches('\'').to_string(),
+            "description" => description = value.trim_matches('"').trim_matches('\'').to_string(),
+            "keywords" => {
+                keywords = parse_list(value);
+            }
+            _ => {}
+        }
+    }
+    if name.is_empty() {
+        name = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("unnamed")
+            .to_string();
+    }
+    Ok(Skill {
+        metadata: SkillMetadata { name, description, keywords, enabled: true },
+        instructions: body.trim().to_string(),
+    })
+}
+
+/// Split `--- frontmatter ---` from the body.
+fn split_frontmatter(text: &str) -> (&str, &str) {
+    let trimmed = text.trim_start_matches('\u{feff}');
+    let Some(rest) = trimmed.strip_prefix("---") else {
+        return ("", trimmed);
+    };
+    let rest = rest.strip_prefix('\n').unwrap_or(rest);
+    // find the closing `---` line
+    let mut lines = rest.splitn(2, "\n---");
+    match (lines.next(), lines.next()) {
+        (Some(fm), Some(body)) => (fm, body),
+        _ => ("", trimmed),
+    }
+}
+
+/// Parse `[a, b, c]` or `a, b, c` into trimmed strings.
+fn parse_list(value: &str) -> Vec<String> {
+    let inner = value.trim().trim_start_matches('[').trim_end_matches(']');
+    inner
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_frontmatter_and_body() {
+        let text = r#"---
+name: web-search
+description: 搜索网页获取最新信息
+keywords: [天气, 新闻, "搜索"]
+---
+# 使用说明
+需要搜索时调用 web_search 工具。"#;
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.name, "web-search");
+        assert_eq!(skill.metadata.keywords, vec!["天气", "新闻", "搜索"]);
+        assert!(skill.instructions.contains("web_search"));
+    }
+
+    #[test]
+    fn no_frontmatter_uses_dir_name() {
+        let skill = parse_skill(Path::new("/skills/calc/SKILL.md"), "# 计算器").unwrap();
+        assert_eq!(skill.metadata.name, "calc");
+    }
+
+    #[test]
+    fn split_works() {
+        let (fm, body) = split_frontmatter("---\na: 1\n---\nbody text");
+        assert_eq!(fm.trim(), "a: 1");
+        assert_eq!(body.trim(), "body text");
+        let (fm, body) = split_frontmatter("no frontmatter");
+        assert_eq!(fm, "");
+        assert_eq!(body, "no frontmatter");
+    }
+}

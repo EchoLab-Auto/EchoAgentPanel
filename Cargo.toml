@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = [
+    "source/backend/echo-core",
+    "source/backend/echo-server",
+    "source/backend/echo-agent",
+    "source/backend/echo-adapter",
+    "source/backend/echo-adapter-qq",
+    "source/tui/echo-tui",
+    "source/echo",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/EchoLab-Auto/EchoAgentPanel"
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+tokio-tungstenite = "0.24"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# error handling
+thiserror = "2"
+anyhow = "1"
+
+# logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# config
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+
+# concurrency / misc
+dashmap = "6"
+uuid = { version = "1", features = ["v4"] }
+async-trait = "0.1"
+
+# agent framework
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+chrono = "0.4"
+walkdir = "2"
+regex = "1"
+
+# tui
+ratatui = "0.29"
+crossterm = "0.28"
+tui-textarea = "0.6"
+qrcode = "0.14"
+rxing = "0.5"
