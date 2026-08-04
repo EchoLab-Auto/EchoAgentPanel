@@ -481,6 +481,13 @@ impl App {
                     KeyCode::Enter => {
                         if let Some(val) = self.state.form_overlay.confirm() {
                             match fo.form_kind {
+                                // QQ setting submenu navigation.
+                                FormKind::QqFilter if val == "qq_allowlist" => {
+                                    crate::slash_commands::qq::allowlist(&mut self.state, &self.backend);
+                                }
+                                FormKind::QqFilter if val == "qq_denylist" => {
+                                    crate::slash_commands::qq::denylist(&mut self.state, &self.backend);
+                                }
                                 FormKind::QqFilter if is_toggle => {
                                     // toggle_group:123456 — add/remove group directly
                                     if let Some(gid_str) = val.split(':').nth(1) {

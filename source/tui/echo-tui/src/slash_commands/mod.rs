@@ -25,8 +25,7 @@ pub enum SlashAction {
     AdapterStart,
     AdapterStop,
     QqLogin,
-    QqAllowlist,
-    QqDenylist,
+    QqSetting,
     ApiSwitch,
     ApiDelete,
     ApiSetPrompt,
@@ -58,8 +57,7 @@ pub const SLASH_COMMANDS: &[(&str, &str, SlashAction)] = &[
     ("adapter start", "启动所有适配器", SlashAction::AdapterStart),
     ("adapter stop", "停止所有适配器", SlashAction::AdapterStop),
     ("qq login", "QQ 扫码登录", SlashAction::QqLogin),
-    ("qq allowlist", "QQ 白名单管理（允许哪些用户/群使用）", SlashAction::QqAllowlist),
-    ("qq denylist", "QQ 黑名单管理（禁止哪些用户/群使用）", SlashAction::QqDenylist),
+    ("qq setting", "QQ 设置（白名单/黑名单管理）", SlashAction::QqSetting),
     ("quit", "退出程序", SlashAction::Quit),
 ];
 
@@ -78,8 +76,7 @@ pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, te
         AdapterStart => { backend.send(BackendCommand::StartAllAdapters); }
         AdapterStop => { backend.send(BackendCommand::StopAllAdapters); }
         QqLogin => qq::login(state, backend),
-        QqAllowlist => qq::allowlist(state, backend),
-        QqDenylist => qq::denylist(state, backend),
+        QqSetting => qq::setting(state, backend),
         ApiSwitch => api::switch(state, backend, &text),
         ApiDelete => api::delete(state, backend, &text),
         ApiSetPrompt => api::prompt(state, backend, &text),

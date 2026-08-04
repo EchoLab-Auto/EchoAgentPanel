@@ -133,6 +133,27 @@ fn render(qr: &QrCode, container: &str, stale: bool) -> Vec<String> {
 
 use crate::components::form_overlay::{FormKind, FormOverlay, SelectItem};
 
+/// Open the QQ settings submenu.
+pub fn setting(state: &mut AppState, backend: &Backend) {
+    let items = vec![
+        SelectItem {
+            label: "🔒 白名单管理（允许哪些用户/群使用）".into(),
+            value: "qq_allowlist".into(),
+        },
+        SelectItem {
+            label: "🚫 黑名单管理（禁止哪些用户/群使用）".into(),
+            value: "qq_denylist".into(),
+        },
+    ];
+
+    let mut fo = FormOverlay::default();
+    fo.activate("QQ 设置 (↑↓选择 Enter进入 Esc退出)", items, FormKind::QqFilter);
+    state.form_overlay = fo;
+    state.menu_msg_idx = -1;
+    state.refresh_menu_msg();
+    state.pending_action = Some("qq_setting:".into());
+}
+
 /// Build a filter management form shared by allowlist and denylist.
 fn open_filter_form(
     state: &mut AppState,
