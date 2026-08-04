@@ -142,7 +142,7 @@ pub fn setting(state: &mut AppState, backend: &Backend) {
         if mode == m { format!("● {label}") } else { format!("○ {label}") }
     };
 
-    let mut items = vec![
+    let items = vec![
         SelectItem {
             label: "── 门控模式（互斥，选一） ──".into(),
             value: "__info__".into(),

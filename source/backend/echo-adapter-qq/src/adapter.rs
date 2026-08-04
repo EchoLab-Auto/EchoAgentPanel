@@ -347,8 +347,7 @@ impl QqAdapter {
     }
 
     /// Persist the current gate mode, allowlist, and denylist to the config
-    /// file by replacing the entire `[adapters.qq]` section in-place so the
-    /// TOML parser can re-read it on next startup.
+    /// file by parsing the TOML, patching in new values, and writing back.
     fn persist_filter(&self) {
         let path = match self.inner.config_path.lock().expect("poisoned").clone() {
             Some(p) => p,
@@ -358,8 +357,6 @@ impl QqAdapter {
             }
         };
 
-        // Build a QqAdapterConfig reflecting the current runtime state so we
-        // can serialise it back and replace the whole `[adapters.qq]` block.
         let filter_cfg = self.get_filter_config();
         let mode_str = match self.get_gate_mode() {
             QqGateMode::Allowlist => "allowlist",
@@ -367,22 +364,28 @@ impl QqAdapter {
             QqGateMode::None => "none",
         };
 
-        let mut persist_cfg = self.inner.config.clone();
-        persist_cfg.gate.mode = mode_str.to_string();
-        persist_cfg.filter = filter_cfg;
-
-        let new_block = match toml::to_string_pretty(&persist_cfg) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to serialize QQ config for persist");
-                return;
-            }
-        };
-
         let tmp = format!("{path}.tmp");
         let result: Result<(), String> = (|| {
             let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let updated = replace_toml_section(&content, "adapters.qq", &new_block);
+            let mut root: toml::Value =
+                toml::from_str(&content).map_err(|e| format!("TOML parse: {e}"))?;
+
+            // Patch gate mode.
+            root["adapters"]["qq"]["gate"]["mode"] = toml::Value::String(mode_str.to_string());
+
+            // Patch allowlist.
+            root["adapters"]["qq"]["filter"]["allowlist"]["user_ids"] =
+                toml::Value::Array(filter_cfg.allowlist.user_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
+            root["adapters"]["qq"]["filter"]["allowlist"]["group_ids"] =
+                toml::Value::Array(filter_cfg.allowlist.group_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
+
+            // Patch denylist.
+            root["adapters"]["qq"]["filter"]["denylist"]["user_ids"] =
+                toml::Value::Array(filter_cfg.denylist.user_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
+            root["adapters"]["qq"]["filter"]["denylist"]["group_ids"] =
+                toml::Value::Array(filter_cfg.denylist.group_ids.iter().map(|&id| toml::Value::Integer(id)).collect());
+
+            let updated = toml::to_string_pretty(&root).map_err(|e| format!("TOML serialize: {e}"))?;
             std::fs::write(&tmp, &updated).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
             Ok(())
@@ -922,38 +925,3 @@ impl Adapter for QqAdapter {
 }
 
 // ── TOML section replacer ─────────────────────────────────────────────────
-
-/// Replace (or insert) a TOML section in `content`.
-fn replace_toml_section(content: &str, section: &str, new_block: &str) -> String {
-    let marker = format!("[{section}]");
-    let lines: Vec<&str> = content.lines().collect();
-    let start = lines.iter().position(|l| l.trim() == marker);
-    let Some(start) = start else {
-        let mut out = content.trim_end().to_string();
-        if !out.is_empty() { out.push('\n'); }
-        out.push_str(new_block);
-        if !new_block.ends_with('\n') { out.push('\n'); }
-        return out;
-    };
-    let array_sub = format!("[[{section}");
-    let dotted_sub = format!("[{section}.");
-    let mut end = lines.len();
-    for i in (start + 1)..lines.len() {
-        let t = lines[i].trim_start();
-        let is_sub = t.starts_with(&array_sub) || t.starts_with(&dotted_sub);
-        if t.starts_with('[') && !is_sub && t != marker { end = i; break; }
-    }
-    let mut out = String::new();
-    for (i, line) in lines.iter().enumerate() {
-        if i == start {
-            out.push_str(new_block);
-            if !new_block.ends_with('\n') { out.push('\n'); }
-        } else if i > start && i < end {
-            // skip old section body
-        } else {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
-    out
-}
