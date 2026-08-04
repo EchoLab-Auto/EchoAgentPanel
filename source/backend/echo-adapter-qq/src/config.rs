@@ -231,3 +231,65 @@ impl Default for QqGateConfig {
         Self { mode: "none".into() }
     }
 }
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gate_config_defaults_to_none() {
+        let cfg = QqGateConfig::default();
+        assert_eq!(cfg.mode, "none");
+    }
+
+    #[test]
+    fn gate_config_deserializes_from_toml() {
+        let toml = r#"
+[adapters.qq.gate]
+mode = "allowlist"
+"#;
+        #[derive(serde::Deserialize)]
+        struct Wrap {
+            #[serde(rename = "adapters")]
+            a: AdaptersWrap,
+        }
+        #[derive(serde::Deserialize)]
+        struct AdaptersWrap {
+            qq: QqAdapterConfig,
+        }
+        let w: Wrap = toml::from_str(toml).unwrap();
+        assert_eq!(w.a.qq.gate.mode, "allowlist");
+    }
+
+    #[test]
+    fn allowlist_config_defaults_empty() {
+        let cfg = AllowlistConfig::default();
+        assert!(cfg.user_ids.is_empty());
+        assert!(cfg.group_ids.is_empty());
+    }
+
+    #[test]
+    fn filter_pipeline_empty_by_default() {
+        let cfg = QqAdapterConfig::default();
+        let pipeline = cfg.build_filter_pipeline();
+        assert_eq!(pipeline.len(), 0); // No filters active when empty defaults
+    }
+
+    #[test]
+    fn filter_pipeline_includes_admin_bypass() {
+        let mut cfg = QqAdapterConfig::default();
+        cfg.owner_qq = 12345;
+        let pipeline = cfg.build_filter_pipeline();
+        assert!(pipeline.len() > 0);
+    }
+
+    #[test]
+    fn filter_pipeline_includes_allowlist_when_populated() {
+        let mut cfg = QqAdapterConfig::default();
+        cfg.filter.allowlist.user_ids = vec![111, 222];
+        let pipeline = cfg.build_filter_pipeline();
+        assert!(pipeline.len() > 0);
+    }
+}

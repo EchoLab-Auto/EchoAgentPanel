@@ -14,6 +14,7 @@ use tracing_subscriber::EnvFilter;
 
 mod config;
 mod handlers;
+mod management;
 
 use config::load;
 use echo_adapter::traits::Adapter;
@@ -130,10 +131,13 @@ async fn main() -> Result<()> {
     );
     agent.set_config_path(args.config.clone());
 
-    // ---- Frontend bridge (TUI) ----
-    let (bridge, handle) = if config.tui.enabled && !args.headless {
+    // ---- Frontend bridge (TUI / management WS) ----
+    let (bridge, handle): (Option<Arc<echo_agent::BackendBridge>>, _) = if config.tui.enabled && !args.headless {
         let (b, h) = echo_agent::create_bridge();
-        (Some(b), Some(Arc::new(h)))
+        (Some(Arc::new(b)), Some(Arc::new(h)))
+    } else if args.headless {
+        let (b, h) = echo_agent::create_bridge();
+        (Some(Arc::new(b)), Some(Arc::new(h)))
     } else {
         (None, None)
     };
@@ -179,8 +183,19 @@ async fn main() -> Result<()> {
         qq_adapter.start().await.map_err(|e| anyhow::anyhow!("QQ adapter start failed: {e}"))?;
     }
 
-    // ---- Cleanup ----
-    // (server_task cleanup removed; adapter manages its own lifecycle)
+    // ---- Management WS server (for remote Panel in headless mode) ----
+    if args.headless {
+        let mgmt_addr = config.core.management_address.clone();
+        let mgmt_agent = agent.clone();
+        let mgmt_bridge = bridge.clone();
+        tokio::spawn(async move {
+            if let Some(b) = mgmt_bridge {
+                if let Err(e) = management::serve(&mgmt_addr, b, mgmt_agent).await {
+                    warn!(error = %e, "management WS server stopped");
+                }
+            }
+        });
+    }
 
     // ---- TUI ----
     let tui_theme = if config.tui.theme == "light" {
