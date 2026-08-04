@@ -38,8 +38,26 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let config = load(&args.config)?;
 
+    // ── Panel-only mode: connect to remote Core via WS, run TUI ──
+    if let Some(ref core_url) = args.connect {
+        init_tracing_simple()?;
+        let theme = echo_tui::Theme::dark();
+        match echo_tui::Backend::connect_ws(core_url).await {
+            Ok(backend) => {
+                if let Err(e) = echo_tui::run_tui_ws(backend, theme).await {
+                    tracing::warn!(error = %e, "tui terminated");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to connect to Core");
+                anyhow::bail!("Cannot connect to Core at {core_url}: {e}");
+            }
+        }
+        return Ok(());
+    }
+
+    let config = load(&args.config)?;
     init_tracing(&config.logging, config.tui.enabled && !args.headless)?;
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
@@ -171,21 +189,7 @@ async fn main() -> Result<()> {
         echo_tui::Theme::dark()
     };
 
-    let tui_task = if let Some(ref core_url) = args.connect {
-        // Panel mode: connect to remote Core via WebSocket.
-        let url = core_url.clone();
-        let theme = tui_theme;
-        Some(tokio::spawn(async move {
-            match echo_tui::Backend::connect_ws(&url).await {
-                Ok(backend) => {
-                    if let Err(e) = echo_tui::run_tui_ws(backend, theme).await {
-                        warn!(error = %e, "tui terminated");
-                    }
-                }
-                Err(e) => warn!(error = %e, "failed to connect to Core"),
-            }
-        }))
-    } else if let Some(bridge) = bridge {
+    let tui_task = if let Some(bridge) = bridge {
         // In-process mode.
         Some(tokio::spawn(async move {
             if let Err(e) = echo_tui::run_tui(bridge, tui_theme).await {
@@ -239,6 +243,17 @@ async fn shutdown_signal() {
 }
 
 /// TUI occupies stdout, so logs must avoid it: TUI mode → file, headless → stdout.
+/// Minimal tracing setup for Panel-only mode (logs to stderr).
+fn init_tracing_simple() -> anyhow::Result<()> {
+    use tracing_subscriber::fmt::MakeWriter;
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .init();
+    Ok(())
+}
+
 fn init_tracing(cfg: &config::LoggingSection, tui_running: bool) -> Result<()> {
     use anyhow::Context as _;
     let filter =
