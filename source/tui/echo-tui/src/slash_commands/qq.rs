@@ -135,6 +135,7 @@ use crate::components::form_overlay::{FormKind, FormOverlay, SelectItem};
 
 /// Open the QQ settings submenu with gate mode switch.
 pub fn setting(state: &mut AppState, backend: &Backend) {
+    tracing::info!("TUI: /qq setting opened");
     backend.send(BackendCommand::RequestQqFilterConfig);
 
     let mode = &state.qq_gate_mode;
@@ -330,12 +331,14 @@ pub fn handle_toggle_group(
 
     if groups.contains(&group_id) {
         groups.retain(|g| *g != group_id);
+        tracing::info!(%group_id, %kind_label, "TUI: remove group from filter");
         backend.send(cmd(users, groups));
         state.toast(format!("已将群 {group_id} 从{kind_label}移除 ✓"), ToastKind::Success);
     } else {
         groups.push(group_id);
         groups.sort();
         groups.dedup();
+        tracing::info!(%group_id, %kind_label, "TUI: add group to filter");
         backend.send(cmd(users, groups));
         state.toast(format!("已将群 {group_id} 添加到{kind_label} ✓"), ToastKind::Success);
     }
@@ -385,6 +388,7 @@ pub fn handle_filter_action(state: &mut AppState, backend: &Backend, action: &st
     } else {
         BackendCommand::UpdateQqAllowlist { user_ids: users, group_ids: groups }
     };
+    tracing::info!(%qq, %kind_label, is_add, "TUI: user filter action");
     backend.send(cmd);
 
     let verb = if is_add { "添加到" } else { "从" };

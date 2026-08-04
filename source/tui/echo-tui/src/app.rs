@@ -484,6 +484,7 @@ impl App {
                                 // QQ setting: gate mode switch.
                                 FormKind::QqFilter if val.starts_with("gate_mode:") => {
                                     let mode = val.strip_prefix("gate_mode:").unwrap_or("none");
+                                    tracing::info!(%mode, "TUI: gate mode switch");
                                     self.backend.send(BackendCommand::SetQqGateMode { mode: mode.to_string() });
                                     self.backend.send(BackendCommand::RequestQqFilterConfig);
                                     self.state.qq_gate_mode = mode.to_string();

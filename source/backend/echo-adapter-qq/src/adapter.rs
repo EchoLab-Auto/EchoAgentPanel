@@ -542,9 +542,11 @@ impl Adapter for QqAdapter {
                 let trigger = &self.inner.config.trigger;
                 if msg.channel.is_group() {
                     if !trigger.group_at_reply || !msg.at_me {
+                        tracing::debug!(user = %msg.user_id, "QQ message dropped by trigger gating (not @me or group reply disabled)");
                         return echo_server::HandleResult::Pass;
                     }
                 } else if !trigger.dm_auto_reply {
+                    tracing::debug!(user = %msg.user_id, "QQ DM dropped: dm_auto_reply disabled");
                     return echo_server::HandleResult::Pass;
                 }
 
@@ -554,6 +556,7 @@ impl Adapter for QqAdapter {
                 if let Some(pipeline) = pipeline_opt {
                     let (accepted, block_reply) = pipeline.should_accept(&msg).await;
                     if !accepted {
+                        tracing::info!(user = %msg.user_id, channel = %msg.channel, "QQ message blocked by filter pipeline");
                         if let Some(reply) = block_reply {
                             let _ = ctx.reply_to(
                                 event.as_message().expect("already checked"),
@@ -563,6 +566,8 @@ impl Adapter for QqAdapter {
                         return echo_server::HandleResult::Handled;
                     }
                 }
+
+                tracing::debug!(user = %msg.user_id, channel = %msg.channel, "QQ message accepted, routing to agent");
 
                 // If agent is set, process through it.
                 let agent = self.inner.agent.lock().expect("agent poisoned").clone();
@@ -773,12 +778,14 @@ impl Adapter for QqAdapter {
                         let allow_groups: std::collections::HashSet<i64> =
                             cfg.allowlist.group_ids.iter().cloned().collect();
                         if !allow_users.is_empty() && user_id != 0 && !allow_users.contains(&user_id) {
+                            tracing::info!(%user_id, "send_message blocked: user not allowlisted");
                             return Ok(SendResult { message_id: None, success: false,
                                 error: Some(format!("user {user_id} is not allowlisted")) });
                         }
                         if !allow_groups.is_empty() {
                             if let Some(gid) = group_id {
                                 if !allow_groups.contains(&gid) {
+                                    tracing::info!(%gid, "send_message blocked: group not allowlisted");
                                     return Ok(SendResult { message_id: None, success: false,
                                         error: Some(format!("group {gid} is not allowlisted")) });
                                 }
@@ -791,12 +798,14 @@ impl Adapter for QqAdapter {
                         let deny_groups: std::collections::HashSet<i64> =
                             cfg.denylist.group_ids.iter().cloned().collect();
                         if !deny_users.is_empty() && user_id != 0 && deny_users.contains(&user_id) {
+                            tracing::info!(%user_id, "send_message blocked: user denylisted");
                             return Ok(SendResult { message_id: None, success: false,
                                 error: Some(format!("user {user_id} is denylisted")) });
                         }
                         if !deny_groups.is_empty() {
                             if let Some(gid) = group_id {
                                 if deny_groups.contains(&gid) {
+                                    tracing::info!(%gid, "send_message blocked: group denylisted");
                                     return Ok(SendResult { message_id: None, success: false,
                                         error: Some(format!("group {gid} is denylisted")) });
                                 }

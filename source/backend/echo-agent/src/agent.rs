@@ -472,6 +472,7 @@ impl Agent {
                 self.emit_adapter_list();
             }
             BackendCommand::UpdateQqAllowlist { user_ids, group_ids } => {
+                tracing::info!(users = ?user_ids, groups = ?group_ids, "Agent: UpdateQqAllowlist");
                 let user_strs: Vec<String> = user_ids.iter().map(|id| id.to_string()).collect();
                 let group_strs: Vec<String> = group_ids.iter().map(|id| id.to_string()).collect();
                 if let Some(adapter) = self.adapters.get("qq") {
@@ -495,6 +496,7 @@ impl Agent {
                 }
             }
             BackendCommand::UpdateQqDenylist { user_ids, group_ids } => {
+                tracing::info!(users = ?user_ids, groups = ?group_ids, "Agent: UpdateQqDenylist");
                 let user_strs: Vec<String> = user_ids.iter().map(|id| id.to_string()).collect();
                 let group_strs: Vec<String> = group_ids.iter().map(|id| id.to_string()).collect();
                 if let Some(adapter) = self.adapters.get("qq") {
@@ -518,6 +520,7 @@ impl Agent {
                 }
             }
             BackendCommand::SetQqGateMode { mode } => {
+                tracing::info!(%mode, "Agent: SetQqGateMode");
                 if let Some(adapter) = self.adapters.get("qq") {
                     adapter.set_gate_mode(&mode);
                     self.emit(BackendEvent::QqGateMode { mode: adapter.get_gate_mode() });
