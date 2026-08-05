@@ -25,11 +25,16 @@ Cargo workspace，源码位于 `source/`：
 |---|---|---|
 | `echo-core` | `source/backend/echo-core` | OneBot v11 协议类型（纯 serde，无 I/O） |
 | `echo-server` | `source/backend/echo-server` | 反向 WebSocket 服务端 |
-| `echo-adapter` | `source/backend/echo-adapter` | 适配器 trait、消息类型、过滤管道、注册中心 |
-| `echo-agent` | `source/backend/echo-agent` | Agent 框架：LLM Provider、工具、技能、会话记忆 |
+| `echo-adapter` | `source/backend/echo-adapter` | 适配器 trait、消息类型、过滤管道、注册中心、ConfigStore |
+| `echo-agent` | `source/backend/echo-agent` | Agent 框架：LLM Provider、工具、技能、会话记忆、命令分发 |
 | `echo-adapter-qq` | `source/backend/echo-adapter-qq` | QQ/OneBot 适配器：消息处理、过滤配置、NapCat API |
 | `echo-tui` | `source/tui/echo-tui` | 终端 UI：聊天区、命令系统、交互式表单、鼠标选区 |
+| `echo-test-utils` | `source/backend/echo-test-utils` | 测试共享 mock（仅 dev-dependency，不依赖 echo-agent） |
 | `echo` | `source/echo` | 可执行程序：配置加载、接线、多运行模式 |
+
+关键设计：适配器只依赖 `echo_adapter::AgentBridge` trait（由 echo-agent 实现），
+`echo-adapter-qq` 不依赖 `echo-agent`；所有 TOML 持久化经共享的
+`echo_adapter::ConfigStore`（原子 read-modify-write），避免并发写丢失。
 
 ## 快速开始
 
@@ -41,21 +46,26 @@ docker run -d -p 6099:6099 -p 3000:3000 -p 3001:3001 mlikiowa/napcat-docker:late
 
 打开 `http://<服务器IP>:6099`（WebUI），用手机 QQ 扫码登录。
 
-### 2. 配置并运行
+### 2. 配置并运行（Panel 与 Core 分离启动）
 
 ```bash
+# Panel 配置（TUI 外观 + Core 连接地址）
 cp config/echo-agent-panel.toml config/echo-agent-panel.local.toml
-# 编辑 [agent]：provider / model / api_key
+# Core 配置（编辑 [agent]：provider / model / api_key，按需启用 [adapters.qq]）
+cp config/echo-agent-core.toml config/echo-agent-core.local.toml
 
-# 完整模式（Core + TUI 同进程）
-cargo run --release -- --config config/echo-agent-panel.local.toml
+# 终端 1 — 启动 Core（Agent + QQ 适配器 + management 服务）
+cargo run --release -- --core --config config/echo-agent-core.local.toml
 
-# 仅 Core（无头模式）
-cargo run --release -- --config config/echo-agent-panel.local.toml --headless
-
-# 仅 TUI（连接远程 Core）
+# 终端 2 — 启动 Panel（TUI，连接远程 Core）
+cargo run --release -- --panel --config config/echo-agent-panel.local.toml
+# 或直接用 --connect 指定 Core 地址（覆盖配置中的 connect_url）：
 cargo run --release -- --connect ws://127.0.0.1:3132
 ```
+
+Core 与 Panel 可部署在不同机器：Core 的 `[core] management_address` 需监听
+可被 Panel 访问的地址（如 `0.0.0.0:3132`），Panel 的 `[core] connect_url`
+指向该地址。
 
 ### 3. 验证
 
@@ -108,9 +118,28 @@ cargo run --release -- --connect ws://127.0.0.1:3132
 
 ## 配置说明
 
+Panel 与 Core 使用各自独立的配置文件。
+
+### `config/echo-agent-panel.toml`（Panel）
+
+```toml
+[logging]
+level = "info"
+format = "text"
+
+[tui]
+enabled = true
+theme = "dark"
+
+[core]
+connect_url = "ws://127.0.0.1:3132"      # 远程 Core 地址（--connect 可覆盖）
+```
+
+### `config/echo-agent-core.toml`（Core）
+
 ```toml
 [core]
-management_address = "127.0.0.1:3132"  # Panel 连接地址（Core/Panel 分离模式）
+management_address = "127.0.0.1:3132"    # Panel 连接地址
 
 [logging]
 level = "info"
@@ -148,11 +177,10 @@ system_prompt = "请你使用中文"
 max_tool_iterations = 1024
 memory_limit = 40
 skills_dir = "skills"
-
-[tui]
-enabled = true
-theme = "dark"
 ```
+
+Panel 中通过 `/api`、`/qq setting` 等命令修改的配置，会经 Core 的
+management WebSocket API 下发，并由 Core 持久化回 `echo-agent-core.toml`。
 
 ## LLM Provider
 
@@ -165,9 +193,22 @@ theme = "dark"
 
 ## 测试
 
+350+ 个测试覆盖全部 7 个 crate 的每个源文件，分三层：
+
+- **单元测试**：协议解析（OneBot 事件/段）、过滤管道、工具（含路径穿越安全防护）、
+  TUI 组件与状态、配置持久化
+- **属性测试（proptest）**：SessionKey 往返、ChatMessage/ToolCall JSON 往返、
+  消息事件 JSON 稳定往返
+- **集成测试**：echo-server 反向 WS 全链路、Agent 端到端命令流、NapCat HTTP mock
+
 ```bash
 cargo test --workspace
+cargo clippy --workspace --all-targets   # 必须零警告
+cargo fmt --all --check
 ```
+
+CI（`.github/workflows/ci.yml`）在 push/PR 时自动执行 fmt + clippy + test
+（stable + nightly）。
 
 ## 目录结构
 
@@ -176,11 +217,12 @@ source/
 ├── backend/
 │   ├── echo-core/          # OneBot v11 协议类型
 │   ├── echo-server/        # 反向 WS 服务端
-│   ├── echo-adapter/       # 适配器 trait + 过滤管道
-│   ├── echo-agent/         # Agent 框架
-│   └── echo-adapter-qq/    # QQ 适配器
+│   ├── echo-adapter/       # 适配器 trait + 过滤管道 + ConfigStore
+│   ├── echo-agent/         # Agent 框架（agent/ 含命令分发子模块）
+│   ├── echo-adapter-qq/    # QQ 适配器（adapter/ 含过滤管理子模块）
+│   └── echo-test-utils/    # 共享测试 mock
 ├── tui/
-│   └── echo-tui/           # TUI 终端界面
+│   └── echo-tui/           # TUI 终端界面（app/ 含事件处理子模块）
 └── echo/                   # 可执行程序入口
 
 doc/

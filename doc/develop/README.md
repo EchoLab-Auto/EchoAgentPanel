@@ -9,6 +9,7 @@
 | [adapter.md](adapter.md) | Adapter trait, QQ adapter, filter pipeline, NapCatClient |
 | [tui.md](tui.md) | Layout, components, slash commands, mouse selection, event loop |
 | [config.md](config.md) | TOML config, env vars, profiles, persistence |
+| [testing.md](testing.md) | Test strategy: unit / property / integration layers |
 
 ## Quick Reference
 
@@ -57,18 +58,27 @@ EchoAgentPanel/
 5. **Adapter lifecycle**: QqAdapter::start() → bind port → spawn server task → accept connections → QqHandler
 
 ### Build & Run
+
+Panel 与 Core 分离部署，各自加载独立的配置文件：
+
 ```bash
+# Core（Agent + QQ 适配器 + management 服务）
+cargo run --release -- --core --config config/echo-agent-core.local.toml
+
+# Panel（TUI，连接远程 Core；--connect 可覆盖配置中的 connect_url）
+cargo run --release -- --panel --config config/echo-agent-panel.local.toml
+cargo run --release -- --connect ws://127.0.0.1:3132
+
 # Development
-cargo run -- --config config/echo-agent-panel.local.toml
+cargo run -- --core --config config/echo-agent-core.local.toml
+cargo run -- --panel --config config/echo-agent-panel.local.toml
 
-# Release
-cargo run --release -- --config config/echo-agent-panel.local.toml
-
-# Headless (no TUI)
-cargo run --release -- --config config/echo-agent-panel.local.toml --headless
-
-# Tests
+# Tests (350+ across all crates; unit + proptest + integration)
 cargo test --workspace
+
+# Quality gates (CI enforces all three)
+cargo clippy --workspace --all-targets   # zero warnings required
+cargo fmt --all --check
 
 # Specific crate
 cargo test -p echo-agent

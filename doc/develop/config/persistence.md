@@ -27,9 +27,9 @@ EchoAgentPanel 的配置分为两类持久化方式：
 ### 数据流
 
 ```
-TUI 操作 (/api ...)
-  → BackendCommand::UpdateApiConfig / SwitchApi / ...
-  → Agent::apply_command()
+Panel 操作 (/api ...)
+  → BackendCommand::UpdateApiConfig / SwitchApi / ...（经 management WS）
+  → Core 的 Agent::apply_command()
     → 更新内存中的 AgentConfig
     → Agent::persist_config(&cfg)
       → 序列化 [agent] section 为 TOML
@@ -40,8 +40,11 @@ TUI 操作 (/api ...)
 ### 写入的文件位置
 
 ```
-{path}/echo-agent-panel.local.toml 的 [agent] section
+Core 启动时 --config 指定的文件（如 config/echo-agent-core.local.toml）的 [agent] section
 ```
+
+Panel 自身不读写 Core 配置文件——所有配置操作都通过 Core 的 management
+WebSocket API 下发，持久化统一在 Core 进程内完成。
 
 ### 不持久化的内容
 
@@ -65,7 +68,7 @@ TUI 操作 (/api ...)
 ### 数据流
 
 ```
-TUI 操作 (/qq setting)
+Panel 操作 (/qq setting)（经 management WS）
   → BackendCommand::SetQqGateMode / UpdateQqAllowlist / UpdateQqDenylist
   → Agent::apply_command()
     → Adapter::set_gate_mode() / update_allowlist() / update_denylist()
