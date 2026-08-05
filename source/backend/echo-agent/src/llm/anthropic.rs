@@ -136,64 +136,18 @@ impl LlmProvider for AnthropicProvider {
             while let Some(pos) = buffer.find("\n\n") {
                 let event = buffer[..pos].to_string();
                 buffer.drain(..pos + 2);
-                let mut data = None;
-                for line in event.lines() {
-                    let line = line.trim();
-                    if let Some(d) = line.strip_prefix("data: ") {
-                        data = Some(d.to_string());
-                    }
-                }
-                let Some(data) = data else { continue };
-                let parsed: StreamEvent = match serde_json::from_str(&data) {
-                    Ok(p) => p,
-                    Err(_) => continue,
-                };
-                match parsed {
-                    StreamEvent::ContentBlockStart {
-                        index,
-                        content_block: Some(ContentBlockStartWire::ToolUse { id, name, .. }),
-                    } => {
-                        let _ = tx.send(ChatChunk {
-                            content_delta: None,
-                            tool_call_delta: Some(ToolCallDelta {
-                                index,
-                                id: Some(id),
-                                name: Some(name),
-                                arguments: None,
-                            }),
-                        });
-                    }
-                    StreamEvent::ContentBlockDelta { index, delta } => {
-                        match delta {
-                            DeltaWire::TextDelta { text } => {
-                                let _ = tx.send(ChatChunk {
-                                    content_delta: Some(text),
-                                    tool_call_delta: None,
-                                });
-                            }
-                            DeltaWire::InputJsonDelta { partial_json } => {
-                                let _ = tx.send(ChatChunk {
-                                    content_delta: None,
-                                    tool_call_delta: Some(ToolCallDelta {
-                                        index,
-                                        id: None,
-                                        name: None,
-                                        arguments: Some(partial_json),
-                                    }),
-                                });
-                            }
-                            // thinking_delta 等未知增量跳过
-                            DeltaWire::Other => {}
+                for outcome in parse_anthropic_event(&event) {
+                    match outcome {
+                        AnthropicOutcome::Chunk(chunk) => {
+                            let _ = tx.send(chunk);
+                        }
+                        AnthropicOutcome::ApiError(msg) => {
+                            return Err(LlmError::Api(format!(
+                                "流式响应错误: {}",
+                                super::truncate(&msg, 300)
+                            )));
                         }
                     }
-                    // 流中段错误不能静默当作成功
-                    StreamEvent::Error => {
-                        return Err(LlmError::Api(format!(
-                            "流式响应错误: {}",
-                            super::truncate(&data, 300)
-                        )));
-                    }
-                    _ => {}
                 }
             }
         }
@@ -203,6 +157,78 @@ impl LlmProvider for AnthropicProvider {
         });
         Ok(())
     }
+}
+
+/// Result of parsing one Anthropic SSE event block.
+#[derive(Debug, PartialEq)]
+enum AnthropicOutcome {
+    /// A content or tool-call delta to forward.
+    Chunk(ChatChunk),
+    /// In-stream `event: error` payload.
+    ApiError(String),
+}
+
+/// Parse one complete Anthropic SSE event block.
+///
+/// Pure function extracted from `chat_stream` so the wire parsing is
+/// unit-testable. The `data:` line is the last one in the event.
+fn parse_anthropic_event(event: &str) -> Vec<AnthropicOutcome> {
+    let mut data = None;
+    for line in event.lines() {
+        let line = line.trim();
+        if let Some(d) = line.strip_prefix("data: ") {
+            data = Some(d.to_string());
+        }
+    }
+    let Some(data) = data else {
+        return Vec::new();
+    };
+    let parsed: StreamEvent = match serde_json::from_str(&data) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    let mut outcomes = Vec::new();
+    match parsed {
+        StreamEvent::ContentBlockStart {
+            index,
+            content_block: Some(ContentBlockStartWire::ToolUse { id, name, .. }),
+        } => {
+            outcomes.push(AnthropicOutcome::Chunk(ChatChunk {
+                content_delta: None,
+                tool_call_delta: Some(ToolCallDelta {
+                    index,
+                    id: Some(id),
+                    name: Some(name),
+                    arguments: None,
+                }),
+            }));
+        }
+        StreamEvent::ContentBlockDelta { index, delta } => match delta {
+            DeltaWire::TextDelta { text } => {
+                outcomes.push(AnthropicOutcome::Chunk(ChatChunk {
+                    content_delta: Some(text),
+                    tool_call_delta: None,
+                }));
+            }
+            DeltaWire::InputJsonDelta { partial_json } => {
+                outcomes.push(AnthropicOutcome::Chunk(ChatChunk {
+                    content_delta: None,
+                    tool_call_delta: Some(ToolCallDelta {
+                        index,
+                        id: None,
+                        name: None,
+                        arguments: Some(partial_json),
+                    }),
+                }));
+            }
+            // thinking_delta 等未知增量跳过
+            DeltaWire::Other => {}
+        },
+        // 流中段错误不能静默当作成功
+        StreamEvent::Error => outcomes.push(AnthropicOutcome::ApiError(data)),
+        _ => {}
+    }
+    outcomes
 }
 
 fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value {
@@ -548,5 +574,77 @@ mod tests {
         let blocks = body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(blocks[0]["type"], "tool_use");
         assert_eq!(blocks[0]["input"], serde_json::json!({}));
+    }
+
+    // ── SSE stream parsing ──────────────────────────────────────────────
+
+    #[test]
+    fn anthropic_sse_text_delta() {
+        let event = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"你好\"}}";
+        let outcomes = parse_anthropic_event(event);
+        assert_eq!(outcomes.len(), 1);
+        match &outcomes[0] {
+            AnthropicOutcome::Chunk(c) => {
+                assert_eq!(c.content_delta.as_deref(), Some("你好"));
+                assert!(c.tool_call_delta.is_none());
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn anthropic_sse_tool_use_start() {
+        let event = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"calc\",\"input\":{}}}";
+        let outcomes = parse_anthropic_event(event);
+        assert_eq!(outcomes.len(), 1);
+        match &outcomes[0] {
+            AnthropicOutcome::Chunk(c) => {
+                let d = c.tool_call_delta.as_ref().unwrap();
+                assert_eq!(d.index, 1);
+                assert_eq!(d.id.as_deref(), Some("tool_1"));
+                assert_eq!(d.name.as_deref(), Some("calc"));
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn anthropic_sse_input_json_delta() {
+        let event = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"expr\\\":\"}}";
+        let outcomes = parse_anthropic_event(event);
+        assert_eq!(outcomes.len(), 1);
+        match &outcomes[0] {
+            AnthropicOutcome::Chunk(c) => {
+                let d = c.tool_call_delta.as_ref().unwrap();
+                assert_eq!(d.index, 1);
+                assert_eq!(d.arguments.as_deref(), Some("{\"expr\":"));
+                assert!(c.content_delta.is_none());
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn anthropic_sse_error_is_surfaced() {
+        let event = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"overloaded\"}}";
+        let outcomes = parse_anthropic_event(event);
+        assert_eq!(outcomes.len(), 1);
+        assert!(
+            matches!(&outcomes[0], AnthropicOutcome::ApiError(msg) if msg.contains("overloaded"))
+        );
+    }
+
+    #[test]
+    fn anthropic_sse_ignores_heartbeats_and_stops() {
+        let ping = "event: ping\ndata: {\"type\":\"ping\"}";
+        assert_eq!(parse_anthropic_event(ping), vec![]);
+        let stop = "event: message_stop\ndata: {\"type\":\"message_stop\"}";
+        assert_eq!(parse_anthropic_event(stop), vec![]);
+    }
+
+    #[test]
+    fn anthropic_sse_ignores_bad_json_and_missing_data() {
+        assert_eq!(parse_anthropic_event("event: ping\ndata: not-json"), vec![]);
+        assert_eq!(parse_anthropic_event(": comment only"), vec![]);
     }
 }

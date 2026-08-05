@@ -763,4 +763,101 @@ mod tests {
         assert!(!accepted);
         assert_eq!(reply, Some("对不起，此功能暂不可用。".into()));
     }
+
+    // ---- Rate limit window / bucket isolation ----
+
+    #[tokio::test]
+    async fn rate_limit_window_expires_and_allows_again() {
+        let f = RateLimitFilter::new(
+            Some(RateLimitEntry {
+                max_requests: 2,
+                window_seconds: 1,
+            }),
+            None,
+            None,
+        );
+        assert!(matches!(f.check(&dm("u1", "a")).await, FilterResult::Allow));
+        assert!(matches!(f.check(&dm("u1", "b")).await, FilterResult::Allow));
+        assert!(matches!(f.check(&dm("u1", "c")).await, FilterResult::Block));
+        // Wait for the 1s window to slide past.
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        assert!(
+            matches!(f.check(&dm("u1", "d")).await, FilterResult::Allow),
+            "window expired → request allowed again"
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_buckets_are_per_user() {
+        let f = RateLimitFilter::new(
+            Some(RateLimitEntry {
+                max_requests: 2,
+                window_seconds: 3600,
+            }),
+            None,
+            None,
+        );
+        assert!(matches!(f.check(&dm("u1", "a")).await, FilterResult::Allow));
+        assert!(matches!(f.check(&dm("u1", "b")).await, FilterResult::Allow));
+        assert!(matches!(f.check(&dm("u1", "c")).await, FilterResult::Block));
+        // A different user is unaffected.
+        assert!(matches!(f.check(&dm("u2", "x")).await, FilterResult::Allow));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_group_bucket_isolated_from_dm() {
+        let f = RateLimitFilter::new(
+            None,
+            Some(RateLimitEntry {
+                max_requests: 1,
+                window_seconds: 3600,
+            }),
+            None,
+        );
+        let group_msg = |content: &str| IncomingMessage {
+            adapter_name: "qq".into(),
+            platform: "qq".into(),
+            user_id: "u1".into(),
+            user_name: "x".into(),
+            channel: ChannelType::Group {
+                group_id: "g1".into(),
+            },
+            group_name: None,
+            content: content.into(),
+            timestamp: 0,
+            at_me: true,
+            metadata: serde_json::Value::Null,
+        };
+        assert!(matches!(
+            f.check(&group_msg("a")).await,
+            FilterResult::Allow
+        ));
+        assert!(matches!(
+            f.check(&group_msg("b")).await,
+            FilterResult::Block
+        ));
+        // DM traffic is not limited by the group bucket.
+        assert!(matches!(
+            f.check(&dm("u1", "hi")).await,
+            FilterResult::Allow
+        ));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_global_and_per_user_both_apply() {
+        let f = RateLimitFilter::new(
+            Some(RateLimitEntry {
+                max_requests: 10,
+                window_seconds: 3600,
+            }),
+            None,
+            Some(RateLimitEntry {
+                max_requests: 1,
+                window_seconds: 3600,
+            }),
+        );
+        assert!(matches!(f.check(&dm("u1", "a")).await, FilterResult::Allow));
+        // Global bucket exhausted — even another user is blocked.
+        assert!(matches!(f.check(&dm("u2", "b")).await, FilterResult::Block));
+    }
 }
