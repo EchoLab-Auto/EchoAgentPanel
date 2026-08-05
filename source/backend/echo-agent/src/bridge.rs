@@ -145,3 +145,100 @@ pub fn serialize_event(ev: &BackendEvent) -> String {
 pub fn deserialize_message(text: &str) -> Option<WsMessage> {
     serde_json::from_str(text).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::SessionInfo;
+
+    #[test]
+    fn command_roundtrip_via_ws() {
+        let cmd = BackendCommand::SendMessage {
+            session_id: "qq:group:123:456".into(),
+            content: "你好".into(),
+        };
+        let text = serialize_command(&cmd);
+        assert!(text.contains("\"type\":\"command\""));
+        let msg = deserialize_message(&text).unwrap();
+        match msg {
+            WsMessage::Command(c) => match c {
+                BackendCommand::SendMessage { session_id, content } => {
+                    assert_eq!(session_id, "qq:group:123:456");
+                    assert_eq!(content, "你好");
+                }
+                other => panic!("wrong command variant: {other:?}"),
+            },
+            other => panic!("wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn event_roundtrip_via_ws() {
+        let ev = BackendEvent::MessageSent {
+            session_id: "user_0".into(),
+            content: "回复内容".into(),
+        };
+        let text = serialize_event(&ev);
+        assert!(text.contains("\"type\":\"event\""));
+        let msg = deserialize_message(&text).unwrap();
+        match msg {
+            WsMessage::Event(e) => match e {
+                BackendEvent::MessageSent { session_id, content } => {
+                    assert_eq!(session_id, "user_0");
+                    assert_eq!(content, "回复内容");
+                }
+                other => panic!("wrong event variant: {other:?}"),
+            },
+            other => panic!("wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_updated_event_roundtrip() {
+        let session = SessionInfo {
+            id: "qq:group:123:456".into(),
+            platform: "qq".into(),
+            scope: "group".into(),
+            user_id: "456".into(),
+            nickname: "alice".into(),
+            group_name: Some("测试群".into()),
+            last_active: 1700000000,
+            last_message: "hello".into(),
+        };
+        let ev = BackendEvent::SessionUpdated { session };
+        let text = serialize_event(&ev);
+        let msg = deserialize_message(&text).unwrap();
+        match msg {
+            WsMessage::Event(BackendEvent::SessionUpdated { session }) => {
+                assert_eq!(session.id, "qq:group:123:456");
+                assert_eq!(session.nickname, "alice");
+                assert_eq!(session.group_name.as_deref(), Some("测试群"));
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_message_returns_none() {
+        assert!(deserialize_message("not json").is_none());
+        assert!(deserialize_message("{\"type\":\"unknown\"}").is_none());
+    }
+
+    #[tokio::test]
+    async fn fanout_handle_default_and_subscribe() {
+        let handle = FanoutHandle::default();
+        let (ev_rx, cmd_tx) = handle.subscribe().await;
+        // Emit an event and verify it reaches the subscriber.
+        handle.emit(BackendEvent::MessageSent {
+            session_id: "s1".into(),
+            content: "hi".into(),
+        }).await;
+        let mut rx = ev_rx;
+        let ev = rx.try_recv().expect("event should be delivered");
+        match ev {
+            BackendEvent::MessageSent { content, .. } => assert_eq!(content, "hi"),
+            other => panic!("wrong event: {other:?}"),
+        }
+        let _ = cmd_tx;
+    }
+}
