@@ -98,8 +98,21 @@ impl Agent {
                         session: s.info(last),
                     });
                 }
-                // Also emit adapter status.
+                // Also emit adapter status and QQ gate/filter state so the
+                // TUI starts up with the correct persisted values.
                 self.emit_adapter_list();
+                if let Some(adapter) = self.adapters.get("qq") {
+                    let (au, ag, du, dg) = adapter.get_filter_info();
+                    self.emit(BackendEvent::QqFilterConfig {
+                        allowlist_users: au.iter().filter_map(|s| s.parse().ok()).collect(),
+                        allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                    self.emit(BackendEvent::QqGateMode {
+                        mode: adapter.get_gate_mode(),
+                    });
+                }
             }
             BackendCommand::ClearSession { session_id } => {
                 if self.sessions.clear(&session_id).await {
@@ -330,6 +343,9 @@ impl Agent {
                         allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
                         denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
                         denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                    self.emit(BackendEvent::QqGateMode {
+                        mode: adapter.get_gate_mode(),
                     });
                 }
             }
