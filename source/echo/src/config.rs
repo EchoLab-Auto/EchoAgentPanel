@@ -1,24 +1,104 @@
 //! TOML configuration loading with environment-variable overrides.
 //!
-//! Supports both the legacy `[server]`/`[bot]` format (auto-migrated)
-//! and the new `[adapters.qq]` format.
+//! Panel 与 Core 分离部署，配置文件也一分为二：
+//! - [`PanelConfig`] — `config/echo-agent-panel.toml`，TUI 启动时加载
+//!   （`[logging]` / `[tui]` / `[core]` 中的 Core 连接地址）。
+//! - [`CoreConfig`] — `config/echo-agent-core.toml`，Core 启动时加载
+//!   （`[logging]` / `[agent]` / `[adapters.qq]` / `[core]` 中的
+//!   management 监听地址）。支持旧的 `[server]`/`[bot]` 格式自动迁移。
 
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
 use serde::Deserialize;
 
+// ── 共享 section ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct LoggingSection {
+    pub level: String,
+    pub format: String,
+    pub log_file: String,
+}
+
+impl Default for LoggingSection {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            format: "text".to_string(),
+            log_file: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TuiSection {
+    pub enabled: bool,
+    pub theme: String,
+}
+
+impl Default for TuiSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            theme: "dark".to_string(),
+        }
+    }
+}
+
+// ── Panel 配置 ─────────────────────────────────────────────────────────────
+
+/// Panel 侧配置：只负责 TUI 外观与连接远程 Core。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
-pub struct Config {
+pub struct PanelConfig {
+    pub logging: LoggingSection,
+    pub tui: TuiSection,
+    pub core: PanelCoreSection,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PanelCoreSection {
+    /// 远程 Core 的 management WebSocket 地址（`--connect` 可覆盖）。
+    pub connect_url: String,
+}
+
+impl Default for PanelCoreSection {
+    fn default() -> Self {
+        Self {
+            connect_url: "ws://127.0.0.1:3132".into(),
+        }
+    }
+}
+
+impl PanelConfig {
+    /// Load the Panel config file.
+    pub fn load(path: &Path) -> Result<Self> {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config file {}", path.display()))?;
+        let config: PanelConfig = toml::from_str(&raw)
+            .with_context(|| format!("invalid config in {}", path.display()))?;
+        validate_logging_level(&config.logging)?;
+        Ok(config)
+    }
+}
+
+// ── Core 配置 ──────────────────────────────────────────────────────────────
+
+/// Core 侧配置：Agent、适配器与 management 服务。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct CoreConfig {
+    pub logging: LoggingSection,
+    pub agent: echo_agent::AgentConfig,
+    pub core: CoreSection,
     /// Legacy server section — auto-migrated to `[adapters.qq.server]`.
     pub server: ServerSection,
-    pub logging: LoggingSection,
     /// Legacy bot section — auto-migrated to `[adapters.qq]`.
     pub bot: BotSection,
-    pub agent: echo_agent::AgentConfig,
-    pub tui: TuiSection,
-    pub core: CoreSection,
     /// New adapter configuration.
     #[serde(alias = "adapters")]
     pub adapters_section: Option<AdaptersSection>,
@@ -54,24 +134,6 @@ impl Default for ServerSection {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
-pub struct LoggingSection {
-    pub level: String,
-    pub format: String,
-    pub log_file: String,
-}
-
-impl Default for LoggingSection {
-    fn default() -> Self {
-        Self {
-            level: "info".to_string(),
-            format: "text".to_string(),
-            log_file: String::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
 pub struct BotSection {
     pub owner_qq: i64,
     pub command_prefix: String,
@@ -88,13 +150,6 @@ impl Default for BotSection {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
-pub struct TuiSection {
-    pub enabled: bool,
-    pub theme: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
 pub struct CoreSection {
     /// WebSocket address for Panel connections (default: 127.0.0.1:3132).
     pub management_address: String,
@@ -102,103 +157,101 @@ pub struct CoreSection {
 
 impl Default for CoreSection {
     fn default() -> Self {
-        Self { management_address: "127.0.0.1:3132".into() }
-    }
-}
-
-impl Default for TuiSection {
-    fn default() -> Self {
         Self {
-            enabled: true,
-            theme: "dark".to_string(),
+            management_address: "127.0.0.1:3132".into(),
         }
     }
 }
 
-/// Load a config file and apply environment-variable overrides.
-pub fn load(path: &Path) -> Result<Config> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read config file {}", path.display()))?;
-    let mut config: Config = toml::from_str(&raw)
-        .with_context(|| format!("invalid config in {}", path.display()))?;
+impl CoreConfig {
+    /// Load the Core config file and apply environment-variable overrides.
+    pub fn load(path: &Path) -> Result<Self> {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config file {}", path.display()))?;
+        let mut config: CoreConfig = toml::from_str(&raw)
+            .with_context(|| format!("invalid config in {}", path.display()))?;
 
-    // Validate logging level.
+        validate_logging_level(&config.logging)?;
+
+        // Empty command prefix would make bare words trigger command handlers unexpectedly.
+        if config.bot.command_prefix.is_empty() {
+            eprintln!("warning: [bot] command_prefix is empty, falling back to \"/\"");
+            config.bot.command_prefix = "/".to_string();
+        }
+
+        // Deduplicate api_profiles by name (self-healing for a historical persistence bug).
+        {
+            let mut seen = std::collections::HashSet::new();
+            config
+                .agent
+                .api_profiles
+                .retain(|p| seen.insert(p.name.clone()));
+        }
+
+        // ---- Build QQ adapter config ----
+        if let Some(ref adapters) = config.adapters_section {
+            if let Some(ref qq_cfg) = adapters.qq {
+                // New-format config takes priority.
+                config.qq_adapter = qq_cfg.clone();
+            }
+        }
+
+        // Backward compat: if [adapters.qq] is not enabled, try old [server]/[bot].
+        // We only migrate if at least one explicit (non-default) value is present:
+        // a non-empty access_token, a non-default heartbeat, or a non-zero owner_qq.
+        // bind_address always has a default so it alone is not a sufficient signal.
+        let has_explicit_server =
+            !config.server.access_token.is_empty() || config.server.heartbeat_interval != 30;
+        let has_explicit_bot = config.bot.owner_qq != 0;
+
+        if !config.qq_adapter.enabled && (has_explicit_server || has_explicit_bot) {
+            if has_explicit_server {
+                eprintln!(
+                    "note: using legacy [server] config — consider migrating to [adapters.qq.server]"
+                );
+            }
+            config.qq_adapter.enabled = true;
+            config.qq_adapter.server.bind_address = config.server.bind_address.clone();
+            config.qq_adapter.server.access_token = config.server.access_token.clone();
+            config.qq_adapter.server.heartbeat_interval = config.server.heartbeat_interval;
+            config.qq_adapter.owner_qq = config.bot.owner_qq;
+            config.qq_adapter.command_prefix = config.bot.command_prefix.clone();
+        }
+
+        // ECHO_ACCESS_TOKEN env override.
+        if let Ok(token) = std::env::var("ECHO_ACCESS_TOKEN") {
+            if config.qq_adapter.enabled {
+                config.qq_adapter.server.access_token = token.clone();
+            }
+            // Also apply to legacy for consistency.
+            config.server.access_token = token;
+        }
+
+        // Agent API key overrides: explicit config wins, otherwise env var.
+        if config.agent.api_key.is_empty() {
+            let env_var = match config.agent.provider.as_str() {
+                "anthropic" | "claude" => "ANTHROPIC_API_KEY",
+                _ => "OPENAI_API_KEY",
+            };
+            if let Ok(key) = std::env::var(env_var) {
+                config.agent.api_key = key;
+            }
+        }
+
+        Ok(config)
+    }
+}
+
+fn validate_logging_level(logging: &LoggingSection) -> Result<()> {
     const LOG_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
-    if !LOG_LEVELS.contains(&config.logging.level.as_str()) {
+    if !LOG_LEVELS.contains(&logging.level.as_str()) {
         anyhow::bail!(
             "[logging] level invalid: \"{}\" (options: {})",
-            config.logging.level,
+            logging.level,
             LOG_LEVELS.join("/")
         );
     }
-
-    // Empty command prefix would make bare words trigger command handlers unexpectedly.
-    if config.bot.command_prefix.is_empty() {
-        eprintln!("warning: [bot] command_prefix is empty, falling back to \"/\"");
-        config.bot.command_prefix = "/".to_string();
-    }
-
-    // Deduplicate api_profiles by name (self-healing for a historical persistence bug).
-    {
-        let mut seen = std::collections::HashSet::new();
-        config.agent.api_profiles.retain(|p| seen.insert(p.name.clone()));
-    }
-
-    // ---- Build QQ adapter config ----
-    if let Some(ref adapters) = config.adapters_section {
-        if let Some(ref qq_cfg) = adapters.qq {
-            // New-format config takes priority.
-            config.qq_adapter = qq_cfg.clone();
-        }
-    }
-
-    // Backward compat: if [adapters.qq] is not enabled, try old [server]/[bot].
-    // We only migrate if at least one explicit (non-default) value is present:
-    // a non-empty access_token, a non-default heartbeat, or a non-zero owner_qq.
-    // bind_address always has a default so it alone is not a sufficient signal.
-    let has_explicit_server =
-        !config.server.access_token.is_empty()
-            || config.server.heartbeat_interval != 30;
-    let has_explicit_bot = config.bot.owner_qq != 0;
-
-    if !config.qq_adapter.enabled && (has_explicit_server || has_explicit_bot) {
-        if has_explicit_server {
-            eprintln!(
-                "note: using legacy [server] config — consider migrating to [adapters.qq.server]"
-            );
-        }
-        config.qq_adapter.enabled = true;
-        config.qq_adapter.server.bind_address =
-            config.server.bind_address.clone();
-        config.qq_adapter.server.access_token =
-            config.server.access_token.clone();
-        config.qq_adapter.server.heartbeat_interval =
-            config.server.heartbeat_interval;
-        config.qq_adapter.owner_qq = config.bot.owner_qq;
-        config.qq_adapter.command_prefix = config.bot.command_prefix.clone();
-    }
-
-    // ECHO_ACCESS_TOKEN env override.
-    if let Ok(token) = std::env::var("ECHO_ACCESS_TOKEN") {
-        if config.qq_adapter.enabled {
-            config.qq_adapter.server.access_token = token.clone();
-        }
-        // Also apply to legacy for consistency.
-        config.server.access_token = token;
-    }
-
-    // Agent API key overrides: explicit config wins, otherwise env var.
-    if config.agent.api_key.is_empty() {
-        let env_var = match config.agent.provider.as_str() {
-            "anthropic" | "claude" => "ANTHROPIC_API_KEY",
-            _ => "OPENAI_API_KEY",
-        };
-        if let Ok(key) = std::env::var(env_var) {
-            config.agent.api_key = key;
-        }
-    }
-
-    Ok(config)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -242,8 +295,12 @@ api_key = ""
 "#,
         )
         .unwrap();
-        let config = load(&path).unwrap();
-        assert_eq!(config.agent.api_profiles.len(), 1, "duplicate profiles should be deduped");
+        let config = CoreConfig::load(&path).unwrap();
+        assert_eq!(
+            config.agent.api_profiles.len(),
+            1,
+            "duplicate profiles should be deduped"
+        );
         assert_eq!(config.agent.api_profiles[0].name, "deepseek");
         std::fs::remove_file(&path).ok();
     }
@@ -269,7 +326,7 @@ model = "gpt-4o"
 "#,
         )
         .unwrap();
-        let config = load(&path).unwrap();
+        let config = CoreConfig::load(&path).unwrap();
         assert!(config.qq_adapter.enabled);
         assert_eq!(config.qq_adapter.server.bind_address, "0.0.0.0:8080");
         assert_eq!(config.qq_adapter.server.access_token, "secret");
@@ -309,7 +366,7 @@ group_at_reply = true
 "#,
         )
         .unwrap();
-        let config = load(&path).unwrap();
+        let config = CoreConfig::load(&path).unwrap();
         assert!(config.qq_adapter.enabled);
         assert_eq!(config.qq_adapter.server.bind_address, "0.0.0.0:9999");
         assert_eq!(config.qq_adapter.server.access_token, "new_token");
@@ -330,8 +387,32 @@ model = "gpt-4o"
 "#,
         )
         .unwrap();
-        let config = load(&path).unwrap();
-        assert!(!config.qq_adapter.enabled, "QQ adapter should be disabled by default");
+        let config = CoreConfig::load(&path).unwrap();
+        assert!(
+            !config.qq_adapter.enabled,
+            "QQ adapter should be disabled by default"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn panel_config_loads_theme_and_connect_url() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("echo-panel-test.toml");
+        std::fs::write(
+            &path,
+            r#"
+[tui]
+theme = "light"
+
+[core]
+connect_url = "ws://192.168.1.10:3132"
+"#,
+        )
+        .unwrap();
+        let config = PanelConfig::load(&path).unwrap();
+        assert_eq!(config.tui.theme, "light");
+        assert_eq!(config.core.connect_url, "ws://192.168.1.10:3132");
         std::fs::remove_file(&path).ok();
     }
 }

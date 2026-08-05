@@ -1,26 +1,26 @@
 //! Terminal app — [`App`] struct, main event loop, input routing,
 //! backend event handling, and rendering.
 //!
-//! Data types and [`AppState`] live in [`crate::state`].
+//! Data types and [`AppState`] live in [`crate::state`]. The large
+//! `BackendEvent` match lives in `events.rs`.
+
+mod events;
 
 use std::time::Duration;
 
 use anyhow::Result;
-use echo_agent::{BackendCommand, BackendEvent, SessionInfo};
+use echo_agent::{BackendCommand, BackendEvent};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{Frame, Terminal};
 
 use crate::backend::Backend;
 use crate::components::{
     chat_view::ChatView, command_palette::PaletteAction, help_popup::HelpPopup,
-    prompt_input::PromptInput, settings_popup::SettingsPopup,
-    status_bar::StatusBar, Component,
+    prompt_input::PromptInput, settings_popup::SettingsPopup, status_bar::StatusBar, Component,
 };
 use crate::event::Event;
 use crate::keybindings::Keybindings;
-use crate::state::{
-    AppState, ConversationMode, DisplayMessage, MsgRole, PaletteMode, ToastKind,
-};
+use crate::state::{AppState, ConversationMode, PaletteMode, ToastKind};
 use crate::theme::Theme;
 use crate::util;
 
@@ -130,12 +130,7 @@ impl App {
             if let Some(action) = self.state.pending_slash.take() {
                 let text = std::mem::take(&mut self.state.pending_slash_text);
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    crate::slash_commands::dispatch(
-                        &mut self.state,
-                        &self.backend,
-                        action,
-                        text,
-                    );
+                    crate::slash_commands::dispatch(&mut self.state, &self.backend, action, text);
                 }));
                 if let Err(e) = result {
                     let msg = if let Some(s) = e.downcast_ref::<String>() {
@@ -211,8 +206,10 @@ impl App {
             .active_session_id
             .clone()
             .unwrap_or_else(|| "user_0".to_string());
-        self.backend
-            .send(BackendCommand::SendMessage { session_id, content });
+        self.backend.send(BackendCommand::SendMessage {
+            session_id,
+            content,
+        });
     }
 
     fn handle_input(&mut self, ev: &crossterm::event::Event) {
@@ -229,9 +226,7 @@ impl App {
                     return;
                 }
                 MouseEventKind::Down(_) => {
-                    if self.state.no_modal()
-                        && self.state.point_in_conv(mouse.column, mouse.row)
-                    {
+                    if self.state.no_modal() && self.state.point_in_conv(mouse.column, mouse.row) {
                         self.state.begin_selection(mouse.column, mouse.row);
                     } else if self.state.no_modal() {
                         self.state.clear_selection();
@@ -274,7 +269,8 @@ impl App {
                 "unknown panic in input handler".into()
             };
             tracing::error!("input handler panic: {msg}");
-            self.state.toast(format!("内部错误: {msg}"), ToastKind::Error);
+            self.state
+                .toast(format!("内部错误: {msg}"), ToastKind::Error);
         }
     }
 
@@ -298,7 +294,8 @@ impl App {
                     self.state.quit_armed_at = std::time::Instant::now();
                     if still_active {
                         self.state.refresh_menu_msg();
-                        self.state.toast("已返回 (再按 Ctrl+C 退出)", ToastKind::Info);
+                        self.state
+                            .toast("已返回 (再按 Ctrl+C 退出)", ToastKind::Info);
                     } else {
                         self.state.exit_config_mode();
                         self.state.toast("已退出配置", ToastKind::Info);
@@ -435,8 +432,8 @@ impl App {
                     .get(fo.select_idx)
                     .map(|s| s.value.as_str())
                     .unwrap_or("");
-                let is_qq_action = current_val.starts_with("allowlist_")
-                    || current_val.starts_with("denylist_");
+                let is_qq_action =
+                    current_val.starts_with("allowlist_") || current_val.starts_with("denylist_");
                 let is_toggle = is_qq_action && current_val.contains("_toggle_group:");
                 let is_direct_remove = is_qq_action && current_val.contains("_remove_user:");
                 let needs_text_input = is_qq_action
@@ -444,64 +441,106 @@ impl App {
                     && !is_direct_remove
                     && !current_val.ends_with("__info__");
                 match key.code {
-                    KeyCode::Char('e') if needs_text_input => if fo.form_kind == FormKind::QqFilter {
-                        let val = fo.confirm().unwrap_or_default();
-                        self.state.form_overlay.set_fields(vec![FormField {
-                            label: "QQ号".into(),
-                            value: String::new(),
-                            kind: FieldKind::Text,
-                        }]);
-                        self.state.form_overlay.edit_label = val;
-                        self.state.form_overlay.enter_edit();
-                        self.state.mode = ConversationMode::Normal;
-                    },
-                    KeyCode::Char('e') => if fo.form_kind == FormKind::ApiConfig {
-                        let label = fo
-                            .select_items
-                            .get(fo.select_idx)
-                            .map(|s| s.label.clone())
-                            .unwrap_or_default();
-                        let st = &self.state.status;
-                        self.state.form_overlay.set_fields(vec![
-                            FormField { label: "Provider".into(), value: st.provider.clone(), kind: FieldKind::Text },
-                            FormField { label: "Model".into(), value: st.model.clone(), kind: FieldKind::Text },
-                            FormField { label: "BaseURL".into(), value: st.base_url.clone(), kind: FieldKind::Text },
-                            FormField { label: "APIKey".into(), value: String::new(), kind: FieldKind::Password },
-                            FormField { label: "Prompt".into(), value: st.system_prompt.clone(), kind: FieldKind::Text },
-                        ]);
-                        self.state.form_overlay.edit_label = label;
-                        self.state.form_overlay.enter_edit();
-                    },
+                    KeyCode::Char('e') if needs_text_input => {
+                        if fo.form_kind == FormKind::QqFilter {
+                            let val = fo.confirm().unwrap_or_default();
+                            self.state.form_overlay.set_fields(vec![FormField {
+                                label: "QQ号".into(),
+                                value: String::new(),
+                                kind: FieldKind::Text,
+                            }]);
+                            self.state.form_overlay.edit_label = val;
+                            self.state.form_overlay.enter_edit();
+                            self.state.mode = ConversationMode::Normal;
+                        }
+                    }
+                    KeyCode::Char('e') => {
+                        if fo.form_kind == FormKind::ApiConfig {
+                            let label = fo
+                                .select_items
+                                .get(fo.select_idx)
+                                .map(|s| s.label.clone())
+                                .unwrap_or_default();
+                            let st = &self.state.status;
+                            self.state.form_overlay.set_fields(vec![
+                                FormField {
+                                    label: "Provider".into(),
+                                    value: st.provider.clone(),
+                                    kind: FieldKind::Text,
+                                },
+                                FormField {
+                                    label: "Model".into(),
+                                    value: st.model.clone(),
+                                    kind: FieldKind::Text,
+                                },
+                                FormField {
+                                    label: "BaseURL".into(),
+                                    value: st.base_url.clone(),
+                                    kind: FieldKind::Text,
+                                },
+                                FormField {
+                                    label: "APIKey".into(),
+                                    value: String::new(),
+                                    kind: FieldKind::Password,
+                                },
+                                FormField {
+                                    label: "Prompt".into(),
+                                    value: st.system_prompt.clone(),
+                                    kind: FieldKind::Text,
+                                },
+                            ]);
+                            self.state.form_overlay.edit_label = label;
+                            self.state.form_overlay.enter_edit();
+                        }
+                    }
                     KeyCode::Enter => {
                         if let Some(val) = self.state.form_overlay.confirm() {
                             match fo.form_kind {
                                 // QQ setting: gate mode switch.
                                 FormKind::QqFilter if val.starts_with("gate_mode:") => {
-                                    let mode = val.strip_prefix("gate_mode:").unwrap_or("none");
-                                    tracing::info!(%mode, "TUI: gate mode switch");
-                                    self.backend.send(BackendCommand::SetQqGateMode { mode: mode.to_string() });
+                                    let mode = match val.strip_prefix("gate_mode:") {
+                                        Some("allowlist") => echo_adapter::GateMode::Allowlist,
+                                        Some("denylist") => echo_adapter::GateMode::Denylist,
+                                        _ => echo_adapter::GateMode::None,
+                                    };
+                                    tracing::info!(mode = %mode.as_str(), "TUI: gate mode switch");
+                                    self.backend.send(BackendCommand::SetQqGateMode { mode });
                                     self.backend.send(BackendCommand::RequestQqFilterConfig);
-                                    self.state.qq_gate_mode = mode.to_string();
+                                    self.state.qq_gate_mode = mode;
                                     // Refresh form to show updated radio state.
-                                    crate::slash_commands::qq::setting(&mut self.state, &self.backend);
+                                    crate::slash_commands::qq::setting(
+                                        &mut self.state,
+                                        &self.backend,
+                                    );
                                 }
                                 // QQ setting submenu navigation.
                                 FormKind::QqFilter if val == "qq_allowlist" => {
-                                    crate::slash_commands::qq::allowlist(&mut self.state, &self.backend);
+                                    crate::slash_commands::qq::allowlist(
+                                        &mut self.state,
+                                        &self.backend,
+                                    );
                                 }
                                 FormKind::QqFilter if val == "qq_denylist" => {
-                                    crate::slash_commands::qq::denylist(&mut self.state, &self.backend);
+                                    crate::slash_commands::qq::denylist(
+                                        &mut self.state,
+                                        &self.backend,
+                                    );
                                 }
                                 FormKind::QqFilter if is_toggle => {
                                     // toggle_group:123456 — add/remove group directly
                                     if let Some(gid_str) = val.split(':').nth(1) {
                                         if let Ok(gid) = gid_str.parse::<i64>() {
                                             crate::slash_commands::qq::handle_toggle_group(
-                                                &mut self.state, &self.backend, &val, gid,
+                                                &mut self.state,
+                                                &self.backend,
+                                                &val,
+                                                gid,
                                             );
                                             // Refresh form
                                             crate::slash_commands::qq::allowlist_deny_refresh(
-                                                &mut self.state, &self.backend, val.starts_with("denylist_"),
+                                                &mut self.state,
+                                                &self.backend,
+                                                val.starts_with("denylist_"),
                                             );
                                         }
                                     }
@@ -513,22 +552,41 @@ impl App {
                                             let is_deny = val.starts_with("denylist_");
                                             let cfg = &self.state.qq_filter;
                                             let (mut users, groups) = if is_deny {
-                                                (cfg.denylist_users.clone(), cfg.denylist_groups.clone())
+                                                (
+                                                    cfg.denylist_users.clone(),
+                                                    cfg.denylist_groups.clone(),
+                                                )
                                             } else {
-                                                (cfg.allowlist_users.clone(), cfg.allowlist_groups.clone())
+                                                (
+                                                    cfg.allowlist_users.clone(),
+                                                    cfg.allowlist_groups.clone(),
+                                                )
                                             };
                                             users.retain(|u| *u != uid);
                                             let cmd = if is_deny {
-                                                BackendCommand::UpdateQqDenylist { user_ids: users, group_ids: groups }
+                                                BackendCommand::UpdateQqDenylist {
+                                                    user_ids: users,
+                                                    group_ids: groups,
+                                                }
                                             } else {
-                                                BackendCommand::UpdateQqAllowlist { user_ids: users, group_ids: groups }
+                                                BackendCommand::UpdateQqAllowlist {
+                                                    user_ids: users,
+                                                    group_ids: groups,
+                                                }
                                             };
                                             self.backend.send(cmd);
-                                            self.backend.send(BackendCommand::RequestQqFilterConfig);
-                                            let kind = if is_deny { "黑名单" } else { "白名单" };
-                                            self.state.toast(format!("已将用户 {uid} 从{kind}移除 ✓"), ToastKind::Success);
+                                            self.backend
+                                                .send(BackendCommand::RequestQqFilterConfig);
+                                            let kind =
+                                                if is_deny { "黑名单" } else { "白名单" };
+                                            self.state.toast(
+                                                format!("已将用户 {uid} 从{kind}移除 ✓"),
+                                                ToastKind::Success,
+                                            );
                                             crate::slash_commands::qq::allowlist_deny_refresh(
-                                                &mut self.state, &self.backend, is_deny,
+                                                &mut self.state,
+                                                &self.backend,
+                                                is_deny,
                                             );
                                         }
                                     }
@@ -547,7 +605,10 @@ impl App {
                                     self.state.do_session_switch(&val);
                                     self.state.load_session_messages(&val);
                                     self.backend.send(BackendCommand::RequestState);
-                                    self.state.toast("已切换到该会话 — PgUp 查看历史消息", ToastKind::Info);
+                                    self.state.toast(
+                                        "已切换到该会话 — PgUp 查看历史消息",
+                                        ToastKind::Info,
+                                    );
                                 }
                                 FormKind::ApiConfig => {
                                     if val.contains(':') {
@@ -634,200 +695,6 @@ impl App {
         self.state.settings.focus = 0;
         self.state.settings.selection = 0;
         self.state.show_settings = true;
-    }
-
-    fn apply_backend_event(&mut self, ev: BackendEvent) {
-        match ev {
-            BackendEvent::AdapterStateChanged {
-                adapter_name,
-                connected,
-                self_id,
-            } => {
-                let self_id_str = self_id.clone();
-                self.state.status.set_adapter_state(crate::state::AdapterStatusEntry {
-                    name: adapter_name.clone(),
-                    display_name: adapter_name.clone(),
-                    connected,
-                    running: true,
-                    self_id,
-                    bind_address: String::new(),
-                    started_at: None,
-                });
-                if connected {
-                    self.state.toast(
-                        format!(
-                            "{adapter_name} connected ({})",
-                            self_id_str.as_deref().unwrap_or("?")
-                        ),
-                        ToastKind::Success,
-                    );
-                } else {
-                    self.state
-                        .toast(format!("{adapter_name} disconnected"), ToastKind::Error);
-                }
-            }
-            BackendEvent::AdapterList { adapters } => {
-                for a in adapters {
-                    self.state.status.set_adapter_state(crate::state::AdapterStatusEntry {
-                        name: a.name,
-                        display_name: a.display_name,
-                        connected: a.connected,
-                        running: a.running,
-                        self_id: a.self_id,
-                        bind_address: a.bind_address,
-                        started_at: a.started_at,
-                    });
-                }
-            }
-            BackendEvent::MessageReceived {
-                session_id,
-                content,
-                timestamp,
-                ..
-            } => {
-                self.push_to(session_id, MsgRole::User, content, timestamp);
-            }
-            BackendEvent::AgentThinking { session_id } => {
-                self.state.llm_in_flight = true;
-                self.push_to(session_id, MsgRole::System, "… 思考中".into(), 0);
-            }
-            BackendEvent::LlmRequest { model, .. } => {
-                self.state.status.model = model;
-            }
-            BackendEvent::LlmResponse {
-                model,
-                prompt_tokens,
-                completion_tokens,
-                ..
-            } => {
-                self.state.status.model = model;
-                self.state.llm_in_flight = false;
-                let _ = (prompt_tokens, completion_tokens);
-            }
-            BackendEvent::ToolCall {
-                session_id,
-                tool_name,
-                arguments,
-                ..
-            } => {
-                self.state.tool_in_flight =
-                    Some((tool_name.clone(), std::time::Instant::now()));
-                self.push_to(
-                    session_id,
-                    MsgRole::Tool,
-                    format!("🔧 {tool_name}({arguments})"),
-                    0,
-                );
-            }
-            BackendEvent::ToolResult {
-                session_id,
-                tool_name,
-                result,
-                ..
-            } => {
-                self.state.tool_in_flight = None;
-                let snippet: String = result.chars().take(80).collect();
-                self.push_to(
-                    session_id,
-                    MsgRole::Tool,
-                    format!("✓ {tool_name}: {snippet}"),
-                    0,
-                );
-            }
-            BackendEvent::MessageSent {
-                session_id,
-                content,
-                ..
-            } => {
-                self.state.llm_in_flight = false;
-                let ts = chrono::Utc::now().timestamp();
-                self.push_to(session_id, MsgRole::Agent, content, ts);
-            }
-            BackendEvent::SessionUpdated { session } => {
-                self.upsert_session(session);
-            }
-            BackendEvent::ApiConfigUpdated {
-                provider,
-                model,
-                base_url,
-                api_key_set,
-                system_prompt,
-                active_api,
-                profiles,
-            } => {
-                self.state.status.provider = provider;
-                self.state.status.model = model.clone();
-                self.state.status.base_url = base_url;
-                self.state.status.system_prompt = system_prompt;
-                self.state.settings.profiles = profiles;
-                self.state.settings.active_api = active_api.clone();
-                self.state.settings.api_key_set = api_key_set;
-                let _ = model;
-            }
-            BackendEvent::ApiProfilesUpdated {
-                active_api,
-                profiles,
-            } => {
-                self.state.settings.profiles = profiles;
-                self.state.settings.active_api = active_api;
-            }
-            BackendEvent::GroupList { groups } => {
-                self.state.qq_groups = groups
-                    .into_iter()
-                    .map(|g| (g.group_id, g.group_name))
-                    .collect();
-            }
-            BackendEvent::QqGateMode { mode } => {
-                self.state.qq_gate_mode = mode;
-            }
-            BackendEvent::QqFilterConfig {
-                allowlist_users,
-                allowlist_groups,
-                denylist_users,
-                denylist_groups,
-            } => {
-                self.state.qq_filter = crate::state::QqFilterCache {
-                    allowlist_users,
-                    allowlist_groups,
-                    denylist_users,
-                    denylist_groups,
-                };
-            }
-            BackendEvent::Error {
-                session_id,
-                message,
-            } => {
-                self.state.llm_in_flight = false;
-                let _ = session_id;
-                self.state.toast(message, ToastKind::Error);
-            }
-        }
-    }
-
-    fn push_to(&mut self, session_id: String, role: MsgRole, content: String, time: i64) {
-        self.state.push_message(
-            &session_id,
-            DisplayMessage {
-                role,
-                content: content.clone(),
-                time,
-            },
-        );
-        if let Some(s) = self.state.sessions.iter_mut().find(|s| s.id == session_id) {
-            s.last_message = content;
-            s.last_active = if time > 0 { time } else { s.last_active };
-        }
-    }
-
-    fn upsert_session(&mut self, session: SessionInfo) {
-        if let Some(s) = self.state.sessions.iter_mut().find(|s| s.id == session.id) {
-            *s = session.clone();
-        } else {
-            self.state.sessions.push(session.clone());
-        }
-        if self.state.active_session_id.is_none() {
-            self.state.active_session_id = Some(session.id);
-        }
     }
 
     pub fn render(&mut self, f: &mut Frame) {
@@ -1001,5 +868,66 @@ mod tests {
         }));
         assert!(result.is_ok(), "海量 profile 渲染不应 panic");
         assert!(app.state.settings.list_len() > 100_000);
+    }
+
+    fn ctrl_c() -> crossterm::event::Event {
+        crossterm::event::Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+    }
+
+    #[test]
+    fn first_ctrl_c_arms_quit_not_exit() {
+        let mut app = app();
+        app.handle_input(&ctrl_c());
+        assert!(app.state.running, "first Ctrl+C must not exit");
+        assert!(app.state.quit_armed);
+    }
+
+    #[test]
+    fn second_ctrl_c_within_window_quits() {
+        let mut app = app();
+        app.handle_input(&ctrl_c());
+        assert!(app.state.running);
+        app.handle_input(&ctrl_c());
+        assert!(!app.state.running, "double Ctrl+C within window exits");
+    }
+
+    #[test]
+    fn quit_arm_expires_after_window() {
+        let mut app = app();
+        app.handle_input(&ctrl_c());
+        assert!(app.state.running);
+        // Pretend 3 seconds passed (window is 2s).
+        app.state.quit_armed_at = std::time::Instant::now() - Duration::from_secs(3);
+        app.handle_input(&ctrl_c());
+        assert!(
+            app.state.running,
+            "second Ctrl+C after the window must re-arm, not exit"
+        );
+        assert!(app.state.quit_armed);
+    }
+
+    #[test]
+    fn ctrl_c_in_form_goes_back_one_level() {
+        let mut app = app();
+        // Activate a form overlay.
+        app.state.form_overlay.activate(
+            "test",
+            vec![crate::components::form_overlay::SelectItem {
+                label: "x".into(),
+                value: "y".into(),
+            }],
+            crate::components::form_overlay::FormKind::ApiConfig,
+        );
+        app.state.form_overlay.enter_edit();
+        assert!(app.state.form_overlay.is_active());
+        app.handle_input(&ctrl_c());
+        assert!(
+            app.state.form_overlay.is_active(),
+            "first Ctrl+C inside a form backs up one level"
+        );
+        // Second Ctrl+C within the window deactivates.
+        app.handle_input(&ctrl_c());
+        assert!(!app.state.form_overlay.is_active());
+        assert!(app.state.running);
     }
 }

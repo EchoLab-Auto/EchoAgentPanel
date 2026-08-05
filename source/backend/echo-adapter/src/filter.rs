@@ -83,6 +83,11 @@ impl FilterPipeline {
         self.filters.is_empty()
     }
 
+    /// Names of all filters, in order (for diagnostics and tests).
+    pub fn filter_names(&self) -> Vec<String> {
+        self.filters.iter().map(|f| f.name().to_string()).collect()
+    }
+
     /// Run all filters in order.
     ///
     /// Returns `(accepted, optional_reply)`.
@@ -359,7 +364,11 @@ impl KeywordBlockFilter {
         } else {
             regex::Regex::new(regex_pattern).ok()
         };
-        Self { keywords, lowered_keywords, regex }
+        Self {
+            keywords,
+            lowered_keywords,
+            regex,
+        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -517,26 +526,38 @@ mod tests {
     #[tokio::test]
     async fn allowlist_allows_when_empty() {
         let f = AllowlistFilter::new(vec![], vec![]);
-        assert!(matches!(f.check(&dm("u1", "hi")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", "hi")).await,
+            FilterResult::Allow
+        ));
     }
 
     #[tokio::test]
     async fn allowlist_blocks_unknown_user() {
         let f = AllowlistFilter::new(vec!["u1".into()], vec![]);
-        assert!(matches!(f.check(&dm("u2", "hi")).await, FilterResult::Block));
+        assert!(matches!(
+            f.check(&dm("u2", "hi")).await,
+            FilterResult::Block
+        ));
     }
 
     #[tokio::test]
     async fn allowlist_allows_known_user() {
         let f = AllowlistFilter::new(vec!["u1".into()], vec![]);
-        assert!(matches!(f.check(&dm("u1", "hi")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", "hi")).await,
+            FilterResult::Allow
+        ));
     }
 
     #[tokio::test]
     async fn allowlist_dm_passes_group_filter() {
         let f = AllowlistFilter::new(vec![], vec!["g1".into()]);
         // DMs always pass the group allowlist
-        assert!(matches!(f.check(&dm("u1", "hi")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", "hi")).await,
+            FilterResult::Allow
+        ));
     }
 
     #[tokio::test]
@@ -553,19 +574,28 @@ mod tests {
     #[tokio::test]
     async fn denylist_allows_when_empty() {
         let f = DenylistFilter::new(vec![], vec![]);
-        assert!(matches!(f.check(&dm("u1", "hi")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", "hi")).await,
+            FilterResult::Allow
+        ));
     }
 
     #[tokio::test]
     async fn denylist_blocks_known_user() {
         let f = DenylistFilter::new(vec!["u1".into()], vec![]);
-        assert!(matches!(f.check(&dm("u1", "hi")).await, FilterResult::Block));
+        assert!(matches!(
+            f.check(&dm("u1", "hi")).await,
+            FilterResult::Block
+        ));
     }
 
     #[tokio::test]
     async fn denylist_allows_unknown_user() {
         let f = DenylistFilter::new(vec!["u1".into()], vec![]);
-        assert!(matches!(f.check(&dm("u2", "hi")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u2", "hi")).await,
+            FilterResult::Allow
+        ));
     }
 
     // ---- RateLimitFilter ----
@@ -573,17 +603,26 @@ mod tests {
     #[tokio::test]
     async fn rate_limit_allows_first_request() {
         let f = RateLimitFilter::new(
-            Some(RateLimitEntry { max_requests: 3, window_seconds: 60 }),
+            Some(RateLimitEntry {
+                max_requests: 3,
+                window_seconds: 60,
+            }),
             None,
             None,
         );
-        assert!(matches!(f.check(&dm("u1", "hi")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", "hi")).await,
+            FilterResult::Allow
+        ));
     }
 
     #[tokio::test]
     async fn rate_limit_blocks_when_exceeded() {
         let f = RateLimitFilter::new(
-            Some(RateLimitEntry { max_requests: 2, window_seconds: 3600 }),
+            Some(RateLimitEntry {
+                max_requests: 2,
+                window_seconds: 3600,
+            }),
             None,
             None,
         );
@@ -597,21 +636,36 @@ mod tests {
     #[tokio::test]
     async fn keyword_filter_blocks_match() {
         let f = KeywordBlockFilter::new(vec!["spam".into(), "广告".into()], "");
-        assert!(matches!(f.check(&dm("u1", "广告信息")).await, FilterResult::Block));
-        assert!(matches!(f.check(&dm("u1", "SPAM here")).await, FilterResult::Block));
+        assert!(matches!(
+            f.check(&dm("u1", "广告信息")).await,
+            FilterResult::Block
+        ));
+        assert!(matches!(
+            f.check(&dm("u1", "SPAM here")).await,
+            FilterResult::Block
+        ));
     }
 
     #[tokio::test]
     async fn keyword_filter_allows_no_match() {
         let f = KeywordBlockFilter::new(vec!["spam".into()], "");
-        assert!(matches!(f.check(&dm("u1", "hello")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", "hello")).await,
+            FilterResult::Allow
+        ));
     }
 
     #[tokio::test]
     async fn regex_filter_blocks_match() {
         let f = KeywordBlockFilter::new(vec![], r"http[s]?://.*\.ru");
-        assert!(matches!(f.check(&dm("u1", "visit https://x.ru now")).await, FilterResult::Block));
-        assert!(matches!(f.check(&dm("u1", "visit https://x.com")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", "visit https://x.ru now")).await,
+            FilterResult::Block
+        ));
+        assert!(matches!(
+            f.check(&dm("u1", "visit https://x.com")).await,
+            FilterResult::Allow
+        ));
     }
 
     // ---- ContentLengthFilter ----
@@ -619,14 +673,23 @@ mod tests {
     #[tokio::test]
     async fn content_length_blocks_too_long() {
         let f = ContentLengthFilter::new(10);
-        assert!(matches!(f.check(&dm("u1", "short")).await, FilterResult::Allow));
-        assert!(matches!(f.check(&dm("u1", "this is way too long")).await, FilterResult::Block));
+        assert!(matches!(
+            f.check(&dm("u1", "short")).await,
+            FilterResult::Allow
+        ));
+        assert!(matches!(
+            f.check(&dm("u1", "this is way too long")).await,
+            FilterResult::Block
+        ));
     }
 
     #[tokio::test]
     async fn content_length_allows_when_zero() {
         let f = ContentLengthFilter::new(0);
-        assert!(matches!(f.check(&dm("u1", &"x".repeat(9999))).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("u1", &"x".repeat(9999))).await,
+            FilterResult::Allow
+        ));
     }
 
     // ---- AdminBypassFilter ----
@@ -635,9 +698,15 @@ mod tests {
     async fn admin_bypass_always_allows() {
         let f = AdminBypassFilter::new(vec!["admin1".into()]);
         // Admins get AllowAndSkip (bypass remaining filters).
-        assert!(matches!(f.check(&dm("admin1", "hi")).await, FilterResult::AllowAndSkip));
+        assert!(matches!(
+            f.check(&dm("admin1", "hi")).await,
+            FilterResult::AllowAndSkip
+        ));
         // Non-admins still pass through (Allow, not blocked).
-        assert!(matches!(f.check(&dm("user1", "hi")).await, FilterResult::Allow));
+        assert!(matches!(
+            f.check(&dm("user1", "hi")).await,
+            FilterResult::Allow
+        ));
     }
 
     // ---- FilterPipeline ----

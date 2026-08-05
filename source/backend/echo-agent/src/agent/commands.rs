@@ -1,0 +1,371 @@
+//! Frontend command handling (`BackendCommand` → agent actions).
+//!
+//! Split out of `mod.rs` so the command dispatch — the largest single
+//! function in the agent — lives in its own file.
+
+use crate::agent::Agent;
+use crate::command::BackendCommand;
+use crate::event::BackendEvent;
+use crate::session::SessionKey;
+
+impl Agent {
+    pub async fn apply_command(&self, cmd: BackendCommand) {
+        match cmd {
+            BackendCommand::SwitchModel { model } => {
+                self.set_model(model.clone()).await;
+                self.emit(BackendEvent::Error {
+                    session_id: None,
+                    message: format!("switched model: {model}"),
+                });
+            }
+            BackendCommand::SwitchProvider { provider } => {
+                let mut config = self.config.write().await;
+                let old_provider = config.provider.clone();
+                config.provider = provider.clone();
+                let cfg = config.clone();
+                drop(config);
+                if self.rebuild_provider(&cfg).await {
+                    let model = cfg.model.clone();
+                    let base_url = cfg.effective_base_url();
+                    let key_set = !cfg.effective_api_key().is_empty();
+                    self.set_model(model).await;
+                    self.emit_api_config().await;
+                    self.persist_config(&cfg).await;
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: format!(
+                            "switched provider: {provider} ({base_url}, key: {})",
+                            if key_set { "***" } else { "not set" }
+                        ),
+                    });
+                } else {
+                    let mut config = self.config.write().await;
+                    config.provider = old_provider;
+                }
+            }
+            BackendCommand::SetSystemPrompt { prompt } => {
+                self.config.write().await.system_prompt = prompt.clone();
+                *self.system_prompt_cache.write().await = None;
+                self.emit(BackendEvent::Error {
+                    session_id: None,
+                    message: "system prompt updated".into(),
+                });
+            }
+            BackendCommand::ToggleSkill { name, enabled } => {
+                let mut skills = self.skills.lock().await;
+                let ok = skills.set_enabled(&name, enabled);
+                *self.system_prompt_cache.write().await = None;
+                self.emit(BackendEvent::Error {
+                    session_id: None,
+                    message: if ok {
+                        format!(
+                            "skill {name} {}",
+                            if enabled { "enabled" } else { "disabled" }
+                        )
+                    } else {
+                        format!("skill {name} not found")
+                    },
+                });
+            }
+            BackendCommand::UpdateApiConfig {
+                name,
+                provider,
+                model,
+                base_url,
+                api_key,
+            } => {
+                self.update_api_config(name, provider, model, base_url, api_key)
+                    .await;
+            }
+            BackendCommand::SwitchApi { name } => {
+                self.switch_api(&name).await;
+            }
+            BackendCommand::DeleteApi { name } => {
+                self.delete_api(&name).await;
+            }
+            BackendCommand::RequestState => {
+                self.emit_api_config().await;
+                for s in self.sessions.all() {
+                    let last = s
+                        .history
+                        .lock()
+                        .await
+                        .last()
+                        .cloned()
+                        .map(|m| m.content)
+                        .unwrap_or_default();
+                    self.emit(BackendEvent::SessionUpdated {
+                        session: s.info(last),
+                    });
+                }
+                // Also emit adapter status.
+                self.emit_adapter_list();
+            }
+            BackendCommand::ClearSession { session_id } => {
+                if self.sessions.clear(&session_id).await {
+                    self.emit(BackendEvent::Error {
+                        session_id: Some(session_id),
+                        message: "session cleared".into(),
+                    });
+                }
+            }
+            BackendCommand::SendMessage {
+                session_id,
+                content,
+            } => {
+                // Parse or fall back to local TUI session key.
+                let key = SessionKey::parse(&session_id).unwrap_or_else(SessionKey::local_tui);
+                let session = self.sessions.get_or_create(&key, "local user".into(), None);
+                let sid = session.id.clone();
+                // Notify TUI that a session exists so it can set active_session_id.
+                self.emit(BackendEvent::SessionUpdated {
+                    session: session.info(String::new()),
+                });
+                self.emit(BackendEvent::MessageReceived {
+                    session_id: sid.clone(),
+                    adapter_name: "local".into(),
+                    platform: key.platform.clone(),
+                    user_id: key.user_id.clone(),
+                    user_name: "local user".into(),
+                    channel: match &*key.scope {
+                        "group" => format!("group:{}", key.scope_id),
+                        _ => "direct".into(),
+                    },
+                    group_name: None,
+                    content: content.clone(),
+                    timestamp: chrono::Utc::now().timestamp(),
+                });
+                match self.process_message(&session, &content).await {
+                    Ok(reply) => {
+                        self.emit(BackendEvent::MessageSent {
+                            session_id: sid,
+                            content: reply,
+                        });
+                    }
+                    Err(e) => {
+                        self.emit(BackendEvent::Error {
+                            session_id: Some(sid),
+                            message: e.to_string(),
+                        });
+                    }
+                }
+            }
+            // ---- Adapter management ----
+            BackendCommand::StartAdapter { name } => match self.adapters.get(&name) {
+                Some(adapter) => {
+                    match adapter.start().await {
+                        Ok(()) => self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: format!("adapter {} started", adapter.display_name()),
+                        }),
+                        Err(e) => self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: format!(
+                                "adapter {} start failed: {e}",
+                                adapter.display_name()
+                            ),
+                        }),
+                    }
+                    self.emit_adapter_list();
+                }
+                None => self.emit(BackendEvent::Error {
+                    session_id: None,
+                    message: format!("adapter {name} not found"),
+                }),
+            },
+            BackendCommand::StopAdapter { name } => match self.adapters.get(&name) {
+                Some(adapter) => {
+                    match adapter.stop().await {
+                        Ok(()) => self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: format!("adapter {} stopped", adapter.display_name()),
+                        }),
+                        Err(e) => self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: format!("adapter {} stop failed: {e}", adapter.display_name()),
+                        }),
+                    }
+                    self.emit_adapter_list();
+                }
+                None => self.emit(BackendEvent::Error {
+                    session_id: None,
+                    message: format!("adapter {name} not found"),
+                }),
+            },
+            BackendCommand::RestartAdapter { name } => match self.adapters.get(&name) {
+                Some(adapter) => {
+                    match adapter.stop().await {
+                        Ok(()) => match adapter.start().await {
+                            Ok(()) => self.emit(BackendEvent::Error {
+                                session_id: None,
+                                message: format!("adapter {} restarted", adapter.display_name()),
+                            }),
+                            Err(e) => self.emit(BackendEvent::Error {
+                                session_id: None,
+                                message: format!(
+                                    "adapter {} restart (start) failed: {e}",
+                                    adapter.display_name()
+                                ),
+                            }),
+                        },
+                        Err(e) => self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: format!(
+                                "adapter {} restart (stop) failed: {e}",
+                                adapter.display_name()
+                            ),
+                        }),
+                    }
+                    self.emit_adapter_list();
+                }
+                None => self.emit(BackendEvent::Error {
+                    session_id: None,
+                    message: format!("adapter {name} not found"),
+                }),
+            },
+            BackendCommand::RequestAdapterStatus => {
+                self.emit_adapter_list();
+            }
+            BackendCommand::StartAllAdapters => {
+                let results = self.adapters.start_all().await;
+                for (name, result) in &results {
+                    match result {
+                        Ok(()) => self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: format!("adapter {name} started"),
+                        }),
+                        Err(e) => self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: format!("adapter {name}: {e}"),
+                        }),
+                    }
+                }
+                self.emit_adapter_list();
+            }
+            BackendCommand::StopAllAdapters => {
+                self.adapters.stop_all().await;
+                self.emit(BackendEvent::Error {
+                    session_id: None,
+                    message: "all adapters stopped".into(),
+                });
+                self.emit_adapter_list();
+            }
+            BackendCommand::UpdateQqAllowlist {
+                user_ids,
+                group_ids,
+            } => {
+                tracing::info!(users = ?user_ids, groups = ?group_ids, "Agent: UpdateQqAllowlist");
+                let user_strs: Vec<String> = user_ids.iter().map(|id| id.to_string()).collect();
+                let group_strs: Vec<String> = group_ids.iter().map(|id| id.to_string()).collect();
+                if let Some(adapter) = self.adapters.get("qq") {
+                    adapter.update_allowlist(user_strs, group_strs);
+                    let (au, ag, du, dg) = adapter.get_filter_info();
+                    self.emit(BackendEvent::QqFilterConfig {
+                        allowlist_users: au.iter().filter_map(|s| s.parse().ok()).collect(),
+                        allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 白名单已更新".into(),
+                    });
+                } else {
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 适配器未找到".into(),
+                    });
+                }
+            }
+            BackendCommand::UpdateQqDenylist {
+                user_ids,
+                group_ids,
+            } => {
+                tracing::info!(users = ?user_ids, groups = ?group_ids, "Agent: UpdateQqDenylist");
+                let user_strs: Vec<String> = user_ids.iter().map(|id| id.to_string()).collect();
+                let group_strs: Vec<String> = group_ids.iter().map(|id| id.to_string()).collect();
+                if let Some(adapter) = self.adapters.get("qq") {
+                    adapter.update_denylist(user_strs, group_strs);
+                    let (au, ag, du, dg) = adapter.get_filter_info();
+                    self.emit(BackendEvent::QqFilterConfig {
+                        allowlist_users: au.iter().filter_map(|s| s.parse().ok()).collect(),
+                        allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 黑名单已更新".into(),
+                    });
+                } else {
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: "QQ 适配器未找到".into(),
+                    });
+                }
+            }
+            BackendCommand::SetQqGateMode { mode } => {
+                tracing::info!(mode = %mode.as_str(), "Agent: SetQqGateMode");
+                if let Some(adapter) = self.adapters.get("qq") {
+                    adapter.set_gate_mode(mode);
+                    self.emit(BackendEvent::QqGateMode {
+                        mode: adapter.get_gate_mode(),
+                    });
+                    let label = match mode {
+                        echo_adapter::GateMode::Allowlist => "白名单模式",
+                        echo_adapter::GateMode::Denylist => "黑名单模式",
+                        echo_adapter::GateMode::None => "无约束模式",
+                    };
+                    self.emit(BackendEvent::Error {
+                        session_id: None,
+                        message: format!("QQ 门控模式已切换为: {label}"),
+                    });
+                }
+            }
+            BackendCommand::RequestQqFilterConfig => {
+                if let Some(adapter) = self.adapters.get("qq") {
+                    let (au, ag, du, dg) = adapter.get_filter_info();
+                    self.emit(BackendEvent::QqFilterConfig {
+                        allowlist_users: au.iter().filter_map(|s| s.parse().ok()).collect(),
+                        allowlist_groups: ag.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_users: du.iter().filter_map(|s| s.parse().ok()).collect(),
+                        denylist_groups: dg.iter().filter_map(|s| s.parse().ok()).collect(),
+                    });
+                }
+            }
+            BackendCommand::RequestGroupList => {
+                let groups = match self.adapters.get("qq") {
+                    Some(adapter) => match adapter.get_groups().await {
+                        Ok(groups) => {
+                            let result: Vec<crate::event::GroupInfo> = groups
+                                .into_iter()
+                                .map(|(gid, name)| crate::event::GroupInfo {
+                                    group_id: gid,
+                                    group_name: name,
+                                })
+                                .collect();
+                            result
+                        }
+                        Err(e) => {
+                            self.emit(BackendEvent::Error {
+                                session_id: None,
+                                message: format!("failed to get group list: {e}"),
+                            });
+                            Vec::new()
+                        }
+                    },
+                    None => {
+                        self.emit(BackendEvent::Error {
+                            session_id: None,
+                            message: "QQ adapter not found".into(),
+                        });
+                        Vec::new()
+                    }
+                };
+                if !groups.is_empty() {
+                    self.emit(BackendEvent::GroupList { groups });
+                }
+            }
+        }
+    }
+}

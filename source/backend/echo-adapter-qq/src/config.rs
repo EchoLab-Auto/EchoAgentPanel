@@ -29,10 +29,19 @@ pub struct QqAdapterConfig {
     /// Default `http://localhost:6099`.
     #[serde(default = "default_napcat_url")]
     pub napcat_webui_url: String,
+    /// Host used to reach NapCat's reverse-WS port when auto-configuring it.
+    /// Defaults to `host.docker.internal` (NapCat in Docker); set to
+    /// `127.0.0.1` when running everything on one host.
+    #[serde(default = "default_napcat_host")]
+    pub napcat_host: String,
 }
 
 fn default_napcat_url() -> String {
     "http://localhost:6099".into()
+}
+
+fn default_napcat_host() -> String {
+    "host.docker.internal".into()
 }
 
 impl Default for QqAdapterConfig {
@@ -46,6 +55,7 @@ impl Default for QqAdapterConfig {
             filter: QqFilterConfig::default(),
             gate: QqGateConfig::default(),
             napcat_webui_url: default_napcat_url(),
+            napcat_host: default_napcat_host(),
         }
     }
 }
@@ -68,8 +78,18 @@ impl QqAdapterConfig {
 
         // Allowlist.
         let allowlist = AllowlistFilter::new(
-            self.filter.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
-            self.filter.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
+            self.filter
+                .allowlist
+                .user_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
+            self.filter
+                .allowlist
+                .group_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
         );
         if allowlist.is_active() {
             pipeline.push(Box::new(allowlist));
@@ -77,8 +97,18 @@ impl QqAdapterConfig {
 
         // Denylist.
         let denylist = DenylistFilter::new(
-            self.filter.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
-            self.filter.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+            self.filter
+                .denylist
+                .user_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
+            self.filter
+                .denylist
+                .group_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
         );
         if denylist.is_active() {
             pipeline.push(Box::new(denylist));
@@ -86,18 +116,30 @@ impl QqAdapterConfig {
 
         // Rate limit.
         let rate_limiter = RateLimitFilter::new(
-            self.filter.rate_limit.per_user.as_ref().map(|r| RateLimitEntry {
-                max_requests: r.max_requests,
-                window_seconds: r.window_seconds,
-            }),
-            self.filter.rate_limit.per_group.as_ref().map(|r| RateLimitEntry {
-                max_requests: r.max_requests,
-                window_seconds: r.window_seconds,
-            }),
-            self.filter.rate_limit.global.as_ref().map(|r| RateLimitEntry {
-                max_requests: r.max_requests,
-                window_seconds: r.window_seconds,
-            }),
+            self.filter
+                .rate_limit
+                .per_user
+                .as_ref()
+                .map(|r| RateLimitEntry {
+                    max_requests: r.max_requests,
+                    window_seconds: r.window_seconds,
+                }),
+            self.filter
+                .rate_limit
+                .per_group
+                .as_ref()
+                .map(|r| RateLimitEntry {
+                    max_requests: r.max_requests,
+                    window_seconds: r.window_seconds,
+                }),
+            self.filter
+                .rate_limit
+                .global
+                .as_ref()
+                .map(|r| RateLimitEntry {
+                    max_requests: r.max_requests,
+                    window_seconds: r.window_seconds,
+                }),
         );
         if rate_limiter.is_active() {
             pipeline.push(Box::new(rate_limiter));
@@ -143,34 +185,88 @@ impl QqAdapterConfig {
         match mode {
             "allowlist" => {
                 let f = AllowlistFilter::new(
-                    self.filter.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
-                    self.filter.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
+                    self.filter
+                        .allowlist
+                        .user_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect(),
+                    self.filter
+                        .allowlist
+                        .group_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect(),
                 );
-                if f.is_active() { pipeline.push(Box::new(f)); }
+                if f.is_active() {
+                    pipeline.push(Box::new(f));
+                }
             }
             "denylist" => {
                 let f = DenylistFilter::new(
-                    self.filter.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
-                    self.filter.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+                    self.filter
+                        .denylist
+                        .user_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect(),
+                    self.filter
+                        .denylist
+                        .group_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect(),
                 );
-                if f.is_active() { pipeline.push(Box::new(f)); }
+                if f.is_active() {
+                    pipeline.push(Box::new(f));
+                }
             }
             _ => {} // none — no allowlist or denylist
         }
 
         // Rate limit, keyword, content length — shared.
         let rate_limiter = RateLimitFilter::new(
-            self.filter.rate_limit.per_user.as_ref().map(|r| RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
-            self.filter.rate_limit.per_group.as_ref().map(|r| RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
-            self.filter.rate_limit.global.as_ref().map(|r| RateLimitEntry { max_requests: r.max_requests, window_seconds: r.window_seconds }),
+            self.filter
+                .rate_limit
+                .per_user
+                .as_ref()
+                .map(|r| RateLimitEntry {
+                    max_requests: r.max_requests,
+                    window_seconds: r.window_seconds,
+                }),
+            self.filter
+                .rate_limit
+                .per_group
+                .as_ref()
+                .map(|r| RateLimitEntry {
+                    max_requests: r.max_requests,
+                    window_seconds: r.window_seconds,
+                }),
+            self.filter
+                .rate_limit
+                .global
+                .as_ref()
+                .map(|r| RateLimitEntry {
+                    max_requests: r.max_requests,
+                    window_seconds: r.window_seconds,
+                }),
         );
-        if rate_limiter.is_active() { pipeline.push(Box::new(rate_limiter)); }
+        if rate_limiter.is_active() {
+            pipeline.push(Box::new(rate_limiter));
+        }
 
-        let keyword = KeywordBlockFilter::new(self.filter.keyword.block_keywords.clone(), &self.filter.keyword.block_regex);
-        if keyword.is_active() { pipeline.push(Box::new(keyword)); }
+        let keyword = KeywordBlockFilter::new(
+            self.filter.keyword.block_keywords.clone(),
+            &self.filter.keyword.block_regex,
+        );
+        if keyword.is_active() {
+            pipeline.push(Box::new(keyword));
+        }
 
         if self.filter.content.max_length > 0 {
-            pipeline.push(Box::new(ContentLengthFilter::new(self.filter.content.max_length)));
+            pipeline.push(Box::new(ContentLengthFilter::new(
+                self.filter.content.max_length,
+            )));
         }
 
         pipeline
@@ -282,7 +378,9 @@ pub struct QqGateConfig {
 
 impl Default for QqGateConfig {
     fn default() -> Self {
-        Self { mode: "none".into() }
+        Self {
+            mode: "none".into(),
+        }
     }
 }
 
@@ -333,10 +431,12 @@ mode = "allowlist"
 
     #[test]
     fn filter_pipeline_includes_admin_bypass() {
-        let mut cfg = QqAdapterConfig::default();
-        cfg.owner_qq = 12345;
+        let cfg = QqAdapterConfig {
+            owner_qq: 12345,
+            ..Default::default()
+        };
         let pipeline = cfg.build_filter_pipeline();
-        assert!(pipeline.len() > 0);
+        assert!(!pipeline.is_empty());
     }
 
     #[test]
@@ -344,6 +444,64 @@ mode = "allowlist"
         let mut cfg = QqAdapterConfig::default();
         cfg.filter.allowlist.user_ids = vec![111, 222];
         let pipeline = cfg.build_filter_pipeline();
-        assert!(pipeline.len() > 0);
+        assert!(!pipeline.is_empty());
+    }
+
+    #[test]
+    fn gated_pipeline_none_mode_has_no_lists() {
+        let mut cfg = QqAdapterConfig::default();
+        cfg.filter.allowlist.user_ids = vec![111];
+        cfg.filter.denylist.user_ids = vec![222];
+        // none: neither allowlist nor denylist is active.
+        let pipeline = cfg.build_filter_pipeline_gated("none");
+        assert_eq!(pipeline.len(), 0, "no filters for gate mode none");
+    }
+
+    #[test]
+    fn gated_pipeline_allowlist_excludes_denylist() {
+        let mut cfg = QqAdapterConfig::default();
+        cfg.filter.allowlist.user_ids = vec![111];
+        cfg.filter.denylist.user_ids = vec![222];
+        let pipeline = cfg.build_filter_pipeline_gated("allowlist");
+        // Allowlist active; denylist must NOT be in the pipeline.
+        assert!(!pipeline.is_empty());
+        let names = pipeline.filter_names();
+        assert!(names.iter().any(|n| n.contains("allowlist")));
+        assert!(
+            !names.iter().any(|n| n.contains("denylist")),
+            "denylist excluded in allowlist mode"
+        );
+    }
+
+    #[test]
+    fn gated_pipeline_denylist_excludes_allowlist() {
+        let mut cfg = QqAdapterConfig::default();
+        cfg.filter.allowlist.user_ids = vec![111];
+        cfg.filter.denylist.user_ids = vec![222];
+        let pipeline = cfg.build_filter_pipeline_gated("denylist");
+        let names = pipeline.filter_names();
+        assert!(names.iter().any(|n| n.contains("denylist")));
+        assert!(
+            !names.iter().any(|n| n.contains("allowlist")),
+            "allowlist excluded in denylist mode"
+        );
+    }
+
+    #[test]
+    fn gated_pipeline_keeps_shared_filters() {
+        let mut cfg = QqAdapterConfig::default();
+        cfg.filter.content.max_length = 500;
+        cfg.owner_qq = 12345;
+        let pipeline = cfg.build_filter_pipeline_gated("none");
+        // Admin bypass + content length still apply.
+        assert!(pipeline.len() >= 2, "shared filters must survive gating");
+    }
+
+    #[test]
+    fn gated_pipeline_unknown_mode_falls_back_to_none() {
+        let mut cfg = QqAdapterConfig::default();
+        cfg.filter.allowlist.user_ids = vec![111];
+        let pipeline = cfg.build_filter_pipeline_gated("bogus-mode");
+        assert_eq!(pipeline.len(), 0);
     }
 }

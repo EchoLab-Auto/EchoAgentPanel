@@ -60,19 +60,42 @@ pub enum BackendEvent {
 
     // ---- Agent processing (platform-agnostic) ----
     /// Agent began processing (LLM call pending).
-    AgentThinking { session_id: String },
+    AgentThinking {
+        session_id: String,
+    },
     /// LLM request was sent.
-    LlmRequest { session_id: String, model: String },
+    LlmRequest {
+        session_id: String,
+        model: String,
+    },
     /// LLM response completed.
-    LlmResponse { session_id: String, model: String, prompt_tokens: u32, completion_tokens: u32 },
+    LlmResponse {
+        session_id: String,
+        model: String,
+        prompt_tokens: u32,
+        completion_tokens: u32,
+    },
     /// Agent invoked a tool.
-    ToolCall { session_id: String, tool_name: String, arguments: String },
+    ToolCall {
+        session_id: String,
+        tool_name: String,
+        arguments: String,
+    },
     /// Tool execution completed.
-    ToolResult { session_id: String, tool_name: String, result: String },
+    ToolResult {
+        session_id: String,
+        tool_name: String,
+        result: String,
+    },
     /// Agent generated a reply.
-    MessageSent { session_id: String, content: String },
+    MessageSent {
+        session_id: String,
+        content: String,
+    },
     /// A session was created or updated.
-    SessionUpdated { session: SessionInfo },
+    SessionUpdated {
+        session: SessionInfo,
+    },
     /// API configuration changed (for TUI settings form).
     ApiConfigUpdated {
         provider: String,
@@ -91,7 +114,10 @@ pub enum BackendEvent {
         profiles: Vec<ApiProfileInfo>,
     },
     /// Backend error (also used for info toasts).
-    Error { session_id: Option<String>, message: String },
+    Error {
+        session_id: Option<String>,
+        message: String,
+    },
 
     // ---- Adapter management ----
     AdapterList {
@@ -109,7 +135,9 @@ pub enum BackendEvent {
         denylist_groups: Vec<i64>,
     },
     /// QQ gate mode changed.
-    QqGateMode { mode: String },
+    QqGateMode {
+        mode: echo_adapter::GateMode,
+    },
 }
 
 /// QQ group info for display.

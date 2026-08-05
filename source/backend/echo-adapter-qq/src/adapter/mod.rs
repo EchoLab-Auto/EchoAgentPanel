@@ -1,4 +1,8 @@
 //! QQ/OneBot adapter — wraps echo-server and implements the Adapter trait.
+//!
+//! Filter/gate management and TOML persistence live in `filter.rs`.
+
+mod filter;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -6,15 +10,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use echo_adapter::filter::FilterPipeline;
-use echo_adapter::traits::{Adapter, AdapterConnectionState, AdapterError, AdapterInfo};
+use echo_adapter::traits::{Adapter, AdapterConnectionState, AdapterError, AdapterInfo, GateMode};
 use echo_adapter::types::{AdapterEvent, ChannelType, IncomingMessage, MessageTarget, SendResult};
 use echo_core::{Event as OneBotEvent, MessageEvent, Segment};
 use echo_server::{ConnCallback, Context, HandlerRegistry, Server, ServerConfig};
 use tokio::sync::mpsc;
-
-// Needed for the internal handler's agent processing.
-use echo_agent;
-
 
 use crate::config::QqAdapterConfig;
 
@@ -30,31 +30,33 @@ pub enum QqGateMode {
 }
 
 /// Shared inner state — lives in an Arc so the server task can reference it.
-struct QqInner {
-    config: QqAdapterConfig,
-    active_context: StdMutex<Option<Arc<Context>>>,
-    running: AtomicBool,
-    started_at: StdMutex<Option<i64>>,
-    connected: AtomicBool,
-    self_id: StdMutex<Option<String>>,
-    subscribers: StdMutex<Vec<mpsc::UnboundedSender<AdapterEvent>>>,
-    filter: StdMutex<Option<Arc<FilterPipeline>>>,
-    shutdown_tx: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
-    tracker: echo_server::ConnectionTracker,
-    /// Agent reference (set externally before start).
-    agent: StdMutex<Option<Arc<echo_agent::Agent>>>,
+/// Fields are `pub(crate)` so the message handler (handler.rs) can use them.
+pub(crate) struct QqInner {
+    pub(crate) config: QqAdapterConfig,
+    pub(crate) active_context: StdMutex<Option<Arc<Context>>>,
+    pub(crate) running: AtomicBool,
+    pub(crate) started_at: StdMutex<Option<i64>>,
+    pub(crate) connected: AtomicBool,
+    pub(crate) self_id: StdMutex<Option<String>>,
+    pub(crate) subscribers: StdMutex<Vec<mpsc::UnboundedSender<AdapterEvent>>>,
+    pub(crate) filter: StdMutex<Option<Arc<FilterPipeline>>>,
+    pub(crate) shutdown_tx: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    pub(crate) tracker: echo_server::ConnectionTracker,
+    /// Agent bridge (set externally before start). Adapters depend only on
+    /// the [`echo_adapter::AgentBridge`] trait, not on echo-agent itself.
+    pub(crate) agent_bridge: StdMutex<Option<Arc<dyn echo_adapter::AgentBridge>>>,
     /// Extra handlers to register alongside the internal QQ handler.
-    extra_handlers: StdMutex<Vec<Box<dyn echo_server::Handler>>>,
+    pub(crate) extra_handlers: StdMutex<Vec<Box<dyn echo_server::Handler>>>,
     /// Runtime allowlist overrides (takes precedence over config file values).
-    runtime_allowlist_users: StdMutex<Vec<i64>>,
-    runtime_allowlist_groups: StdMutex<Vec<i64>>,
+    pub(crate) runtime_allowlist_users: StdMutex<Vec<i64>>,
+    pub(crate) runtime_allowlist_groups: StdMutex<Vec<i64>>,
     /// Runtime denylist overrides.
-    runtime_denylist_users: StdMutex<Vec<i64>>,
-    runtime_denylist_groups: StdMutex<Vec<i64>>,
+    pub(crate) runtime_denylist_users: StdMutex<Vec<i64>>,
+    pub(crate) runtime_denylist_groups: StdMutex<Vec<i64>>,
     /// Current gating mode (mutually exclusive).
-    gate_mode: StdMutex<QqGateMode>,
-    /// Path to the config file for persisting gate changes.
-    config_path: StdMutex<Option<String>>,
+    pub(crate) gate_mode: StdMutex<QqGateMode>,
+    /// Shared config store for persisting gate/filter changes.
+    pub(crate) config_store: StdMutex<Option<echo_adapter::ConfigStore>>,
 }
 
 /// Wrapper to make a boxed handler satisfy the `Handler` trait constraint.
@@ -62,9 +64,17 @@ struct BoxedHandler(Box<dyn echo_server::Handler>);
 
 #[async_trait]
 impl echo_server::Handler for BoxedHandler {
-    fn name(&self) -> &str { self.0.name() }
-    fn priority(&self) -> i32 { self.0.priority() }
-    async fn handle(&self, ctx: &echo_server::Context, event: &OneBotEvent) -> echo_server::HandleResult {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+    fn priority(&self) -> i32 {
+        self.0.priority()
+    }
+    async fn handle(
+        &self,
+        ctx: &echo_server::Context,
+        event: &OneBotEvent,
+    ) -> echo_server::HandleResult {
         self.0.handle(ctx, event).await
     }
 }
@@ -101,14 +111,14 @@ impl QqAdapter {
                 filter: StdMutex::new(None), // built below via rebuild_filter_pipeline
                 shutdown_tx: StdMutex::new(None),
                 tracker: echo_server::ConnectionTracker::default(),
-                agent: StdMutex::new(None),
+                agent_bridge: StdMutex::new(None),
                 extra_handlers: StdMutex::new(Vec::new()),
                 runtime_allowlist_users: StdMutex::new(au),
                 runtime_allowlist_groups: StdMutex::new(ag),
                 runtime_denylist_users: StdMutex::new(du),
                 runtime_denylist_groups: StdMutex::new(dg),
                 gate_mode: StdMutex::new(gate_mode),
-                config_path: StdMutex::new(None),
+                config_store: StdMutex::new(None),
             }),
         };
         // Build the pipeline respecting gate mode.
@@ -117,13 +127,23 @@ impl QqAdapter {
     }
 
     /// Set the agent reference — must be called before start().
-    pub fn set_agent(&self, agent: Arc<echo_agent::Agent>) {
-        *self.inner.agent.lock().expect("agent poisoned") = Some(agent);
+    /// Attach the agent bridge (implemented by echo-agent) that routes
+    /// inbound messages into the LLM loop.
+    pub fn set_agent(&self, bridge: Arc<dyn echo_adapter::AgentBridge>) {
+        *self
+            .inner
+            .agent_bridge
+            .lock()
+            .expect("agent bridge poisoned") = Some(bridge);
     }
 
     /// Register an additional handler (e.g. Echo, Help, Admin).
     pub fn add_handler(&self, handler: Box<dyn echo_server::Handler>) {
-        self.inner.extra_handlers.lock().expect("handlers poisoned").push(handler);
+        self.inner
+            .extra_handlers
+            .lock()
+            .expect("handlers poisoned")
+            .push(handler);
     }
 
     /// Get group list via the active QQ connection.
@@ -225,129 +245,7 @@ impl QqAdapter {
         serde_json::to_string(&resp.data).map_err(|e| e.to_string())
     }
 
-    /// Rebuild the filter pipeline from config + runtime overrides and store it.
-    fn rebuild_filter_pipeline(&self) {
-        // Merge runtime overrides into config.
-        let mut cfg = self.inner.config.clone();
-        cfg.filter.allowlist.user_ids = self.inner.runtime_allowlist_users.lock().expect("poisoned").clone();
-        cfg.filter.allowlist.group_ids = self.inner.runtime_allowlist_groups.lock().expect("poisoned").clone();
-        cfg.filter.denylist.user_ids = self.inner.runtime_denylist_users.lock().expect("poisoned").clone();
-        cfg.filter.denylist.group_ids = self.inner.runtime_denylist_groups.lock().expect("poisoned").clone();
-
-        let mode_str = match self.get_gate_mode() {
-            QqGateMode::Allowlist => "allowlist",
-            QqGateMode::Denylist => "denylist",
-            _ => "none",
-        };
-
-        let pipeline = cfg.build_filter_pipeline_gated(mode_str);
-        *self.inner.filter.lock().expect("filter poisoned") = Some(Arc::new(pipeline));
-    }
-
-    /// Update the runtime allowlist. Changes take effect immediately and persist.
-    pub fn update_allowlist(&self, user_ids: Vec<i64>, group_ids: Vec<i64>) {
-        *self.inner.runtime_allowlist_users.lock().expect("poisoned") = user_ids;
-        *self.inner.runtime_allowlist_groups.lock().expect("poisoned") = group_ids;
-        self.rebuild_filter_pipeline();
-        self.persist_filter();
-        tracing::info!("QQ allowlist updated");
-    }
-
-    /// Update the runtime denylist. Changes take effect immediately and persist.
-    pub fn update_denylist(&self, user_ids: Vec<i64>, group_ids: Vec<i64>) {
-        *self.inner.runtime_denylist_users.lock().expect("poisoned") = user_ids;
-        *self.inner.runtime_denylist_groups.lock().expect("poisoned") = group_ids;
-        self.rebuild_filter_pipeline();
-        self.persist_filter();
-        tracing::info!("QQ denylist updated");
-    }
-
-    /// Set the path to the config file for persisting gate changes.
-    pub fn set_config_path(&self, path: String) {
-        *self.inner.config_path.lock().expect("poisoned") = Some(path);
-    }
-
-    /// Persist the current gate mode, allowlist, and denylist to the config
-    /// file by parsing the TOML, patching in new values, and writing back.
-    fn persist_filter(&self) {
-        let path = match self.inner.config_path.lock().expect("poisoned").clone() {
-            Some(p) => p,
-            None => {
-                tracing::warn!("QQ filter persist skipped: no config path set");
-                return;
-            }
-        };
-
-        let filter_cfg = self.get_filter_config();
-        let mode_str = match self.get_gate_mode() {
-            QqGateMode::Allowlist => "allowlist",
-            QqGateMode::Denylist => "denylist",
-            QqGateMode::None => "none",
-        };
-
-        let tmp = format!("{path}.tmp");
-        let result: Result<(), String> = (|| {
-            let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let mut root: toml::Value =
-                toml::from_str(&content).map_err(|e| format!("TOML parse: {e}"))?;
-
-            // Ensure intermediate tables exist (don't panic on missing keys).
-            let root_t = match &mut root {
-                toml::Value::Table(t) => t,
-                _ => return Err("root not a table".into()),
-            };
-            let qq = ensure_table(ensure_table(root_t, "adapters"), "qq");
-
-            qq.insert("gate".into(), toml::Value::Table({
-                let mut t = toml::Table::new();
-                t.insert("mode".into(), toml::Value::String(mode_str.to_string()));
-                t
-            }));
-
-            let filter = ensure_table(qq, "filter");
-            filter.insert("allowlist".into(), toml::Value::Table(build_list_table(
-                &filter_cfg.allowlist.user_ids, &filter_cfg.allowlist.group_ids,
-            )));
-            filter.insert("denylist".into(), toml::Value::Table(build_list_table(
-                &filter_cfg.denylist.user_ids, &filter_cfg.denylist.group_ids,
-            )));
-
-            let updated = toml::to_string_pretty(&root).map_err(|e| format!("TOML serialize: {e}"))?;
-            std::fs::write(&tmp, &updated).map_err(|e| e.to_string())?;
-            std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
-            Ok(())
-        })();
-        if let Err(e) = result {
-            tracing::warn!(error = %e, "failed to persist QQ filter config");
-        } else {
-            tracing::info!(mode = mode_str, "QQ filter config persisted");
-        }
-    }
-
-    /// Set the gating mode. Rebuilds the filter pipeline and persists.
-    pub fn set_gate_mode(&self, mode: QqGateMode) {
-        *self.inner.gate_mode.lock().expect("poisoned") = mode;
-        self.rebuild_filter_pipeline();
-        self.persist_filter();
-        tracing::info!(mode = ?mode, "QQ gate mode updated");
-    }
-
-    /// Get the current gating mode.
-    pub fn get_gate_mode(&self) -> QqGateMode {
-        *self.inner.gate_mode.lock().expect("poisoned")
-    }
-
-    /// Return the current effective filter config (runtime overrides merged).
-    pub fn get_filter_config(&self) -> crate::config::QqFilterConfig {
-        let mut cfg = self.inner.config.filter.clone();
-        cfg.allowlist.user_ids = self.inner.runtime_allowlist_users.lock().expect("poisoned").clone();
-        cfg.allowlist.group_ids = self.inner.runtime_allowlist_groups.lock().expect("poisoned").clone();
-        cfg.denylist.user_ids = self.inner.runtime_denylist_users.lock().expect("poisoned").clone();
-        cfg.denylist.group_ids = self.inner.runtime_denylist_groups.lock().expect("poisoned").clone();
-        cfg
-    }
-
-    fn convert_message(event: &OneBotEvent) -> Option<IncomingMessage> {
+    pub(crate) fn convert_message(event: &OneBotEvent) -> Option<IncomingMessage> {
         let msg = event.as_message()?;
         if matches!(msg, MessageEvent::Unknown) {
             return None;
@@ -357,7 +255,12 @@ impl QqAdapter {
             return None;
         }
         let (channel, group_name) = if let Some(gid) = msg.group_id() {
-            (ChannelType::Group { group_id: gid.to_string() }, None)
+            (
+                ChannelType::Group {
+                    group_id: gid.to_string(),
+                },
+                None,
+            )
         } else {
             (ChannelType::Direct, None)
         };
@@ -374,7 +277,6 @@ impl QqAdapter {
             metadata: serde_json::Value::Null,
         })
     }
-
 }
 
 #[async_trait]
@@ -433,134 +335,6 @@ impl Adapter for QqAdapter {
 
         let inner = self.inner.clone();
 
-        // The handler that bridges OneBot events into the agent.
-        struct QqHandler {
-            inner: Arc<QqInner>,
-        }
-
-        #[async_trait]
-        impl echo_server::Handler for QqHandler {
-            fn name(&self) -> &str {
-                "qq-handler"
-            }
-            fn priority(&self) -> i32 {
-                1000
-            }
-            async fn handle(
-                &self,
-                ctx: &Context,
-                event: &OneBotEvent,
-            ) -> echo_server::HandleResult {
-                // Store context for outbound sends.
-                *self.inner.active_context.lock().expect("ctx poisoned") =
-                    Some(Arc::new(ctx.clone()));
-
-                let Some(msg) = QqAdapter::convert_message(event) else {
-                    return echo_server::HandleResult::Pass;
-                };
-
-                // Trigger gating.
-                let trigger = &self.inner.config.trigger;
-                if msg.channel.is_group() {
-                    if !trigger.group_at_reply || !msg.at_me {
-                        tracing::debug!(user = %msg.user_id, "QQ message dropped by trigger gating (not @me or group reply disabled)");
-                        return echo_server::HandleResult::Pass;
-                    }
-                } else if !trigger.dm_auto_reply {
-                    tracing::debug!(user = %msg.user_id, "QQ DM dropped: dm_auto_reply disabled");
-                    return echo_server::HandleResult::Pass;
-                }
-
-                // Filter pipeline — clone Arc out of the lock so the guard
-                // is dropped before .await.
-                let pipeline_opt = self.inner.filter.lock().expect("filter poisoned").clone();
-                if let Some(pipeline) = pipeline_opt {
-                    let (accepted, block_reply) = pipeline.should_accept(&msg).await;
-                    if !accepted {
-                        tracing::info!(user = %msg.user_id, channel = %msg.channel, "QQ message blocked by filter pipeline");
-                        if let Some(reply) = block_reply {
-                            let _ = ctx.reply_to(
-                                event.as_message().expect("already checked"),
-                                reply,
-                            ).await;
-                        }
-                        return echo_server::HandleResult::Handled;
-                    }
-                }
-
-                tracing::debug!(user = %msg.user_id, channel = %msg.channel, "QQ message accepted, routing to agent");
-
-                // If agent is set, process through it.
-                let agent = self.inner.agent.lock().expect("agent poisoned").clone();
-                if let Some(agent) = agent {
-                    use echo_agent::SessionKey;
-
-                    let key = SessionKey {
-                        platform: "qq".into(),
-                        scope: if msg.channel.is_group() { "group".into() } else { "dm".into() },
-                        scope_id: msg.channel.group_id().unwrap_or("").to_string(),
-                        user_id: msg.user_id.clone(),
-                    };
-                    let session = agent.sessions.get_or_create(
-                        &key,
-                        msg.user_name.clone(),
-                        msg.group_name.clone(),
-                    );
-                    let session_id = session.id.clone();
-
-                    agent.emit(echo_agent::BackendEvent::SessionUpdated {
-                        session: session.info(String::new()),
-                    });
-                    agent.emit(echo_agent::BackendEvent::MessageReceived {
-                        session_id: session_id.clone(),
-                        adapter_name: "qq".into(),
-                        platform: "qq".into(),
-                        user_id: msg.user_id.clone(),
-                        user_name: msg.user_name.clone(),
-                        channel: format!("{}", msg.channel),
-                        group_name: msg.group_name.clone(),
-                        content: msg.content.clone(),
-                        timestamp: msg.timestamp,
-                    });
-
-                    match agent.process_message(&session, &msg.content).await {
-                        Ok(reply) => {
-                            if !reply.trim().is_empty() {
-                                let _ = ctx.reply_to(
-                                    event.as_message().expect("already checked"),
-                                    reply.clone(),
-                                ).await;
-                                agent.emit(echo_agent::BackendEvent::MessageSent {
-                                    session_id,
-                                    content: reply,
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "agent processing failed");
-                            agent.emit(echo_agent::BackendEvent::Error {
-                                session_id: Some(session_id.clone()),
-                                message: e.to_string(),
-                            });
-                            let _ = ctx.reply_to(
-                                event.as_message().expect("already checked"),
-                                "（处理消息出错，请稍后再试）".to_string(),
-                            ).await;
-                        }
-                    }
-                } else {
-                    // No agent — forward to subscribers.
-                    let adapter_event = AdapterEvent::MessageReceived(msg);
-                    let subs = self.inner.subscribers.lock().expect("subs poisoned");
-                    for tx in subs.iter() {
-                        let _ = tx.send(adapter_event.clone());
-                    }
-                }
-
-                echo_server::HandleResult::Handled
-            }
-        }
-
         let bind_addr = server_cfg.bind_address.clone();
 
         let listener = tokio::net::TcpListener::bind(&bind_addr)
@@ -568,7 +342,10 @@ impl Adapter for QqAdapter {
             .map_err(|e| AdapterError::Internal(format!("bind {}: {e}", bind_addr)))?;
 
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        *inner.shutdown_tx.lock().map_err(|e| AdapterError::Internal(e.to_string()))? = Some(shutdown_tx);
+        *inner
+            .shutdown_tx
+            .lock()
+            .map_err(|e| AdapterError::Internal(e.to_string()))? = Some(shutdown_tx);
 
         let inner_cb = inner.clone();
         let conn_cb: ConnCallback = Arc::new(move |connected: bool, self_id: i64| {
@@ -579,12 +356,9 @@ impl Adapter for QqAdapter {
                 tracing::warn!("NapCat client disconnected");
             }
             inner_cb.connected.store(connected, Ordering::SeqCst);
-            if let Some(ref agent) = *inner_cb.agent.lock().expect("agent poisoned") {
-                agent.emit(echo_agent::BackendEvent::AdapterStateChanged {
-                    adapter_name: "qq".into(),
-                    connected,
-                    self_id: Some(self_id.to_string()),
-                });
+            if let Some(ref bridge) = *inner_cb.agent_bridge.lock().expect("agent bridge poisoned")
+            {
+                bridge.on_connection_state("qq", connected, Some(self_id.to_string()));
             }
         });
 
@@ -596,13 +370,18 @@ impl Adapter for QqAdapter {
         for h in extra {
             registry.register(BoxedHandler(h));
         }
-        registry.register(QqHandler { inner: inner.clone() });
+        registry.register(crate::handler::QqHandler::new(inner.clone()));
 
         inner.running.store(true, Ordering::SeqCst);
         *inner.started_at.lock().expect("started_at poisoned") =
             Some(chrono::Utc::now().timestamp());
 
-        let server = Server::new(server_cfg, Arc::new(registry), inner.tracker.clone(), Some(conn_cb));
+        let server = Server::new(
+            server_cfg,
+            Arc::new(registry),
+            inner.tracker.clone(),
+            Some(conn_cb),
+        );
 
         tokio::spawn(async move {
             let run_fut = server.run_with_listener(listener);
@@ -620,10 +399,12 @@ impl Adapter for QqAdapter {
         });
 
         // Auto-configure NapCat reverse WebSocket (background).
-        // NapCat runs in Docker — use host.docker.internal to reach the host.
+        // NapCat usually runs in Docker — reach the host via the configured
+        // host (default host.docker.internal).
         let napcat_url = self.inner.config.napcat_webui_url.clone();
+        let napcat_host = self.inner.config.napcat_host.clone();
         let port = bind_addr.split(':').next_back().unwrap_or("3131");
-        let ws_url = format!("ws://host.docker.internal:{port}");
+        let ws_url = format!("ws://{napcat_host}:{port}");
         let token = self.inner.config.server.access_token.clone();
         tokio::spawn(async move {
             let napcat = crate::NapCatClient::new(&napcat_url);
@@ -636,10 +417,14 @@ impl Adapter for QqAdapter {
                     }
                 }
                 crate::napcat::NapCatState::WaitingForLogin => {
-                    tracing::info!("NapCat running, not logged in — will try auto-config after login");
+                    tracing::info!(
+                        "NapCat running, not logged in — will try auto-config after login"
+                    );
                 }
                 crate::napcat::NapCatState::Unreachable => {
-                    tracing::info!("NapCat WebUI not reachable at {napcat_url} — skipping auto-config");
+                    tracing::info!(
+                        "NapCat WebUI not reachable at {napcat_url} — skipping auto-config"
+                    );
                 }
             }
         });
@@ -698,17 +483,26 @@ impl Adapter for QqAdapter {
                             cfg.allowlist.user_ids.iter().cloned().collect();
                         let allow_groups: std::collections::HashSet<i64> =
                             cfg.allowlist.group_ids.iter().cloned().collect();
-                        if !allow_users.is_empty() && user_id != 0 && !allow_users.contains(&user_id) {
+                        if !allow_users.is_empty()
+                            && user_id != 0
+                            && !allow_users.contains(&user_id)
+                        {
                             tracing::info!(%user_id, "send_message blocked: user not allowlisted");
-                            return Ok(SendResult { message_id: None, success: false,
-                                error: Some(format!("user {user_id} is not allowlisted")) });
+                            return Ok(SendResult {
+                                message_id: None,
+                                success: false,
+                                error: Some(format!("user {user_id} is not allowlisted")),
+                            });
                         }
                         if !allow_groups.is_empty() {
                             if let Some(gid) = group_id {
                                 if !allow_groups.contains(&gid) {
                                     tracing::info!(%gid, "send_message blocked: group not allowlisted");
-                                    return Ok(SendResult { message_id: None, success: false,
-                                        error: Some(format!("group {gid} is not allowlisted")) });
+                                    return Ok(SendResult {
+                                        message_id: None,
+                                        success: false,
+                                        error: Some(format!("group {gid} is not allowlisted")),
+                                    });
                                 }
                             }
                         }
@@ -720,20 +514,28 @@ impl Adapter for QqAdapter {
                             cfg.denylist.group_ids.iter().cloned().collect();
                         if !deny_users.is_empty() && user_id != 0 && deny_users.contains(&user_id) {
                             tracing::info!(%user_id, "send_message blocked: user denylisted");
-                            return Ok(SendResult { message_id: None, success: false,
-                                error: Some(format!("user {user_id} is denylisted")) });
+                            return Ok(SendResult {
+                                message_id: None,
+                                success: false,
+                                error: Some(format!("user {user_id} is denylisted")),
+                            });
                         }
                         if !deny_groups.is_empty() {
                             if let Some(gid) = group_id {
                                 if deny_groups.contains(&gid) {
                                     tracing::info!(%gid, "send_message blocked: group denylisted");
-                                    return Ok(SendResult { message_id: None, success: false,
-                                        error: Some(format!("group {gid} is denylisted")) });
+                                    return Ok(SendResult {
+                                        message_id: None,
+                                        success: false,
+                                        error: Some(format!("group {gid} is denylisted")),
+                                    });
                                 }
                             }
                         }
                     }
-                    QqGateMode::None => unreachable!(),
+                    // Never reached: the outer guard filters out None. A
+                    // fallback arm keeps this robust if a new mode is added.
+                    _ => {}
                 }
             }
         }
@@ -835,50 +637,162 @@ impl Adapter for QqAdapter {
     fn get_filter_info(&self) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
         let cfg = self.get_filter_config();
         (
-            cfg.allowlist.user_ids.iter().map(|id| id.to_string()).collect(),
-            cfg.allowlist.group_ids.iter().map(|id| id.to_string()).collect(),
-            cfg.denylist.user_ids.iter().map(|id| id.to_string()).collect(),
-            cfg.denylist.group_ids.iter().map(|id| id.to_string()).collect(),
+            cfg.allowlist
+                .user_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
+            cfg.allowlist
+                .group_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
+            cfg.denylist
+                .user_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
+            cfg.denylist
+                .group_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
         )
     }
 
-    fn set_gate_mode(&self, mode: &str) {
+    fn set_gate_mode(&self, mode: GateMode) {
         let m = match mode {
-            "allowlist" => QqGateMode::Allowlist,
-            "denylist" => QqGateMode::Denylist,
-            _ => QqGateMode::None,
+            GateMode::Allowlist => QqGateMode::Allowlist,
+            GateMode::Denylist => QqGateMode::Denylist,
+            GateMode::None => QqGateMode::None,
         };
         self.set_gate_mode(m);
     }
 
-    fn get_gate_mode(&self) -> String {
+    fn get_gate_mode(&self) -> GateMode {
         match self.get_gate_mode() {
-            QqGateMode::Allowlist => "allowlist".into(),
-            QqGateMode::Denylist => "denylist".into(),
-            QqGateMode::None => "none".into(),
+            QqGateMode::Allowlist => GateMode::Allowlist,
+            QqGateMode::Denylist => GateMode::Denylist,
+            QqGateMode::None => GateMode::None,
         }
     }
 }
 
-// ── TOML helpers ───────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use echo_core::Event;
 
-/// Get or create a sub-table inside `parent`.
-fn ensure_table<'a>(parent: &'a mut toml::Table, key: &str) -> &'a mut toml::Table {
-    if !parent.contains_key(key) {
-        parent.insert(key.into(), toml::Value::Table(toml::Table::new()));
+    fn private_event(text: &str) -> Event {
+        serde_json::from_value(serde_json::json!({
+            "post_type": "message",
+            "message_type": "private",
+            "time": 1700000000,
+            "self_id": 10001,
+            "sub_type": "friend",
+            "message_id": 42,
+            "user_id": 123456,
+            "message": [{"type": "text", "data": {"text": text}}],
+            "raw_message": text,
+            "font": 0,
+            "sender": {"user_id": 123456, "nickname": "tester"}
+        }))
+        .unwrap()
     }
-    match parent.get_mut(key).unwrap() {
-        toml::Value::Table(t) => t,
-        _ => unreachable!(),
-    }
-}
 
-/// Build an allowlist / denylist TOML table.
-fn build_list_table(user_ids: &[i64], group_ids: &[i64]) -> toml::Table {
-    let mut t = toml::Table::new();
-    t.insert("user_ids".into(), toml::Value::Array(user_ids.iter().map(|&id| toml::Value::Integer(id)).collect()));
-    t.insert("group_ids".into(), toml::Value::Array(group_ids.iter().map(|&id| toml::Value::Integer(id)).collect()));
-    t
+    fn group_event(text: &str, at_me: bool) -> Event {
+        let mut segments = vec![serde_json::json!({"type": "text", "data": {"text": text}})];
+        if at_me {
+            segments.insert(
+                0,
+                serde_json::json!({"type": "at", "data": {"qq": "10001"}}),
+            );
+        }
+        serde_json::from_value(serde_json::json!({
+            "post_type": "message",
+            "message_type": "group",
+            "time": 1700000000,
+            "self_id": 10001,
+            "sub_type": "normal",
+            "message_id": 43,
+            "group_id": 999,
+            "user_id": 123456,
+            "message": segments,
+            "raw_message": text,
+            "font": 0,
+            "sender": {"user_id": 123456, "nickname": "tester", "card": ""}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn converts_private_message_to_direct_channel() {
+        let msg = QqAdapter::convert_message(&private_event("hello")).expect("converted");
+        assert_eq!(msg.platform, "qq");
+        assert_eq!(msg.user_id, "123456");
+        assert_eq!(msg.user_name, "tester");
+        assert!(matches!(msg.channel, ChannelType::Direct));
+        assert_eq!(msg.content, "hello");
+        assert_eq!(msg.timestamp, 1700000000);
+        assert!(!msg.at_me);
+    }
+
+    #[test]
+    fn converts_group_message_with_group_id() {
+        let msg = QqAdapter::convert_message(&group_event("hi all", false)).expect("converted");
+        match msg.channel {
+            ChannelType::Group { group_id } => assert_eq!(group_id, "999"),
+            other => panic!("expected group channel, got {other:?}"),
+        }
+        assert!(!msg.at_me);
+    }
+
+    #[test]
+    fn detects_at_me_in_group_message() {
+        let msg = QqAdapter::convert_message(&group_event("hi", true)).expect("converted");
+        assert!(msg.at_me);
+    }
+
+    #[test]
+    fn rejects_blank_content() {
+        assert!(QqAdapter::convert_message(&private_event("   ")).is_none());
+        assert!(QqAdapter::convert_message(&private_event("")).is_none());
+    }
+
+    #[test]
+    fn rejects_non_message_events() {
+        let heartbeat = serde_json::from_value(serde_json::json!({
+            "post_type": "meta_event",
+            "meta_event_type": "heartbeat",
+            "time": 1700000000,
+            "self_id": 10001,
+            "interval": 5000,
+            "status": {"online": true}
+        }))
+        .unwrap();
+        assert!(QqAdapter::convert_message(&heartbeat).is_none());
+    }
+
+    #[test]
+    fn converts_cq_image_segments_without_content() {
+        // A message with only an image has no plain text — content empty.
+        let event = serde_json::from_value(serde_json::json!({
+            "post_type": "message",
+            "message_type": "private",
+            "time": 1700000000,
+            "self_id": 10001,
+            "sub_type": "friend",
+            "message_id": 42,
+            "user_id": 123456,
+            "message": [{"type": "image", "data": {"file": "abc.png"}}],
+            "raw_message": "[CQ:image,file=abc.png]",
+            "font": 0,
+            "sender": {"user_id": 123456, "nickname": "tester"}
+        }))
+        .unwrap();
+        // Image-only messages carry no text, so they are dropped.
+        assert!(QqAdapter::convert_message(&event).is_none());
+    }
 }
 
 // ── TOML section replacer ─────────────────────────────────────────────────

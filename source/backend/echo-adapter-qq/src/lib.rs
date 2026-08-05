@@ -11,10 +11,9 @@
 
 pub mod adapter;
 pub mod config;
+pub mod handler;
 pub mod napcat;
-pub mod tools;
 
 pub use adapter::QqAdapter;
 pub use config::{QqAdapterConfig, QqFilterConfig, QqServerConfig, QqTriggerConfig};
 pub use napcat::NapCatClient;
-pub use tools::register_qq_tools;

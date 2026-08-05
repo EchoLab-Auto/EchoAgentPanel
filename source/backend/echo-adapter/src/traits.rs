@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::filter::FilterPipeline;
-use crate::types::{AdapterEvent, MessageTarget, SendResult};
+use crate::types::{AdapterEvent, IncomingMessage, MessageTarget, SendResult};
 
 /// Connection state of an adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +41,52 @@ pub struct AdapterInfo {
     pub platform: String,
     /// Whether this adapter is configured and enabled.
     pub configured: bool,
+}
+
+/// Bridge that platform adapters use to route inbound messages into the
+/// agent framework, without depending on echo-agent directly.
+///
+/// The agent framework implements this trait; adapters hold an
+/// `Arc<dyn AgentBridge>` and call [`handle_incoming_message`]
+/// (AgentBridge::handle_incoming_message) from their handlers.
+#[async_trait]
+pub trait AgentBridge: Send + Sync {
+    /// Route one inbound platform message through the agent.
+    ///
+    /// The bridge owns session lookup, agent event emission, and LLM
+    /// processing. Returns the reply text to send back, or `None` when no
+    /// reply is needed; `Err` carries a user-facing error message.
+    async fn handle_incoming_message(&self, msg: IncomingMessage)
+        -> Result<Option<String>, String>;
+
+    /// Notify the agent that an adapter's connection state changed.
+    fn on_connection_state(&self, adapter_name: &str, connected: bool, self_id: Option<String>);
+}
+
+/// Gating mode: which users/groups may interact with the bot.
+///
+/// Serialised as `"none" | "allowlist" | "denylist"` (snake_case), matching
+/// the legacy string-based protocol so WS payloads stay wire-compatible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateMode {
+    /// Everyone may interact.
+    #[default]
+    None,
+    /// Only allowlisted users/groups may interact.
+    Allowlist,
+    /// Allowlisted-excluded: only denylisted users/groups are blocked.
+    Denylist,
+}
+
+impl GateMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GateMode::None => "none",
+            GateMode::Allowlist => "allowlist",
+            GateMode::Denylist => "denylist",
+        }
+    }
 }
 
 /// Adapter errors.
@@ -138,11 +184,11 @@ pub trait Adapter: Send + Sync {
         (vec![], vec![], vec![], vec![])
     }
 
-    /// Set the gating mode ("none", "allowlist", "denylist").  Default: no-op.
-    fn set_gate_mode(&self, _mode: &str) {}
+    /// Set the gating mode.  Default: no-op.
+    fn set_gate_mode(&self, _mode: GateMode) {}
 
-    /// Get the current gating mode.  Default: "none".
-    fn get_gate_mode(&self) -> String {
-        "none".into()
+    /// Get the current gating mode.  Default: [`GateMode::None`].
+    fn get_gate_mode(&self) -> GateMode {
+        GateMode::None
     }
 }

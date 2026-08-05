@@ -1,6 +1,9 @@
 //! QQ-specific tools that the LLM can invoke.
 //!
-//! These tools delegate to `QqAdapter` for actual QQ API calls.
+//! Lives in the binary crate (not echo-adapter-qq) because tools must
+//! implement `echo_agent::Tool` — the adapter crate deliberately has no
+//! dependency on echo-agent. These tools delegate to `QqAdapter` for actual
+//! QQ API calls.
 
 use std::sync::Arc;
 
@@ -9,16 +12,10 @@ use echo_adapter::traits::Adapter;
 use echo_adapter::types::{ChannelType, MessageTarget};
 use serde_json::{json, Value};
 
-use crate::QqAdapter;
+use echo_adapter_qq::QqAdapter;
 
-/// Register QQ tools into an echo-agent `ToolRegistry`.
-///
-/// Called from the binary layer (main.rs) where both echo-agent and
-/// echo-adapter-qq crates are visible.
-pub fn register_qq_tools(
-    registry: &mut echo_agent::ToolRegistry,
-    qq_adapter: Arc<QqAdapter>,
-) {
+/// Register QQ tools into the agent's `ToolRegistry`.
+pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Arc<QqAdapter>) {
     let qq = qq_adapter.clone();
     registry.register(Arc::new(QqToolWrapper {
         name: "send_group_msg".into(),
@@ -37,7 +34,8 @@ pub fn register_qq_tools(
     let qq = qq_adapter.clone();
     registry.register(Arc::new(QqToolWrapper {
         name: "send_private_msg".into(),
-        description: "Send a text message to a QQ user privately. Requires user_id and content.".into(),
+        description: "Send a text message to a QQ user privately. Requires user_id and content."
+            .into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -111,7 +109,9 @@ impl echo_agent::Tool for QqToolWrapper {
                     .ok_or_else(|| ToolError::InvalidArguments("content required".into()))?;
                 let target = MessageTarget {
                     adapter_name: "qq".into(),
-                    channel: ChannelType::Group { group_id: group_id.to_string() },
+                    channel: ChannelType::Group {
+                        group_id: group_id.to_string(),
+                    },
                     user_id: String::new(),
                 };
                 match self.adapter.send_message(&target, content).await {
@@ -170,22 +170,20 @@ impl echo_agent::Tool for QqToolWrapper {
                     Err(e) => Err(ToolError::Execution(e)),
                 }
             }
-            "get_group_list" => {
-                match self.adapter.get_group_list().await {
-                    Ok(groups) => {
-                        let lines: Vec<String> = groups
-                            .iter()
-                            .map(|(gid, name)| format!("  {gid}: {name}"))
-                            .collect();
-                        if lines.is_empty() {
-                            Ok("no groups joined".into())
-                        } else {
-                            Ok(format!("{} groups:\n{}", groups.len(), lines.join("\n")))
-                        }
+            "get_group_list" => match self.adapter.get_group_list().await {
+                Ok(groups) => {
+                    let lines: Vec<String> = groups
+                        .iter()
+                        .map(|(gid, name)| format!("  {gid}: {name}"))
+                        .collect();
+                    if lines.is_empty() {
+                        Ok("no groups joined".into())
+                    } else {
+                        Ok(format!("{} groups:\n{}", groups.len(), lines.join("\n")))
                     }
-                    Err(e) => Err(ToolError::Execution(e)),
                 }
-            }
+                Err(e) => Err(ToolError::Execution(e)),
+            },
             other => Err(ToolError::Execution(format!("unknown QQ tool: {other}"))),
         }
     }

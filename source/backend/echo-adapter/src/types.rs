@@ -103,9 +103,7 @@ pub enum AdapterEvent {
         self_id: Option<String>,
     },
     /// The adapter was stopped.
-    Stopped {
-        adapter_name: String,
-    },
+    Stopped { adapter_name: String },
     /// An error occurred in the adapter.
     Error {
         adapter_name: String,
@@ -120,14 +118,20 @@ mod tests {
     #[test]
     fn channel_type_is_group() {
         assert!(!ChannelType::Direct.is_group());
-        assert!(ChannelType::Group { group_id: "123".into() }.is_group());
+        assert!(ChannelType::Group {
+            group_id: "123".into()
+        }
+        .is_group());
     }
 
     #[test]
     fn channel_type_group_id() {
         assert_eq!(ChannelType::Direct.group_id(), None);
         assert_eq!(
-            ChannelType::Group { group_id: "456".into() }.group_id(),
+            ChannelType::Group {
+                group_id: "456".into()
+            }
+            .group_id(),
             Some("456")
         );
     }
@@ -136,7 +140,12 @@ mod tests {
     fn channel_type_display() {
         assert_eq!(format!("{}", ChannelType::Direct), "direct");
         assert_eq!(
-            format!("{}", ChannelType::Group { group_id: "789".into() }),
+            format!(
+                "{}",
+                ChannelType::Group {
+                    group_id: "789".into()
+                }
+            ),
             "group:789"
         );
     }
@@ -144,6 +153,12 @@ mod tests {
     #[test]
     fn channel_type_scope() {
         assert_eq!(ChannelType::Direct.as_scope(), "dm");
-        assert_eq!(ChannelType::Group { group_id: "x".into() }.as_scope(), "group");
+        assert_eq!(
+            ChannelType::Group {
+                group_id: "x".into()
+            }
+            .as_scope(),
+            "group"
+        );
     }
 }

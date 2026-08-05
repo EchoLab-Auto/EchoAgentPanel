@@ -1,7 +1,8 @@
 //! EchoAgentPanel — extensible agent framework with optional platform adapters.
 //!
-//! Default (no adapters): terminal UI only.
-//! Add `[adapters.qq] enabled = true` to your config to enable QQ.
+//! 分离部署：
+//! - `--panel`（默认）: 终端 UI，通过 WebSocket 连接远程 Core。
+//! - `--core`: Agent 核心，运行 QQ 适配器与 management WebSocket 服务。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,8 +16,9 @@ use tracing_subscriber::EnvFilter;
 mod config;
 mod handlers;
 mod management;
+mod qq_tools;
 
-use config::load;
+use config::{CoreConfig, PanelConfig};
 use echo_adapter::traits::Adapter;
 use echo_server::ConnectionTracker;
 
@@ -25,51 +27,88 @@ use echo_server::ConnectionTracker;
 #[command(version, about)]
 struct Args {
     /// Path to the TOML configuration file.
-    #[arg(short, long, default_value = "config/echo-agent-panel.toml")]
-    config: PathBuf,
-    /// Run without the terminal UI (server only).
-    #[arg(long)]
-    headless: bool,
-    /// Connect to a remote Core via WebSocket instead of running in-process.
+    /// Default: config/echo-agent-panel.toml (Panel) / echo-agent-core.toml (Core).
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+    /// Run as Core: agent + QQ adapter + management WS server (no TUI).
+    #[arg(long, group = "mode")]
+    core: bool,
+    /// Run as Panel: TUI connecting to a remote Core (default).
+    #[arg(long, group = "mode")]
+    panel: bool,
+    /// Override the Core WebSocket address (Panel mode).
     /// e.g. `--connect ws://127.0.0.1:3132`
     #[arg(long)]
     connect: Option<String>,
 }
 
+impl Args {
+    /// Resolve the config path for the selected mode.
+    fn config_path(&self) -> PathBuf {
+        self.config.clone().unwrap_or_else(|| {
+            if self.core {
+                PathBuf::from("config/echo-agent-core.toml")
+            } else {
+                PathBuf::from("config/echo-agent-panel.toml")
+            }
+        })
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let path = args.config_path();
+    if args.core {
+        let cfg = CoreConfig::load(&path)?;
+        run_core(args, cfg).await
+    } else {
+        let cfg = PanelConfig::load(&path)?;
+        run_panel(args, cfg).await
+    }
+}
 
-    // ── Panel-only mode: connect to remote Core via WS, run TUI ──
-    if let Some(ref core_url) = args.connect {
-        init_tracing_simple()?;
-        let theme = echo_tui::Theme::dark();
-        match echo_tui::Backend::connect_ws(core_url).await {
-            Ok(backend) => {
-                if let Err(e) = echo_tui::run_tui_ws(backend, theme).await {
-                    tracing::warn!(error = %e, "tui terminated");
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to connect to Core");
-                anyhow::bail!("Cannot connect to Core at {core_url}: {e}");
+// ── Panel 模式：TUI + 远程 Core ────────────────────────────────────────────
+
+async fn run_panel(args: Args, cfg: PanelConfig) -> Result<()> {
+    init_tracing(&cfg.logging, cfg.tui.enabled)?;
+
+    let core_url = args.connect.unwrap_or(cfg.core.connect_url);
+    let theme = if cfg.tui.theme == "light" {
+        echo_tui::Theme::light()
+    } else {
+        echo_tui::Theme::dark()
+    };
+
+    info!(core = %core_url, theme = %cfg.tui.theme, "connecting to Core");
+    match echo_tui::Backend::connect_ws(&core_url).await {
+        Ok(backend) => {
+            if let Err(e) = echo_tui::run_tui_ws(backend, theme).await {
+                warn!(error = %e, "tui terminated");
             }
         }
-        return Ok(());
+        Err(e) => {
+            warn!(error = %e, "failed to connect to Core");
+            anyhow::bail!("Cannot connect to Core at {core_url}: {e}");
+        }
     }
+    Ok(())
+}
 
-    let config = load(&args.config)?;
-    init_tracing(&config.logging, config.tui.enabled && !args.headless)?;
+// ── Core 模式：Agent + QQ 适配器 + management WS 服务 ──────────────────────
+
+async fn run_core(args: Args, cfg: CoreConfig) -> Result<()> {
+    init_tracing(&cfg.logging, false)?;
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     let tracker = ConnectionTracker::default();
 
     // ---- agent framework ----
-    let skills = echo_agent::SkillRegistry::discover(&config.agent.skills_dir)
+    let skills = echo_agent::SkillRegistry::discover(&cfg.agent.skills_dir)
         .map_err(|e| anyhow::anyhow!("failed to load skills: {e}"))?;
     info!(skills = ?skills.names(), "skills discovered");
 
-    let mut provider_cfg = config.agent.clone();
+    let mut provider_cfg = cfg.agent.clone();
     provider_cfg.apply_active_profile();
     // Fallback: if top-level provider is still empty but profiles exist, use the first one.
     if provider_cfg.provider.is_empty() {
@@ -90,9 +129,12 @@ async fn main() -> Result<()> {
             "anthropic" | "claude" => "ANTHROPIC_API_KEY",
             _ => "OPENAI_API_KEY",
         };
-        warn!("API key not set — use /api key <key> in TUI or set {env_var} env var");
+        warn!("API key not set — use /api key <key> in Panel or set {env_var} env var");
     } else {
-        info!("API key is configured (length={})", provider_cfg.api_key.len());
+        info!(
+            "API key is configured (length={})",
+            provider_cfg.api_key.len()
+        );
     }
 
     let provider = echo_agent::llm::create_provider(&provider_cfg)?;
@@ -106,13 +148,13 @@ async fn main() -> Result<()> {
 
     // ---- QQ adapter (always registered, auto-started only when enabled) ----
     let qq_adapter: Arc<echo_adapter_qq::QqAdapter> =
-        Arc::new(echo_adapter_qq::QqAdapter::new(config.qq_adapter.clone()));
-    echo_adapter_qq::register_qq_tools(&mut tools, qq_adapter.clone());
+        Arc::new(echo_adapter_qq::QqAdapter::new(cfg.qq_adapter.clone()));
+    crate::qq_tools::register_qq_tools(&mut tools, qq_adapter.clone());
     adapter_registry.register(qq_adapter.clone());
-    if config.qq_adapter.enabled {
+    if cfg.qq_adapter.enabled {
         info!("QQ adapter configured — will auto-start");
     } else {
-        info!("QQ adapter registered — use /adapters → [s] start in TUI");
+        info!("QQ adapter registered — use /adapters → [s] start in Panel");
     }
 
     let adapters = Arc::new(adapter_registry);
@@ -124,25 +166,21 @@ async fn main() -> Result<()> {
     // Create the agent.
     let agent = echo_agent::Agent::new(
         Arc::from(provider),
-        config.agent.clone(),
+        cfg.agent.clone(),
         skills,
         tools,
         adapters,
     );
-    agent.set_config_path(args.config.clone());
+    // One shared ConfigStore: Agent (`[agent]`) and QqAdapter
+    // (`[adapters.qq]`) persist through the same store, so concurrent TOML
+    // writes cannot lose each other's sections.
+    let config_store = echo_adapter::ConfigStore::new(args.config_path());
+    agent.set_config_store(config_store.clone());
 
-    // ---- Frontend bridge (TUI / management WS) ----
-    let needs_bridge = config.tui.enabled || args.headless;
-    let (bridge, handle): (Option<Arc<echo_agent::BackendBridge>>, _) = if needs_bridge {
-        let (b, h) = echo_agent::create_bridge();
-        (Some(Arc::new(b)), Some(Arc::new(h)))
-    } else {
-        (None, None)
-    };
-
-    if let Some(handle) = handle {
-        agent.attach(handle);
-    }
+    // ---- Frontend bridge (management WS) ----
+    let (bridge, handle) = echo_agent::create_bridge();
+    let bridge = Arc::new(bridge);
+    agent.attach(Arc::new(handle));
 
     let agent = Arc::new(agent);
     // Restore persisted sessions and start periodic save.
@@ -153,13 +191,18 @@ async fn main() -> Result<()> {
     agent.start_session_save_task();
 
     // ---- Wire agent into QQ adapter ----
-    qq_adapter.set_config_path(args.config.to_string_lossy().to_string());
-    qq_adapter.set_agent(agent.clone());
-    qq_adapter.add_handler(Box::new(handlers::EchoHandler::new(&config.bot.command_prefix)));
-    qq_adapter.add_handler(Box::new(handlers::HelpHandler::new(&config.bot.command_prefix)));
+    qq_adapter.set_config_store(config_store.clone());
+    // The adapter only sees the AgentBridge trait — no direct echo-agent dep.
+    qq_adapter.set_agent(Arc::new(echo_agent::AdapterBridge::new(agent.clone())));
+    qq_adapter.add_handler(Box::new(handlers::EchoHandler::new(
+        &cfg.bot.command_prefix,
+    )));
+    qq_adapter.add_handler(Box::new(handlers::HelpHandler::new(
+        &cfg.bot.command_prefix,
+    )));
     qq_adapter.add_handler(Box::new(handlers::AdminHandler::new(
-        &config.bot.command_prefix,
-        config.bot.owner_qq,
+        &cfg.bot.command_prefix,
+        cfg.bot.owner_qq,
         shutdown_tx,
         tracker.clone(),
     )));
@@ -177,63 +220,42 @@ async fn main() -> Result<()> {
     });
 
     // ---- Auto-start QQ adapter if enabled ----
-    if config.qq_adapter.enabled {
-        qq_adapter.start().await.map_err(|e| anyhow::anyhow!("QQ adapter start failed: {e}"))?;
+    if cfg.qq_adapter.enabled {
+        qq_adapter
+            .start()
+            .await
+            .map_err(|e| anyhow::anyhow!("QQ adapter start failed: {e}"))?;
     }
 
-    // ---- Management WS server (for remote Panel in headless mode) ----
-    if args.headless {
-        let mgmt_addr = config.core.management_address.clone();
-        let mgmt_agent = agent.clone();
-        let mgmt_bridge = bridge.clone();
-        tokio::spawn(async move {
-            if let Some(b) = mgmt_bridge {
-                if let Err(e) = management::serve(&mgmt_addr, b, mgmt_agent).await {
-                    warn!(error = %e, "management WS server stopped");
-                }
-            }
-        });
-    }
-
-    // ---- TUI (only in non-headless mode) ----
-    let tui_theme = if config.tui.theme == "light" {
-        echo_tui::Theme::light()
-    } else {
-        echo_tui::Theme::dark()
-    };
-
-    let tui_task = if config.tui.enabled && !args.headless {
-        bridge.map(|bridge| tokio::spawn(async move {
-            if let Err(e) = echo_tui::run_tui(bridge, tui_theme).await {
-                warn!(error = %e, "tui terminated");
-            }
-        }))
-    } else {
-        None
-    };
+    // ---- Management WS server (for remote Panel) ----
+    let mgmt_addr = cfg.core.management_address.clone();
+    let mgmt_agent = agent.clone();
+    let mgmt_bridge = bridge.clone();
+    tokio::spawn(async move {
+        if let Err(e) = management::serve(&mgmt_addr, mgmt_bridge, mgmt_agent).await {
+            warn!(error = %e, "management WS server stopped");
+        }
+    });
 
     // ---- Main loop ----
-    let tui_exit = async {
-        if let Some(t) = tui_task {
-            let _ = t.await;
-        } else {
-            std::future::pending::<()>().await
-        }
-    };
-
     tokio::select! {
         _ = shutdown_signal() => info!("shutdown signal received, exiting"),
         _ = shutdown_rx.changed() => info!("shutdown requested by admin command, exiting"),
-        _ = tui_exit => info!("tui exited, shutting down"),
     }
 
-    drop(pump);
+    // Graceful shutdown: stop the command pump and QQ adapter, cancel
+    // background tasks, and flush sessions to disk.
+    pump.abort();
+    let _ = qq_adapter.stop().await;
+    agent.shutdown().await;
     Ok(())
 }
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]
@@ -253,21 +275,11 @@ async fn shutdown_signal() {
     }
 }
 
-/// TUI occupies stdout, so logs must avoid it: TUI mode → file, headless → stdout.
-/// Minimal tracing setup for Panel-only mode (logs to stderr).
-fn init_tracing_simple() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
-        .init();
-    Ok(())
-}
-
+/// TUI occupies stdout, so logs must avoid it: Panel (TUI) mode → file,
+/// Core (headless) mode → stdout (Docker 中可用 docker logs 查看).
 fn init_tracing(cfg: &config::LoggingSection, tui_running: bool) -> Result<()> {
     use anyhow::Context as _;
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.level));
     if tui_running {
         let path = if cfg.log_file.is_empty() {
             PathBuf::from("logs/echo-agent-panel.log")

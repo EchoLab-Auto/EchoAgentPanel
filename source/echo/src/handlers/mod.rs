@@ -49,4 +49,31 @@ mod tests {
     fn rejects_non_command() {
         assert!(parse_command("just text", "/", "help").is_none());
     }
+
+    #[test]
+    fn trims_leading_whitespace() {
+        // Leading whitespace is trimmed; trailing whitespace is preserved.
+        assert_eq!(
+            parse_command("/echo    spaced  out   ", "/", "echo"),
+            Some("spaced  out   ".to_string())
+        );
+        assert_eq!(parse_command("/help ", "/", "help"), Some(String::new()));
+    }
+
+    #[test]
+    fn empty_prefix_matches_anywhere() {
+        // Empty prefix (auto-fallback) — the command itself must still be
+        // token-bounded.
+        assert_eq!(parse_command("status", "", "status"), Some(String::new()));
+        assert!(parse_command("statusful", "", "status").is_none());
+    }
+
+    #[test]
+    fn custom_prefix_is_respected() {
+        assert_eq!(
+            parse_command("!ping hello", "!", "ping"),
+            Some("hello".to_string())
+        );
+        assert!(parse_command("/ping hello", "!", "ping").is_none());
+    }
 }

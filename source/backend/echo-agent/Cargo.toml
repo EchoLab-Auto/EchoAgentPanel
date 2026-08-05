@@ -24,3 +24,8 @@ chrono.workspace = true
 walkdir.workspace = true
 regex.workspace = true
 toml.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+echo-test-utils = { path = "../echo-test-utils" }
+proptest = "1"

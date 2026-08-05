@@ -67,7 +67,9 @@ async fn run_tui_inner(backend: Backend, theme: Theme) -> anyhow::Result<()> {
     let mut app = App::new(backend, theme, crate::keybindings::Keybindings::default());
     // 捕获 TUI 主循环 panic 并写入日志：否则任务 panic 会被 JoinError 吞掉，
     // 主进程"干净退出"，bug 极难定位。
-    let result = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(app.run(&mut terminal))).await;
+    let result =
+        futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(app.run(&mut terminal)))
+            .await;
     let result = match result {
         Ok(r) => r,
         Err(payload) => {

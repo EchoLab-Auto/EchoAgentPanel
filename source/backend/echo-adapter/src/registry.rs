@@ -33,8 +33,7 @@ impl AdapterRegistry {
 
     /// Register an adapter. Replaces any existing adapter with the same name.
     pub fn register(&mut self, adapter: Arc<dyn Adapter>) {
-        self.adapters
-            .insert(adapter.name().to_string(), adapter);
+        self.adapters.insert(adapter.name().to_string(), adapter);
     }
 
     /// Get an adapter by name.

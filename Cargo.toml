@@ -6,6 +6,7 @@ members = [
     "source/backend/echo-agent",
     "source/backend/echo-adapter",
     "source/backend/echo-adapter-qq",
+    "source/backend/echo-test-utils",
     "source/tui/echo-tui",
     "source/echo",
 ]
@@ -16,6 +17,10 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 repository = "https://github.com/EchoLab-Auto/EchoAgentPanel"
+
+# Faster test builds (cheap to compile, noticeably faster test runs).
+[profile.test]
+opt-level = 1
 
 [workspace.dependencies]
 # async runtime
@@ -43,6 +48,7 @@ clap = { version = "4", features = ["derive"] }
 dashmap = "6"
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # agent framework
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }

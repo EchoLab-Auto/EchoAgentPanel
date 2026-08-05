@@ -1,7 +1,7 @@
 //! Commands sent by the TUI / API layer into the agent backend.
 
 /// Commands from the frontend to the agent backend.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BackendCommand {
     /// Send a message into a session (as if from the local user).
     SendMessage { session_id: String, content: String },
@@ -47,11 +47,17 @@ pub enum BackendCommand {
     /// Stop all running adapters.
     StopAllAdapters,
     /// Update QQ adapter allowlist at runtime.
-    UpdateQqAllowlist { user_ids: Vec<i64>, group_ids: Vec<i64> },
+    UpdateQqAllowlist {
+        user_ids: Vec<i64>,
+        group_ids: Vec<i64>,
+    },
     /// Update QQ adapter denylist at runtime.
-    UpdateQqDenylist { user_ids: Vec<i64>, group_ids: Vec<i64> },
+    UpdateQqDenylist {
+        user_ids: Vec<i64>,
+        group_ids: Vec<i64>,
+    },
     /// Request current QQ filter config.
     RequestQqFilterConfig,
-    /// Set QQ gating mode ("none" / "allowlist" / "denylist").
-    SetQqGateMode { mode: String },
+    /// Set QQ gating mode. Serialised as "none" / "allowlist" / "denylist".
+    SetQqGateMode { mode: echo_adapter::GateMode },
 }

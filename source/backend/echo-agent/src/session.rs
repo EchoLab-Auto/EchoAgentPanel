@@ -34,7 +34,10 @@ pub struct SessionKey {
 impl SessionKey {
     /// Build the canonical session ID string.
     pub fn to_session_id(&self) -> String {
-        format!("{}:{}:{}:{}", self.platform, self.scope, self.scope_id, self.user_id)
+        format!(
+            "{}:{}:{}:{}",
+            self.platform, self.scope, self.scope_id, self.user_id
+        )
     }
 
     /// Create a session key for local TUI use.
@@ -104,7 +107,8 @@ impl Session {
 
     /// Record activity (shared across clones).
     pub fn touch(&self) {
-        self.last_active.store(chrono::Utc::now().timestamp(), Ordering::Relaxed);
+        self.last_active
+            .store(chrono::Utc::now().timestamp(), Ordering::Relaxed);
     }
 
     pub fn last_active(&self) -> i64 {
@@ -138,15 +142,21 @@ impl Clone for SessionManager {
         Self {
             sessions: Arc::clone(&self.sessions),
             memory_limit: self.memory_limit,
-            persist_path: std::sync::Mutex::new(self.persist_path.lock().expect("poisoned").clone()),
-            dirty: std::sync::atomic::AtomicBool::new(self.dirty.load(std::sync::atomic::Ordering::Relaxed)),
+            persist_path: std::sync::Mutex::new(
+                self.persist_path.lock().expect("poisoned").clone(),
+            ),
+            dirty: std::sync::atomic::AtomicBool::new(
+                self.dirty.load(std::sync::atomic::Ordering::Relaxed),
+            ),
         }
     }
 }
 
 impl std::fmt::Debug for SessionManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionManager").field("len", &self.len()).finish()
+        f.debug_struct("SessionManager")
+            .field("len", &self.len())
+            .finish()
     }
 }
 
@@ -175,25 +185,60 @@ impl SessionManager {
 
     /// Save sessions to JSON file if dirty.
     pub async fn maybe_save(&self) {
-        if !self.dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        if !self.dirty.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
+        self.write_to_disk().await;
+    }
+
+    /// Force a save now, ignoring the dirty flag (used at shutdown).
+    pub async fn save_now(&self) {
+        self.write_to_disk().await;
+    }
+
+    /// Write sessions to disk. On failure the dirty flag stays set so the
+    /// periodic task retries; failures are logged, not silently dropped.
+    async fn write_to_disk(&self) {
         let path = {
-            self.persist_path.lock().expect("persist path poisoned").clone()
+            self.persist_path
+                .lock()
+                .expect("persist path poisoned")
+                .clone()
         };
-        let Some(ref path) = path else { return };
-        let data = self.serialize();
+        let Some(ref path) = path else {
+            self.dirty
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            return;
+        };
+        let Some(data) = self.serialize() else {
+            // Serialization failure — nothing was written, retry next tick.
+            return;
+        };
         let tmp = format!("{}.tmp", path.display());
-        if tokio::fs::write(&tmp, &data).await.is_err() { return; }
-        let _ = tokio::fs::rename(&tmp, path).await;
+        if let Err(e) = tokio::fs::write(&tmp, &data).await {
+            tracing::warn!(error = %e, path = %path.display(), "session save: tmp write failed, will retry");
+            return;
+        }
+        if let Err(e) = tokio::fs::rename(&tmp, path).await {
+            tracing::warn!(error = %e, path = %path.display(), "session save: rename failed, will retry");
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return;
+        }
+        self.dirty
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Load sessions from JSON file. Returns count of restored sessions.
     pub async fn load_from_file(&self) -> usize {
         let path = {
-            self.persist_path.lock().expect("persist path poisoned").clone()
+            self.persist_path
+                .lock()
+                .expect("persist path poisoned")
+                .clone()
         };
-        let Some(ref path) = path else { return 0; };
+        let Some(ref path) = path else {
+            return 0;
+        };
         let data = match tokio::fs::read_to_string(path).await {
             Ok(d) => d,
             Err(_) => return 0,
@@ -201,23 +246,28 @@ impl SessionManager {
         self.deserialize(&data)
     }
 
-    fn serialize(&self) -> String {
+    /// Serialize all sessions. Returns `None` on failure so the caller can
+    /// skip the write instead of silently replacing the file with garbage.
+    fn serialize(&self) -> Option<String> {
         let sessions: Vec<serde_json::Value> = self
             .all()
             .iter()
             .filter_map(|s| {
                 let history = s.history.try_lock().ok()?;
-                let msgs: Vec<serde_json::Value> = history.iter().map(|m| {
-                    serde_json::json!({
-                        "role": match m.role {
-                            crate::llm::ChatRole::System => "system",
-                            crate::llm::ChatRole::User => "user",
-                            crate::llm::ChatRole::Assistant => "assistant",
-                            crate::llm::ChatRole::Tool => "tool",
-                        },
-                        "content": m.content,
+                let msgs: Vec<serde_json::Value> = history
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "role": match m.role {
+                                crate::llm::ChatRole::System => "system",
+                                crate::llm::ChatRole::User => "user",
+                                crate::llm::ChatRole::Assistant => "assistant",
+                                crate::llm::ChatRole::Tool => "tool",
+                            },
+                            "content": m.content,
+                        })
                     })
-                }).collect();
+                    .collect();
                 Some(serde_json::json!({
                     "id": s.id,
                     "platform": s.session_key.platform,
@@ -231,7 +281,13 @@ impl SessionManager {
                 }))
             })
             .collect();
-        serde_json::to_string_pretty(&sessions).unwrap_or_default()
+        match serde_json::to_string_pretty(&sessions) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::error!(error = %e, "session serialization failed, skipping save");
+                None
+            }
+        }
     }
 
     fn deserialize(&self, data: &str) -> usize {
@@ -240,7 +296,9 @@ impl SessionManager {
         };
         let mut count = 0;
         for s in &sessions {
-            let Some(_id) = s["id"].as_str() else { continue };
+            let Some(_id) = s["id"].as_str() else {
+                continue;
+            };
             let key = crate::session::SessionKey {
                 platform: s["platform"].as_str().unwrap_or("local").into(),
                 scope: s["scope"].as_str().unwrap_or("tui").into(),
@@ -251,20 +309,23 @@ impl SessionManager {
             let group_name = s["group_name"].as_str().map(|g| g.to_string());
             let session = self.get_or_create(&key, nickname, group_name);
             if let Some(history) = s["history"].as_array() {
-                let msgs: Vec<ChatMessage> = history.iter().filter_map(|m| {
-                    Some(ChatMessage {
-                        role: match m["role"].as_str()? {
-                            "system" => crate::llm::ChatRole::System,
-                            "user" => crate::llm::ChatRole::User,
-                            "assistant" => crate::llm::ChatRole::Assistant,
-                            "tool" => crate::llm::ChatRole::Tool,
-                            _ => return None,
-                        },
-                        content: m["content"].as_str()?.into(),
-                        tool_calls: None,
-                        tool_call_id: None,
+                let msgs: Vec<ChatMessage> = history
+                    .iter()
+                    .filter_map(|m| {
+                        Some(ChatMessage {
+                            role: match m["role"].as_str()? {
+                                "system" => crate::llm::ChatRole::System,
+                                "user" => crate::llm::ChatRole::User,
+                                "assistant" => crate::llm::ChatRole::Assistant,
+                                "tool" => crate::llm::ChatRole::Tool,
+                                _ => return None,
+                            },
+                            content: m["content"].as_str()?.into(),
+                            tool_calls: None,
+                            tool_call_id: None,
+                        })
                     })
-                }).collect();
+                    .collect();
                 if let Ok(mut hist) = session.history.try_lock() {
                     *hist = msgs;
                 }
@@ -277,7 +338,8 @@ impl SessionManager {
     /// Evict sessions idle longer than TTL. Called periodically from a background task.
     pub fn evict_idle(&self) {
         let now = chrono::Utc::now().timestamp_millis();
-        self.sessions.retain(|_, s| now - s.last_active() * 1000 < SESSION_IDLE_TTL_MS);
+        self.sessions
+            .retain(|_, s| now - s.last_active() * 1000 < SESSION_IDLE_TTL_MS);
     }
 
     /// Get or create a session for the given key.
@@ -338,6 +400,35 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Round-trip for any key whose fields don't contain the `:` separator
+        /// (the wire format's only structural character).
+        #[test]
+        fn session_key_roundtrip(
+            platform in "[a-z0-9_]{1,10}",
+            scope in "dm|group|tui",
+            scope_id in "[0-9]{0,12}",
+            user_id in "[0-9]{1,15}",
+        ) {
+            let key = SessionKey { platform, scope, scope_id, user_id };
+            let id = key.to_session_id();
+            let parsed = SessionKey::parse(&id).expect("roundtrip parse");
+            prop_assert_eq!(parsed, key);
+        }
+
+        /// Arbitrary strings must never panic in parse; malformed input
+        /// either parses to a key whose serialisation round-trips or is None.
+        #[test]
+        fn session_key_parse_never_panics(
+            input in ".*",
+        ) {
+            if let Some(key) = SessionKey::parse(&input) {
+                prop_assert_eq!(SessionKey::parse(&key.to_session_id()), Some(key));
+            }
+        }
+    }
 
     #[test]
     fn session_key_format() {
@@ -404,5 +495,125 @@ mod tests {
         assert_eq!(info.user_id, "456");
         assert_eq!(info.group_name, Some("TestGroup".into()));
         assert_eq!(info.last_message, "last msg");
+    }
+
+    // ── Persistence ─────────────────────────────────────────────────────────
+
+    fn temp_sessions_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("echo-sessions-{name}-{}.json", std::process::id()))
+    }
+
+    #[tokio::test]
+    async fn save_and_load_roundtrip_restores_sessions() {
+        let path = temp_sessions_path("roundtrip");
+        let _ = std::fs::remove_file(&path);
+
+        let mgr = SessionManager::new(10);
+        mgr.set_persist_path(&path);
+        let key = SessionKey::parse("qq:group:789:456").unwrap();
+        let s = mgr.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
+        s.history
+            .lock()
+            .await
+            .push(crate::llm::ChatMessage::user("你好"));
+        s.history
+            .lock()
+            .await
+            .push(crate::llm::ChatMessage::assistant("回复"));
+        mgr.mark_dirty();
+        mgr.save_now().await;
+        assert!(path.exists(), "sessions file written");
+
+        // A fresh manager restores everything.
+        let mgr2 = SessionManager::new(10);
+        mgr2.set_persist_path(&path);
+        let restored = mgr2.load_from_file().await;
+        assert_eq!(restored, 1, "one session restored");
+        let s2 = mgr2.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
+        let hist = s2.history.lock().await.clone();
+        assert_eq!(hist.len(), 2);
+        assert_eq!(hist[0].content, "你好");
+        assert_eq!(hist[1].content, "回复");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn load_from_missing_file_returns_zero() {
+        let mgr = SessionManager::new(10);
+        mgr.set_persist_path(temp_sessions_path("missing"));
+        assert_eq!(mgr.load_from_file().await, 0);
+    }
+
+    #[tokio::test]
+    async fn load_handles_malformed_entries_leniently() {
+        let path = temp_sessions_path("malformed");
+        std::fs::write(
+            &path,
+            r#"[
+                {"id": "ok", "platform": "qq", "scope": "dm", "scope_id": "", "user_id": "1", "nickname": "a", "history": []},
+                {"id": "bad", "platform": "qq", "scope": "dm"},
+                "not an object"
+            ]"#,
+        )
+        .unwrap();
+        let mgr = SessionManager::new(10);
+        mgr.set_persist_path(&path);
+        let restored = mgr.load_from_file().await;
+        // Entries with an id are restored leniently (missing fields fall back
+        // to defaults); non-object entries are skipped.
+        assert_eq!(restored, 2);
+        // The partially-populated entry falls back to defaults for the
+        // missing fields only (scope_id/user_id → empty/0).
+        let fallback = mgr.get("qq:dm::0").expect("lenient default session");
+        assert_eq!(fallback.session_key.scope_id, "");
+        assert_eq!(fallback.session_key.user_id, "0");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_get_or_create_yields_single_instance() {
+        let mgr = SessionManager::new(10);
+        let key = SessionKey::parse("qq:dm::999").unwrap();
+        let key2 = key.clone();
+
+        // 32 concurrent callers racing on the same key.
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let mgr = mgr.clone();
+            let key = key.clone();
+            handles.push(tokio::spawn(async move {
+                mgr.get_or_create(&key, "alice".into(), None)
+            }));
+        }
+        for h in handles {
+            let _ = h.await.unwrap();
+        }
+        assert_eq!(mgr.len(), 1, "single session for concurrent callers");
+        let _ = key2;
+    }
+
+    #[test]
+    fn evict_idle_removes_stale_but_keeps_recent() {
+        let mgr = SessionManager::new(10);
+        let key = SessionKey::parse("qq:dm::111").unwrap();
+        let stale = mgr.get_or_create(&key, "alice".into(), None);
+        // Force last_active far in the past (2× TTL).
+        let past = chrono::Utc::now().timestamp() - (SESSION_IDLE_TTL_MS / 1000) * 2;
+        stale
+            .last_active
+            .store(past, std::sync::atomic::Ordering::Relaxed);
+
+        let key2 = SessionKey::parse("qq:dm::222").unwrap();
+        let recent = mgr.get_or_create(&key2, "bob".into(), None);
+        recent.touch(); // now
+
+        assert_eq!(mgr.len(), 2);
+        mgr.evict_idle();
+        assert_eq!(mgr.len(), 1);
+        assert!(
+            mgr.get(&key2.to_session_id()).is_some(),
+            "recent session survives"
+        );
     }
 }

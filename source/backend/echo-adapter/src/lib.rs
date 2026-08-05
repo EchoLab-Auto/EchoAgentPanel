@@ -13,12 +13,17 @@
 //! | [`filter`] | `MessageFilter` trait, `FilterPipeline`, built-in filters |
 //! | [`registry`] | `AdapterRegistry` |
 
+pub mod config_store;
 pub mod filter;
 pub mod registry;
 pub mod traits;
 pub mod types;
 
+pub use config_store::{ensure_table, ConfigStore};
+
 pub use filter::{FilterPipeline, FilterResult, MessageFilter};
 pub use registry::AdapterRegistry;
-pub use traits::{Adapter, AdapterConnectionState, AdapterError, AdapterInfo};
+pub use traits::{
+    Adapter, AdapterConnectionState, AdapterError, AdapterInfo, AgentBridge, GateMode,
+};
 pub use types::{AdapterEvent, ChannelType, IncomingMessage, MessageTarget, SendResult};

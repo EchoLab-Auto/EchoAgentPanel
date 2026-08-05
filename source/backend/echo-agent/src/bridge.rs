@@ -56,8 +56,14 @@ pub fn create_bridge() -> (BackendBridge, BackendHandle) {
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     (
-        BackendBridge { command_tx, event_rx: Mutex::new(event_rx) },
-        BackendHandle { event_tx, command_rx: Mutex::new(command_rx) },
+        BackendBridge {
+            command_tx,
+            event_rx: Mutex::new(event_rx),
+        },
+        BackendHandle {
+            event_tx,
+            command_rx: Mutex::new(command_rx),
+        },
     )
 }
 
@@ -71,7 +77,9 @@ pub struct FanoutHandle {
 }
 
 impl Default for FanoutHandle {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FanoutHandle {
@@ -87,16 +95,26 @@ impl FanoutHandle {
     /// Register a new subscriber. Returns an event receiver (for forwarding
     /// to the subscriber) and a command sender (for the subscriber to send
     /// commands back to the agent).
-    pub async fn subscribe(&self) -> (mpsc::UnboundedReceiver<BackendEvent>, mpsc::UnboundedSender<BackendCommand>) {
+    pub async fn subscribe(
+        &self,
+    ) -> (
+        mpsc::UnboundedReceiver<BackendEvent>,
+        mpsc::UnboundedSender<BackendCommand>,
+    ) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         self.senders.lock().await.push(event_tx);
         (event_rx, self.command_tx.clone())
     }
 
     /// Emit an event to all subscribers.
+    ///
+    /// Dead subscribers (dropped receivers — e.g. a Panel that disconnected
+    /// without unsubscribing) are removed so the channel list cannot grow
+    /// unboundedly. The channels themselves stay unbounded: dropping events
+    /// would lose conversation data.
     pub async fn emit(&self, event: BackendEvent) {
-        let senders = self.senders.lock().await;
-        senders.iter().for_each(|tx| { let _ = tx.send(event.clone()); });
+        let mut senders = self.senders.lock().await;
+        senders.retain(|tx| tx.send(event.clone()).is_ok());
     }
 
     /// Try to receive a command without blocking.
@@ -132,18 +150,36 @@ pub enum WsMessage {
 }
 
 /// Serialise a command for WS transport.
+///
+/// On failure, logs the error and returns an empty string (the receiver
+/// treats empty frames as protocol errors).
 pub fn serialize_command(cmd: &BackendCommand) -> String {
-    serde_json::to_string(&WsMessage::Command(cmd.clone())).unwrap_or_default()
+    serde_json::to_string(&WsMessage::Command(cmd.clone())).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to serialize command for WS");
+        String::new()
+    })
 }
 
 /// Serialise an event for WS transport.
+///
+/// On failure, logs the error and returns an empty string.
 pub fn serialize_event(ev: &BackendEvent) -> String {
-    serde_json::to_string(&WsMessage::Event(ev.clone())).unwrap_or_default()
+    serde_json::to_string(&WsMessage::Event(ev.clone())).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to serialize event for WS");
+        String::new()
+    })
 }
 
-/// Deserialise a WS text message.
+/// Deserialise a WS text message. Logs malformed input for diagnosis.
 pub fn deserialize_message(text: &str) -> Option<WsMessage> {
-    serde_json::from_str(text).ok()
+    match serde_json::from_str(text) {
+        Ok(msg) => Some(msg),
+        Err(e) => {
+            let snippet: String = text.chars().take(200).collect();
+            tracing::warn!(error = %e, "failed to deserialize WS message: {snippet}");
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -162,7 +198,10 @@ mod tests {
         let msg = deserialize_message(&text).unwrap();
         match msg {
             WsMessage::Command(c) => match c {
-                BackendCommand::SendMessage { session_id, content } => {
+                BackendCommand::SendMessage {
+                    session_id,
+                    content,
+                } => {
                     assert_eq!(session_id, "qq:group:123:456");
                     assert_eq!(content, "你好");
                 }
@@ -183,7 +222,10 @@ mod tests {
         let msg = deserialize_message(&text).unwrap();
         match msg {
             WsMessage::Event(e) => match e {
-                BackendEvent::MessageSent { session_id, content } => {
+                BackendEvent::MessageSent {
+                    session_id,
+                    content,
+                } => {
                     assert_eq!(session_id, "user_0");
                     assert_eq!(content, "回复内容");
                 }
@@ -229,10 +271,12 @@ mod tests {
         let handle = FanoutHandle::default();
         let (ev_rx, cmd_tx) = handle.subscribe().await;
         // Emit an event and verify it reaches the subscriber.
-        handle.emit(BackendEvent::MessageSent {
-            session_id: "s1".into(),
-            content: "hi".into(),
-        }).await;
+        handle
+            .emit(BackendEvent::MessageSent {
+                session_id: "s1".into(),
+                content: "hi".into(),
+            })
+            .await;
         let mut rx = ev_rx;
         let ev = rx.try_recv().expect("event should be delivered");
         match ev {
@@ -240,5 +284,64 @@ mod tests {
             other => panic!("wrong event: {other:?}"),
         }
         let _ = cmd_tx;
+    }
+
+    #[tokio::test]
+    async fn fanout_emits_to_all_subscribers() {
+        let handle = FanoutHandle::default();
+        let (mut rx1, _) = handle.subscribe().await;
+        let (mut rx2, _) = handle.subscribe().await;
+        handle
+            .emit(BackendEvent::MessageSent {
+                session_id: "s".into(),
+                content: "x".into(),
+            })
+            .await;
+        assert!(rx1.try_recv().is_ok(), "subscriber 1 gets the event");
+        assert!(rx2.try_recv().is_ok(), "subscriber 2 gets the event");
+    }
+
+    #[tokio::test]
+    async fn fanout_prunes_dead_subscribers() {
+        let handle = FanoutHandle::default();
+        let (dead_rx, _) = handle.subscribe().await;
+        let (mut live_rx, _) = handle.subscribe().await;
+        // Kill the first subscriber.
+        drop(dead_rx);
+
+        // A few emits: the dead sender must be pruned, the live one served.
+        for i in 0..3 {
+            handle
+                .emit(BackendEvent::MessageSent {
+                    session_id: "s".into(),
+                    content: format!("m{i}"),
+                })
+                .await;
+        }
+        match live_rx.try_recv().unwrap() {
+            BackendEvent::MessageSent { session_id, .. } => assert_eq!(session_id, "s"),
+            other => panic!("wrong event: {other:?}"),
+        }
+        assert!(
+            handle.senders.lock().await.len() <= 1,
+            "dead subscriber must be pruned"
+        );
+    }
+
+    #[tokio::test]
+    async fn fanout_command_channel_reaches_agent() {
+        let handle = FanoutHandle::default();
+        let (_, cmd_tx) = handle.subscribe().await;
+        cmd_tx
+            .send(BackendCommand::SwitchModel {
+                model: "gpt-x".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            handle.try_recv_command(),
+            Some(BackendCommand::SwitchModel {
+                model: "gpt-x".into()
+            })
+        );
     }
 }
