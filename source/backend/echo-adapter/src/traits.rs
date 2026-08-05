@@ -171,6 +171,12 @@ pub trait Adapter: Send + Sync {
         false
     }
 
+    /// Get the friend list for this platform. Default: empty.
+    async fn get_friend_list(&self) -> Result<Vec<(i64, String)>, AdapterError> {
+        let _ = self;
+        Ok(Vec::new())
+    }
+
     /// Update the adapter's runtime allowlist.  Default: no-op.
     fn update_allowlist(&self, _user_ids: Vec<String>, _group_ids: Vec<String>) {}
 

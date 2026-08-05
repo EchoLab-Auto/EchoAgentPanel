@@ -152,6 +152,10 @@ impl App {
                     .into_iter()
                     .map(|g| (g.group_id, g.group_name))
                     .collect();
+                // If the QQ filter form is open, auto-refresh it so the
+                // group list appears without the user having to close and
+                // reopen the form.
+                self.try_refresh_qq_filter_form();
             }
             BackendEvent::QqGateMode { mode } => {
                 self.state.qq_gate_mode = mode;
@@ -168,6 +172,13 @@ impl App {
                     denylist_users,
                     denylist_groups,
                 };
+            }
+            BackendEvent::FriendList { friends } => {
+                self.state.qq_friends = friends
+                    .into_iter()
+                    .map(|f| (f.user_id, f.nickname))
+                    .collect();
+                self.try_refresh_qq_filter_form();
             }
             BackendEvent::Error {
                 session_id,

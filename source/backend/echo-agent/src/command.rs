@@ -42,6 +42,8 @@ pub enum BackendCommand {
     RequestAdapterStatus,
     /// Request the QQ group list.
     RequestGroupList,
+    /// Request the QQ friend list (for interactive allowlist/denylist UI).
+    RequestFriendList,
     /// Start all configured adapters.
     StartAllAdapters,
     /// Stop all running adapters.

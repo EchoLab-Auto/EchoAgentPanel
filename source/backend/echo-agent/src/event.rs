@@ -138,6 +138,10 @@ pub enum BackendEvent {
     QqGateMode {
         mode: echo_adapter::GateMode,
     },
+    /// QQ friend list (for interactive allowlist/denylist picker).
+    FriendList {
+        friends: Vec<FriendInfo>,
+    },
 }
 
 /// QQ group info for display.
@@ -145,6 +149,13 @@ pub enum BackendEvent {
 pub struct GroupInfo {
     pub group_id: i64,
     pub group_name: String,
+}
+
+/// QQ friend info for allowlist/denylist picker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FriendInfo {
+    pub user_id: i64,
+    pub nickname: String,
 }
 
 /// API profile summary (for TUI list display).

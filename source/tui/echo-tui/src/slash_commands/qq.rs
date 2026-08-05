@@ -221,9 +221,12 @@ pub fn setting(state: &mut AppState, backend: &Backend) {
 }
 
 /// Build a filter management form shared by allowlist and denylist.
-fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny: bool) {
+pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny: bool) {
     backend.send(BackendCommand::RequestQqFilterConfig);
     backend.send(BackendCommand::RequestGroupList);
+    if state.qq_friends.is_empty() {
+        backend.send(BackendCommand::RequestFriendList);
+    }
 
     let cfg = &state.qq_filter;
     let (list_users, list_groups) = if is_deny {
@@ -271,7 +274,7 @@ fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny: bool) {
 
     if state.qq_groups.is_empty() {
         items.push(SelectItem {
-            label: "  (未获取到群列表，请确认 QQ 已连接)".into(),
+            label: "  (正在获取群列表…)".into(),
             value: "__info__".into(),
         });
     } else {
@@ -281,6 +284,33 @@ fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny: bool) {
             items.push(SelectItem {
                 label: format!("  [{mark}] {gname} ({gid})"),
                 value: format!("{prefix}_toggle_group:{gid}"),
+            });
+        }
+    }
+
+    items.push(SelectItem {
+        label: String::new(),
+        value: "__info__".into(),
+    });
+
+    // ── Friend list picker ──
+    items.push(SelectItem {
+        label: "── QQ好友列表 (Enter添加/移除) ──".to_string(),
+        value: "__info__".into(),
+    });
+    if state.qq_friends.is_empty() {
+        items.push(SelectItem {
+            label: "  (正在获取好友列表…)".into(),
+            value: "__info__".into(),
+        });
+    } else {
+        let friend_set: std::collections::HashSet<i64> = list_users.iter().cloned().collect();
+        for (uid, nickname) in &state.qq_friends {
+            let in_list = friend_set.contains(uid);
+            let mark = if in_list { "✓" } else { " " };
+            items.push(SelectItem {
+                label: format!("  [{mark}] {nickname} ({uid})"),
+                value: format!("{prefix}_toggle_friend:{uid}"),
             });
         }
     }
@@ -381,6 +411,53 @@ pub fn handle_toggle_group(state: &mut AppState, backend: &Backend, action: &str
         );
     }
     // Refresh the form with updated state.
+    backend.send(BackendCommand::RequestQqFilterConfig);
+}
+
+/// Toggle a friend in/out of the allowlist or denylist. Same logic as
+/// [`handle_toggle_group`] but for user IDs from the friend list picker.
+pub fn handle_toggle_friend(state: &mut AppState, backend: &Backend, action: &str, user_id: i64) {
+    let cfg = &state.qq_filter;
+    let is_deny = action.starts_with("denylist_");
+
+    let (mut users, groups) = if is_deny {
+        (cfg.denylist_users.clone(), cfg.denylist_groups.clone())
+    } else {
+        (cfg.allowlist_users.clone(), cfg.allowlist_groups.clone())
+    };
+
+    let kind_label = if is_deny { "黑名单" } else { "白名单" };
+
+    if users.contains(&user_id) {
+        users.retain(|u| *u != user_id);
+        tracing::info!(%user_id, %kind_label, "TUI: remove friend from filter");
+        state.toast(
+            format!("已将用户 {user_id} 从{kind_label}移除 ✓"),
+            ToastKind::Success,
+        );
+    } else {
+        users.push(user_id);
+        users.sort();
+        users.dedup();
+        tracing::info!(%user_id, %kind_label, "TUI: add friend to filter");
+        state.toast(
+            format!("已将用户 {user_id} 添加到{kind_label} ✓"),
+            ToastKind::Success,
+        );
+    }
+
+    let cmd = if is_deny {
+        BackendCommand::UpdateQqDenylist {
+            user_ids: users,
+            group_ids: groups,
+        }
+    } else {
+        BackendCommand::UpdateQqAllowlist {
+            user_ids: users,
+            group_ids: groups,
+        }
+    };
+    backend.send(cmd);
     backend.send(BackendCommand::RequestQqFilterConfig);
 }
 

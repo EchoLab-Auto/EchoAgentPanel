@@ -403,6 +403,18 @@ impl App {
         );
     }
 
+    /// If the QQ filter form is open, re-generate it so updated group/member
+    /// lists appear immediately (called when GroupList or QqFilterConfig events arrive).
+    pub(super) fn try_refresh_qq_filter_form(&mut self) {
+        use crate::components::form_overlay::FormKind;
+        if self.state.form_overlay.form_kind != FormKind::QqFilter {
+            return;
+        }
+        let title = &self.state.form_overlay.title;
+        let is_deny = title.contains("黑名单");
+        crate::slash_commands::qq::open_filter_form(&mut self.state, &self.backend, is_deny);
+    }
+
     /// Handle keys within the form overlay.
     fn handle_form_key(&mut self, key: &KeyEvent) {
         use crate::components::form_overlay::{FieldKind, FormField, FormKind, FormState};
@@ -435,9 +447,11 @@ impl App {
                 let is_qq_action =
                     current_val.starts_with("allowlist_") || current_val.starts_with("denylist_");
                 let is_toggle = is_qq_action && current_val.contains("_toggle_group:");
+                let is_friend_toggle = is_qq_action && current_val.contains("_toggle_friend:");
                 let is_direct_remove = is_qq_action && current_val.contains("_remove_user:");
                 let needs_text_input = is_qq_action
                     && !is_toggle
+                    && !is_friend_toggle
                     && !is_direct_remove
                     && !current_val.ends_with("__info__");
                 match key.code {
@@ -537,6 +551,25 @@ impl App {
                                                 gid,
                                             );
                                             // Refresh form
+                                            crate::slash_commands::qq::allowlist_deny_refresh(
+                                                &mut self.state,
+                                                &self.backend,
+                                                val.starts_with("denylist_"),
+                                            );
+                                        }
+                                    }
+                                }
+                                FormKind::QqFilter if is_friend_toggle => {
+                                    // toggle_friend:123456 — add/remove friend from list
+                                    if let Some(uid_str) = val.split(':').nth(1) {
+                                        if let Ok(uid) = uid_str.parse::<i64>() {
+                                            crate::slash_commands::qq::handle_toggle_friend(
+                                                &mut self.state,
+                                                &self.backend,
+                                                &val,
+                                                uid,
+                                            );
+                                            // Refresh the form.
                                             crate::slash_commands::qq::allowlist_deny_refresh(
                                                 &mut self.state,
                                                 &self.backend,

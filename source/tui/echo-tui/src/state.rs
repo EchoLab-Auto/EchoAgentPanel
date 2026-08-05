@@ -154,6 +154,8 @@ pub struct AppState {
     pub qq_gate_mode: echo_adapter::GateMode,
     /// Cached QQ group list (fetched from adapter on request).
     pub qq_groups: Vec<(i64, String)>,
+    /// Cached QQ friend list (for allowlist/denylist picker).
+    pub qq_friends: Vec<(i64, String)>,
     // Mouse text selection
     pub selecting: bool,
     pub sel_anchor: Option<(usize, usize)>,
@@ -202,6 +204,7 @@ impl AppState {
             qq_filter: QqFilterCache::default(),
             qq_gate_mode: echo_adapter::GateMode::None,
             qq_groups: Vec::new(),
+            qq_friends: Vec::new(),
             selecting: false,
             sel_anchor: None,
             sel_other: None,

@@ -146,6 +146,35 @@ impl QqAdapter {
             .push(handler);
     }
 
+    /// Get the QQ friend list via the active QQ connection.
+    pub async fn get_friend_list(&self) -> Result<Vec<(i64, String)>, String> {
+        let ctx = self
+            .inner
+            .active_context
+            .lock()
+            .map_err(|e| format!("lock poisoned: {e}"))?
+            .clone()
+            .ok_or("no QQ connection active")?;
+        let request = echo_core::action::actions::get_friend_list();
+        let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
+        let friends: Vec<(i64, String)> = resp
+            .data
+            .as_array()
+            .ok_or("unexpected response format")?
+            .iter()
+            .filter_map(|v| {
+                let uid = v.get("user_id")?.as_i64()?;
+                let name = v
+                    .get("nickname")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("(unknown)")
+                    .to_string();
+                Some((uid, name))
+            })
+            .collect();
+        Ok(friends)
+    }
+
     /// Get group list via the active QQ connection.
     pub async fn get_group_list(&self) -> Result<Vec<(i64, String)>, String> {
         let ctx = self
@@ -616,6 +645,10 @@ impl Adapter for QqAdapter {
         self.get_group_list().await.map_err(AdapterError::Internal)
     }
 
+    async fn get_friend_list(&self) -> Result<Vec<(i64, String)>, AdapterError> {
+        self.get_friend_list().await.map_err(AdapterError::Internal)
+    }
+
     fn has_group_list(&self) -> bool {
         true
     }
@@ -780,7 +813,10 @@ mod tests {
             .into_iter()
             .filter(|(gid, _)| allow_groups.contains(gid))
             .collect();
-        assert!(filtered.is_empty(), "empty allowlist filters ALL groups out");
+        assert!(
+            filtered.is_empty(),
+            "empty allowlist filters ALL groups out"
+        );
     }
 
     #[test]

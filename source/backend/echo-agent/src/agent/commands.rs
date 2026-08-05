@@ -382,6 +382,30 @@ impl Agent {
                     self.emit(BackendEvent::GroupList { groups });
                 }
             }
+            BackendCommand::RequestFriendList => {
+                if let Some(adapter) = self.adapters.get("qq") {
+                    match adapter.get_friend_list().await {
+                        Ok(friends) => {
+                            let result: Vec<crate::event::FriendInfo> = friends
+                                .into_iter()
+                                .map(|(uid, name)| crate::event::FriendInfo {
+                                    user_id: uid,
+                                    nickname: name,
+                                })
+                                .collect();
+                            if !result.is_empty() {
+                                self.emit(BackendEvent::FriendList { friends: result });
+                            }
+                        }
+                        Err(e) => {
+                            self.emit(BackendEvent::Error {
+                                session_id: None,
+                                message: format!("failed to get friend list: {e}"),
+                            });
+                        }
+                    }
+                }
+            }
         }
     }
 }
