@@ -66,6 +66,11 @@ mod adapter {
         pub subscribers: std::sync::Mutex<
             Vec<tokio::sync::mpsc::UnboundedSender<echo_adapter::types::AdapterEvent>>,
         >,
+        /// Filter state updated via `update_allowlist` / `update_denylist`.
+        pub allowlist_users: std::sync::Mutex<Vec<String>>,
+        pub allowlist_groups: std::sync::Mutex<Vec<String>>,
+        pub denylist_users: std::sync::Mutex<Vec<String>>,
+        pub denylist_groups: std::sync::Mutex<Vec<String>>,
     }
 
     impl MockAdapter {
@@ -76,6 +81,10 @@ mod adapter {
                 started: AtomicBool::new(false),
                 send_results: Vec::new(),
                 subscribers: std::sync::Mutex::new(Vec::new()),
+                allowlist_users: std::sync::Mutex::new(Vec::new()),
+                allowlist_groups: std::sync::Mutex::new(Vec::new()),
+                denylist_users: std::sync::Mutex::new(Vec::new()),
+                denylist_groups: std::sync::Mutex::new(Vec::new()),
             }
         }
 

@@ -949,4 +949,66 @@ mod tests {
         assert!(!msg.has_at(10001));
         assert!(!msg.at_me());
     }
+
+    fn private_msg_with_nickname(nickname: &str) -> Event {
+        serde_json::from_value(json!({
+            "post_type": "message",
+            "message_type": "private",
+            "time": 1,
+            "self_id": 10001,
+            "sub_type": "friend",
+            "message_id": 1,
+            "user_id": 20001,
+            "message": [{"type": "text", "data": {"text": "hi"}}],
+            "raw_message": "hi",
+            "font": 0,
+            "sender": {"user_id": 20001, "nickname": nickname}
+        }))
+        .unwrap()
+    }
+
+    fn group_msg_with_card(card: Option<&str>) -> Event {
+        let mut sender = json!({"user_id": 20001, "nickname": "nick"});
+        if let Some(card) = card {
+            sender["card"] = json!(card);
+        }
+        serde_json::from_value(json!({
+            "post_type": "message",
+            "message_type": "group",
+            "time": 1,
+            "self_id": 10001,
+            "sub_type": "normal",
+            "message_id": 1,
+            "group_id": 30001,
+            "user_id": 20001,
+            "message": [{"type": "text", "data": {"text": "hi"}}],
+            "raw_message": "hi",
+            "font": 0,
+            "sender": sender
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn sender_nickname_prefers_group_card() {
+        let event = group_msg_with_card(Some("群名片"));
+        let msg = event.as_message().unwrap();
+        assert_eq!(msg.sender_nickname(), "群名片");
+    }
+
+    #[test]
+    fn sender_nickname_falls_back_to_nickname() {
+        // No card field at all.
+        let event = group_msg_with_card(None);
+        assert_eq!(event.as_message().unwrap().sender_nickname(), "nick");
+        // Empty card must also fall back.
+        let event = group_msg_with_card(Some(""));
+        assert_eq!(event.as_message().unwrap().sender_nickname(), "nick");
+    }
+
+    #[test]
+    fn private_sender_nickname_is_used_directly() {
+        let event = private_msg_with_nickname("私聊昵称");
+        assert_eq!(event.as_message().unwrap().sender_nickname(), "私聊昵称");
+    }
 }
