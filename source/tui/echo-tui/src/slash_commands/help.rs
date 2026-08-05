@@ -26,6 +26,7 @@ pub fn run(state: &mut AppState) {
         "  /adapter stop   停止适配器",
         "  /qq login     QQ 扫码登录",
         "  /quit         退出",
-    ].join("\n");
+    ]
+    .join("\n");
     state.toast(help, ToastKind::Info);
 }

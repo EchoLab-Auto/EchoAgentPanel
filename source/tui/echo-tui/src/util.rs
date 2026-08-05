@@ -40,7 +40,11 @@ pub fn format_timestamp(ts: i64) -> String {
         return String::new();
     }
     chrono::DateTime::from_timestamp(ts, 0)
-        .map(|d| d.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+        .map(|d| {
+            d.with_timezone(&chrono::Local)
+                .format("%H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -77,5 +81,45 @@ where
             tracing::error!("panic caught: {msg}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visual_width_counts_cjk_as_two() {
+        assert_eq!(str_visual_width("abc"), 3);
+        assert_eq!(str_visual_width("你好"), 4);
+        assert_eq!(str_visual_width("a好b"), 4);
+        assert_eq!(str_visual_width(""), 0);
+    }
+
+    #[test]
+    fn col_to_byte_maps_wide_char_columns() {
+        assert_eq!(col_to_byte("abc", 2), 2);
+        assert_eq!(col_to_byte("你好", 0), 0);
+        // Clicking the second column of "你" maps to the start of "你".
+        assert_eq!(col_to_byte("你好", 1), 0);
+        assert_eq!(col_to_byte("你好", 2), 3);
+        // Past the end → full length.
+        assert_eq!(col_to_byte("你好", 99), 6);
+    }
+
+    #[test]
+    fn timestamp_formatting_handles_invalid_input() {
+        assert_eq!(format_timestamp(0), "");
+        assert_eq!(format_timestamp(-5), "");
+        assert_eq!(format_timestamp_compact(0), "");
+        // A known timestamp formats without panicking.
+        let s = format_timestamp(1700000000);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn catch_panic_returns_result_or_none() {
+        assert_eq!(catch_panic(|| 42), Some(42));
+        assert!(catch_panic(|| panic!("boom")).is_none());
     }
 }

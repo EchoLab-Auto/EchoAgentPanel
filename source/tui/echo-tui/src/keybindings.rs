@@ -27,10 +27,16 @@ pub struct KeyChord {
 
 impl KeyChord {
     pub fn plain(code: KeyCode) -> Self {
-        Self { code, modifiers: KeyModifiers::NONE }
+        Self {
+            code,
+            modifiers: KeyModifiers::NONE,
+        }
     }
     pub fn ctrl(code: KeyCode) -> Self {
-        Self { code, modifiers: KeyModifiers::CONTROL }
+        Self {
+            code,
+            modifiers: KeyModifiers::CONTROL,
+        }
     }
 }
 
@@ -46,5 +52,32 @@ impl Default for Keybindings {
             scroll_top: KeyChord::ctrl(KeyCode::Char('g')),
             scroll_bottom: KeyChord::plain(KeyCode::End),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_bindings_follow_leader_pattern() {
+        let kb = Keybindings::default();
+        assert_eq!(kb.command_palette.code, KeyCode::Char('p'));
+        assert!(kb.command_palette.modifiers.contains(KeyModifiers::CONTROL));
+        assert_eq!(kb.scroll_up.code, KeyCode::PageUp);
+        assert_eq!(kb.scroll_down.code, KeyCode::PageDown);
+        assert_eq!(kb.scroll_top.code, KeyCode::Char('g'));
+        assert!(kb.scroll_top.modifiers.contains(KeyModifiers::CONTROL));
+        assert_eq!(kb.scroll_bottom.code, KeyCode::End);
+        assert_eq!(kb.help.code, KeyCode::Char('?'));
+    }
+
+    #[test]
+    fn chord_constructors_set_modifiers() {
+        let plain = KeyChord::plain(KeyCode::Enter);
+        assert_eq!(plain.modifiers, KeyModifiers::NONE);
+        let ctrl = KeyChord::ctrl(KeyCode::Char('c'));
+        assert!(ctrl.modifiers.contains(KeyModifiers::CONTROL));
+        assert_eq!(ctrl.code, KeyCode::Char('c'));
     }
 }

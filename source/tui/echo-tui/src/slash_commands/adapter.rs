@@ -1,8 +1,8 @@
 //! /adapter and /adapters commands.
 
-use echo_agent::BackendCommand;
-use crate::state::{AppState, ToastKind};
 use crate::backend::Backend;
+use crate::state::{AppState, ToastKind};
+use echo_agent::BackendCommand;
 
 /// /adapters — show adapter status with connection details.
 pub fn status(state: &mut AppState, backend: &Backend) {
@@ -18,7 +18,10 @@ pub fn status(state: &mut AppState, backend: &Backend) {
             if !a.running {
                 lines.push("    状态: ○ 已停止".into());
             } else if a.connected {
-                lines.push(format!("    状态: ● 已连接  self: {}", a.self_id.as_deref().unwrap_or("?")));
+                lines.push(format!(
+                    "    状态: ● 已连接  self: {}",
+                    a.self_id.as_deref().unwrap_or("?")
+                ));
             } else {
                 lines.push("    状态: ◐ 等待客户端连接…".into());
                 if !a.bind_address.is_empty() {

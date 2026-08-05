@@ -13,8 +13,8 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListSt
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
-use crate::state::{AppState, PaletteMode};
 use crate::event::Event;
+use crate::state::{AppState, PaletteMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteAction {
@@ -45,6 +45,32 @@ impl CommandPalette {
 }
 
 impl CommandPalette {
+    /// 会话列表标签（按最近活跃排序，当前会话标 ●）。纯函数，测试专用。
+    #[cfg(test)]
+    fn session_labels(&self, state: &AppState) -> Vec<String> {
+        let mut sessions = state.sessions.clone();
+        sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+        sessions
+            .iter()
+            .map(|s| {
+                let active = state.active_session_id.as_deref() == Some(s.id.as_str());
+                let name = if s.group_name.is_some() {
+                    s.nickname.clone()
+                } else {
+                    format!("💬 {}", s.nickname)
+                };
+                let marker = if active { "● " } else { "○ " };
+                let preview: String = s.last_message.chars().take(24).collect();
+                let preview_part = if preview.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {preview}")
+                };
+                format!("{marker}{name}{preview_part}")
+            })
+            .collect()
+    }
+
     /// 会话列表项（按最近活跃排序，当前会话标 ●）。
     fn session_items<'a>(&self, state: &'a AppState) -> Vec<ListItem<'a>> {
         let theme = state.theme;
@@ -114,11 +140,18 @@ impl Component for CommandPalette {
             .border_type(BorderType::Rounded)
             .border_style(theme.border_focused)
             .title(Span::styled(title, Style::default().fg(theme.title).bold()));
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.title).bold());
+        let list = List::new(items).block(block).highlight_style(
+            Style::default()
+                .bg(theme.highlight_bg)
+                .fg(theme.title)
+                .bold(),
+        );
         let mut list_state = ListState::default();
-        list_state.select(Some(state.palette_selection.min(rect.height.saturating_sub(4) as usize)));
+        list_state.select(Some(
+            state
+                .palette_selection
+                .min(rect.height.saturating_sub(4) as usize),
+        ));
         f.render_stateful_widget(list, rect, &mut list_state);
 
         let hint = Paragraph::new(Line::from("↑↓/jk 选择 · Enter 执行 · Esc 关闭"))
@@ -149,5 +182,126 @@ impl Component for CommandPalette {
             _ => return ComponentResult::Pass,
         }
         ComponentResult::Consumed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybindings::Keybindings;
+    use crate::theme::Theme;
+
+    fn key(code: KeyCode, kind: KeyEventKind) -> Event {
+        let mut k = crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
+        k.kind = kind;
+        Event::Input(crossterm::event::Event::Key(k))
+    }
+
+    fn state_with_sessions() -> AppState {
+        let mut st = AppState::new(Theme::dark(), Keybindings::default());
+        st.sessions = vec![
+            echo_agent::SessionInfo {
+                id: "old".into(),
+                platform: "qq".into(),
+                nickname: "alice".into(),
+                scope: "dm".into(),
+                user_id: "123".into(),
+                group_name: None,
+                last_active: 100,
+                last_message: "hi".into(),
+            },
+            echo_agent::SessionInfo {
+                id: "new".into(),
+                platform: "qq".into(),
+                nickname: "bob".into(),
+                scope: "group".into(),
+                user_id: "456".into(),
+                group_name: Some("testers".into()),
+                last_active: 200,
+                last_message: String::new(),
+            },
+        ];
+        st.active_session_id = Some("old".into());
+        st
+    }
+
+    #[test]
+    fn actions_returns_all_six() {
+        let palette = CommandPalette;
+        assert_eq!(palette.actions().len(), 6);
+        assert!(palette.actions().contains(&PaletteAction::Quit));
+        assert!(palette.actions().contains(&PaletteAction::ConfigureApi));
+    }
+
+    #[test]
+    fn session_labels_sorted_by_recency_with_active_marker() {
+        let st = state_with_sessions();
+        let palette = CommandPalette;
+        let labels = palette.session_labels(&st);
+        assert_eq!(labels.len(), 2);
+        // Most recent first: bob (last_active 200) before alice (100).
+        assert!(labels[0].contains("bob"), "got: {}", labels[0]);
+        assert!(
+            labels[1].contains("●"),
+            "active session must be marked: {}",
+            labels[1]
+        );
+        assert!(labels[1].contains("alice"));
+        // DM sessions get a 💬 prefix; group sessions show plain nickname.
+        assert!(labels[1].contains("💬"));
+    }
+
+    #[test]
+    fn down_navigates_with_wraparound() {
+        let mut st = state_with_sessions();
+        st.palette_mode = PaletteMode::Commands; // 6 actions
+        let mut palette = CommandPalette;
+        let ev = key(KeyCode::Down, KeyEventKind::Press);
+        assert_eq!(
+            palette.handle_event(&ev, &mut st),
+            ComponentResult::Consumed
+        );
+        assert_eq!(st.palette_selection, 1);
+        // Wrap from last to first.
+        st.palette_selection = 5;
+        assert_eq!(
+            palette.handle_event(&ev, &mut st),
+            ComponentResult::Consumed
+        );
+        assert_eq!(st.palette_selection, 0);
+    }
+
+    #[test]
+    fn up_never_underflows() {
+        let mut st = state_with_sessions();
+        let mut palette = CommandPalette;
+        let ev = key(KeyCode::Char('k'), KeyEventKind::Press);
+        assert_eq!(
+            palette.handle_event(&ev, &mut st),
+            ComponentResult::Consumed
+        );
+        assert_eq!(st.palette_selection, 0, "saturating_sub must not underflow");
+    }
+
+    #[test]
+    fn escape_closes_palette() {
+        let mut st = state_with_sessions();
+        st.show_palette = true;
+        let mut palette = CommandPalette;
+        let ev = key(KeyCode::Esc, KeyEventKind::Press);
+        assert_eq!(
+            palette.handle_event(&ev, &mut st),
+            ComponentResult::Consumed
+        );
+        assert!(!st.show_palette);
+    }
+
+    #[test]
+    fn release_events_pass_through() {
+        let mut st = state_with_sessions();
+        let mut palette = CommandPalette;
+        let ev = key(KeyCode::Down, KeyEventKind::Release);
+        assert_eq!(palette.handle_event(&ev, &mut st), ComponentResult::Pass);
+        assert_eq!(st.palette_selection, 0);
     }
 }

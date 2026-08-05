@@ -26,8 +26,11 @@ fn try_clipboard_tool(text: &str) -> bool {
         &["pbcopy"],
     ];
     for cmd in cmds {
-        let mut child = match Command::new(cmd[0])
-            .args(&cmd[1..])
+        let Some((program, args)) = cmd.split_first() else {
+            continue;
+        };
+        let mut child = match Command::new(program)
+            .args(args)
             .stdin(Stdio::piped())
             .spawn()
         {

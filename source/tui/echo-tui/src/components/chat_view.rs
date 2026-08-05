@@ -7,12 +7,14 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
-use crate::state::{AppState, MsgRole, SPINNER};
 use crate::event::Event;
+use crate::state::{AppState, MsgRole, SPINNER};
 
 #[derive(Debug, Default)]
 pub struct ChatView;
@@ -77,7 +79,9 @@ impl ChatView {
 impl Component for ChatView {
     fn render(&self, f: &mut Frame, area: Rect, state: &AppState) {
         let theme = state.theme;
-        let block = Block::default().borders(Borders::TOP).border_style(theme.border);
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(theme.border);
 
         let (lines, _line_texts) = self.build_lines(state, area.width);
 
@@ -200,4 +204,121 @@ fn render_message(
     }
     out.push(Line::default());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybindings::Keybindings;
+    use crate::state::{DisplayMessage, MsgRole};
+    use crate::theme::Theme;
+
+    fn test_state() -> AppState {
+        let mut st = AppState::new(Theme::dark(), Keybindings::default());
+        st.active_session_id = Some("s1".into());
+        st.push_message(
+            "s1",
+            DisplayMessage {
+                role: MsgRole::User,
+                content: "你好".into(),
+                time: 0,
+            },
+        );
+        st
+    }
+
+    fn key_for(chord: crate::keybindings::KeyChord) -> Event {
+        Event::Input(crossterm::event::Event::Key(
+            crossterm::event::KeyEvent::new(chord.code, chord.modifiers),
+        ))
+    }
+
+    #[test]
+    fn build_lines_labels_messages() {
+        let st = test_state();
+        let view = ChatView;
+        let (lines, texts) = view.build_lines(&st, 80);
+        assert!(!lines.is_empty());
+        assert_eq!(texts.len(), lines.len());
+        // Header line contains the role label.
+        assert!(texts[0].contains("你"));
+        // Body line contains the content.
+        assert!(texts.iter().any(|t| t.contains("你好")));
+    }
+
+    #[test]
+    fn build_lines_wraps_long_content() {
+        let mut st = test_state();
+        st.push_message(
+            "s1",
+            DisplayMessage {
+                role: MsgRole::Agent,
+                content: "x".repeat(100),
+                time: 0,
+            },
+        );
+        let view = ChatView;
+        let (lines, _) = view.build_lines(&st, 20); // narrow area → wrap
+                                                    // Header + wrapped body chunks + blank line.
+        assert!(
+            lines.len() >= 6,
+            "100 chars at width 18 must wrap to several lines, got {}",
+            lines.len()
+        );
+    }
+
+    #[test]
+    fn handle_event_scroll_up_increases_offset() {
+        let mut st = test_state();
+        let mut view = ChatView;
+        let event = key_for(st.keybindings.scroll_up);
+        assert_eq!(
+            view.handle_event(&event, &mut st),
+            ComponentResult::Consumed
+        );
+        assert!(st.chat_scroll >= 10);
+    }
+
+    #[test]
+    fn handle_event_scroll_down_never_underflows() {
+        let mut st = test_state();
+        let mut view = ChatView;
+        let event = key_for(st.keybindings.scroll_down);
+        assert_eq!(
+            view.handle_event(&event, &mut st),
+            ComponentResult::Consumed
+        );
+        assert_eq!(st.chat_scroll, 0, "saturating_sub must not underflow");
+    }
+
+    #[test]
+    fn handle_event_scroll_top_and_bottom() {
+        let mut st = test_state();
+        let mut view = ChatView;
+        let top = key_for(st.keybindings.scroll_top);
+        assert_eq!(view.handle_event(&top, &mut st), ComponentResult::Consumed);
+        assert_eq!(st.chat_scroll, usize::MAX);
+        let bottom = key_for(st.keybindings.scroll_bottom);
+        assert_eq!(
+            view.handle_event(&bottom, &mut st),
+            ComponentResult::Consumed
+        );
+        assert_eq!(st.chat_scroll, 0);
+    }
+
+    #[test]
+    fn render_message_includes_timestamp_when_set() {
+        let m = DisplayMessage {
+            role: MsgRole::Agent,
+            content: "hi".into(),
+            time: 1700000000,
+        };
+        let lines = render_message(&m, "hi", 80, Theme::dark(), false);
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(text.contains("Agent"));
+        assert!(text.contains("["), "timestamp should be shown");
+    }
 }

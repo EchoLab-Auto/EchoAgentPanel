@@ -90,3 +90,56 @@ impl Theme {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Luminance of an RGB color (0..=255), used to verify brightness layering.
+    fn luminance(c: Color) -> u8 {
+        match c {
+            Color::Rgb(r, g, b) => {
+                ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000) as u8
+            }
+            _ => 128,
+        }
+    }
+
+    #[test]
+    fn dark_theme_text_brightness_decreases_by_layer() {
+        let t = Theme::dark();
+        // title > fg > subtitle > dim > faint
+        assert!(luminance(t.title) > luminance(t.fg));
+        assert!(luminance(t.fg) > luminance(t.subtitle));
+        assert!(luminance(t.subtitle) > luminance(t.dim));
+        assert!(luminance(t.dim) > luminance(t.faint));
+    }
+
+    #[test]
+    fn light_theme_text_brightness_increases_by_layer() {
+        let t = Theme::light();
+        // On light backgrounds, higher layers are *darker* (less luminance).
+        assert!(luminance(t.faint) > luminance(t.dim));
+        assert!(luminance(t.dim) > luminance(t.subtitle));
+        assert!(luminance(t.subtitle) > luminance(t.fg));
+        assert!(luminance(t.fg) > luminance(t.title));
+    }
+
+    #[test]
+    fn both_themes_have_distinct_role_colors() {
+        let dark = Theme::dark();
+        let light = Theme::light();
+        for c in [dark.user_fg, dark.agent_fg, dark.tool_fg, dark.system_fg] {
+            assert_ne!(c, dark.fg, "role colors differ from body text");
+        }
+        assert_ne!(dark.success, dark.error);
+        assert_ne!(light.success, light.error);
+        assert_ne!(dark.border, dark.border_focused);
+    }
+
+    #[test]
+    fn focused_border_stands_out_from_regular() {
+        let dark = Theme::dark();
+        assert!(luminance(dark.border_focused) > luminance(dark.border));
+    }
+}

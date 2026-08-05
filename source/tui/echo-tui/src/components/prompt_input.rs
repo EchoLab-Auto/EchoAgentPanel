@@ -13,19 +13,17 @@ use ratatui::Frame;
 use tui_textarea::{Input, Key, TextArea};
 
 use super::{Component, ComponentResult};
-use crate::state::AppState;
 use crate::event::Event;
 use crate::slash_commands::{SlashAction, SLASH_COMMANDS};
+use crate::state::AppState;
 
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct PromptInput {
     textarea: TextArea<'static>,
     history: Vec<String>,
     history_idx: Option<usize>,
     draft: String,
 }
-
 
 impl PromptInput {
     /// 输入内容若以 `/` 开头则返回命令过滤串（支持多词命令如 /adapter start）。
@@ -41,8 +39,12 @@ impl PromptInput {
         SLASH_COMMANDS
             .iter()
             .filter(|(name, _, _)| {
-                if !name.starts_with(filter) { return false; }
-                if !show_sub && name.contains(' ') { return false; }
+                if !name.starts_with(filter) {
+                    return false;
+                }
+                if !show_sub && name.contains(' ') {
+                    return false;
+                }
                 true
             })
             .collect()
@@ -73,7 +75,10 @@ impl PromptInput {
                 Style::default().fg(theme.fg)
             };
             lines.push(Line::from(vec![
-                Span::styled(format!(" {marker} "), if i == sel { theme.accent } else { theme.faint }),
+                Span::styled(
+                    format!(" {marker} "),
+                    if i == sel { theme.accent } else { theme.faint },
+                ),
                 Span::styled(*name, name_style),
                 Span::styled(format!("  {desc}"), theme.dim),
             ]));
@@ -88,7 +93,10 @@ impl PromptInput {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme.border_focused)
-            .title(Span::styled(format!(" /{} ", state.slash_filter), Style::default().fg(theme.title)));
+            .title(Span::styled(
+                format!(" /{} ", state.slash_filter),
+                Style::default().fg(theme.title),
+            ));
         let p = Paragraph::new(lines)
             .block(block)
             .style(Style::default().bg(theme.panel_bg));
@@ -112,9 +120,17 @@ impl Component for PromptInput {
         };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(if focused { theme.border_focused } else { theme.border })
+            .border_style(if focused {
+                theme.border_focused
+            } else {
+                theme.border
+            })
             .title(Span::styled(
-                if focused { title } else { format!("{title}(Tab 选中后输入)") },
+                if focused {
+                    title
+                } else {
+                    format!("{title}(Tab 选中后输入)")
+                },
                 Style::default().fg(if focused { theme.subtitle } else { theme.faint }),
             ));
         let inner = block.inner(area);
@@ -128,9 +144,18 @@ impl Component for PromptInput {
             .iter()
             .skip(first_row)
             .take(inner.height.max(1) as usize)
-            .map(|l| l.chars().skip(start_col).take(inner.width.max(1) as usize).collect())
+            .map(|l| {
+                l.chars()
+                    .skip(start_col)
+                    .take(inner.width.max(1) as usize)
+                    .collect()
+            })
             .collect();
-        let rendered = if visible.is_empty() { String::new() } else { visible.join("\n") };
+        let rendered = if visible.is_empty() {
+            String::new()
+        } else {
+            visible.join("\n")
+        };
         let p = Paragraph::new(rendered)
             .style(Style::default().bg(theme.panel_bg).fg(theme.fg))
             .block(block);
@@ -164,7 +189,9 @@ impl Component for PromptInput {
                 }
                 KeyCode::Enter => {
                     let filtered = Self::filtered_commands(&state.slash_filter);
-                    if let Some((_, _, action)) = filtered.get(state.slash_selection % filtered.len().max(1)) {
+                    if let Some((_, _, action)) =
+                        filtered.get(state.slash_selection % filtered.len().max(1))
+                    {
                         self.save_to_history();
                         state.pending_slash = Some(*action);
                         state.pending_slash_text = self.textarea.lines().join(" ");
@@ -179,7 +206,9 @@ impl Component for PromptInput {
                 // Tab → autocomplete to the selected match.
                 KeyCode::Tab => {
                     let filtered = Self::filtered_commands(&state.slash_filter);
-                    if let Some((name, _, _)) = filtered.get(state.slash_selection % filtered.len().max(1)) {
+                    if let Some((name, _, _)) =
+                        filtered.get(state.slash_selection % filtered.len().max(1))
+                    {
                         // Replace textarea content with the completed command.
                         self.textarea.select_all();
                         self.textarea.delete_line_by_end();
@@ -290,12 +319,10 @@ impl PromptInput {
         }
 
         let new_idx = match code {
-            KeyCode::Up => {
-                match self.history_idx {
-                    None => self.history.len().saturating_sub(1),
-                    Some(i) => i.saturating_sub(1),
-                }
-            }
+            KeyCode::Up => match self.history_idx {
+                None => self.history.len().saturating_sub(1),
+                Some(i) => i.saturating_sub(1),
+            },
             KeyCode::Down => {
                 match self.history_idx {
                     None => return ComponentResult::Consumed,
@@ -341,13 +368,42 @@ impl PromptInput {
     }
 }
 
+/// Convert a crossterm key event into a tui-textarea `Input`.
+fn to_tui_input(key: &KeyEvent) -> Input {
+    let mk = |k: Key| Input {
+        key: k,
+        ctrl: key.modifiers.contains(KeyModifiers::CONTROL),
+        alt: key.modifiers.contains(KeyModifiers::ALT),
+        shift: key.modifiers.contains(KeyModifiers::SHIFT),
+    };
+    match key.code {
+        KeyCode::Char(c) => mk(Key::Char(c)),
+        KeyCode::Enter => mk(Key::Enter),
+        KeyCode::Tab => mk(Key::Tab),
+        KeyCode::Backspace => mk(Key::Backspace),
+        KeyCode::Delete => mk(Key::Delete),
+        KeyCode::Left => mk(Key::Left),
+        KeyCode::Right => mk(Key::Right),
+        KeyCode::Up => mk(Key::Up),
+        KeyCode::Down => mk(Key::Down),
+        KeyCode::Home => mk(Key::Home),
+        KeyCode::End => mk(Key::End),
+        KeyCode::PageUp => mk(Key::PageUp),
+        KeyCode::PageDown => mk(Key::PageDown),
+        _ => Input::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{keybindings::Keybindings, theme::Theme};
 
     fn key(code: KeyCode) -> Event {
-        Event::Input(crossterm::event::Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
+        Event::Input(crossterm::event::Event::Key(KeyEvent::new(
+            code,
+            KeyModifiers::NONE,
+        )))
     }
 
     fn state() -> AppState {
@@ -396,26 +452,5 @@ mod tests {
         input.handle_event(&key(KeyCode::Enter), &mut st);
         assert_eq!(st.pending_submit.as_deref(), Some("hi"));
         assert!(st.pending_slash.is_none());
-    }
-}
-
-/// Convert a crossterm key event into a tui-textarea `Input`.
-fn to_tui_input(key: &KeyEvent) -> Input {
-    let mk = |k: Key| Input { key: k, ctrl: key.modifiers.contains(KeyModifiers::CONTROL), alt: key.modifiers.contains(KeyModifiers::ALT), shift: key.modifiers.contains(KeyModifiers::SHIFT) };
-    match key.code {
-        KeyCode::Char(c) => mk(Key::Char(c)),
-        KeyCode::Enter => mk(Key::Enter),
-        KeyCode::Tab => mk(Key::Tab),
-        KeyCode::Backspace => mk(Key::Backspace),
-        KeyCode::Delete => mk(Key::Delete),
-        KeyCode::Left => mk(Key::Left),
-        KeyCode::Right => mk(Key::Right),
-        KeyCode::Up => mk(Key::Up),
-        KeyCode::Down => mk(Key::Down),
-        KeyCode::Home => mk(Key::Home),
-        KeyCode::End => mk(Key::End),
-        KeyCode::PageUp => mk(Key::PageUp),
-        KeyCode::PageDown => mk(Key::PageDown),
-        _ => Input::default(),
     }
 }

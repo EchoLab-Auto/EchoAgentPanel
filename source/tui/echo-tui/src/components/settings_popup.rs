@@ -14,8 +14,8 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListSt
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
-use crate::state::AppState;
 use crate::event::Event;
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsMode {
@@ -73,15 +73,33 @@ impl SettingsForm {
     }
 
     /// 开始编辑 profile：`name` 为空 = 新建（含 name 字段），否则编辑已有。
-    pub fn edit_profile(&mut self, name: &str, provider: &str, model: &str, base_url: &str, api_key_set: bool) {
+    pub fn edit_profile(
+        &mut self,
+        name: &str,
+        provider: &str,
+        model: &str,
+        base_url: &str,
+        api_key_set: bool,
+    ) {
         self.mode = SettingsMode::EditProfile;
         self.focus = 0;
         if name.is_empty() {
             self.name.clear();
-            self.fields = vec![String::new(), provider.into(), model.into(), base_url.into(), String::new()];
+            self.fields = vec![
+                String::new(),
+                provider.into(),
+                model.into(),
+                base_url.into(),
+                String::new(),
+            ];
         } else {
             self.name = name.to_string();
-            self.fields = vec![provider.into(), model.into(), base_url.into(), String::new()];
+            self.fields = vec![
+                provider.into(),
+                model.into(),
+                base_url.into(),
+                String::new(),
+            ];
         }
         self.api_key_set = api_key_set;
     }
@@ -132,9 +150,9 @@ impl SettingsForm {
                     api_key: rest[3].clone(),
                 }
             }
-            SettingsMode::EditSystemPrompt => {
-                BackendCommand::SetSystemPrompt { prompt: self.fields[0].clone() }
-            }
+            SettingsMode::EditSystemPrompt => BackendCommand::SetSystemPrompt {
+                prompt: self.fields[0].clone(),
+            },
             SettingsMode::List => unreachable!("list mode has no command"),
         }
     }
@@ -147,7 +165,151 @@ impl SettingsForm {
     /// 列表选中项：`None` = 顶层默认，`Some(i)` = profiles[i]。
     /// selection==0 必须映射到顶层默认（None），不能用 saturating_sub。
     pub fn selected_profile(&self) -> Option<&echo_agent::ApiProfileInfo> {
-        self.selection.checked_sub(1).and_then(|i| self.profiles.get(i))
+        self.selection
+            .checked_sub(1)
+            .and_then(|i| self.profiles.get(i))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile(name: &str) -> echo_agent::ApiProfileInfo {
+        echo_agent::ApiProfileInfo {
+            name: name.into(),
+            provider: "deepseek".into(),
+            model: "ds-v4".into(),
+            api_key_set: true,
+        }
+    }
+
+    #[test]
+    fn edit_profile_new_has_name_field() {
+        let mut f = SettingsForm::default();
+        f.edit_profile("", "deepseek", "ds-v4", "http://x", false);
+        assert_eq!(f.mode, SettingsMode::EditProfile);
+        assert_eq!(f.fields.len(), 5);
+        assert_eq!(
+            f.field_names(),
+            vec!["name", "provider", "model", "base_url", "api_key"]
+        );
+        assert!(f.name.is_empty());
+    }
+
+    #[test]
+    fn edit_profile_existing_omits_name_field() {
+        let mut f = SettingsForm::default();
+        f.edit_profile("p1", "openai", "gpt-4o", "http://y", true);
+        assert_eq!(f.fields.len(), 4);
+        assert_eq!(f.name, "p1");
+        assert_eq!(
+            f.field_names(),
+            vec!["provider", "model", "base_url", "api_key"]
+        );
+        assert!(f.api_key_set);
+    }
+
+    #[test]
+    fn edit_system_prompt_sets_single_field() {
+        let mut f = SettingsForm::default();
+        f.edit_system_prompt("你好");
+        assert_eq!(f.mode, SettingsMode::EditSystemPrompt);
+        assert_eq!(f.field_names(), vec!["system_prompt"]);
+        assert_eq!(f.fields[0], "你好");
+    }
+
+    #[test]
+    fn display_value_masks_api_key() {
+        let mut f = SettingsForm::default();
+        f.edit_profile("p1", "openai", "m", "", false);
+        // api_key is the last field.
+        let idx = f.fields.len() - 1;
+        f.fields[idx] = "sk-123".into();
+        let masked = f.display_value(idx);
+        assert!(!masked.contains("sk-123"));
+        assert_eq!(masked.chars().count(), 6, "one dot per character");
+        // Non-key fields show raw value.
+        assert_eq!(f.display_value(0), "openai");
+    }
+
+    #[test]
+    fn build_command_from_new_profile() {
+        let mut f = SettingsForm::default();
+        f.edit_profile("", "deepseek", "ds-v4", "http://x", false);
+        f.fields = vec![
+            "newp".into(),
+            "deepseek".into(),
+            "ds-v4".into(),
+            "http://x".into(),
+            "sk".into(),
+        ];
+        match f.build_command() {
+            BackendCommand::UpdateApiConfig {
+                name,
+                provider,
+                model,
+                base_url,
+                api_key,
+            } => {
+                assert_eq!(name, "newp");
+                assert_eq!(provider, "deepseek");
+                assert_eq!(model, "ds-v4");
+                assert_eq!(base_url, "http://x");
+                assert_eq!(api_key, "sk");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_command_from_existing_profile_keeps_name() {
+        let mut f = SettingsForm::default();
+        f.edit_profile("existing", "openai", "m", "", true);
+        match f.build_command() {
+            BackendCommand::UpdateApiConfig { name, .. } => assert_eq!(name, "existing"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_command_system_prompt() {
+        let mut f = SettingsForm::default();
+        f.edit_system_prompt("be concise");
+        assert_eq!(
+            f.build_command(),
+            BackendCommand::SetSystemPrompt {
+                prompt: "be concise".into()
+            }
+        );
+    }
+
+    #[test]
+    fn selection_maps_zero_to_default() {
+        let mut f = SettingsForm {
+            profiles: vec![profile("a"), profile("b")],
+            ..Default::default()
+        };
+        f.selection = 0;
+        assert!(f.selected_profile().is_none(), "selection 0 = default");
+        f.selection = 1;
+        assert_eq!(f.selected_profile().unwrap().name, "a");
+        f.selection = 2;
+        assert_eq!(f.selected_profile().unwrap().name, "b");
+        f.selection = 99;
+        assert!(f.selected_profile().is_none(), "out of range");
+        assert_eq!(f.list_len(), 3);
+    }
+
+    #[test]
+    fn to_list_resets_edit_state() {
+        let mut f = SettingsForm::default();
+        f.edit_profile("p1", "openai", "m", "", false);
+        f.to_list();
+        assert_eq!(f.mode, SettingsMode::List);
+        assert!(f.fields.is_empty());
+        assert!(f.name.is_empty());
+        assert_eq!(f.focus, 0);
     }
 }
 
@@ -174,7 +336,9 @@ impl Component for SettingsPopup {
         }
         match state.settings.mode {
             SettingsMode::List => self.handle_list(key, state),
-            SettingsMode::EditProfile | SettingsMode::EditSystemPrompt => self.handle_edit(key, state),
+            SettingsMode::EditProfile | SettingsMode::EditSystemPrompt => {
+                self.handle_edit(key, state)
+            }
         }
     }
 }
@@ -204,14 +368,25 @@ impl SettingsPopup {
             "⚙ 默认配置".to_string()
         };
         items.push(ListItem::new(Line::from(vec![
-            Span::styled(default_label, if default_active { Style::default().fg(theme.title).bold() } else { Style::default().fg(theme.fg) }),
+            Span::styled(
+                default_label,
+                if default_active {
+                    Style::default().fg(theme.title).bold()
+                } else {
+                    Style::default().fg(theme.fg)
+                },
+            ),
             Span::styled("  (顶层默认)", theme.faint),
         ])));
         // profiles
         for p in &form.profiles {
             let active = p.name == form.active_api;
             let marker = if active { "● " } else { "○ " };
-            let name_style = if active { Style::default().fg(theme.title).bold() } else { Style::default().fg(theme.fg) };
+            let name_style = if active {
+                Style::default().fg(theme.title).bold()
+            } else {
+                Style::default().fg(theme.fg)
+            };
             let mut spans = vec![Span::styled(format!("{marker}{}", p.name), name_style)];
             spans.push(Span::styled(
                 format!("  ({}/{})", p.provider, p.model),
@@ -230,7 +405,10 @@ impl SettingsPopup {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme.border_focused)
-            .title(Span::styled(" API 配置 ", Style::default().fg(theme.title).bold()));
+            .title(Span::styled(
+                " API 配置 ",
+                Style::default().fg(theme.title).bold(),
+            ));
         let list = List::new(items)
             .block(block)
             .highlight_style(Style::default().bg(theme.highlight_bg));
@@ -246,7 +424,11 @@ impl SettingsPopup {
         f.render_widget(hint, Rect::new(x, y + h, w, 1));
     }
 
-    fn handle_list(&mut self, key: &crossterm::event::KeyEvent, state: &mut AppState) -> ComponentResult {
+    fn handle_list(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+        state: &mut AppState,
+    ) -> ComponentResult {
         let len = state.settings.list_len();
         match key.code {
             KeyCode::Esc => {
@@ -272,11 +454,19 @@ impl SettingsPopup {
                 let selection = state.settings.selected_profile().cloned();
                 match selection {
                     Some(p) => {
-                        state.settings.edit_profile(&p.name, &p.provider, &p.model, "", p.api_key_set);
+                        state.settings.edit_profile(
+                            &p.name,
+                            &p.provider,
+                            &p.model,
+                            "",
+                            p.api_key_set,
+                        );
                     }
                     None => {
                         // 顶层默认：也允许编辑（name 空 = 顶层）
-                        state.settings.edit_profile("", "", "", "", state.settings.api_key_set);
+                        state
+                            .settings
+                            .edit_profile("", "", "", "", state.settings.api_key_set);
                     }
                 }
             }
@@ -285,11 +475,15 @@ impl SettingsPopup {
             }
             KeyCode::Char('d') => {
                 if let Some(p) = state.settings.selected_profile() {
-                    state.pending_command = Some(BackendCommand::DeleteApi { name: p.name.clone() });
+                    state.pending_command = Some(BackendCommand::DeleteApi {
+                        name: p.name.clone(),
+                    });
                 }
             }
             KeyCode::Char('s') => {
-                state.settings.edit_system_prompt(&state.status.system_prompt);
+                state
+                    .settings
+                    .edit_system_prompt(&state.status.system_prompt);
             }
             _ => return ComponentResult::Pass,
         }
@@ -323,7 +517,14 @@ impl SettingsPopup {
             let focused = i == form.focus;
             let prefix = if focused { "▸ " } else { "  " };
             let label = if *name == "api_key" {
-                format!("api_key ({})", if form.api_key_set { "已设置" } else { "未设置" })
+                format!(
+                    "api_key ({})",
+                    if form.api_key_set {
+                        "已设置"
+                    } else {
+                        "未设置"
+                    }
+                )
             } else {
                 name.to_string()
             };
@@ -337,9 +538,15 @@ impl SettingsPopup {
                 _ => "机器人人设与规则".to_string(),
             };
             let (label_style, value_style) = if focused {
-                (Style::default().fg(theme.accent).bold(), Style::default().fg(theme.title))
+                (
+                    Style::default().fg(theme.accent).bold(),
+                    Style::default().fg(theme.title),
+                )
             } else {
-                (Style::default().fg(theme.subtitle), Style::default().fg(theme.fg))
+                (
+                    Style::default().fg(theme.subtitle),
+                    Style::default().fg(theme.fg),
+                )
             };
             let mut spans = vec![Span::styled(format!("{prefix}{label}: "), label_style)];
             if value.is_empty() {
@@ -361,7 +568,11 @@ impl SettingsPopup {
         f.render_widget(hint, Rect::new(x, y + h, w, 1));
     }
 
-    fn handle_edit(&mut self, key: &crossterm::event::KeyEvent, state: &mut AppState) -> ComponentResult {
+    fn handle_edit(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+        state: &mut AppState,
+    ) -> ComponentResult {
         let n = state.settings.fields.len();
         match key.code {
             KeyCode::Esc => {
@@ -380,7 +591,11 @@ impl SettingsPopup {
                 state.settings.focus = (state.settings.focus + 1) % n;
             }
             KeyCode::BackTab | KeyCode::Up => {
-                state.settings.focus = if state.settings.focus == 0 { n - 1 } else { state.settings.focus - 1 };
+                state.settings.focus = if state.settings.focus == 0 {
+                    n - 1
+                } else {
+                    state.settings.focus - 1
+                };
             }
             KeyCode::Backspace => {
                 state.settings.fields[state.settings.focus].pop();

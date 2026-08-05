@@ -89,7 +89,9 @@ impl Default for FormOverlay {
 impl FormOverlay {
     // ── lifecycle ──
 
-    pub fn is_active(&self) -> bool { self.state != FormState::Inactive }
+    pub fn is_active(&self) -> bool {
+        self.state != FormState::Inactive
+    }
 
     pub fn activate(&mut self, title: &str, items: Vec<SelectItem>, kind: FormKind) {
         self.state = FormState::Selecting;
@@ -126,10 +128,14 @@ impl FormOverlay {
     // ── actions ──
 
     /// Enter edit mode. Caller should pre-fill via set_fields() before calling this.
-    pub fn set_fields(&mut self, fields: Vec<FormField>) { self.fields = fields; }
+    pub fn set_fields(&mut self, fields: Vec<FormField>) {
+        self.fields = fields;
+    }
 
     pub fn enter_edit(&mut self) {
-        if self.state != FormState::Selecting { return; }
+        if self.state != FormState::Selecting {
+            return;
+        }
         self.field_idx = 0;
         self.state = FormState::Editing;
     }
@@ -148,30 +154,78 @@ impl FormOverlay {
 
         let send = |name, prov, mdl, url, key| {
             backend.send(BackendCommand::UpdateApiConfig {
-                name, provider: prov, model: mdl, base_url: url, api_key: key,
+                name,
+                provider: prov,
+                model: mdl,
+                base_url: url,
+                api_key: key,
             });
         };
-        if !provider.is_empty() { send(String::new(), provider, String::new(), String::new(), String::new()); }
-        if !model.is_empty() { send(String::new(), String::new(), model, String::new(), String::new()); }
-        if !url.is_empty() { send(String::new(), String::new(), String::new(), url, String::new()); }
-        if !key.is_empty() { send(String::new(), String::new(), String::new(), String::new(), key); }
-        if !prompt.is_empty() { backend.send(BackendCommand::SetSystemPrompt { prompt }); }
+        if !provider.is_empty() {
+            send(
+                String::new(),
+                provider,
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+        }
+        if !model.is_empty() {
+            send(
+                String::new(),
+                String::new(),
+                model,
+                String::new(),
+                String::new(),
+            );
+        }
+        if !url.is_empty() {
+            send(
+                String::new(),
+                String::new(),
+                String::new(),
+                url,
+                String::new(),
+            );
+        }
+        if !key.is_empty() {
+            send(
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                key,
+            );
+        }
+        if !prompt.is_empty() {
+            backend.send(BackendCommand::SetSystemPrompt { prompt });
+        }
 
         self.state = FormState::Selecting;
     }
 
     /// Confirm selection (Enter in Selecting mode).
     pub fn confirm(&self) -> Option<String> {
-        if self.state != FormState::Selecting { return None; }
-        self.select_items.get(self.select_idx).map(|s| s.value.clone())
+        if self.state != FormState::Selecting {
+            return None;
+        }
+        self.select_items
+            .get(self.select_idx)
+            .map(|s| s.value.clone())
     }
 
     /// Go back one level: Editing→Selecting, Selecting→Inactive.
     /// Returns true if still active after going back.
     pub fn back(&mut self) -> bool {
         match self.state {
-            FormState::Editing => { self.state = FormState::Selecting; true }
-            FormState::Selecting => { self.state = FormState::Inactive; false }
+            FormState::Editing => {
+                self.state = FormState::Selecting;
+                true
+            }
+            FormState::Selecting => {
+                self.state = FormState::Inactive;
+                false
+            }
             _ => false,
         }
     }
@@ -197,15 +251,29 @@ impl FormOverlay {
                 for (i, field) in self.fields.iter().enumerate() {
                     let mark = if i == self.field_idx { "▸ " } else { "  " };
                     let display = match field.kind {
-                        FieldKind::Password => if field.value.is_empty() { "(未设置)".to_string() } else { "***".to_string() },
-                        FieldKind::Text => if field.value.is_empty() { "(空)".to_string() } else { field.value.clone() },
+                        FieldKind::Password => {
+                            if field.value.is_empty() {
+                                "(未设置)".to_string()
+                            } else {
+                                "***".to_string()
+                            }
+                        }
+                        FieldKind::Text => {
+                            if field.value.is_empty() {
+                                "(空)".to_string()
+                            } else {
+                                field.value.clone()
+                            }
+                        }
                     };
                     lines.push(format!("{mark}{}: {}", field.label, display));
                 }
                 lines.push(String::new());
                 match self.form_kind {
                     FormKind::ApiConfig => {
-                        lines.push("↑↓选字段  直接输入改值  Ctrl+S保存  Ctrl+C×1返回  Ctrl+C×2退出".into());
+                        lines.push(
+                            "↑↓选字段  直接输入改值  Ctrl+S保存  Ctrl+C×1返回  Ctrl+C×2退出".into(),
+                        );
                     }
                     FormKind::QqFilter => {
                         lines.push("输入QQ号后 Enter确认  Esc取消".into());
@@ -246,7 +314,9 @@ impl FormOverlay {
     /// Handle a key event. Returns `true` if the key was consumed.
     /// Handle key events that DON'T need AppState access.
     pub fn handle_key(&mut self, key: &KeyEvent, backend: &Backend) -> bool {
-        if !self.is_active() { return false; }
+        if !self.is_active() {
+            return false;
+        }
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
@@ -256,13 +326,25 @@ impl FormOverlay {
 
         match self.state {
             FormState::Selecting => match key.code {
-                KeyCode::Up => { self.navigate(-1); return true; }
-                KeyCode::Down => { self.navigate(1); return true; }
+                KeyCode::Up => {
+                    self.navigate(-1);
+                    return true;
+                }
+                KeyCode::Down => {
+                    self.navigate(1);
+                    return true;
+                }
                 _ => {}
             },
             FormState::Editing => match key.code {
-                KeyCode::Up => { self.navigate(-1); return true; }
-                KeyCode::Down => { self.navigate(1); return true; }
+                KeyCode::Up => {
+                    self.navigate(-1);
+                    return true;
+                }
+                KeyCode::Down => {
+                    self.navigate(1);
+                    return true;
+                }
                 // Ctrl+S only meaningful for ApiConfig forms.
                 KeyCode::Char('s') if ctrl && self.form_kind == FormKind::ApiConfig => {
                     self.save(backend);
@@ -273,5 +355,230 @@ impl FormOverlay {
             _ => {}
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn items(n: usize) -> Vec<SelectItem> {
+        (0..n)
+            .map(|i| SelectItem {
+                label: format!("item {i}"),
+                value: format!("v{i}"),
+            })
+            .collect()
+    }
+
+    fn key(code: KeyCode, ctrl: bool) -> KeyEvent {
+        KeyEvent::new(
+            code,
+            if ctrl {
+                KeyModifiers::CONTROL
+            } else {
+                KeyModifiers::NONE
+            },
+        )
+    }
+
+    #[test]
+    fn inactive_form_ignores_keys() {
+        let (backend, _handle) = {
+            let (bridge, handle) = echo_agent::create_bridge();
+            (Backend::new(std::sync::Arc::new(bridge)), handle)
+        };
+        let mut fo = FormOverlay::default();
+        assert!(!fo.is_active());
+        assert!(!fo.handle_key(&key(KeyCode::Down, false), &backend));
+        assert_eq!(fo.confirm(), None);
+    }
+
+    #[test]
+    fn navigation_wraps_around() {
+        let mut fo = FormOverlay::default();
+        fo.activate("t", items(3), FormKind::ApiConfig);
+        assert_eq!(fo.select_idx, 0);
+        fo.navigate(-1); // wrap to last
+        assert_eq!(fo.select_idx, 2);
+        fo.navigate(1);
+        assert_eq!(fo.select_idx, 0);
+        fo.navigate(1);
+        fo.navigate(1);
+        assert_eq!(fo.select_idx, 2);
+    }
+
+    #[test]
+    fn confirm_returns_selected_value() {
+        let mut fo = FormOverlay::default();
+        fo.activate("t", items(3), FormKind::QqFilter);
+        fo.select_idx = 1;
+        assert_eq!(fo.confirm(), Some("v1".into()));
+    }
+
+    #[test]
+    fn confirm_inactive_or_editing_returns_none() {
+        let fo = FormOverlay::default();
+        assert_eq!(fo.confirm(), None);
+        let mut fo = FormOverlay::default();
+        fo.activate("t", items(1), FormKind::ApiConfig);
+        fo.enter_edit();
+        assert_eq!(fo.confirm(), None);
+    }
+
+    #[test]
+    fn back_transitions_editing_selecting_inactive() {
+        let mut fo = FormOverlay::default();
+        fo.activate("t", items(2), FormKind::ApiConfig);
+        fo.enter_edit();
+        assert_eq!(fo.state, FormState::Editing);
+        assert!(fo.back());
+        assert_eq!(fo.state, FormState::Selecting);
+        assert!(!fo.back());
+        assert_eq!(fo.state, FormState::Inactive);
+    }
+
+    #[test]
+    fn render_text_lists_selection_with_cursor() {
+        let mut fo = FormOverlay::default();
+        fo.activate("标题", items(2), FormKind::QqFilter);
+        fo.select_idx = 1;
+        let text = fo.render_text();
+        assert!(text.contains("── 标题 ──"));
+        assert!(text.contains("▸"));
+        assert!(text.contains("item 0"));
+        assert!(text.contains("item 1"));
+    }
+
+    #[test]
+    fn render_text_masks_password_fields() {
+        let mut fo = FormOverlay::default();
+        fo.activate("api", items(0), FormKind::ApiConfig);
+        fo.set_fields(vec![
+            FormField {
+                label: "APIKey".into(),
+                value: "secret".into(),
+                kind: FieldKind::Password,
+            },
+            FormField {
+                label: "Model".into(),
+                value: String::new(),
+                kind: FieldKind::Text,
+            },
+        ]);
+        fo.enter_edit();
+        let text = fo.render_text();
+        assert!(text.contains("***"), "password must be masked");
+        assert!(!text.contains("secret"), "password must not leak");
+        assert!(text.contains("(空)"));
+    }
+
+    #[test]
+    fn set_field_value_updates_selected_field_only() {
+        let mut fo = FormOverlay::default();
+        fo.activate("api", items(0), FormKind::ApiConfig);
+        fo.set_fields(vec![
+            FormField {
+                label: "A".into(),
+                value: "a".into(),
+                kind: FieldKind::Text,
+            },
+            FormField {
+                label: "B".into(),
+                value: "b".into(),
+                kind: FieldKind::Text,
+            },
+        ]);
+        fo.enter_edit();
+        fo.set_field_value("new");
+        assert_eq!(fo.fields[0].value, "new");
+        assert_eq!(fo.fields[1].value, "b");
+    }
+
+    #[tokio::test]
+    async fn save_sends_commands_for_nonempty_fields() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let backend = Backend::new(std::sync::Arc::new(bridge));
+        let mut fo = FormOverlay::default();
+        fo.activate("api", items(0), FormKind::ApiConfig);
+        fo.set_fields(vec![
+            FormField {
+                label: "Provider".into(),
+                value: "deepseek".into(),
+                kind: FieldKind::Text,
+            },
+            FormField {
+                label: "Model".into(),
+                value: "deepseek-v4-flash".into(),
+                kind: FieldKind::Text,
+            },
+            FormField {
+                label: "BaseURL".into(),
+                value: String::new(),
+                kind: FieldKind::Text,
+            },
+            FormField {
+                label: "APIKey".into(),
+                value: "sk-123".into(),
+                kind: FieldKind::Password,
+            },
+            FormField {
+                label: "Prompt".into(),
+                value: "你好".into(),
+                kind: FieldKind::Text,
+            },
+        ]);
+        fo.enter_edit();
+        fo.save(&backend);
+
+        let mut commands = Vec::new();
+        while let Ok(cmd) = handle.command_rx.try_lock().unwrap().try_recv() {
+            commands.push(cmd);
+        }
+        // provider + model + key + prompt = 4 commands (empty url skipped)
+        assert_eq!(commands.len(), 4);
+        assert_eq!(
+            commands[0],
+            BackendCommand::UpdateApiConfig {
+                name: String::new(),
+                provider: "deepseek".into(),
+                model: String::new(),
+                base_url: String::new(),
+                api_key: String::new(),
+            }
+        );
+        assert_eq!(
+            commands[3],
+            BackendCommand::SetSystemPrompt {
+                prompt: "你好".into()
+            }
+        );
+        // After save the form returns to selecting.
+        assert_eq!(fo.state, FormState::Selecting);
+    }
+
+    #[test]
+    fn save_is_noop_for_non_api_forms() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let backend = Backend::new(std::sync::Arc::new(bridge));
+        let mut fo = FormOverlay::default();
+        fo.activate("qq", items(0), FormKind::QqFilter);
+        fo.save(&backend);
+        assert!(
+            handle.command_rx.try_lock().unwrap().try_recv().is_err(),
+            "QqFilter forms must not save"
+        );
+    }
+
+    #[test]
+    fn handle_key_navigates_and_consumes() {
+        let (bridge, _handle) = echo_agent::create_bridge();
+        let backend = Backend::new(std::sync::Arc::new(bridge));
+        let mut fo = FormOverlay::default();
+        fo.activate("t", items(3), FormKind::ApiConfig);
+        assert!(fo.handle_key(&key(KeyCode::Down, false), &backend));
+        assert_eq!(fo.select_idx, 1);
+        assert!(fo.handle_key(&key(KeyCode::Up, false), &backend));
+        assert_eq!(fo.select_idx, 0);
     }
 }

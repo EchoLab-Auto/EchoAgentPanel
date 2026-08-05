@@ -8,8 +8,8 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
-use crate::state::AppState;
 use crate::event::Event;
+use crate::state::AppState;
 
 #[derive(Debug, Default)]
 pub struct HelpPopup;
@@ -48,7 +48,10 @@ impl Component for HelpPopup {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(theme.border_focused)
-                    .title(Span::styled(" 按键绑定 ", Style::default().fg(theme.title).bold())),
+                    .title(Span::styled(
+                        " 按键绑定 ",
+                        Style::default().fg(theme.title).bold(),
+                    )),
             );
         f.render_widget(p, rect);
         let _ = kb;
@@ -65,5 +68,62 @@ impl Component for HelpPopup {
             return ComponentResult::Consumed;
         }
         ComponentResult::Pass
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybindings::Keybindings;
+    use crate::theme::Theme;
+
+    fn key(code: KeyCode, kind: KeyEventKind) -> Event {
+        let mut k = crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
+        k.kind = kind;
+        Event::Input(crossterm::event::Event::Key(k))
+    }
+
+    fn state() -> AppState {
+        AppState::new(Theme::dark(), Keybindings::default())
+    }
+
+    #[test]
+    fn escape_closes_help() {
+        let mut st = state();
+        st.show_help = true;
+        let mut popup = HelpPopup;
+        let ev = key(KeyCode::Esc, KeyEventKind::Press);
+        assert_eq!(popup.handle_event(&ev, &mut st), ComponentResult::Consumed);
+        assert!(!st.show_help);
+    }
+
+    #[test]
+    fn question_mark_closes_help() {
+        let mut st = state();
+        st.show_help = true;
+        let mut popup = HelpPopup;
+        let ev = key(KeyCode::Char('?'), KeyEventKind::Press);
+        assert_eq!(popup.handle_event(&ev, &mut st), ComponentResult::Consumed);
+        assert!(!st.show_help);
+    }
+
+    #[test]
+    fn other_keys_pass_through() {
+        let mut st = state();
+        st.show_help = true;
+        let mut popup = HelpPopup;
+        let ev = key(KeyCode::Enter, KeyEventKind::Press);
+        assert_eq!(popup.handle_event(&ev, &mut st), ComponentResult::Pass);
+        assert!(st.show_help, "help stays open");
+    }
+
+    #[test]
+    fn non_press_events_pass() {
+        let mut st = state();
+        st.show_help = true;
+        let mut popup = HelpPopup;
+        let ev = key(KeyCode::Esc, KeyEventKind::Release);
+        assert_eq!(popup.handle_event(&ev, &mut st), ComponentResult::Pass);
+        assert!(st.show_help);
     }
 }

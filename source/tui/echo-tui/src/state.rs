@@ -151,7 +151,7 @@ pub struct AppState {
     pub menu_msg_idx: isize,
     pub qq_filter: QqFilterCache,
     /// Current QQ gate mode.
-    pub qq_gate_mode: String,
+    pub qq_gate_mode: echo_adapter::GateMode,
     /// Cached QQ group list (fetched from adapter on request).
     pub qq_groups: Vec<(i64, String)>,
     // Mouse text selection
@@ -200,7 +200,7 @@ impl AppState {
             pending_action: None,
             menu_msg_idx: -1,
             qq_filter: QqFilterCache::default(),
-            qq_gate_mode: "none".into(),
+            qq_gate_mode: echo_adapter::GateMode::None,
             qq_groups: Vec::new(),
             selecting: false,
             sel_anchor: None,
@@ -264,8 +264,7 @@ impl AppState {
                 time: chrono::Utc::now().timestamp(),
             },
         );
-        self.menu_msg_idx =
-            (self.messages.get(&sid).map(|m| m.len()).unwrap_or(1) - 1) as isize;
+        self.menu_msg_idx = (self.messages.get(&sid).map(|m| m.len()).unwrap_or(1) - 1) as isize;
     }
 
     // ── Mouse selection helpers ────────────────────────────────────────
@@ -298,10 +297,7 @@ impl AppState {
     }
 
     pub fn no_modal(&self) -> bool {
-        !self.show_palette
-            && !self.show_help
-            && !self.show_settings
-            && !self.show_slash
+        !self.show_palette && !self.show_help && !self.show_settings && !self.show_slash
     }
 
     pub fn col_from_screen(&self, mx: u16) -> usize {
@@ -415,7 +411,11 @@ impl AppState {
                     _ => MsgRole::System,
                 };
                 let content = m["content"].as_str().unwrap_or("").to_string();
-                msgs.push(DisplayMessage { role, content, time: 0 });
+                msgs.push(DisplayMessage {
+                    role,
+                    content,
+                    time: 0,
+                });
             }
             return;
         }
@@ -472,5 +472,193 @@ impl AppState {
         let mut sessions = self.sessions.clone();
         sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         sessions
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybindings::Keybindings;
+    use crate::theme::Theme;
+
+    fn state() -> AppState {
+        AppState::new(Theme::dark(), Keybindings::default())
+    }
+
+    fn session(id: &str, last_active: i64) -> SessionInfo {
+        SessionInfo {
+            id: id.into(),
+            platform: "qq".into(),
+            nickname: id.into(),
+            scope: "dm".into(),
+            user_id: "1".into(),
+            group_name: None,
+            last_active,
+            last_message: String::new(),
+        }
+    }
+
+    #[test]
+    fn active_messages_returns_empty_without_session() {
+        let st = state();
+        assert!(st.active_messages().is_empty());
+        assert!(st.active_session().is_none());
+    }
+
+    #[test]
+    fn push_message_scrolls_to_bottom_and_flashes() {
+        let mut st = state();
+        st.active_session_id = Some("s1".into());
+        st.chat_scroll = 50;
+        st.push_message(
+            "s1",
+            DisplayMessage {
+                role: MsgRole::User,
+                content: "hi".into(),
+                time: 0,
+            },
+        );
+        assert_eq!(st.chat_scroll, 0, "new message snaps to bottom");
+        assert!(st.chat_flash_until.is_some());
+        assert_eq!(st.active_messages().len(), 1);
+        assert_eq!(st.active_messages()[0].content, "hi");
+    }
+
+    #[test]
+    fn active_session_finds_by_id() {
+        let mut st = state();
+        st.sessions.push(session("a", 1));
+        st.sessions.push(session("b", 2));
+        st.active_session_id = Some("b".into());
+        assert_eq!(st.active_session().unwrap().id, "b");
+        st.active_session_id = Some("missing".into());
+        assert!(st.active_session().is_none());
+    }
+
+    #[test]
+    fn refresh_menu_msg_inserts_or_updates() {
+        let mut st = state();
+        let mut fo = crate::components::form_overlay::FormOverlay::default();
+        fo.activate(
+            "t",
+            vec![crate::components::form_overlay::SelectItem {
+                label: "x".into(),
+                value: "y".into(),
+            }],
+            crate::components::form_overlay::FormKind::QqFilter,
+        );
+        st.form_overlay = fo;
+        st.refresh_menu_msg();
+        assert_eq!(st.active_messages().len(), 1);
+        assert_eq!(st.menu_msg_idx, 0);
+        let first = st.active_messages()[0].content.clone();
+        assert!(first.contains("t"));
+
+        // Second refresh updates the same message instead of appending.
+        st.refresh_menu_msg();
+        assert_eq!(st.active_messages().len(), 1, "updated in place");
+    }
+
+    #[test]
+    fn point_in_conv_uses_area_bounds() {
+        let mut st = state();
+        st.conv_area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        assert!(st.point_in_conv(10, 5));
+        assert!(!st.point_in_conv(90, 5), "outside width");
+        assert!(!st.point_in_conv(10, 0), "above header row");
+        assert!(!st.point_in_conv(10, 25), "below area");
+    }
+
+    #[test]
+    fn row_index_maps_screen_to_text_row() {
+        let mut st = state();
+        st.conv_area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        st.conv_text = (0..30).map(|i| format!("line {i}")).collect();
+        st.conv_top = 10;
+        // Row 5 on screen → text row 10 + (5 - header offset 1) = 14.
+        assert_eq!(st.row_index_from_screen(5), Some(14));
+        // Beyond the visible area clamps to the last visible row (28),
+        // then selection_rect would clamp to the last text line.
+        assert_eq!(st.row_index_from_screen(100), Some(28));
+    }
+
+    #[test]
+    fn col_from_screen_clamps_to_width() {
+        let mut st = state();
+        st.conv_area = ratatui::layout::Rect::new(5, 0, 40, 10);
+        assert_eq!(st.col_from_screen(5), 0);
+        assert_eq!(st.col_from_screen(20), 15);
+        assert_eq!(st.col_from_screen(100), 39, "clamped to inner width");
+        assert_eq!(st.col_from_screen(0), 0, "clamped to 0");
+    }
+
+    #[test]
+    fn selection_rect_normalizes_anchor_order() {
+        let mut st = state();
+        st.conv_area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        st.conv_text = vec!["aaa".into(), "bbb".into()];
+        st.begin_selection(5, 3); // row 2? header offset → row 2-1=1
+        st.update_selection(2, 2); // earlier row
+        let rect = st.selection_rect().expect("selection active");
+        // Anchor (later) and other (earlier) are normalised.
+        assert!(rect.0 <= rect.2, "start row <= end row");
+        assert!(st.selecting);
+    }
+
+    #[test]
+    fn clear_selection_resets_state() {
+        let mut st = state();
+        st.conv_area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        st.conv_text = vec!["x".into()];
+        st.begin_selection(1, 1);
+        assert!(st.selecting);
+        st.clear_selection();
+        assert!(!st.selecting);
+        assert!(st.selection_rect().is_none());
+    }
+
+    #[test]
+    fn do_session_switch_resets_view_state() {
+        let mut st = state();
+        st.chat_scroll = 42;
+        st.menu_msg_idx = 3;
+        st.do_session_switch("s2");
+        assert_eq!(st.active_session_id.as_deref(), Some("s2"));
+        assert_eq!(st.chat_scroll, 0);
+        assert!(!st.form_overlay.is_active());
+        assert_eq!(st.menu_msg_idx, -1);
+    }
+
+    #[test]
+    fn exit_config_mode_returns_to_normal() {
+        let mut st = state();
+        st.mode = ConversationMode::ApiConfig;
+        st.menu_msg_idx = 5;
+        st.exit_config_mode();
+        assert_eq!(st.mode, ConversationMode::Normal);
+        assert_eq!(st.menu_msg_idx, -1);
+    }
+
+    #[test]
+    fn sorted_sessions_orders_by_recency() {
+        let mut st = state();
+        st.sessions.push(session("old", 100));
+        st.sessions.push(session("new", 300));
+        st.sessions.push(session("mid", 200));
+        let sorted = st.sorted_sessions();
+        assert_eq!(sorted[0].id, "new");
+        assert_eq!(sorted[1].id, "mid");
+        assert_eq!(sorted[2].id, "old");
+    }
+
+    #[test]
+    fn no_modal_false_when_any_overlay_open() {
+        let mut st = state();
+        assert!(st.no_modal());
+        st.show_palette = true;
+        assert!(!st.no_modal());
+        st.show_palette = false;
+        st.show_help = true;
+        assert!(!st.no_modal());
     }
 }

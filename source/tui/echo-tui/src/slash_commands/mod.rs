@@ -2,12 +2,12 @@
 //!
 //! Each command category lives in its own sub-module.
 
-use echo_agent::BackendCommand;
-use crate::state::{AppState, ToastKind};
 use crate::backend::Backend;
+use crate::state::{AppState, ToastKind};
+use echo_agent::BackendCommand;
 
-pub mod api;
 pub mod adapter;
+pub mod api;
 pub mod basic;
 pub mod help;
 pub mod qq;
@@ -45,7 +45,11 @@ pub const SLASH_COMMANDS: &[(&str, &str, SlashAction)] = &[
     ("api delete ", "删除 API profile", SlashAction::ApiDelete),
     ("api prompt ", "设置系统提示词", SlashAction::ApiSetPrompt),
     ("api key ", "设置 API key", SlashAction::ApiSetKey),
-    ("api provider ", "设置 LLM provider", SlashAction::ApiSetProvider),
+    (
+        "api provider ",
+        "设置 LLM provider",
+        SlashAction::ApiSetProvider,
+    ),
     ("api model ", "设置 LLM model", SlashAction::ApiSetModel),
     ("api url ", "设置 API base URL", SlashAction::ApiSetUrl),
     ("api new ", "新建 API profile", SlashAction::ApiNewProfile),
@@ -57,7 +61,11 @@ pub const SLASH_COMMANDS: &[(&str, &str, SlashAction)] = &[
     ("adapter start", "启动所有适配器", SlashAction::AdapterStart),
     ("adapter stop", "停止所有适配器", SlashAction::AdapterStop),
     ("qq login", "QQ 扫码登录", SlashAction::QqLogin),
-    ("qq setting", "QQ 设置（白名单/黑名单管理）", SlashAction::QqSetting),
+    (
+        "qq setting",
+        "QQ 设置（白名单/黑名单管理）",
+        SlashAction::QqSetting,
+    ),
     ("quit", "退出程序", SlashAction::Quit),
 ];
 
@@ -69,12 +77,18 @@ pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, te
         Help => help::run(state),
         ConfigureApi => api::config(state, backend),
         ClearSession => basic::clear(state, backend),
-        RequestState => { backend.send(BackendCommand::RequestState); }
+        RequestState => {
+            backend.send(BackendCommand::RequestState);
+        }
         SwitchSession => { /* handled by open_palette in app */ }
         ResumeSession => cmd_resume(state),
         AdapterStatus => adapter::status(state, backend),
-        AdapterStart => { backend.send(BackendCommand::StartAllAdapters); }
-        AdapterStop => { backend.send(BackendCommand::StopAllAdapters); }
+        AdapterStart => {
+            backend.send(BackendCommand::StartAllAdapters);
+        }
+        AdapterStop => {
+            backend.send(BackendCommand::StopAllAdapters);
+        }
         QqLogin => qq::login(state, backend),
         QqSetting => qq::setting(state, backend),
         ApiSwitch => api::switch(state, backend, &text),
@@ -85,7 +99,9 @@ pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, te
         ApiSetModel => api::model(state, backend, &text),
         ApiSetUrl => api::url(state, backend, &text),
         ApiNewProfile => api::new_profile(state, backend, &text),
-        Quit => { state.running = false; }
+        Quit => {
+            state.running = false;
+        }
     }
 }
 
@@ -105,7 +121,11 @@ fn cmd_resume(state: &mut AppState) {
     let mut items: Vec<SelectItem> = Vec::new();
     let mut cur_idx = 0;
     for (i, s) in sorted.iter().enumerate() {
-        let active = if Some(&s.id) == state.active_session_id.as_ref() { "◀" } else { "" };
+        let active = if Some(&s.id) == state.active_session_id.as_ref() {
+            "◀"
+        } else {
+            ""
+        };
         let scope = match s.scope.as_str() {
             "dm" => "💬私聊".to_string(),
             "group" => format!("👥群:{}", s.group_name.as_deref().unwrap_or("?")),
@@ -113,17 +133,32 @@ fn cmd_resume(state: &mut AppState) {
             _ => s.scope.clone(),
         };
         let time = chrono::DateTime::from_timestamp(s.last_active, 0)
-            .map(|d| d.with_timezone(&chrono::Local).format("%m/%d %H:%M").to_string())
+            .map(|d| {
+                d.with_timezone(&chrono::Local)
+                    .format("%m/%d %H:%M")
+                    .to_string()
+            })
             .unwrap_or_default();
         let preview: String = s.last_message.chars().take(40).collect();
-        let label = format!("{} [{}] {} ({})  {}  └ {}",
-            active, s.platform, s.nickname, scope, time, preview);
-        items.push(SelectItem { label, value: s.id.clone() });
-        if Some(&s.id) == state.active_session_id.as_ref() { cur_idx = i; }
+        let label = format!(
+            "{} [{}] {} ({})  {}  └ {}",
+            active, s.platform, s.nickname, scope, time, preview
+        );
+        items.push(SelectItem {
+            label,
+            value: s.id.clone(),
+        });
+        if Some(&s.id) == state.active_session_id.as_ref() {
+            cur_idx = i;
+        }
     }
 
     let mut fo = FormOverlay::default();
-    fo.activate("历史会话 (↑↓选择 Enter进入 Esc取消)", items, crate::components::form_overlay::FormKind::SessionSelect);
+    fo.activate(
+        "历史会话 (↑↓选择 Enter进入 Esc取消)",
+        items,
+        crate::components::form_overlay::FormKind::SessionSelect,
+    );
     fo.select_idx = cur_idx;
     state.form_overlay = fo;
     state.menu_msg_idx = -1;
