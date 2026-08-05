@@ -122,18 +122,16 @@ impl LlmProvider for AnthropicProvider {
                     Err(_) => continue,
                 };
                 match parsed {
-                    StreamEvent::ContentBlockStart { index, content_block: Some(cb) } => {
-                        if let ContentBlockStartWire::ToolUse { id, name, .. } = cb {
-                            let _ = tx.send(ChatChunk {
-                                content_delta: None,
-                                tool_call_delta: Some(ToolCallDelta {
-                                    index,
-                                    id: Some(id),
-                                    name: Some(name),
-                                    arguments: None,
-                                }),
-                            });
-                        }
+                    StreamEvent::ContentBlockStart { index, content_block: Some(ContentBlockStartWire::ToolUse { id, name, .. }) } => {
+                        let _ = tx.send(ChatChunk {
+                            content_delta: None,
+                            tool_call_delta: Some(ToolCallDelta {
+                                index,
+                                id: Some(id),
+                                name: Some(name),
+                                arguments: None,
+                            }),
+                        });
                     }
                     StreamEvent::ContentBlockDelta { index, delta } => {
                         match delta {

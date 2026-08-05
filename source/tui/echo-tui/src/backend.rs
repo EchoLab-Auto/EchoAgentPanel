@@ -54,10 +54,10 @@ impl Backend {
         tokio::spawn(async move {
             while let Some(Ok(msg)) = read.next().await {
                 if let tungstenite::Message::Text(text) = msg {
-                    if let Some(ws_msg) = echo_agent::bridge::deserialize_message(&text.to_string()) {
-                        if let echo_agent::bridge::WsMessage::Event(ev) = ws_msg {
-                            events_clone.lock().await.push(ev);
-                        }
+                    if let Some(echo_agent::bridge::WsMessage::Event(ev)) =
+                        echo_agent::bridge::deserialize_message(&text.to_string())
+                    {
+                        events_clone.lock().await.push(ev);
                     }
                 }
             }

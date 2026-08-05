@@ -644,15 +644,15 @@ impl App {
                 self_id,
             } => {
                 let self_id_str = self_id.clone();
-                self.state.status.set_adapter_state(
-                    &adapter_name,
-                    &adapter_name,
+                self.state.status.set_adapter_state(crate::state::AdapterStatusEntry {
+                    name: adapter_name.clone(),
+                    display_name: adapter_name.clone(),
                     connected,
-                    true,
+                    running: true,
                     self_id,
-                    "",
-                    None,
-                );
+                    bind_address: String::new(),
+                    started_at: None,
+                });
                 if connected {
                     self.state.toast(
                         format!(
@@ -668,15 +668,15 @@ impl App {
             }
             BackendEvent::AdapterList { adapters } => {
                 for a in adapters {
-                    self.state.status.set_adapter_state(
-                        &a.name,
-                        &a.display_name,
-                        a.connected,
-                        a.running,
-                        a.self_id,
-                        &a.bind_address,
-                        a.started_at,
-                    );
+                    self.state.status.set_adapter_state(crate::state::AdapterStatusEntry {
+                        name: a.name,
+                        display_name: a.display_name,
+                        connected: a.connected,
+                        running: a.running,
+                        self_id: a.self_id,
+                        bind_address: a.bind_address,
+                        started_at: a.started_at,
+                    });
                 }
             }
             BackendEvent::MessageReceived {

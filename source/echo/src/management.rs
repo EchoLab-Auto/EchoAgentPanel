@@ -74,10 +74,10 @@ async fn handle_connection(
     while let Some(Ok(msg)) = read.next().await {
         match msg {
             tokio_tungstenite::tungstenite::Message::Text(text) => {
-                if let Some(ws_msg) = echo_agent::bridge::deserialize_message(&text) {
-                    if let echo_agent::bridge::WsMessage::Command(cmd) = ws_msg {
-                        let _ = bridge.send_command(cmd);
-                    }
+                if let Some(echo_agent::bridge::WsMessage::Command(cmd)) =
+                    echo_agent::bridge::deserialize_message(&text)
+                {
+                    let _ = bridge.send_command(cmd);
                 }
             }
             tokio_tungstenite::tungstenite::Message::Close(_) => break,

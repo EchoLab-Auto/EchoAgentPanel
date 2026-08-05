@@ -71,32 +71,12 @@ pub struct StatusInfo {
 }
 
 impl StatusInfo {
-    pub fn set_adapter_state(
-        &mut self,
-        name: &str,
-        display_name: &str,
-        connected: bool,
-        running: bool,
-        self_id: Option<String>,
-        bind_address: &str,
-        started_at: Option<i64>,
-    ) {
-        if let Some(entry) = self.adapters.iter_mut().find(|a| a.name == name) {
-            entry.connected = connected;
-            entry.running = running;
-            entry.self_id = self_id;
-            entry.bind_address = bind_address.to_string();
-            entry.started_at = started_at;
+    /// Upsert an adapter status entry.
+    pub fn set_adapter_state(&mut self, entry: AdapterStatusEntry) {
+        if let Some(existing) = self.adapters.iter_mut().find(|a| a.name == entry.name) {
+            *existing = entry;
         } else {
-            self.adapters.push(AdapterStatusEntry {
-                name: name.to_string(),
-                display_name: display_name.to_string(),
-                connected,
-                running,
-                self_id,
-                bind_address: bind_address.to_string(),
-                started_at,
-            });
+            self.adapters.push(entry);
         }
     }
 
