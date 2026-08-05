@@ -346,3 +346,72 @@ async fn toggle_skill_enables_and_disables() {
             .enabled
     );
 }
+
+#[tokio::test]
+async fn skill_keyword_injects_instructions_into_prompt() {
+    let (agent, provider) = test_agent("ok");
+    agent.skills.lock().await.register(echo_agent::Skill {
+        metadata: echo_agent::skill::SkillMetadata {
+            name: "calc".into(),
+            description: "算术计算".into(),
+            keywords: vec!["计算".into()],
+            enabled: true,
+        },
+        instructions: "使用 calculator 工具计算表达式".into(),
+    });
+
+    // A message containing the trigger keyword.
+    agent
+        .apply_command(BackendCommand::SendMessage {
+            session_id: "qq:dm::123".into(),
+            content: "帮我计算 1+1".into(),
+        })
+        .await;
+    let prompt = provider.last_system_prompt().await;
+    assert!(
+        prompt.contains("Triggered skill: calc"),
+        "triggered skill section missing: {prompt}"
+    );
+    assert!(
+        prompt.contains("使用 calculator 工具计算表达式"),
+        "skill instructions missing: {prompt}"
+    );
+    assert!(
+        prompt.contains("Available skills"),
+        "Tier-1 listing present"
+    );
+}
+
+#[tokio::test]
+async fn non_triggering_message_uses_cached_prompt() {
+    let (agent, provider) = test_agent("ok");
+    agent.skills.lock().await.register(echo_agent::Skill {
+        metadata: echo_agent::skill::SkillMetadata {
+            name: "calc".into(),
+            description: "算术计算".into(),
+            keywords: vec!["计算".into()],
+            enabled: true,
+        },
+        instructions: "use calculator".into(),
+    });
+
+    // First message has no trigger → prompt cached.
+    agent
+        .apply_command(BackendCommand::SendMessage {
+            session_id: "qq:dm::123".into(),
+            content: "你好".into(),
+        })
+        .await;
+    let first = provider.last_system_prompt().await;
+    assert!(!first.contains("Triggered skill"), "no trigger: {first}");
+
+    // Second non-triggering message must reuse the same prompt (no
+    // re-computation, no drift).
+    agent
+        .apply_command(BackendCommand::SendMessage {
+            session_id: "qq:dm::123".into(),
+            content: "再见".into(),
+        })
+        .await;
+    assert_eq!(provider.last_system_prompt().await, first);
+}
