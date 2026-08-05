@@ -132,10 +132,8 @@ async fn main() -> Result<()> {
     agent.set_config_path(args.config.clone());
 
     // ---- Frontend bridge (TUI / management WS) ----
-    let (bridge, handle): (Option<Arc<echo_agent::BackendBridge>>, _) = if config.tui.enabled && !args.headless {
-        let (b, h) = echo_agent::create_bridge();
-        (Some(Arc::new(b)), Some(Arc::new(h)))
-    } else if args.headless {
+    let needs_bridge = (config.tui.enabled && !args.headless) || args.headless;
+    let (bridge, handle): (Option<Arc<echo_agent::BackendBridge>>, _) = if needs_bridge {
         let (b, h) = echo_agent::create_bridge();
         (Some(Arc::new(b)), Some(Arc::new(h)))
     } else {

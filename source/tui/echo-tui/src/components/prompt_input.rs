@@ -31,11 +31,7 @@ impl PromptInput {
     /// 输入内容若以 `/` 开头则返回命令过滤串（支持多词命令如 /adapter start）。
     fn slash_filter(&self) -> Option<String> {
         let text = self.textarea.lines().join(" ");
-        if text.starts_with('/') {
-            Some(text[1..].to_string())
-        } else {
-            None
-        }
+        text.strip_prefix('/').map(|s| s.to_string())
     }
 
     /// Filter commands by the current slash filter.
