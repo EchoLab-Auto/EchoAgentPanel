@@ -89,7 +89,7 @@ pub struct ToolCall {
 }
 
 /// Incremental chunk of a tool call during streaming.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolCallDelta {
     pub index: usize,
     pub id: Option<String>,
@@ -98,7 +98,7 @@ pub struct ToolCallDelta {
 }
 
 /// Streaming chunk from the LLM.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChatChunk {
     pub content_delta: Option<String>,
     pub tool_call_delta: Option<ToolCallDelta>,

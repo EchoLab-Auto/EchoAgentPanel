@@ -132,53 +132,23 @@ impl LlmProvider for OpenAiProvider {
             while let Some(pos) = buffer.find("\n\n") {
                 let event = buffer[..pos].to_string();
                 buffer.drain(..pos + 2);
-                for line in event.lines() {
-                    let line = line.trim();
-                    if let Some(raw) = line.strip_prefix("data:") {
-                        let data = raw.trim_start();
-                        if data == "[DONE]" {
+                for outcome in parse_sse_event(&event) {
+                    match outcome {
+                        SseOutcome::Done => {
                             let _ = tx.send(ChatChunk {
                                 content_delta: None,
                                 tool_call_delta: None,
                             });
                             return Ok(());
                         }
-                        let parsed: StreamChunk = match serde_json::from_str(data) {
-                            Ok(p) => p,
-                            Err(_) => continue,
-                        };
-                        // 流中段错误（HTTP 200 + data:{"error":...}）不能静默成功
-                        if let Some(err) = &parsed.error {
+                        SseOutcome::Chunk(chunk) => {
+                            let _ = tx.send(chunk);
+                        }
+                        SseOutcome::ApiError(msg) => {
                             return Err(LlmError::Api(format!(
                                 "流式响应错误: {}",
-                                super::truncate(&err.message, 300)
+                                super::truncate(&msg, 300)
                             )));
-                        }
-                        if let Some(choice) = parsed.choices.first() {
-                            let delta = &choice.delta;
-                            // 并行工具调用：逐个转发所有 delta，而不是只取第一个
-                            if let Some(tcs) = &delta.tool_calls {
-                                for tc in tcs.iter() {
-                                    let _ = tx.send(ChatChunk {
-                                        content_delta: None,
-                                        tool_call_delta: Some(ToolCallDelta {
-                                            index: tc.index.unwrap_or(0),
-                                            id: tc.id.clone(),
-                                            name: tc.function.as_ref().and_then(|f| f.name.clone()),
-                                            arguments: tc
-                                                .function
-                                                .as_ref()
-                                                .and_then(|f| f.arguments.clone()),
-                                        }),
-                                    });
-                                }
-                            }
-                            if let Some(content) = &delta.content {
-                                let _ = tx.send(ChatChunk {
-                                    content_delta: Some(content.clone()),
-                                    tool_call_delta: None,
-                                });
-                            }
                         }
                     }
                 }
@@ -190,6 +160,73 @@ impl LlmProvider for OpenAiProvider {
         });
         Ok(())
     }
+}
+
+/// Result of parsing one SSE event block.
+#[derive(Debug, PartialEq)]
+enum SseOutcome {
+    /// `data: [DONE]` — stream finished.
+    Done,
+    /// A content or tool-call delta to forward.
+    Chunk(ChatChunk),
+    /// In-stream error payload (HTTP 200 + `data:{"error":...}`).
+    ApiError(String),
+}
+
+/// Parse one complete SSE event block (already CRLF-normalised).
+///
+/// Pure function extracted from `chat_stream` so the wire parsing is
+/// unit-testable. Multiple deltas inside one event are all returned.
+fn parse_sse_event(event: &str) -> Vec<SseOutcome> {
+    let mut outcomes = Vec::new();
+    for line in event.lines() {
+        let line = line.trim();
+        let Some(raw) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = raw.trim_start();
+        if data == "[DONE]" {
+            outcomes.push(SseOutcome::Done);
+            continue;
+        }
+        let parsed: StreamChunk = match serde_json::from_str(data) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::debug!(error = %e, "SSE data line skipped (partial/keep-alive)");
+                continue;
+            }
+        };
+        // 流中段错误（HTTP 200 + data:{"error":...}）不能静默成功
+        if let Some(err) = &parsed.error {
+            outcomes.push(SseOutcome::ApiError(err.message.clone()));
+            continue;
+        }
+        let Some(choice) = parsed.choices.first() else {
+            continue;
+        };
+        let delta = &choice.delta;
+        // 并行工具调用：逐个转发所有 delta，而不是只取第一个
+        if let Some(tcs) = &delta.tool_calls {
+            for tc in tcs.iter() {
+                outcomes.push(SseOutcome::Chunk(ChatChunk {
+                    content_delta: None,
+                    tool_call_delta: Some(ToolCallDelta {
+                        index: tc.index.unwrap_or(0),
+                        id: tc.id.clone(),
+                        name: tc.function.as_ref().and_then(|f| f.name.clone()),
+                        arguments: tc.function.as_ref().and_then(|f| f.arguments.clone()),
+                    }),
+                }));
+            }
+        }
+        if let Some(content) = &delta.content {
+            outcomes.push(SseOutcome::Chunk(ChatChunk {
+                content_delta: Some(content.clone()),
+                tool_call_delta: None,
+            }));
+        }
+    }
+    outcomes
 }
 
 fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value {
@@ -289,6 +326,10 @@ struct UsageWire {
 
 #[derive(Deserialize)]
 struct StreamChunk {
+    /// `#[serde(default)]` required: error-only events carry no choices,
+    /// and a missing field would fail the whole parse, silently skipping
+    /// the in-stream error.
+    #[serde(default)]
     choices: Vec<StreamChoice>,
     /// HTTP 200 + SSE error 事件时出现。
     #[serde(default)]
@@ -443,5 +484,71 @@ mod tests {
         ] {
             assert_eq!(role_str(role), expected);
         }
+    }
+
+    // ── SSE stream parsing ──────────────────────────────────────────────
+
+    #[test]
+    fn sse_content_delta_is_extracted() {
+        let event = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}";
+        let outcomes = parse_sse_event(event);
+        assert_eq!(outcomes.len(), 1);
+        match &outcomes[0] {
+            SseOutcome::Chunk(c) => {
+                assert_eq!(c.content_delta.as_deref(), Some("你好"));
+                assert!(c.tool_call_delta.is_none());
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_multiple_tool_call_deltas_are_all_forwarded() {
+        // SSE `data:` payloads are single-line — the parser processes one
+        // line per event.
+        let event = r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"calc","arguments":"{\"expr\""}},{"index":1,"id":"c2","function":{"name":"read","arguments":"{\"path\""}}]}}]}"#;
+        let outcomes = parse_sse_event(event);
+        assert_eq!(outcomes.len(), 2, "one outcome per tool delta");
+        match &outcomes[0] {
+            SseOutcome::Chunk(c) => {
+                let d = c.tool_call_delta.as_ref().unwrap();
+                assert_eq!(d.index, 0);
+                assert_eq!(d.id.as_deref(), Some("c1"));
+                assert_eq!(d.name.as_deref(), Some("calc"));
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+        match &outcomes[1] {
+            SseOutcome::Chunk(c) => {
+                let d = c.tool_call_delta.as_ref().unwrap();
+                assert_eq!(d.index, 1);
+                assert_eq!(d.id.as_deref(), Some("c2"));
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_done_terminates() {
+        assert_eq!(parse_sse_event("data: [DONE]"), vec![SseOutcome::Done]);
+    }
+
+    #[test]
+    fn sse_error_payload_is_surfaced() {
+        let event = r#"data: {"error":{"message":"rate limited"}}"#;
+        let outcomes = parse_sse_event(event);
+        assert_eq!(outcomes, vec![SseOutcome::ApiError("rate limited".into())]);
+    }
+
+    #[test]
+    fn sse_ignores_non_data_lines_and_bad_json() {
+        let event = "event: message\ndata: not-json\n: comment";
+        assert_eq!(parse_sse_event(event), vec![]);
+    }
+
+    #[test]
+    fn sse_empty_choices_are_skipped() {
+        let event = r#"data: {"choices":[]}"#;
+        assert_eq!(parse_sse_event(event), vec![]);
     }
 }
