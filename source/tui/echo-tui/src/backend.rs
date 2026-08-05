@@ -18,7 +18,7 @@ pub struct Backend {
 
 enum BackendInner {
     /// In-process mpsc bridge.
-    Mpsc(BackendBridge),
+    Mpsc(Arc<BackendBridge>),
     /// WebSocket-based transport.
     Ws {
         tx: tokio::sync::mpsc::UnboundedSender<String>,
@@ -27,8 +27,8 @@ enum BackendInner {
 }
 
 impl Backend {
-    /// Create an in-process backend (backward-compatible).
-    pub fn new(bridge: BackendBridge) -> Self {
+    /// Create an in-process backend from a shared bridge (no unwrap / panic).
+    pub fn new(bridge: Arc<BackendBridge>) -> Self {
         Self { inner: BackendInner::Mpsc(bridge) }
     }
 

@@ -42,7 +42,7 @@ impl Drop for TermGuard {
 
 /// Run the TUI with an in-process mpsc bridge.
 pub async fn run_tui(bridge: Arc<echo_agent::BackendBridge>, theme: Theme) -> anyhow::Result<()> {
-    run_tui_inner(Backend::new(Arc::try_unwrap(bridge).ok().unwrap()), theme).await
+    run_tui_inner(Backend::new(bridge), theme).await
 }
 
 /// Run the TUI with a pre-connected WebSocket backend.

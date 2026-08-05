@@ -928,7 +928,7 @@ mod tests {
     fn app() -> App {
         let (bridge, _handle) = echo_agent::create_bridge();
         App::new(
-            Backend::new(bridge),
+            Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
             Keybindings::default(),
         )
