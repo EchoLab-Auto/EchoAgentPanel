@@ -30,3 +30,24 @@ pub fn run(state: &mut AppState) {
     .join("\n");
     state.toast(help, ToastKind::Info);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybindings::Keybindings;
+    use crate::theme::Theme;
+
+    #[test]
+    fn help_toasts_command_reference() {
+        let mut st = AppState::new(Theme::dark(), Keybindings::default());
+        run(&mut st);
+        // Toast lands in the active session's message list.
+        let session_id = st.active_session_id.clone().expect("session created");
+        let messages = st.messages.get(&session_id).expect("messages stored");
+        let text: String = messages.iter().map(|m| m.content.clone()).collect();
+        assert!(text.contains("/api"), "help lists /api");
+        assert!(text.contains("/quit"));
+        assert!(text.contains("Ctrl+P"));
+        assert!(text.contains("/qq login"));
+    }
+}

@@ -22,7 +22,15 @@ pub async fn serve(
         .await
         .with_context(|| format!("bind management address {addr}"))?;
     info!("Panel management WS server listening on {addr}");
+    serve_with_listener(listener, bridge, agent).await
+}
 
+/// Serve on a pre-bound listener (used by tests to pick a free port).
+pub async fn serve_with_listener(
+    listener: TcpListener,
+    bridge: Arc<BackendBridge>,
+    agent: Arc<echo_agent::Agent>,
+) -> anyhow::Result<()> {
     loop {
         let (stream, peer) = match listener.accept().await {
             Ok(conn) => conn,
@@ -168,5 +176,122 @@ mod tests {
                 mode: echo_adapter::GateMode::Allowlist
             }
         );
+    }
+
+    // ── End-to-end WS server ──────────────────────────────────────────────
+
+    /// A provider that is never actually called (management needs an Agent).
+    struct DummyProvider;
+
+    #[async_trait::async_trait]
+    impl echo_agent::LlmProvider for DummyProvider {
+        fn name(&self) -> &str {
+            "dummy"
+        }
+        fn default_model(&self) -> &str {
+            "dummy"
+        }
+        async fn chat(
+            &self,
+            _request: &echo_agent::llm::ChatRequest,
+        ) -> Result<echo_agent::llm::ChatResponse, echo_agent::llm::LlmError> {
+            unimplemented!()
+        }
+        async fn chat_stream(
+            &self,
+            _request: &echo_agent::llm::ChatRequest,
+            _tx: tokio::sync::mpsc::UnboundedSender<echo_agent::llm::ChatChunk>,
+        ) -> Result<(), echo_agent::llm::LlmError> {
+            unimplemented!()
+        }
+    }
+
+    fn dummy_agent() -> Arc<echo_agent::Agent> {
+        Arc::new(echo_agent::Agent::new(
+            Arc::new(DummyProvider),
+            echo_agent::AgentConfig::default(),
+            echo_agent::SkillRegistry::new(),
+            echo_agent::ToolRegistry::new(),
+            Arc::new(echo_adapter::AdapterRegistry::new()),
+        ))
+    }
+
+    async fn start_test_server() -> (Arc<BackendBridge>, echo_agent::BackendHandle, String) {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let bridge = Arc::new(bridge);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let agent = dummy_agent();
+        let b = bridge.clone();
+        tokio::spawn(async move {
+            let _ = serve_with_listener(listener, b, agent).await;
+        });
+        (bridge, handle, addr)
+    }
+
+    #[tokio::test]
+    async fn panel_command_reaches_agent_bridge() {
+        let (bridge, handle, addr) = start_test_server().await;
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .expect("connect");
+
+        let text = echo_agent::bridge::serialize_command(&BackendCommand::SwitchModel {
+            model: "gpt-x".into(),
+        });
+        ws.send(tokio_tungstenite::tungstenite::Message::Text(text))
+            .await
+            .expect("send");
+
+        let received = handle
+            .command_rx
+            .lock()
+            .await
+            .recv()
+            .await
+            .expect("command delivered");
+        assert_eq!(
+            received,
+            BackendCommand::SwitchModel {
+                model: "gpt-x".into()
+            }
+        );
+        let _ = bridge;
+        ws.close(None).await.ok();
+    }
+
+    #[tokio::test]
+    async fn agent_events_reach_panel() {
+        let (bridge, handle, addr) = start_test_server().await;
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .expect("connect");
+
+        // Emit an event from the agent side; the server forwards it.
+        handle.emit(echo_agent::BackendEvent::MessageSent {
+            session_id: "s1".into(),
+            content: "回复".into(),
+        });
+
+        // The forwarder polls every 100ms.
+        let mut received = None;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) = ws.next().await {
+                if let Some(echo_agent::bridge::WsMessage::Event(ev)) =
+                    echo_agent::bridge::deserialize_message(&text)
+                {
+                    received = Some(ev);
+                    break;
+                }
+            }
+        }
+        let ev = received.expect("event forwarded to panel");
+        match ev {
+            echo_agent::BackendEvent::MessageSent { content, .. } => assert_eq!(content, "回复"),
+            other => panic!("wrong event: {other:?}"),
+        }
+        let _ = bridge;
+        ws.close(None).await.ok();
     }
 }

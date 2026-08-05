@@ -43,3 +43,74 @@ pub fn status(state: &mut AppState, backend: &Backend) {
     }
     state.toast(lines.join("\n"), ToastKind::Info);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybindings::Keybindings;
+    use crate::state::AdapterStatusEntry;
+    use crate::theme::Theme;
+
+    fn toast_text(st: &AppState) -> String {
+        let id = st.active_session_id.as_deref().unwrap();
+        st.messages
+            .get(id)
+            .map(|msgs| msgs.iter().map(|m| m.content.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn status_requests_refresh_and_reports_empty() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let backend = Backend::new(std::sync::Arc::new(bridge));
+        let mut st = AppState::new(Theme::dark(), Keybindings::default());
+        status(&mut st, &backend);
+        assert_eq!(
+            handle.try_recv_command(),
+            Some(BackendCommand::RequestAdapterStatus)
+        );
+        assert!(toast_text(&st).contains("无适配器"));
+    }
+
+    #[tokio::test]
+    async fn status_shows_connected_self_id() {
+        let (bridge, _handle) = echo_agent::create_bridge();
+        let backend = Backend::new(std::sync::Arc::new(bridge));
+        let mut st = AppState::new(Theme::dark(), Keybindings::default());
+        st.status.set_adapter_state(AdapterStatusEntry {
+            name: "qq".into(),
+            display_name: "QQ/OneBot".into(),
+            connected: true,
+            running: true,
+            self_id: Some("10001".into()),
+            bind_address: String::new(),
+            started_at: None,
+        });
+        status(&mut st, &backend);
+        let text = toast_text(&st);
+        assert!(text.contains("QQ/OneBot"));
+        assert!(text.contains("已连接"));
+        assert!(text.contains("10001"));
+    }
+
+    #[tokio::test]
+    async fn status_shows_waiting_hints_when_disconnected() {
+        let (bridge, _handle) = echo_agent::create_bridge();
+        let backend = Backend::new(std::sync::Arc::new(bridge));
+        let mut st = AppState::new(Theme::dark(), Keybindings::default());
+        st.status.set_adapter_state(AdapterStatusEntry {
+            name: "qq".into(),
+            display_name: "QQ/OneBot".into(),
+            connected: false,
+            running: true,
+            self_id: None,
+            bind_address: "0.0.0.0:3131".into(),
+            started_at: None,
+        });
+        status(&mut st, &backend);
+        let text = toast_text(&st);
+        assert!(text.contains("等待客户端连接"));
+        assert!(text.contains("ws://0.0.0.0:3131"));
+        assert!(text.contains("docker ps"));
+    }
+}
