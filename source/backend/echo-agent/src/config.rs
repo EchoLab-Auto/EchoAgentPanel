@@ -15,7 +15,11 @@ pub struct ApiProfile {
 }
 
 impl ApiProfile {
-    pub fn new(name: impl Into<String>, provider: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             provider: provider.into(),
@@ -79,11 +83,21 @@ impl AgentConfig {
 
     /// 将激活 profile 的值合入顶层字段。只有非空值才会覆盖顶层。
     pub fn apply_active_profile(&mut self) {
-        let Some(p) = self.active_profile().cloned() else { return };
-        if !p.provider.is_empty() { self.provider = p.provider; }
-        if !p.model.is_empty() { self.model = p.model; }
-        if !p.base_url.is_empty() { self.base_url = p.base_url; }
-        if !p.api_key.is_empty() { self.api_key = p.api_key; }
+        let Some(p) = self.active_profile().cloned() else {
+            return;
+        };
+        if !p.provider.is_empty() {
+            self.provider = p.provider;
+        }
+        if !p.model.is_empty() {
+            self.model = p.model;
+        }
+        if !p.base_url.is_empty() {
+            self.base_url = p.base_url;
+        }
+        if !p.api_key.is_empty() {
+            self.api_key = p.api_key;
+        }
     }
 
     /// Resolve the effective API key: explicit config, then env var by provider.
@@ -122,5 +136,130 @@ impl AgentConfig {
             "ollama" => "http://localhost:11434".into(),
             _ => "https://api.openai.com/v1".into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg_with_profile(name: &str, provider: &str, model: &str) -> AgentConfig {
+        let mut cfg = AgentConfig::default();
+        cfg.api_profiles
+            .push(ApiProfile::new(name, provider, model));
+        cfg
+    }
+
+    #[test]
+    fn active_profile_returns_none_when_empty() {
+        let cfg = AgentConfig::default();
+        assert!(cfg.active_profile().is_none());
+    }
+
+    #[test]
+    fn active_profile_finds_by_name() {
+        let mut cfg = cfg_with_profile("deepseek", "deepseek", "ds-v4");
+        cfg.active_api = "deepseek".into();
+        let p = cfg.active_profile().expect("profile found");
+        assert_eq!(p.provider, "deepseek");
+        assert_eq!(p.model, "ds-v4");
+    }
+
+    #[test]
+    fn active_profile_miss_returns_none() {
+        let mut cfg = cfg_with_profile("a", "openai", "m");
+        cfg.active_api = "missing".into();
+        assert!(cfg.active_profile().is_none());
+    }
+
+    #[test]
+    fn apply_active_profile_merges_nonempty_values() {
+        let mut cfg = AgentConfig {
+            provider: "openai".into(),
+            model: "old-model".into(),
+            ..Default::default()
+        };
+        cfg.api_profiles.push(ApiProfile {
+            name: "p".into(),
+            provider: "deepseek".into(),
+            model: "new-model".into(),
+            base_url: String::new(), // empty — must not override
+            api_key: "sk".into(),
+        });
+        cfg.active_api = "p".into();
+        cfg.apply_active_profile();
+        assert_eq!(cfg.provider, "deepseek");
+        assert_eq!(cfg.model, "new-model");
+        assert_eq!(cfg.base_url, ""); // untouched
+        assert_eq!(cfg.api_key, "sk");
+    }
+
+    #[test]
+    fn apply_active_profile_noop_without_active() {
+        let mut cfg = cfg_with_profile("p", "deepseek", "m");
+        cfg.apply_active_profile();
+        assert!(cfg.provider.is_empty(), "no active profile → no merge");
+    }
+
+    #[test]
+    fn effective_api_key_prefers_explicit_value() {
+        let cfg = AgentConfig {
+            api_key: "explicit".into(),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_api_key(), "explicit");
+    }
+
+    #[test]
+    fn effective_api_key_empty_without_env() {
+        // No env var is set in tests — must resolve to empty, not panic.
+        let cfg = AgentConfig {
+            provider: "openai".into(),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_api_key(), "");
+    }
+
+    #[test]
+    fn effective_base_url_uses_provider_defaults() {
+        for (provider, expected) in [
+            ("deepseek", "https://api.deepseek.com"),
+            ("ollama", "http://localhost:11434"),
+            ("anthropic", "https://api.anthropic.com"),
+            ("anything-else", "https://api.openai.com/v1"),
+        ] {
+            let cfg = AgentConfig {
+                provider: provider.into(),
+                ..Default::default()
+            };
+            assert_eq!(cfg.effective_base_url(), expected, "provider {provider}");
+        }
+    }
+
+    #[test]
+    fn effective_base_url_prefers_explicit() {
+        let cfg = AgentConfig {
+            base_url: "http://custom:8080".into(),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_base_url(), "http://custom:8080");
+    }
+
+    #[test]
+    fn config_roundtrips_through_toml() {
+        let mut cfg = AgentConfig {
+            provider: "deepseek".into(),
+            model: "deepseek-v4-flash".into(),
+            ..Default::default()
+        };
+        cfg.api_profiles
+            .push(ApiProfile::new("p1", "openai", "gpt-4o"));
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let parsed: AgentConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.provider, "deepseek");
+        assert_eq!(parsed.api_profiles.len(), 1);
+        assert_eq!(parsed.api_profiles[0].name, "p1");
+        // api_key is skipped in serialisation but defaults to empty on load.
+        assert!(parsed.api_key.is_empty());
     }
 }
