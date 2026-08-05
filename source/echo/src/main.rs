@@ -195,18 +195,22 @@ async fn main() -> Result<()> {
         });
     }
 
-    // ---- TUI ----
+    // ---- TUI (only in non-headless mode) ----
     let tui_theme = if config.tui.theme == "light" {
         echo_tui::Theme::light()
     } else {
         echo_tui::Theme::dark()
     };
 
-    let tui_task = bridge.map(|bridge| tokio::spawn(async move {
+    let tui_task = if config.tui.enabled && !args.headless {
+        bridge.map(|bridge| tokio::spawn(async move {
             if let Err(e) = echo_tui::run_tui(bridge, tui_theme).await {
                 warn!(error = %e, "tui terminated");
             }
-        }));
+        }))
+    } else {
+        None
+    };
 
     // ---- Main loop ----
     let tui_exit = async {
