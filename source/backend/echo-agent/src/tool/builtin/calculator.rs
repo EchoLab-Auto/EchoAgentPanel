@@ -106,9 +106,7 @@ fn tokenize(expr: &str) -> Result<Vec<Token>, String> {
                         break;
                     }
                 }
-                let v: f64 = num
-                    .parse()
-                    .map_err(|_| format!("无效数字: {num}"))?;
+                let v: f64 = num.parse().map_err(|_| format!("无效数字: {num}"))?;
                 tokens.push(Token::Num(v));
             }
             other => return Err(format!("无法识别的字符: {other}")),
@@ -211,5 +209,51 @@ mod tests {
         assert!(evaluate("(1+2").is_err());
         assert!(evaluate("1+").is_err());
         assert!(evaluate("foo").is_err());
+    }
+
+    #[test]
+    fn operator_precedence_and_associativity() {
+        assert_eq!(evaluate("2+3*4").unwrap(), 14.0);
+        assert_eq!(evaluate("10-2-3").unwrap(), 5.0, "left-associative minus");
+        assert_eq!(
+            evaluate("100/10/2").unwrap(),
+            5.0,
+            "left-associative divide"
+        );
+        assert_eq!(evaluate("2*3+4*5").unwrap(), 26.0);
+    }
+
+    #[test]
+    fn nested_parentheses() {
+        assert_eq!(evaluate("((2+3)*4)").unwrap(), 20.0);
+        assert_eq!(evaluate("2*(3+(4*5))").unwrap(), 46.0);
+        assert_eq!(evaluate("(1+(2+(3+4)))").unwrap(), 10.0);
+    }
+
+    #[test]
+    fn floating_point_math() {
+        assert_eq!(evaluate("1.5*2").unwrap(), 3.0);
+        assert_eq!(evaluate("0.5+0.25").unwrap(), 0.75);
+        assert!((evaluate("1/3").unwrap() - (1.0 / 3.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn unary_minus_and_parenthesized_negative() {
+        assert_eq!(evaluate("-(2+3)").unwrap(), -5.0);
+        assert_eq!(evaluate("-2*3").unwrap(), -6.0);
+        assert_eq!(evaluate("5--3").unwrap(), 8.0);
+    }
+
+    #[test]
+    fn whitespace_is_ignored() {
+        assert_eq!(evaluate("  2  +  3  ").unwrap(), 5.0);
+        assert_eq!(evaluate("\t(2\n+\n3)\t").unwrap(), 5.0);
+    }
+
+    #[test]
+    fn malformed_expressions_are_rejected() {
+        for bad in ["1+*2", "()", "2 2", "(1+2))", "1..2", "*5", "5/", "+"] {
+            assert!(evaluate(bad).is_err(), "should reject: {bad:?}");
+        }
     }
 }

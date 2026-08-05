@@ -9,7 +9,9 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::{ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, ToolCallDelta, Usage};
+use super::{
+    ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, ToolCallDelta, Usage,
+};
 
 #[derive(Debug, Clone)]
 pub struct OpenAiProvider {
@@ -26,11 +28,17 @@ impl OpenAiProvider {
             api_key: api_key.to_string(),
             model: model.to_string(),
             // 超时保护：上游挂起时不能让 agent 任务无限阻塞
-            client: reqwest::Client::builder()
+            client: match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, "reqwest builder failed, using client without timeouts");
+                    reqwest::Client::new()
+                }
+            },
         }
     }
 }
@@ -57,7 +65,10 @@ impl LlmProvider for OpenAiProvider {
         let status = resp.status();
         let text = resp.text().await?;
         if !status.is_success() {
-            return Err(LlmError::Api(format!("HTTP {status}: {}", super::truncate(&text, 300))));
+            return Err(LlmError::Api(format!(
+                "HTTP {status}: {}",
+                super::truncate(&text, 300)
+            )));
         }
         let parsed: OpenAIResponse = serde_json::from_str(&text)
             .map_err(|e| LlmError::Parse(format!("{e} — body: {}", super::truncate(&text, 300))))?;
@@ -73,9 +84,19 @@ impl LlmProvider for OpenAiProvider {
                 .tool_calls
                 .unwrap_or_default()
                 .into_iter()
-                .map(|tc| ToolCall { id: tc.id, name: tc.function.name, arguments: tc.function.arguments })
+                .map(|tc| ToolCall {
+                    id: tc.id,
+                    name: tc.function.name,
+                    arguments: tc.function.arguments,
+                })
                 .collect(),
-            usage: parsed.usage.map(|u| Usage { prompt_tokens: u.prompt_tokens, completion_tokens: u.completion_tokens }).unwrap_or_default(),
+            usage: parsed
+                .usage
+                .map(|u| Usage {
+                    prompt_tokens: u.prompt_tokens,
+                    completion_tokens: u.completion_tokens,
+                })
+                .unwrap_or_default(),
         })
     }
 
@@ -95,7 +116,10 @@ impl LlmProvider for OpenAiProvider {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await?;
-            return Err(LlmError::Api(format!("HTTP {status}: {}", super::truncate(&text, 300))));
+            return Err(LlmError::Api(format!(
+                "HTTP {status}: {}",
+                super::truncate(&text, 300)
+            )));
         }
         let mut stream = resp.bytes_stream();
         let mut buffer = String::new();
@@ -113,7 +137,10 @@ impl LlmProvider for OpenAiProvider {
                     if let Some(raw) = line.strip_prefix("data:") {
                         let data = raw.trim_start();
                         if data == "[DONE]" {
-                            let _ = tx.send(ChatChunk { content_delta: None, tool_call_delta: None });
+                            let _ = tx.send(ChatChunk {
+                                content_delta: None,
+                                tool_call_delta: None,
+                            });
                             return Ok(());
                         }
                         let parsed: StreamChunk = match serde_json::from_str(data) {
@@ -138,20 +165,29 @@ impl LlmProvider for OpenAiProvider {
                                             index: tc.index.unwrap_or(0),
                                             id: tc.id.clone(),
                                             name: tc.function.as_ref().and_then(|f| f.name.clone()),
-                                            arguments: tc.function.as_ref().and_then(|f| f.arguments.clone()),
+                                            arguments: tc
+                                                .function
+                                                .as_ref()
+                                                .and_then(|f| f.arguments.clone()),
                                         }),
                                     });
                                 }
                             }
                             if let Some(content) = &delta.content {
-                                let _ = tx.send(ChatChunk { content_delta: Some(content.clone()), tool_call_delta: None });
+                                let _ = tx.send(ChatChunk {
+                                    content_delta: Some(content.clone()),
+                                    tool_call_delta: None,
+                                });
                             }
                         }
                     }
                 }
             }
         }
-        let _ = tx.send(ChatChunk { content_delta: None, tool_call_delta: None });
+        let _ = tx.send(ChatChunk {
+            content_delta: None,
+            tool_call_delta: None,
+        });
         Ok(())
     }
 }
@@ -166,11 +202,14 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
                 "content": m.content,
             });
             if let Some(tool_calls) = &m.tool_calls {
-                v["tool_calls"] = json!(tool_calls.iter().map(|tc| json!({
-                    "id": tc.id,
-                    "type": "function",
-                    "function": { "name": tc.name, "arguments": tc.arguments },
-                })).collect::<Vec<_>>());
+                v["tool_calls"] = json!(tool_calls
+                    .iter()
+                    .map(|tc| json!({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": { "name": tc.name, "arguments": tc.arguments },
+                    }))
+                    .collect::<Vec<_>>());
             }
             if let Some(id) = &m.tool_call_id {
                 v["tool_call_id"] = json!(id);
@@ -307,5 +346,102 @@ mod tests {
         assert_eq!(body["model"], "test");
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["stream"], false);
+    }
+
+    #[test]
+    fn body_includes_tool_calls_and_tool_role() {
+        let body = build_request_body(
+            &ChatRequest {
+                model: "m".into(),
+                messages: vec![
+                    ChatMessage {
+                        role: crate::llm::ChatRole::Assistant,
+                        content: "".into(),
+                        tool_calls: Some(vec![crate::llm::ToolCall {
+                            id: "c1".into(),
+                            name: "calc".into(),
+                            arguments: "{\"expr\":\"1+1\"}".into(),
+                        }]),
+                        tool_call_id: None,
+                    },
+                    crate::llm::ChatMessage::tool("2", "c1"),
+                ],
+                tools: None,
+                temperature: None,
+                max_tokens: None,
+            },
+            false,
+        );
+        let msgs = body["messages"].as_array().unwrap();
+        let assistant = &msgs[0];
+        assert_eq!(assistant["role"], "assistant");
+        assert_eq!(assistant["tool_calls"][0]["type"], "function");
+        assert_eq!(assistant["tool_calls"][0]["function"]["name"], "calc");
+        assert_eq!(
+            assistant["tool_calls"][0]["function"]["arguments"],
+            "{\"expr\":\"1+1\"}"
+        );
+        let tool = &msgs[1];
+        assert_eq!(tool["role"], "tool");
+        assert_eq!(tool["tool_call_id"], "c1");
+        assert_eq!(tool["content"], "2");
+    }
+
+    #[test]
+    fn body_serializes_tool_definitions() {
+        let body = build_request_body(
+            &ChatRequest {
+                model: "m".into(),
+                messages: vec![ChatMessage::user("hi")],
+                tools: Some(vec![crate::llm::ToolDefinition {
+                    name: "web_search".into(),
+                    description: "search the web".into(),
+                    parameters: Some(serde_json::json!({"type": "object"})),
+                }]),
+                temperature: Some(0.5),
+                max_tokens: Some(100),
+            },
+            true,
+        );
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["temperature"], 0.5);
+        assert_eq!(body["max_tokens"], 100);
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["function"]["name"], "web_search");
+        assert_eq!(tools[0]["function"]["description"], "search the web");
+        assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn tool_definition_without_parameters_gets_empty_object() {
+        let body = build_request_body(
+            &ChatRequest {
+                model: "m".into(),
+                messages: vec![ChatMessage::user("hi")],
+                tools: Some(vec![crate::llm::ToolDefinition {
+                    name: "no_params".into(),
+                    description: "d".into(),
+                    parameters: None,
+                }]),
+                temperature: None,
+                max_tokens: None,
+            },
+            false,
+        );
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn all_roles_are_mapped() {
+        for (role, expected) in [
+            (crate::llm::ChatRole::System, "system"),
+            (crate::llm::ChatRole::User, "user"),
+            (crate::llm::ChatRole::Assistant, "assistant"),
+            (crate::llm::ChatRole::Tool, "tool"),
+        ] {
+            assert_eq!(role_str(role), expected);
+        }
     }
 }

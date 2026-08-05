@@ -78,14 +78,50 @@ mod tests {
             .build();
 
         assert_eq!(segs.len(), 4);
-        assert!(matches!(segs[0], Segment::Known(KnownSegment::Reply { .. })));
+        assert!(matches!(
+            segs[0],
+            Segment::Known(KnownSegment::Reply { .. })
+        ));
         assert!(matches!(segs[1], Segment::Known(KnownSegment::At { .. })));
         assert!(matches!(segs[2], Segment::Known(KnownSegment::Text { .. })));
-        assert!(matches!(segs[3], Segment::Known(KnownSegment::Image { .. })));
+        assert!(matches!(
+            segs[3],
+            Segment::Known(KnownSegment::Image { .. })
+        ));
     }
 
     #[test]
     fn quick_text() {
         assert_eq!(text("hi"), vec![Segment::text("hi")]);
+    }
+
+    #[test]
+    fn builder_defaults_to_empty() {
+        let b = MessageBuilder::new();
+        assert!(b.is_empty());
+        assert!(b.build().is_empty());
+    }
+
+    #[test]
+    fn builder_at_all_and_face() {
+        let segs = MessageBuilder::new().at_all().face("1").build();
+        assert_eq!(segs.len(), 2);
+        match &segs[0] {
+            Segment::Known(KnownSegment::At { data }) => assert_eq!(data.qq, "all"),
+            other => panic!("unexpected: {other:?}"),
+        }
+        match &segs[1] {
+            Segment::Known(KnownSegment::Face { data }) => assert_eq!(data.id, "1"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_chains_are_immutable() {
+        // push() consumes self — chaining must not affect earlier builders.
+        let base = MessageBuilder::new().text("a");
+        let extended = base.clone().at("1");
+        assert_eq!(base.build().len(), 1);
+        assert_eq!(extended.build().len(), 2);
     }
 }

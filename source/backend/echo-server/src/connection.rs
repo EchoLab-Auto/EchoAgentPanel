@@ -30,6 +30,7 @@ use crate::server::ConnectionTracker;
 const CHANNEL_CAPACITY: usize = 1024;
 
 /// Messages queued for the per-connection write task.
+#[derive(Debug)]
 pub enum Outgoing {
     Api(echo_core::ApiRequest),
     Ping,
@@ -96,10 +97,22 @@ pub async fn spawn(
     let _ = api_tx.try_send(Outgoing::Close);
     pending.clear();
     drop(api_tx);
-    let _ = tokio::time::timeout(Duration::from_secs(5), write_task).await;
-    let _ = tokio::time::timeout(Duration::from_secs(5), dispatch_task).await;
+    await_task(conn_id, write_task, "write").await;
+    await_task(conn_id, dispatch_task, "dispatch").await;
 
     read_result
+}
+
+/// Join a teardown task with a deadline, logging panics and timeouts instead
+/// of silently discarding them.
+async fn await_task(conn_id: &str, task: tokio::task::JoinHandle<()>, name: &str) {
+    match tokio::time::timeout(Duration::from_secs(5), task).await {
+        Ok(Ok(())) => {}
+        Ok(Err(join_err)) => {
+            warn!(conn = %conn_id, %name, error = %join_err, "task panicked during teardown")
+        }
+        Err(_) => warn!(conn = %conn_id, %name, "task did not shut down within 5s"),
+    }
 }
 
 /// Read loop: parse inbound frames, forwarding events and action responses.
@@ -275,5 +288,130 @@ async fn write_loop(
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_channels() -> (
+        mpsc::Sender<Outgoing>,
+        mpsc::Receiver<Outgoing>,
+        mpsc::Sender<Event>,
+        mpsc::Receiver<Event>,
+    ) {
+        let (api_tx, api_rx) = mpsc::channel(16);
+        let (event_tx, event_rx) = mpsc::channel(16);
+        (api_tx, api_rx, event_tx, event_rx)
+    }
+
+    #[test]
+    fn event_json_is_forwarded() {
+        let (_, _api_rx, event_tx, mut event_rx) = test_channels();
+        let pending = Arc::new(DashMap::new());
+        handle_json(
+            r#"{"post_type":"meta_event","meta_event_type":"heartbeat","time":1,"self_id":10001,"interval":5000,"status":{"online":true}}"#,
+            &pending,
+            &event_tx,
+            "conn-test",
+        );
+        let ev = event_rx.try_recv().expect("event forwarded");
+        assert_eq!(ev.self_id(), Some(10001));
+    }
+
+    #[test]
+    fn action_response_resolves_pending_call() {
+        let (_api_tx, _api_rx, event_tx, mut event_rx) = test_channels();
+        let pending: Arc<DashMap<String, oneshot::Sender<ApiResponse>>> = Arc::new(DashMap::new());
+        let (resp_tx, mut resp_rx) = oneshot::channel();
+        pending.insert("echo-1".into(), resp_tx);
+
+        handle_json(
+            r#"{"status":"ok","retcode":0,"data":{"message_id":7},"echo":"echo-1"}"#,
+            &pending,
+            &event_tx,
+            "conn-test",
+        );
+        let resp = resp_rx.try_recv().expect("caller resolved");
+        assert!(resp.is_ok());
+        assert_eq!(resp.data["message_id"], 7);
+        // The pending entry was removed.
+        assert!(pending.get("echo-1").is_none());
+        assert!(event_rx.try_recv().is_err(), "no event forwarded");
+    }
+
+    #[test]
+    fn response_with_unknown_echo_is_dropped() {
+        let (_, _api_rx, event_tx, _event_rx) = test_channels();
+        let pending: Arc<DashMap<String, oneshot::Sender<ApiResponse>>> = Arc::new(DashMap::new());
+        handle_json(
+            r#"{"status":"ok","retcode":0,"data":{},"echo":"nobody-waiting"}"#,
+            &pending,
+            &event_tx,
+            "conn-test",
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn invalid_json_is_ignored() {
+        let (_, _api_rx, event_tx, mut event_rx) = test_channels();
+        let pending = Arc::new(DashMap::new());
+        handle_json("not json at all", &pending, &event_tx, "conn-test");
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn unparseable_event_is_ignored() {
+        let (_, _api_rx, event_tx, mut event_rx) = test_channels();
+        let pending = Arc::new(DashMap::new());
+        // post_type present but structurally invalid.
+        handle_json(
+            r#"{"post_type":"message","message_type":"private"}"#,
+            &pending,
+            &event_tx,
+            "conn-test",
+        );
+        assert!(event_rx.try_recv().is_err(), "malformed event dropped");
+    }
+
+    #[test]
+    fn unrecognized_payload_is_ignored() {
+        let (_, _api_rx, event_tx, mut event_rx) = test_channels();
+        let pending = Arc::new(DashMap::new());
+        handle_json(r#"{"foo":"bar"}"#, &pending, &event_tx, "conn-test");
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn ping_produces_pong() {
+        let (api_tx, mut api_rx, event_tx, _event_rx) = test_channels();
+        let pending = Arc::new(DashMap::new());
+        handle_message(
+            Message::Ping(vec![1, 2, 3]),
+            &api_tx,
+            &pending,
+            &event_tx,
+            "conn-test",
+        );
+        match api_rx.try_recv().expect("pong queued") {
+            Outgoing::Pong(payload) => assert_eq!(payload, vec![1, 2, 3]),
+            other => panic!("expected Pong, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_utf8_binary_is_ignored() {
+        let (api_tx, _api_rx, event_tx, mut event_rx) = test_channels();
+        let pending = Arc::new(DashMap::new());
+        handle_message(
+            Message::Binary(vec![0xff, 0xfe, 0xfd]),
+            &api_tx,
+            &pending,
+            &event_tx,
+            "conn-test",
+        );
+        assert!(event_rx.try_recv().is_err());
     }
 }

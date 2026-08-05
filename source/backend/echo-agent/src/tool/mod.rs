@@ -36,39 +36,59 @@ pub trait Tool: Send + Sync {
 /// Registry of tools, keyed by name.
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
-    cached_definitions: std::sync::RwLock<Option<Arc<Vec<ToolDefinition>>>>,
+    /// Tokio RwLock: `definitions()` runs inside async agent loops and must
+    /// never block a worker thread on a contended std RwLock.
+    cached_definitions: tokio::sync::RwLock<Option<Arc<Vec<ToolDefinition>>>>,
 }
 
 impl std::fmt::Debug for ToolRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ToolRegistry").field("names", &self.names()).finish()
+        f.debug_struct("ToolRegistry")
+            .field("names", &self.names())
+            .finish()
     }
 }
 
 impl Default for ToolRegistry {
     fn default() -> Self {
-        Self { tools: HashMap::new(), cached_definitions: std::sync::RwLock::new(None) }
+        Self {
+            tools: HashMap::new(),
+            cached_definitions: tokio::sync::RwLock::new(None),
+        }
     }
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        Self { tools: HashMap::new(), cached_definitions: std::sync::RwLock::new(None) }
+        Self {
+            tools: HashMap::new(),
+            cached_definitions: tokio::sync::RwLock::new(None),
+        }
     }
 
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
         self.tools.insert(tool.name().to_string(), tool);
-        *self.cached_definitions.write().unwrap() = None;
+        // Best-effort cache invalidation; a concurrent definitions() may
+        // still return the previous list for one call, which is harmless.
+        if let Ok(mut cache) = self.cached_definitions.try_write() {
+            *cache = None;
+        }
     }
 
-    pub fn definitions(&self) -> Arc<Vec<ToolDefinition>> {
-        {
-            let cached = self.cached_definitions.read().unwrap();
-            if let Some(ref defs) = *cached {
-                return Arc::clone(defs);
-            }
+    /// Build (or reuse) the tool definition list sent to the LLM.
+    pub async fn definitions(&self) -> Arc<Vec<ToolDefinition>> {
+        // Fast path: read lock.
+        if let Some(defs) = self.cached_definitions.read().await.as_ref() {
+            return Arc::clone(defs);
         }
-        let defs: Vec<ToolDefinition> = self.tools
+        // Slow path: write lock with a re-check, so a concurrent rebuild
+        // between the read and write is not wasted.
+        let mut cache = self.cached_definitions.write().await;
+        if let Some(defs) = cache.as_ref() {
+            return Arc::clone(defs);
+        }
+        let defs: Vec<ToolDefinition> = self
+            .tools
             .values()
             .map(|t| ToolDefinition {
                 name: t.name().to_string(),
@@ -77,7 +97,7 @@ impl ToolRegistry {
             })
             .collect();
         let arc = Arc::new(defs);
-        *self.cached_definitions.write().unwrap() = Some(Arc::clone(&arc));
+        *cache = Some(Arc::clone(&arc));
         arc
     }
 

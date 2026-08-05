@@ -23,58 +23,32 @@ pub enum Segment {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum KnownSegment {
     /// Plain text. `{"type":"text","data":{"text":"hi"}}`
-    Text {
-        data: TextData,
-    },
+    Text { data: TextData },
     /// QQ built-in emoji. `{"type":"face","data":{"id":"123"}}`
-    Face {
-        data: FaceData,
-    },
+    Face { data: FaceData },
     /// Image. `file` may be a URL, a local path, or `base64://...`.
-    Image {
-        data: ImageData,
-    },
+    Image { data: ImageData },
     /// Voice message. `{"type":"record","data":{"file":"..."}}`
-    Record {
-        data: RecordData,
-    },
+    Record { data: RecordData },
     /// Video. `{"type":"video","data":{"file":"..."}}`
-    Video {
-        data: VideoData,
-    },
+    Video { data: VideoData },
     /// @ a user; `qq = "all"` mentions everyone in a group.
-    At {
-        data: AtData,
-    },
+    At { data: AtData },
     /// Reply to a previous message. `{"type":"reply","data":{"id":"9001"}}`
-    Reply {
-        data: ReplyData,
-    },
+    Reply { data: ReplyData },
     /// Forwarded message list (for `send_group_forward_msg`).
-    Forward {
-        data: ForwardData,
-    },
+    Forward { data: ForwardData },
     /// A message node inside a forward chain.
-    Node {
-        data: NodeData,
-    },
+    Node { data: NodeData },
     /// Rich XML message. `{"type":"xml","data":{"data":"<msg>..."}}`
-    Xml {
-        data: XmlData,
-    },
+    Xml { data: XmlData },
     /// Rich JSON message (JSON string). `{"type":"json","data":{"data":"{...}"}}`
-    Json {
-        data: JsonData,
-    },
+    Json { data: JsonData },
     /// Poke / poke sticker. `{"type":"poke","data":{"type":"1","id":"..."}}`
-    Poke {
-        data: PokeData,
-    },
+    Poke { data: PokeData },
     /// Card image. `{"type":"cardimage","data":{"file":"..."}}`
     #[serde(rename = "cardimage")]
-    CardImage {
-        data: CardImageData,
-    },
+    CardImage { data: CardImageData },
     /// Dice roll — the spec defines no `data` payload.
     Dice {
         #[serde(default, skip_serializing_if = "Value::is_null")]
@@ -212,7 +186,11 @@ pub struct ForwardData {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct NodeData {
     /// Set for received forward messages.
-    #[serde(default, deserialize_with = "de_opt_string_or_int", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "de_opt_string_or_int",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub id: Option<String>,
     /// Set when building a forward chain to send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -235,9 +213,18 @@ pub struct JsonData {
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PokeData {
-    #[serde(rename = "type", default, deserialize_with = "de_opt_string_or_int", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "de_opt_string_or_int",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub poke_type: Option<String>,
-    #[serde(default, deserialize_with = "de_opt_string_or_int", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "de_opt_string_or_int",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub id: Option<String>,
 }
 
@@ -301,8 +288,7 @@ mod tests {
 
     #[test]
     fn parse_text_segment() {
-        let seg: Segment =
-            serde_json::from_str(r#"{"type":"text","data":{"text":"hi"}}"#).unwrap();
+        let seg: Segment = serde_json::from_str(r#"{"type":"text","data":{"text":"hi"}}"#).unwrap();
         assert_eq!(
             seg,
             Segment::Known(KnownSegment::Text {
@@ -354,5 +340,82 @@ mod tests {
         let json = serde_json::to_value(&segs).unwrap();
         let back: Vec<Segment> = serde_json::from_value(json).unwrap();
         assert_eq!(segs, back);
+    }
+
+    #[test]
+    fn parses_media_segments() {
+        let record: Segment =
+            serde_json::from_str(r#"{"type":"record","data":{"file":"a.amr"}}"#).unwrap();
+        assert!(matches!(
+            record,
+            Segment::Known(KnownSegment::Record { .. })
+        ));
+        let video: Segment =
+            serde_json::from_str(r#"{"type":"video","data":{"file":"b.mp4"}}"#).unwrap();
+        assert!(matches!(video, Segment::Known(KnownSegment::Video { .. })));
+        let image: Segment =
+            serde_json::from_str(r#"{"type":"image","data":{"file":"c.png","url":"http://x"}}"#)
+                .unwrap();
+        match image {
+            Segment::Known(KnownSegment::Image { data }) => {
+                assert_eq!(data.file, "c.png");
+                assert_eq!(data.url.as_deref(), Some("http://x"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_rich_and_action_segments() {
+        let xml: Segment =
+            serde_json::from_str(r#"{"type":"xml","data":{"data":"<msg>hi</msg>"}}"#).unwrap();
+        assert!(matches!(xml, Segment::Known(KnownSegment::Xml { .. })));
+        let json: Segment =
+            serde_json::from_str(r#"{"type":"json","data":{"data":"{\"k\":1}"}}"#).unwrap();
+        assert!(matches!(json, Segment::Known(KnownSegment::Json { .. })));
+        let poke: Segment =
+            serde_json::from_str(r#"{"type":"poke","data":{"type":"1","id":"2"}}"#).unwrap();
+        assert!(matches!(poke, Segment::Known(KnownSegment::Poke { .. })));
+        let card: Segment =
+            serde_json::from_str(r#"{"type":"cardimage","data":{"file":"d.png"}}"#).unwrap();
+        assert!(matches!(
+            card,
+            Segment::Known(KnownSegment::CardImage { .. })
+        ));
+        let rps: Segment = serde_json::from_str(r#"{"type":"rps"}"#).unwrap();
+        assert!(matches!(rps, Segment::Known(KnownSegment::Rps { .. })));
+        let shake: Segment = serde_json::from_str(r#"{"type":"shake"}"#).unwrap();
+        assert!(matches!(shake, Segment::Known(KnownSegment::Shake { .. })));
+    }
+
+    #[test]
+    fn parses_forward_and_node() {
+        let forward: Segment =
+            serde_json::from_str(r#"{"type":"forward","data":{"id":"123"}}"#).unwrap();
+        assert!(matches!(
+            forward,
+            Segment::Known(KnownSegment::Forward { .. })
+        ));
+        let node: Segment = serde_json::from_str(r#"{"type":"node","data":{"id":"456"}}"#).unwrap();
+        assert!(matches!(node, Segment::Known(KnownSegment::Node { .. })));
+    }
+
+    #[test]
+    fn at_all_serializes_as_qq_all() {
+        let seg = Segment::at_all();
+        let json = serde_json::to_value(&seg).unwrap();
+        assert_eq!(json["type"], "at");
+        assert_eq!(json["data"]["qq"], "all");
+    }
+
+    #[test]
+    fn unknown_fields_on_known_segments_are_ignored() {
+        let seg: Segment =
+            serde_json::from_str(r#"{"type":"text","data":{"text":"hi","extra_field":123}}"#)
+                .unwrap();
+        match seg {
+            Segment::Known(KnownSegment::Text { data }) => assert_eq!(data.text, "hi"),
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 }

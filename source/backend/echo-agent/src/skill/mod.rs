@@ -59,7 +59,10 @@ impl SkillRegistry {
         if dir.is_empty() || !std::path::Path::new(dir).exists() {
             return Ok(registry);
         }
-        for entry in walkdir::WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        for entry in walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let path = entry.path();
             if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some("SKILL.md") {
                 let skill = loader::load_skill(path)?;
@@ -80,7 +83,11 @@ impl SkillRegistry {
     /// Find the first enabled skill triggered by the message.
     /// HashMap 迭代顺序随机，命中多个时按名称排序取第一个，保证确定性。
     pub fn find_matching(&self, content: &str) -> Option<&Skill> {
-        let mut matched: Vec<&Skill> = self.skills.values().filter(|s| s.matches(content)).collect();
+        let mut matched: Vec<&Skill> = self
+            .skills
+            .values()
+            .filter(|s| s.matches(content))
+            .collect();
         matched.sort_by_key(|s| s.metadata.name.clone());
         matched.into_iter().next()
     }
@@ -107,7 +114,10 @@ impl SkillRegistry {
                 } else {
                     format!(" (触发词: {})", s.metadata.keywords.join("、"))
                 };
-                format!("- {}: {}{}", s.metadata.name, s.metadata.description, keywords)
+                format!(
+                    "- {}: {}{}",
+                    s.metadata.name, s.metadata.description, keywords
+                )
             })
             .collect();
         lines.sort();
@@ -119,7 +129,11 @@ impl SkillRegistry {
     }
 
     pub fn enabled_names(&self) -> Vec<String> {
-        self.skills.values().filter(|s| s.metadata.enabled).map(|s| s.metadata.name.clone()).collect()
+        self.skills
+            .values()
+            .filter(|s| s.metadata.enabled)
+            .map(|s| s.metadata.name.clone())
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -165,7 +179,10 @@ mod tests {
         let mut reg = SkillRegistry::new();
         reg.register(skill("calc", &["计算"]));
         reg.register(skill("web", &["搜索"]));
-        assert_eq!(reg.find_matching("帮我计算一下").unwrap().metadata.name, "calc");
+        assert_eq!(
+            reg.find_matching("帮我计算一下").unwrap().metadata.name,
+            "calc"
+        );
         assert!(reg.find_matching("随便聊聊").is_none());
     }
 
@@ -176,5 +193,67 @@ mod tests {
         s.metadata.enabled = false;
         reg.register(s);
         assert!(reg.find_matching("计算一下").is_none());
+    }
+
+    #[test]
+    fn keyword_matching_is_case_insensitive() {
+        let s = skill("calc", &["calc"]);
+        assert!(s.matches("use Calc now"));
+        assert!(s.matches("CALC"));
+    }
+
+    #[test]
+    fn empty_keywords_never_match() {
+        let s = skill("empty", &[""]);
+        assert!(!s.matches("anything"));
+        let s2 = skill("none", &[]);
+        assert!(!s2.matches("anything"));
+    }
+
+    #[test]
+    fn find_matching_is_deterministic_with_multiple_hits() {
+        let mut reg = SkillRegistry::new();
+        reg.register(skill("zeta", &["触发"]));
+        reg.register(skill("alpha", &["触发"]));
+        reg.register(skill("middle", &["触发"]));
+        // Alphabetically first match wins, regardless of insertion order.
+        assert_eq!(
+            reg.find_matching("触发消息").unwrap().metadata.name,
+            "alpha"
+        );
+    }
+
+    #[test]
+    fn discover_walks_directories_recursively() {
+        let dir = std::env::temp_dir().join(format!("echo-skills-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: top-skill\ndescription: d\nkeywords: [top]\n---\nbody",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("nested").join("SKILL.md"),
+            "---\nname: nested-skill\ndescription: d\nkeywords: [nest]\n---\nbody",
+        )
+        .unwrap();
+        // An unrelated file must be ignored.
+        std::fs::write(dir.join("README.md"), "# not a skill").unwrap();
+
+        let reg = SkillRegistry::discover(dir.to_str().unwrap()).unwrap();
+        assert!(reg.get("top-skill").is_some());
+        assert!(reg.get("nested-skill").is_some(), "recursive discovery");
+        assert_eq!(reg.get("top-skill").unwrap().instructions, "body");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_missing_or_empty_dir_is_empty() {
+        assert!(SkillRegistry::discover("").unwrap().is_empty());
+        let missing = std::env::temp_dir().join("echo-no-such-dir-xyz");
+        assert!(SkillRegistry::discover(missing.to_str().unwrap())
+            .unwrap()
+            .is_empty());
     }
 }

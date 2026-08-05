@@ -150,9 +150,11 @@ impl MessageEvent {
     pub fn sender_nickname(&self) -> &str {
         match self {
             MessageEvent::Private { sender, .. } => &sender.nickname,
-            MessageEvent::Group { sender, .. } => {
-                sender.card.as_deref().filter(|c| !c.is_empty()).unwrap_or(&sender.nickname)
-            }
+            MessageEvent::Group { sender, .. } => sender
+                .card
+                .as_deref()
+                .filter(|c| !c.is_empty())
+                .unwrap_or(&sender.nickname),
             MessageEvent::Unknown => "",
         }
     }
@@ -336,6 +338,8 @@ pub enum NoticeEvent {
         message_id: i64,
     },
     /// Group events: poke, honor, lucky king (`sub_type` distinguishes).
+    /// The OneBot wire tag for this family is `"notify"`, not `"group_notify"`.
+    #[serde(rename = "notify")]
     GroupNotify {
         time: i64,
         self_id: i64,
@@ -473,7 +477,10 @@ mod tests {
         let msg = event.as_message().expect("should be a message event");
         match msg {
             MessageEvent::Private {
-                user_id, self_id, message, ..
+                user_id,
+                self_id,
+                message,
+                ..
             } => {
                 assert_eq!(*user_id, 20001);
                 assert_eq!(*self_id, 10001);
@@ -632,5 +639,314 @@ mod tests {
         .unwrap();
         let msg = event.as_message().unwrap();
         assert_eq!(msg.reply_to(), Some("42"));
+    }
+
+    #[test]
+    fn parse_group_upload_notice() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"group_upload","time":1,"self_id":10001,"group_id":30001,"user_id":20001,"file":{"id":"f1","name":"x.pdf","size":100,"busid":0}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::Notice {
+                inner: NoticeEvent::GroupUpload { user_id: 20001, .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_group_admin_notice() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"group_admin","time":1,"self_id":10001,"group_id":30001,"user_id":20001,"sub_type":"set"}"#,
+        )
+        .unwrap();
+        match event {
+            Event::Notice {
+                inner: NoticeEvent::GroupAdmin { sub_type, .. },
+            } => assert_eq!(sub_type, "set"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_group_decrease_notice() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"group_decrease","time":1,"self_id":10001,"group_id":30001,"operator_id":50001,"user_id":20001,"sub_type":"kick"}"#,
+        )
+        .unwrap();
+        match event {
+            Event::Notice {
+                inner:
+                    NoticeEvent::GroupDecrease {
+                        operator_id,
+                        sub_type,
+                        ..
+                    },
+            } => {
+                assert_eq!(operator_id, Some(50001));
+                assert_eq!(sub_type, "kick");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_group_ban_notice() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"group_ban","time":1,"self_id":10001,"group_id":30001,"operator_id":50001,"user_id":20001,"sub_type":"ban","duration":600}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::Notice {
+                inner: NoticeEvent::GroupBan { duration: 600, .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_recall_notices() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"group_recall","time":1,"self_id":10001,"group_id":30001,"user_id":20001,"operator_id":50001,"message_id":42}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::Notice {
+                inner: NoticeEvent::GroupRecall { message_id: 42, .. }
+            }
+        ));
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"friend_recall","time":1,"self_id":10001,"user_id":20001,"message_id":7}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::Notice {
+                inner: NoticeEvent::FriendRecall { message_id: 7, .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_group_notify_poke() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"notify","time":1,"self_id":10001,"group_id":30001,"user_id":20001,"target_id":10001,"sub_type":"poke"}"#,
+        )
+        .unwrap();
+        match event {
+            Event::Notice {
+                inner:
+                    NoticeEvent::GroupNotify {
+                        sub_type,
+                        target_id,
+                        ..
+                    },
+            } => {
+                assert_eq!(sub_type, "poke");
+                assert_eq!(target_id, Some(10001));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_group_card_notice() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"group_card","time":1,"self_id":10001,"group_id":30001,"user_id":20001,"card_new":"New","card_old":"Old"}"#,
+        )
+        .unwrap();
+        match event {
+            Event::Notice {
+                inner: NoticeEvent::GroupCard { card_new, .. },
+            } => assert_eq!(card_new, "New"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_notice_type_is_preserved() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"group_essence","time":1,"self_id":10001,"group_id":30001,"user_id":20001,"operator_id":50001,"message_id":9}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::Notice {
+                inner: NoticeEvent::Unknown
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_group_request() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"request","request_type":"group","time":1,"self_id":10001,"sub_type":"add","group_id":30001,"user_id":20001,"comment":"pls","flag":"g123"}"#,
+        )
+        .unwrap();
+        match event {
+            Event::Request {
+                inner:
+                    RequestEvent::Group {
+                        sub_type,
+                        group_id,
+                        flag,
+                        ..
+                    },
+            } => {
+                assert_eq!(sub_type, "add");
+                assert_eq!(group_id, 30001);
+                assert_eq!(flag, "g123");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_friend_add_notice() {
+        let event: Event = serde_json::from_str(
+            r#"{"post_type":"notice","notice_type":"friend_add","time":1,"self_id":10001,"user_id":20001}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::Notice {
+                inner: NoticeEvent::FriendAdd { user_id: 20001, .. }
+            }
+        ));
+    }
+
+    // ── Property tests ─────────────────────────────────────────────────────
+
+    use proptest::prelude::*;
+    use serde_json::json;
+
+    fn message_event_json(text: &str, user_id: i64, group_id: i64, is_group: bool) -> Value {
+        let message = json!([{"type": "text", "data": {"text": text}}]);
+        let sender = json!({"user_id": user_id, "nickname": "prop-user"});
+        if is_group {
+            json!({
+                "post_type": "message",
+                "message_type": "group",
+                "time": 1700000000,
+                "self_id": 10001,
+                "sub_type": "normal",
+                "message_id": 1,
+                "group_id": group_id,
+                "user_id": user_id,
+                "message": message,
+                "raw_message": text,
+                "font": 0,
+                "sender": sender
+            })
+        } else {
+            json!({
+                "post_type": "message",
+                "message_type": "private",
+                "time": 1700000000,
+                "self_id": 10001,
+                "sub_type": "friend",
+                "message_id": 1,
+                "user_id": user_id,
+                "message": message,
+                "raw_message": text,
+                "font": 0,
+                "sender": sender
+            })
+        }
+    }
+
+    proptest! {
+        /// Any message text (Unicode, control chars, quotes) round-trips
+        /// stably: parse → serialize → parse yields the same event.
+        #[test]
+        fn message_event_json_roundtrip_is_stable(
+            text in ".*",
+            user_id in 0i64..1_000_000_000i64,
+            group_id in 0i64..1_000_000_000i64,
+            is_group in proptest::bool::ANY,
+        ) {
+            let raw = message_event_json(&text, user_id, group_id, is_group);
+            let ev: Event = serde_json::from_value(raw).expect("parse");
+            let ev2: Event =
+                serde_json::from_value(serde_json::to_value(&ev).expect("serialize"))
+                    .expect("re-parse");
+            prop_assert_eq!(ev, ev2);
+        }
+
+        /// Segment lists with arbitrary text survive message round-trips.
+        #[test]
+        fn segment_rich_message_roundtrip(
+            texts in proptest::collection::vec("[a-zA-Z0-9 你好世界]{0,20}", 0..8),
+            user_id in 0i64..1_000_000i64,
+        ) {
+            let message: Vec<Value> = texts
+                .iter()
+                .map(|t| json!({"type": "text", "data": {"text": t}}))
+                .collect();
+            let raw = json!({
+                "post_type": "message",
+                "message_type": "private",
+                "time": 1,
+                "self_id": 10001,
+                "sub_type": "friend",
+                "message_id": 1,
+                "user_id": user_id,
+                "message": message,
+                "raw_message": texts.join(""),
+                "font": 0,
+                "sender": {"user_id": user_id, "nickname": "x"}
+            });
+            let ev: Event = serde_json::from_value(raw).expect("parse");
+            let ev2: Event =
+                serde_json::from_value(serde_json::to_value(&ev).expect("serialize"))
+                    .expect("re-parse");
+            prop_assert_eq!(ev, ev2);
+        }
+    }
+
+    fn group_msg_with_at(at_qq: Option<&str>) -> Event {
+        let at_segment = match at_qq {
+            Some(qq) => serde_json::json!({"type": "at", "data": {"qq": qq}}),
+            None => serde_json::json!({"type": "text", "data": {"text": "hi"}}),
+        };
+        serde_json::from_value(json!({
+            "post_type": "message",
+            "message_type": "group",
+            "time": 1,
+            "self_id": 10001,
+            "sub_type": "normal",
+            "message_id": 1,
+            "group_id": 30001,
+            "user_id": 20001,
+            "message": [at_segment],
+            "raw_message": "",
+            "font": 0,
+            "sender": {"user_id": 20001, "nickname": "x"}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn has_at_matches_specific_user_and_all() {
+        let event = group_msg_with_at(Some("10001"));
+        let msg = event.as_message().unwrap();
+        assert!(msg.has_at(10001));
+        assert!(!msg.has_at(20002), "other user not mentioned");
+        assert!(msg.at_me(), "self_id 10001 is mentioned");
+
+        let event = group_msg_with_at(Some("all"));
+        let all = event.as_message().unwrap();
+        assert!(all.has_at(10001), "@all matches anyone");
+        assert!(all.at_me());
+    }
+
+    #[test]
+    fn has_at_false_without_mentions() {
+        let event = group_msg_with_at(None);
+        let msg = event.as_message().unwrap();
+        assert!(!msg.has_at(10001));
+        assert!(!msg.at_me());
     }
 }

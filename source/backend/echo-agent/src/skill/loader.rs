@@ -35,7 +35,9 @@ fn parse_skill(path: &Path, text: &str) -> Result<Skill, SkillError> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let Some((key, value)) = line.split_once(':') else { continue };
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
         let key = key.trim();
         let value = value.trim();
         match key {
@@ -56,7 +58,12 @@ fn parse_skill(path: &Path, text: &str) -> Result<Skill, SkillError> {
             .to_string();
     }
     Ok(Skill {
-        metadata: SkillMetadata { name, description, keywords, enabled: true },
+        metadata: SkillMetadata {
+            name,
+            description,
+            keywords,
+            enabled: true,
+        },
         instructions: body.trim().to_string(),
     })
 }
@@ -119,5 +126,66 @@ keywords: [天气, 新闻, "搜索"]
         let (fm, body) = split_frontmatter("no frontmatter");
         assert_eq!(fm, "");
         assert_eq!(body, "no frontmatter");
+    }
+
+    #[test]
+    fn empty_file_falls_back_to_dir_name() {
+        let skill = parse_skill(Path::new("/skills/empty-skill/SKILL.md"), "").unwrap();
+        assert_eq!(skill.metadata.name, "empty-skill");
+        assert!(skill.instructions.is_empty());
+    }
+
+    #[test]
+    fn bom_prefix_is_ignored() {
+        let text = "\u{feff}---\nname: bom-skill\n---\nbody";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.name, "bom-skill");
+    }
+
+    #[test]
+    fn quoted_values_are_unquoted() {
+        let text = "---\nname: \"double\"\ndescription: 'single'\n---\n";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.name, "double");
+        assert_eq!(skill.metadata.description, "single");
+    }
+
+    #[test]
+    fn keywords_without_brackets_are_supported() {
+        let text = "---\nname: k\nkeywords: 天气, 新闻\n---\n";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.keywords, vec!["天气", "新闻"]);
+    }
+
+    #[test]
+    fn unterminated_frontmatter_is_treated_as_body() {
+        // Opening `---` with no closing delimiter → no frontmatter at all.
+        let text = "---\nname: orphan\nbody text";
+        let skill = parse_skill(Path::new("/skills/orphan/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.name, "orphan", "falls back to dir name");
+        assert!(skill.metadata.description.is_empty());
+    }
+
+    #[test]
+    fn unknown_keys_and_comments_are_ignored() {
+        let text = "---\nname: k\nversion: 1.0\n# a comment\nunknown: x\n---\nbody";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.name, "k");
+        assert!(skill.metadata.description.is_empty());
+    }
+
+    #[test]
+    fn crlf_line_endings_parse() {
+        let text = "---\r\nname: crlf-skill\r\ndescription: ok\r\nkeywords: [a, b]\r\n---\r\nbody";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.name, "crlf-skill");
+        assert_eq!(skill.metadata.keywords, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn colon_in_value_is_preserved() {
+        let text = "---\ndescription: 使用 https://example.com 搜索\n---\n";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert_eq!(skill.metadata.description, "使用 https://example.com 搜索");
     }
 }

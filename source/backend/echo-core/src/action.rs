@@ -78,7 +78,11 @@ pub mod actions {
     }
 
     /// Send a message to either a group or a private chat.
-    pub fn send_msg(message_type: &str, target_id: i64, message: Vec<crate::segment::Segment>) -> ApiRequest {
+    pub fn send_msg(
+        message_type: &str,
+        target_id: i64,
+        message: Vec<crate::segment::Segment>,
+    ) -> ApiRequest {
         let params = if message_type == "group" {
             json!({ "message_type": "group", "group_id": target_id, "message": message })
         } else {
@@ -94,7 +98,10 @@ pub mod actions {
 
     /// Send a group message built from node segments (forward chain).
     pub fn send_group_forward_msg(group_id: i64, nodes: Vec<Value>) -> ApiRequest {
-        ApiRequest::new("send_group_forward_msg", json!({ "group_id": group_id, "messages": nodes }))
+        ApiRequest::new(
+            "send_group_forward_msg",
+            json!({ "group_id": group_id, "messages": nodes }),
+        )
     }
 
     /// Info about the logged-in bot account.
@@ -156,10 +163,7 @@ mod tests {
 
     #[test]
     fn request_serialization() {
-        let req = actions::send_group_msg(
-            30001,
-            vec![Segment::at("20001"), Segment::text("hi")],
-        );
+        let req = actions::send_group_msg(30001, vec![Segment::at("20001"), Segment::text("hi")]);
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["action"], "send_group_msg");
         assert_eq!(json["params"]["group_id"], 30001);
@@ -188,5 +192,62 @@ mod tests {
         .unwrap();
         assert!(!failed.is_ok());
         assert_eq!(failed.error_message().as_deref(), Some("bad"));
+    }
+
+    #[test]
+    fn send_msg_routes_group_and_private() {
+        let group = actions::send_msg("group", 30001, vec![Segment::text("hi")]);
+        let json = serde_json::to_value(&group).unwrap();
+        assert_eq!(json["action"], "send_msg");
+        assert_eq!(json["params"]["message_type"], "group");
+        assert_eq!(json["params"]["group_id"], 30001);
+
+        let private = actions::send_msg("private", 20001, vec![Segment::text("hi")]);
+        let json = serde_json::to_value(&private).unwrap();
+        assert_eq!(json["params"]["message_type"], "private");
+        assert_eq!(json["params"]["user_id"], 20001);
+    }
+
+    #[test]
+    fn moderation_actions_carry_params() {
+        let ban = actions::set_group_ban(100, 200, 3600);
+        let json = serde_json::to_value(&ban).unwrap();
+        assert_eq!(json["params"]["group_id"], 100);
+        assert_eq!(json["params"]["user_id"], 200);
+        assert_eq!(json["params"]["duration"], 3600);
+
+        let kick = actions::set_group_kick(100, 200, true);
+        let json = serde_json::to_value(&kick).unwrap();
+        assert_eq!(json["params"]["reject_add_request"], true);
+
+        let card = actions::set_group_card(100, 200, "new name");
+        let json = serde_json::to_value(&card).unwrap();
+        assert_eq!(json["params"]["card"], "new name");
+    }
+
+    #[test]
+    fn info_actions_have_correct_action_names() {
+        assert_eq!(actions::get_login_info().action, "get_login_info");
+        assert_eq!(actions::get_group_list().action, "get_group_list");
+        assert_eq!(actions::get_version().action, "get_version");
+        assert_eq!(actions::get_friend_list().action, "get_friend_list");
+        assert_eq!(actions::delete_msg(42).action, "delete_msg");
+    }
+
+    #[test]
+    fn response_error_message_falls_back_to_wording() {
+        let resp: ApiResponse = serde_json::from_str(
+            r#"{"status":"failed","retcode":100,"data":null,"wording":"rate limited"}"#,
+        )
+        .unwrap();
+        assert!(!resp.is_ok());
+        assert_eq!(resp.error_message().as_deref(), Some("rate limited"));
+    }
+
+    #[test]
+    fn forward_msg_uses_messages_key() {
+        let req = actions::send_group_forward_msg(30001, vec![serde_json::json!({"type": "node"})]);
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["params"]["messages"][0]["type"], "node");
     }
 }

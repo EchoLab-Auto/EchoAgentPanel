@@ -6,7 +6,9 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::{ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, ToolCallDelta, Usage};
+use super::{
+    ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, ToolCallDelta, Usage,
+};
 
 #[derive(Debug, Clone)]
 pub struct AnthropicProvider {
@@ -22,11 +24,19 @@ impl AnthropicProvider {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             model: model.to_string(),
-            client: reqwest::Client::builder()
+            client: match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    // Extremely unlikely, but the fallback client has NO
+                    // timeout — surface it so hangs are diagnosable.
+                    tracing::warn!(error = %e, "reqwest builder failed, using client without timeouts");
+                    reqwest::Client::new()
+                }
+            },
         }
     }
 }
@@ -55,7 +65,10 @@ impl LlmProvider for AnthropicProvider {
         let status = resp.status();
         let text = resp.text().await?;
         if !status.is_success() {
-            return Err(LlmError::Api(format!("HTTP {status}: {}", super::truncate(&text, 300))));
+            return Err(LlmError::Api(format!(
+                "HTTP {status}: {}",
+                super::truncate(&text, 300)
+            )));
         }
         let parsed: MessagesResponse = serde_json::from_str(&text)
             .map_err(|e| LlmError::Parse(format!("{e} — body: {}", super::truncate(&text, 300))))?;
@@ -65,7 +78,11 @@ impl LlmProvider for AnthropicProvider {
             match block {
                 ContentBlock::Text { text } => content.push_str(&text),
                 ContentBlock::ToolUse { id, name, input } => {
-                    tool_calls.push(ToolCall { id, name, arguments: input.to_string() });
+                    tool_calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments: input.to_string(),
+                    });
                 }
                 // 未知块（推理模型的 thinking 等）宽容跳过
                 ContentBlock::Other => {}
@@ -73,11 +90,18 @@ impl LlmProvider for AnthropicProvider {
         }
         Ok(ChatResponse {
             // 只有 tool_use 没有文本时置 None，避免助手消息带空 content 被严格端点拒绝
-            content: if content.is_empty() { None } else { Some(content) },
+            content: if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            },
             tool_calls,
             usage: parsed
                 .usage
-                .map(|u| Usage { prompt_tokens: u.input_tokens, completion_tokens: u.output_tokens })
+                .map(|u| Usage {
+                    prompt_tokens: u.input_tokens,
+                    completion_tokens: u.output_tokens,
+                })
                 .unwrap_or_default(),
         })
     }
@@ -99,7 +123,10 @@ impl LlmProvider for AnthropicProvider {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await?;
-            return Err(LlmError::Api(format!("HTTP {status}: {}", super::truncate(&text, 300))));
+            return Err(LlmError::Api(format!(
+                "HTTP {status}: {}",
+                super::truncate(&text, 300)
+            )));
         }
         let mut stream = resp.bytes_stream();
         let mut buffer = String::new();
@@ -122,7 +149,10 @@ impl LlmProvider for AnthropicProvider {
                     Err(_) => continue,
                 };
                 match parsed {
-                    StreamEvent::ContentBlockStart { index, content_block: Some(ContentBlockStartWire::ToolUse { id, name, .. }) } => {
+                    StreamEvent::ContentBlockStart {
+                        index,
+                        content_block: Some(ContentBlockStartWire::ToolUse { id, name, .. }),
+                    } => {
                         let _ = tx.send(ChatChunk {
                             content_delta: None,
                             tool_call_delta: Some(ToolCallDelta {
@@ -136,7 +166,10 @@ impl LlmProvider for AnthropicProvider {
                     StreamEvent::ContentBlockDelta { index, delta } => {
                         match delta {
                             DeltaWire::TextDelta { text } => {
-                                let _ = tx.send(ChatChunk { content_delta: Some(text), tool_call_delta: None });
+                                let _ = tx.send(ChatChunk {
+                                    content_delta: Some(text),
+                                    tool_call_delta: None,
+                                });
                             }
                             DeltaWire::InputJsonDelta { partial_json } => {
                                 let _ = tx.send(ChatChunk {
@@ -155,13 +188,19 @@ impl LlmProvider for AnthropicProvider {
                     }
                     // 流中段错误不能静默当作成功
                     StreamEvent::Error => {
-                        return Err(LlmError::Api(format!("流式响应错误: {}", super::truncate(&data, 300))));
+                        return Err(LlmError::Api(format!(
+                            "流式响应错误: {}",
+                            super::truncate(&data, 300)
+                        )));
                     }
                     _ => {}
                 }
             }
         }
-        let _ = tx.send(ChatChunk { content_delta: None, tool_call_delta: None });
+        let _ = tx.send(ChatChunk {
+            content_delta: None,
+            tool_call_delta: None,
+        });
         Ok(())
     }
 }
@@ -180,7 +219,10 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
         let msgs = &request.messages;
         while i < msgs.len() {
             let m = &msgs[i];
-            if m.role == super::ChatRole::System { i += 1; continue; }
+            if m.role == super::ChatRole::System {
+                i += 1;
+                continue;
+            }
             if m.role == super::ChatRole::Tool {
                 let mut results: Vec<serde_json::Value> = Vec::new();
                 while i < msgs.len() && msgs[i].role == super::ChatRole::Tool {
@@ -197,26 +239,29 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
                 out.push(match m.role {
                     super::ChatRole::User => json!({"role": "user", "content": m.content}),
                     super::ChatRole::Assistant => {
-                        let has_tools = m.tool_calls.as_ref().map(|tc| !tc.is_empty()).unwrap_or(false);
-                        if has_tools {
-                            let mut blocks: Vec<serde_json::Value> = Vec::new();
-                            if !m.content.is_empty() {
-                                blocks.push(json!({"type": "text", "text": m.content}));
+                        // Match directly on tool_calls instead of a separate
+                        // has_tools guard + unwrap, so an empty/None tool_calls
+                        // can never panic here.
+                        match &m.tool_calls {
+                            Some(tcs) if !tcs.is_empty() => {
+                                let mut blocks: Vec<serde_json::Value> = Vec::new();
+                                if !m.content.is_empty() {
+                                    blocks.push(json!({"type": "text", "text": m.content}));
+                                }
+                                for tc in tcs {
+                                    blocks.push(json!({
+                                        "type": "tool_use",
+                                        "id": tc.id,
+                                        "name": tc.name,
+                                        "input": serde_json::from_str::<serde_json::Value>(&tc.arguments).unwrap_or_else(|_| json!({})),
+                                    }));
+                                }
+                                json!({
+                                    "role": "assistant",
+                                    "content": blocks,
+                                })
                             }
-                            for tc in m.tool_calls.as_ref().unwrap() {
-                                blocks.push(json!({
-                                    "type": "tool_use",
-                                    "id": tc.id,
-                                    "name": tc.name,
-                                    "input": serde_json::from_str::<serde_json::Value>(&tc.arguments).unwrap_or_else(|_| json!({})),
-                                }));
-                            }
-                            json!({
-                                "role": "assistant",
-                                "content": blocks,
-                            })
-                        } else {
-                            json!({"role": "assistant", "content": m.content})
+                            _ => json!({"role": "assistant", "content": m.content}),
                         }
                     }
                     _ => unreachable!(),
@@ -264,7 +309,11 @@ enum ContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "tool_use")]
-    ToolUse { id: String, name: String, input: serde_json::Value },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
     /// 未知内容块（如推理模型的 thinking 块），宽容跳过
     #[serde(other)]
     Other,
@@ -279,8 +328,14 @@ struct UsageWire {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum StreamEvent {
-    ContentBlockStart { index: usize, content_block: Option<ContentBlockStartWire> },
-    ContentBlockDelta { index: usize, delta: DeltaWire },
+    ContentBlockStart {
+        index: usize,
+        content_block: Option<ContentBlockStartWire>,
+    },
+    ContentBlockDelta {
+        index: usize,
+        delta: DeltaWire,
+    },
     MessageStart,
     MessageDelta,
     ContentBlockStop,
@@ -293,8 +348,14 @@ enum StreamEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(dead_code)]
 enum ContentBlockStartWire {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: serde_json::Value },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
     #[serde(other)]
     Other,
 }
@@ -302,8 +363,12 @@ enum ContentBlockStartWire {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum DeltaWire {
-    TextDelta { text: String },
-    InputJsonDelta { partial_json: String },
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
     #[serde(other)]
     Other,
 }
@@ -349,10 +414,7 @@ mod tests {
         let body = build_request_body(
             &ChatRequest {
                 model: "claude-test".into(),
-                messages: vec![
-                    ChatMessage::system("你是助手"),
-                    ChatMessage::user("hi"),
-                ],
+                messages: vec![ChatMessage::system("你是助手"), ChatMessage::user("hi")],
                 tools: None,
                 temperature: None,
                 max_tokens: None,
@@ -362,5 +424,129 @@ mod tests {
         assert_eq!(body["system"], "你是助手");
         assert_eq!(body["messages"].as_array().unwrap().len(), 1);
         assert_eq!(body["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn tool_results_are_grouped_into_one_user_message() {
+        let body = build_request_body(
+            &ChatRequest {
+                model: "claude-test".into(),
+                messages: vec![
+                    ChatMessage::system("sys"),
+                    ChatMessage::user("calculate"),
+                    ChatMessage::assistant("calling"),
+                    ChatMessage {
+                        role: crate::llm::ChatRole::Assistant,
+                        content: "".into(),
+                        tool_calls: Some(vec![ToolCall {
+                            id: "call_1".into(),
+                            name: "calculator".into(),
+                            arguments: "{\"expr\":\"1+1\"}".into(),
+                        }]),
+                        tool_call_id: None,
+                    },
+                    ChatMessage::tool("2", "call_1"),
+                    ChatMessage::tool("3", "call_2"),
+                ],
+                tools: None,
+                temperature: None,
+                max_tokens: None,
+            },
+            false,
+        );
+        let messages = body["messages"].as_array().unwrap();
+        // user + assistant + assistant-with-tool_use + one grouped user message.
+        assert_eq!(messages.len(), 4);
+        let tool_result_msg = &messages[3];
+        assert_eq!(tool_result_msg["role"], "user");
+        let results = tool_result_msg["content"].as_array().unwrap();
+        assert_eq!(results.len(), 2, "both tool results grouped");
+        assert_eq!(results[0]["tool_use_id"], "call_1");
+        assert_eq!(results[0]["content"], "2");
+        assert_eq!(results[1]["tool_use_id"], "call_2");
+        assert_eq!(results[1]["content"], "3");
+    }
+
+    #[test]
+    fn assistant_tool_use_includes_input_blocks() {
+        let body = build_request_body(
+            &ChatRequest {
+                model: "claude-test".into(),
+                messages: vec![
+                    ChatMessage::system("sys"),
+                    ChatMessage {
+                        role: crate::llm::ChatRole::Assistant,
+                        content: "I'll check".into(),
+                        tool_calls: Some(vec![ToolCall {
+                            id: "c1".into(),
+                            name: "read_file".into(),
+                            arguments: "{\"path\":\"a.rs\"}".into(),
+                        }]),
+                        tool_call_id: None,
+                    },
+                ],
+                tools: None,
+                temperature: None,
+                max_tokens: None,
+            },
+            false,
+        );
+        let msg = &body["messages"][0];
+        assert_eq!(msg["role"], "assistant");
+        let blocks = msg["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2, "text block + tool_use block");
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[1]["type"], "tool_use");
+        assert_eq!(blocks[1]["name"], "read_file");
+        assert_eq!(blocks[1]["input"]["path"], "a.rs");
+    }
+
+    #[test]
+    fn multiple_system_messages_are_joined() {
+        let body = build_request_body(
+            &ChatRequest {
+                model: "claude-test".into(),
+                messages: vec![
+                    ChatMessage::system("第一部分"),
+                    ChatMessage::system("第二部分"),
+                    ChatMessage::user("hi"),
+                ],
+                tools: None,
+                temperature: None,
+                max_tokens: None,
+            },
+            false,
+        );
+        assert_eq!(body["system"], "第一部分\n第二部分");
+        assert_eq!(body["messages"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn malformed_tool_arguments_fall_back_to_empty_object() {
+        let body = build_request_body(
+            &ChatRequest {
+                model: "claude-test".into(),
+                messages: vec![
+                    ChatMessage::system("sys"),
+                    ChatMessage {
+                        role: crate::llm::ChatRole::Assistant,
+                        content: "".into(),
+                        tool_calls: Some(vec![ToolCall {
+                            id: "c1".into(),
+                            name: "t".into(),
+                            arguments: "not-json".into(),
+                        }]),
+                        tool_call_id: None,
+                    },
+                ],
+                tools: None,
+                temperature: None,
+                max_tokens: None,
+            },
+            false,
+        );
+        let blocks = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "tool_use");
+        assert_eq!(blocks[0]["input"], serde_json::json!({}));
     }
 }

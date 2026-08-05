@@ -16,8 +16,14 @@ pub struct OllamaProvider {
 impl OllamaProvider {
     pub fn new(base_url: &str, model: &str) -> Self {
         let base = base_url.trim_end_matches('/').to_string();
-        let v1 = if base.ends_with("/v1") { base } else { format!("{base}/v1") };
-        Self { inner: OpenAiProvider::new(&v1, "ollama", model) }
+        let v1 = if base.ends_with("/v1") {
+            base
+        } else {
+            format!("{base}/v1")
+        };
+        Self {
+            inner: OpenAiProvider::new(&v1, "ollama", model),
+        }
     }
 }
 
@@ -41,5 +47,34 @@ impl LlmProvider for OllamaProvider {
         tx: mpsc::UnboundedSender<super::ChatChunk>,
     ) -> Result<(), LlmError> {
         self.inner.chat_stream(request, tx).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn appends_v1_to_plain_base_url() {
+        let p = OllamaProvider::new("http://localhost:11434", "llama3");
+        assert_eq!(p.default_model(), "llama3");
+    }
+
+    #[test]
+    fn keeps_existing_v1_suffix() {
+        let p = OllamaProvider::new("http://localhost:11434/v1", "llama3");
+        assert_eq!(p.default_model(), "llama3");
+    }
+
+    #[test]
+    fn strips_trailing_slash() {
+        let p = OllamaProvider::new("http://localhost:11434/", "llama3");
+        assert_eq!(p.default_model(), "llama3");
+    }
+
+    #[test]
+    fn provider_name_is_ollama() {
+        let p = OllamaProvider::new("http://localhost:11434", "llama3");
+        assert_eq!(p.name(), "ollama");
     }
 }

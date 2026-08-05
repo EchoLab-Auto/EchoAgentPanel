@@ -31,7 +31,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub(crate) fn new(
+    pub fn new(
         self_id: i64,
         connection_id: String,
         api_tx: mpsc::Sender<Outgoing>,
@@ -75,8 +75,10 @@ impl Context {
         user_id: i64,
         message: Vec<Segment>,
     ) -> Result<ApiResponse, EchoServerError> {
-        self.send_api(echo_core::action::actions::send_private_msg(user_id, message))
-            .await
+        self.send_api(echo_core::action::actions::send_private_msg(
+            user_id, message,
+        ))
+        .await
     }
 
     /// Send a message to a group.
@@ -85,8 +87,10 @@ impl Context {
         group_id: i64,
         message: Vec<Segment>,
     ) -> Result<ApiResponse, EchoServerError> {
-        self.send_api(echo_core::action::actions::send_group_msg(group_id, message))
-            .await
+        self.send_api(echo_core::action::actions::send_group_msg(
+            group_id, message,
+        ))
+        .await
     }
 
     /// Send a text message to a private chat.
@@ -95,7 +99,8 @@ impl Context {
         user_id: i64,
         content: &str,
     ) -> Result<ApiResponse, EchoServerError> {
-        self.send_private_msg(user_id, echo_core::message::text(content)).await
+        self.send_private_msg(user_id, echo_core::message::text(content))
+            .await
     }
 
     /// Send a text message to a group.
@@ -104,7 +109,8 @@ impl Context {
         group_id: i64,
         content: &str,
     ) -> Result<ApiResponse, EchoServerError> {
-        self.send_group_msg(group_id, echo_core::message::text(content)).await
+        self.send_group_msg(group_id, echo_core::message::text(content))
+            .await
     }
 
     /// Reply to a message: private messages get a DM; group messages get a
@@ -119,7 +125,9 @@ impl Context {
             MessageEvent::Private { user_id, .. } => {
                 self.send_private_text(*user_id, &content).await
             }
-            MessageEvent::Group { group_id, user_id, .. } => {
+            MessageEvent::Group {
+                group_id, user_id, ..
+            } => {
                 self.send_group_msg(
                     *group_id,
                     vec![Segment::at(user_id.to_string()), Segment::text(content)],
@@ -220,5 +228,237 @@ impl HandlerRegistry {
                 HandleResult::Pass => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Records every event it sees and replies with a fixed `HandleResult`.
+    struct Recorder {
+        name: &'static str,
+        priority: i32,
+        result: HandleResult,
+        seen: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl Handler for Recorder {
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn priority(&self) -> i32 {
+            self.priority
+        }
+        async fn handle(&self, _ctx: &Context, _event: &Event) -> HandleResult {
+            self.seen.fetch_add(1, Ordering::SeqCst);
+            self.result
+        }
+    }
+
+    /// A handler that panics — used to verify panic isolation.
+    struct Panicking;
+
+    #[async_trait]
+    impl Handler for Panicking {
+        fn name(&self) -> &str {
+            "panicking"
+        }
+        fn priority(&self) -> i32 {
+            0 // runs first
+        }
+        async fn handle(&self, _ctx: &Context, _event: &Event) -> HandleResult {
+            panic!("boom");
+        }
+    }
+
+    /// A private-message event used as dispatch input.
+    fn private_event() -> Event {
+        serde_json::from_value(serde_json::json!({
+            "post_type": "message",
+            "message_type": "private",
+            "time": 1700000000,
+            "self_id": 10001,
+            "sub_type": "friend",
+            "message_id": 42,
+            "user_id": 123456,
+            "message": [{"type": "text", "data": {"text": "hi"}}],
+            "raw_message": "hi",
+            "font": 0,
+            "sender": {"user_id": 123456, "nickname": "tester"}
+        }))
+        .unwrap()
+    }
+
+    /// Build a Context backed by a fresh (discarded) channel.
+    fn test_context() -> (Context, mpsc::Receiver<Outgoing>) {
+        let (api_tx, api_rx) = mpsc::channel(16);
+        let ctx = Context::new(10001, "conn-test".into(), api_tx, Arc::new(DashMap::new()));
+        (ctx, api_rx)
+    }
+
+    #[tokio::test]
+    async fn dispatch_runs_lowest_priority_first() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mut registry = HandlerRegistry::new();
+        registry.register(Recorder {
+            name: "high",
+            priority: 1000,
+            result: HandleResult::Handled,
+            seen: seen.clone(),
+        });
+        registry.register(Recorder {
+            name: "low",
+            priority: -100,
+            result: HandleResult::Handled,
+            seen: seen.clone(),
+        });
+        assert_eq!(registry.names(), vec!["low", "high"]);
+
+        let (ctx, _rx) = test_context();
+        registry.dispatch(&ctx, &private_event()).await;
+        // "high" should never be reached because "low" handled first.
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn pass_continues_to_next_handler() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mut registry = HandlerRegistry::new();
+        registry.register(Recorder {
+            name: "first",
+            priority: 10,
+            result: HandleResult::Pass,
+            seen: seen.clone(),
+        });
+        registry.register(Recorder {
+            name: "second",
+            priority: 20,
+            result: HandleResult::Handled,
+            seen: seen.clone(),
+        });
+
+        let (ctx, _rx) = test_context();
+        registry.dispatch(&ctx, &private_event()).await;
+        assert_eq!(seen.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn handled_stops_dispatch() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mut registry = HandlerRegistry::new();
+        registry.register(Recorder {
+            name: "first",
+            priority: 10,
+            result: HandleResult::Handled,
+            seen: seen.clone(),
+        });
+        registry.register(Recorder {
+            name: "second",
+            priority: 20,
+            result: HandleResult::Handled,
+            seen: seen.clone(),
+        });
+
+        let (ctx, _rx) = test_context();
+        registry.dispatch(&ctx, &private_event()).await;
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn handled_and_continue_keeps_going() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mut registry = HandlerRegistry::new();
+        registry.register(Recorder {
+            name: "first",
+            priority: 10,
+            result: HandleResult::HandledAndContinue,
+            seen: seen.clone(),
+        });
+        registry.register(Recorder {
+            name: "second",
+            priority: 20,
+            result: HandleResult::Handled,
+            seen: seen.clone(),
+        });
+
+        let (ctx, _rx) = test_context();
+        registry.dispatch(&ctx, &private_event()).await;
+        assert_eq!(seen.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn panicking_handler_does_not_crash_dispatch() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mut registry = HandlerRegistry::new();
+        registry.register(Panicking);
+        registry.register(Recorder {
+            name: "after",
+            priority: 100,
+            result: HandleResult::Handled,
+            seen: seen.clone(),
+        });
+
+        let (ctx, _rx) = test_context();
+        // Must not propagate the panic.
+        registry.dispatch(&ctx, &private_event()).await;
+        // Panic stops dispatch entirely.
+        assert_eq!(seen.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn send_api_correlates_response_by_echo() {
+        let (ctx, mut api_rx) = test_context();
+
+        // Start the call and grab the outgoing request.
+        let call_ctx = ctx.clone();
+        let request_task = tokio::spawn(async move {
+            call_ctx
+                .send_api(echo_core::action::ApiRequest {
+                    action: "send_private_msg".into(),
+                    params: serde_json::json!({}),
+                    echo: None,
+                })
+                .await
+        });
+
+        let outgoing = api_rx.recv().await.expect("request queued");
+        let Outgoing::Api(request) = outgoing else {
+            panic!("expected Api outgoing");
+        };
+        let echo = request.echo.clone().expect("echo set");
+
+        // Respond as NapCat would.
+        let resp = ApiResponse {
+            status: "ok".into(),
+            retcode: 0,
+            data: serde_json::json!({"message_id": 7}),
+            echo: Some(echo.clone()),
+            message: None,
+            wording: None,
+        };
+        let (_, pending_tx) = ctx.pending.remove(&echo).expect("pending entry exists");
+        pending_tx.send(resp.clone()).expect("response delivered");
+
+        let received = request_task.await.expect("task ok").expect("send_api ok");
+        assert_eq!(received, resp);
+    }
+
+    #[tokio::test]
+    async fn send_api_fails_when_connection_closed() {
+        // Drop the receiver so sends fail immediately.
+        let (api_tx, api_rx) = mpsc::channel(16);
+        drop(api_rx);
+        let ctx = Context::new(10001, "conn-test".into(), api_tx, Arc::new(DashMap::new()));
+        let result = ctx
+            .send_api(echo_core::action::ApiRequest {
+                action: "send_private_msg".into(),
+                params: serde_json::json!({}),
+                echo: None,
+            })
+            .await;
+        assert!(matches!(result, Err(EchoServerError::ConnectionClosed)));
     }
 }

@@ -12,10 +12,10 @@ use echo_server::{
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::net::TcpStream;
+use tokio_tungstenite::client_async_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::Message;
-use tokio_tungstenite::client_async_with_config;
 
 /// Replies to every private message with a fixed text via the API.
 struct EchoBackHandler;
@@ -62,17 +62,19 @@ async fn connect_mock_napcat(
     self_id: &str,
     token: Option<&str>,
 ) -> Result<
-    (tokio_tungstenite::WebSocketStream<TcpStream>, tungstenite::http::Response<Option<Vec<u8>>>),
+    (
+        tokio_tungstenite::WebSocketStream<TcpStream>,
+        tungstenite::http::Response<Option<Vec<u8>>>,
+    ),
     tokio_tungstenite::tungstenite::Error,
 > {
     let mut request = format!("ws://{addr}/").into_client_request().unwrap();
     request
         .headers_mut()
         .insert("x-self-id", HeaderValue::from_str(self_id).unwrap());
-    request.headers_mut().insert(
-        "x-client-role",
-        HeaderValue::from_static("Universal"),
-    );
+    request
+        .headers_mut()
+        .insert("x-client-role", HeaderValue::from_static("Universal"));
     if let Some(token) = token {
         request.headers_mut().insert(
             "authorization",
@@ -165,7 +167,11 @@ async fn event_dispatch_and_api_correlation() {
     };
     let req2: ApiRequest = serde_json::from_str(&text).unwrap();
     assert_eq!(req2.action, "send_private_msg");
-    assert_ne!(req2.echo, Some(echo), "each request must use a fresh echo id");
+    assert_ne!(
+        req2.echo,
+        Some(echo),
+        "each request must use a fresh echo id"
+    );
 
     ws.send(Message::Text(
         json!({"status": "ok", "retcode": 0, "data": {"message_id": 1235}, "echo": req2.echo})
@@ -212,9 +218,11 @@ async fn unknown_event_is_ignored() {
     .unwrap();
 
     // The server is still alive and responds to a normal event afterwards.
-    ws.send(Message::Text(private_message_event("still here").to_string()))
-        .await
-        .unwrap();
+    ws.send(Message::Text(
+        private_message_event("still here").to_string(),
+    ))
+    .await
+    .unwrap();
     let frame = tokio::time::timeout(Duration::from_secs(5), ws.next())
         .await
         .expect("server died after unknown event")

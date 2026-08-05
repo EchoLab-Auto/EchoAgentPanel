@@ -23,7 +23,7 @@ pub enum ChatRole {
 }
 
 /// A single message in the conversation sent to the LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: String,
@@ -36,13 +36,28 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: ChatRole::System, content: content.into(), tool_calls: None, tool_call_id: None }
+        Self {
+            role: ChatRole::System,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: ChatRole::User, content: content.into(), tool_calls: None, tool_call_id: None }
+        Self {
+            role: ChatRole::User,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: ChatRole::Assistant, content: content.into(), tool_calls: None, tool_call_id: None }
+        Self {
+            role: ChatRole::Assistant,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+        }
     }
     pub fn tool(content: impl Into<String>, tool_call_id: impl Into<String>) -> Self {
         Self {
@@ -65,7 +80,7 @@ pub struct ToolDefinition {
 }
 
 /// A tool call requested by the LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
@@ -158,40 +173,6 @@ pub(crate) fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::AgentConfig;
-
-    fn cfg(provider: &str, base_url: &str) -> AgentConfig {
-        let mut c = AgentConfig::default();
-        c.provider = provider.into();
-        c.base_url = base_url.into();
-        c.model = "test-model".into();
-        c.api_key = "test-key".into();
-        c
-    }
-
-    #[test]
-    fn deepseek_anthropic_endpoint_routes_to_anthropic_client() {
-        let p = create_provider(&cfg("deepseek", "https://api.deepseek.com/anthropic")).unwrap();
-        assert_eq!(p.name(), "anthropic");
-    }
-
-    #[test]
-    fn deepseek_openai_endpoint_routes_to_openai_client() {
-        let p = create_provider(&cfg("deepseek", "https://api.deepseek.com")).unwrap();
-        assert_eq!(p.name(), "openai");
-        let p = create_provider(&cfg("deepseek", "")).unwrap();
-        assert_eq!(p.name(), "openai");
-    }
-
-    #[test]
-    fn unknown_provider_is_config_error() {
-        assert!(create_provider(&cfg("gpt-x", "")).is_err());
-    }
-}
-
 /// Build a provider from configuration.
 ///
 /// base_url 以 `/anthropic` 结尾时（如 DeepSeek 的 Anthropic 兼容端点
@@ -234,5 +215,96 @@ pub fn create_provider(cfg: &crate::config::AgentConfig) -> Result<Box<dyn LlmPr
         other => Err(LlmError::Config(format!(
             "不支持的 provider: {other} (可选: openai/deepseek/anthropic/ollama)"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AgentConfig;
+
+    fn cfg(provider: &str, base_url: &str) -> AgentConfig {
+        AgentConfig {
+            provider: provider.into(),
+            base_url: base_url.into(),
+            model: "test-model".into(),
+            api_key: "test-key".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn deepseek_anthropic_endpoint_routes_to_anthropic_client() {
+        let p = create_provider(&cfg("deepseek", "https://api.deepseek.com/anthropic")).unwrap();
+        assert_eq!(p.name(), "anthropic");
+    }
+
+    #[test]
+    fn deepseek_openai_endpoint_routes_to_openai_client() {
+        let p = create_provider(&cfg("deepseek", "https://api.deepseek.com")).unwrap();
+        assert_eq!(p.name(), "openai");
+        let p = create_provider(&cfg("deepseek", "")).unwrap();
+        assert_eq!(p.name(), "openai");
+    }
+
+    #[test]
+    fn unknown_provider_is_config_error() {
+        assert!(create_provider(&cfg("gpt-x", "")).is_err());
+    }
+
+    // ── Property tests ─────────────────────────────────────────────────────
+
+    use proptest::prelude::Just;
+    use proptest::prop_assert_eq;
+
+    proptest::proptest! {
+        /// ChatMessage JSON round-trip for any plausible message.
+        #[test]
+        fn chat_message_json_roundtrip(
+            role in proptest::prop_oneof![
+                Just(ChatRole::System),
+                Just(ChatRole::User),
+                Just(ChatRole::Assistant),
+                Just(ChatRole::Tool),
+            ],
+            content in ".*",
+            has_tool_call in proptest::bool::ANY,
+            tool_call_id in "[a-z0-9_-]{0,20}",
+        ) {
+            let tool_calls = if has_tool_call {
+                Some(vec![ToolCall {
+                    id: "call_1".into(),
+                    name: "calculator".into(),
+                    arguments: "{\"expr\":\"1+1\"}".into(),
+                }])
+            } else {
+                None
+            };
+            let msg = ChatMessage {
+                role,
+                content,
+                tool_calls,
+                tool_call_id: (role == ChatRole::Tool).then_some(tool_call_id),
+            };
+            let json = serde_json::to_string(&msg).expect("serialize");
+            let back: ChatMessage = serde_json::from_str(&json).expect("deserialize");
+            prop_assert_eq!(back.role, msg.role);
+            prop_assert_eq!(back.content, msg.content);
+            prop_assert_eq!(back.tool_calls, msg.tool_calls);
+            prop_assert_eq!(back.tool_call_id, msg.tool_call_id);
+        }
+
+        /// ToolCall JSON round-trip.
+        #[test]
+        fn tool_call_json_roundtrip(
+            id in "[a-z0-9_-]{1,20}",
+            name in "[a-z0-9_]{1,20}",
+            arguments in ".*",
+        ) {
+            let call = ToolCall { id, name, arguments };
+            let json = serde_json::to_string(&call).expect("serialize");
+            let back: ToolCall = serde_json::from_str(&json).expect("deserialize");
+            prop_assert_eq!(back, call);
+        }
     }
 }

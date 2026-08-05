@@ -126,7 +126,9 @@ impl Server {
             let conn_callback = self.conn_callback.clone();
 
             tokio::spawn(async move {
-                if let Err(e) = handle_connection(stream, peer, config, registry, tracker, conn_callback).await {
+                if let Err(e) =
+                    handle_connection(stream, peer, config, registry, tracker, conn_callback).await
+                {
                     warn!(peer = %peer, error = %e, "connection ended with error");
                 }
             });
@@ -139,7 +141,10 @@ fn token_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.bytes()
+        .zip(b.bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 /// Handle a single inbound reverse-WebSocket connection.
@@ -154,44 +159,48 @@ async fn handle_connection(
     // Capture request headers during the WebSocket upgrade. Authentication is
     // enforced here too: a bad token yields a 401 before the upgrade finishes.
     let mut captured: Option<(i64, Option<String>)> = None;
-    let callback =
-        |req: &Request, resp: Response| -> Result<Response, tokio_tungstenite::tungstenite::http::Response<Option<String>>> {
-            let self_id = req
-                .headers()
-                .get("x-self-id")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<i64>().ok());
-            let role = req
-                .headers()
-                .get("x-client-role")
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_string);
+    let callback = |req: &Request,
+                    resp: Response|
+     -> Result<
+        Response,
+        tokio_tungstenite::tungstenite::http::Response<Option<String>>,
+    > {
+        let self_id = req
+            .headers()
+            .get("x-self-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<i64>().ok());
+        let role = req
+            .headers()
+            .get("x-client-role")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
 
-            let auth_ok = match &config.access_token {
-                Some(token) => req
-                    .headers()
-                    .get("authorization")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.strip_prefix("Bearer "))
-                    .map(|t| token_eq(t, token))
-                    .unwrap_or(false),
-                None => true,
-            };
-
-            // x-self-id: optional for reverse WS clients that don't send it.
-            if self_id.is_none() {
-                tracing::warn!("WebSocket connection without x-self-id header — NapCat reverse WS client may need configuration");
-            }
-            captured = Some((self_id.unwrap_or(0), role));
-            if !auth_ok {
-                // Returning Err(response) aborts the upgrade and sends the
-                // response to the client — a 401 here.
-                let mut resp = resp.map(|_| None);
-                *resp.status_mut() = StatusCode::UNAUTHORIZED;
-                return Err(resp);
-            }
-            Ok(resp)
+        let auth_ok = match &config.access_token {
+            Some(token) => req
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .map(|t| token_eq(t, token))
+                .unwrap_or(false),
+            None => true,
         };
+
+        // x-self-id: optional for reverse WS clients that don't send it.
+        if self_id.is_none() {
+            tracing::warn!("WebSocket connection without x-self-id header — NapCat reverse WS client may need configuration");
+        }
+        captured = Some((self_id.unwrap_or(0), role));
+        if !auth_ok {
+            // Returning Err(response) aborts the upgrade and sends the
+            // response to the client — a 401 here.
+            let mut resp = resp.map(|_| None);
+            *resp.status_mut() = StatusCode::UNAUTHORIZED;
+            return Err(resp);
+        }
+        Ok(resp)
+    };
 
     let ws = accept_hdr_async(stream, callback)
         .await
@@ -239,3 +248,72 @@ async fn handle_connection(
 
 // Re-exported for type clarity in connection.rs signatures.
 pub type WsStream = WebSocketStream<TcpStream>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn conn(id: &str) -> ConnectionInfo {
+        ConnectionInfo {
+            id: id.into(),
+            self_id: 10001,
+            role: "test".into(),
+            peer: "127.0.0.1:1".parse().unwrap(),
+            connected_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn tracker_tracks_connection_lifecycle() {
+        let tracker = ConnectionTracker::default();
+        assert_eq!(tracker.active_connections(), 0);
+        tracker.insert(conn("a"));
+        tracker.insert(conn("b"));
+        assert_eq!(tracker.active_connections(), 2);
+        assert_eq!(tracker.connections().len(), 2);
+        tracker.remove("a");
+        assert_eq!(tracker.active_connections(), 1);
+        assert_eq!(tracker.connections()[0].id, "b");
+    }
+
+    #[test]
+    fn tracker_counts_events() {
+        let tracker = ConnectionTracker::default();
+        assert_eq!(tracker.total_events(), 0);
+        tracker.count_event();
+        tracker.count_event();
+        tracker.count_event();
+        assert_eq!(tracker.total_events(), 3);
+    }
+
+    #[test]
+    fn tracker_remove_missing_is_noop() {
+        let tracker = ConnectionTracker::default();
+        tracker.insert(conn("a"));
+        tracker.remove("nope");
+        assert_eq!(tracker.active_connections(), 1);
+    }
+
+    #[test]
+    fn token_eq_matches_identical() {
+        assert!(token_eq("secret", "secret"));
+        assert!(token_eq("", ""));
+    }
+
+    #[test]
+    fn token_eq_rejects_different_lengths() {
+        assert!(!token_eq("a", "ab"));
+        assert!(!token_eq("abc", "ab"));
+    }
+
+    #[test]
+    fn token_eq_rejects_different_content() {
+        assert!(!token_eq("secret", "secrex"));
+        assert!(!token_eq("abc", "xyz"));
+    }
+
+    #[test]
+    fn token_eq_is_case_sensitive() {
+        assert!(!token_eq("Token", "token"));
+    }
+}
