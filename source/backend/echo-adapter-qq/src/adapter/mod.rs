@@ -183,9 +183,7 @@ impl QqAdapter {
                 QqGateMode::Allowlist => {
                     let allow_groups: std::collections::HashSet<i64> =
                         cfg.allowlist.group_ids.iter().cloned().collect();
-                    if !allow_groups.is_empty() {
-                        filtered.retain(|(gid, _)| allow_groups.contains(gid));
-                    }
+                    filtered.retain(|(gid, _)| allow_groups.contains(gid));
                 }
                 QqGateMode::Denylist => {
                     let deny_groups: std::collections::HashSet<i64> =
