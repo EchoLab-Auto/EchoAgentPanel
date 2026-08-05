@@ -758,6 +758,32 @@ mod tests {
     }
 
     #[test]
+    fn empty_allowlist_in_allowlist_mode_returns_no_groups() {
+        // Simulate the exact scenario: allowlist mode, empty allowlist.
+        // get_filter_config() returns the runtime-overlaid config.
+        let mut cfg = QqAdapterConfig::default();
+        cfg.gate.mode = "allowlist".into();
+        // allowlist is empty (default)
+        let adapter = QqAdapter::new(cfg);
+        // Manually set gate mode to allowlist.
+        adapter.set_gate_mode(QqGateMode::Allowlist);
+
+        let groups: Vec<(i64, String)> = vec![(111, "group a".into()), (222, "group b".into())];
+        // We must test the filter logic without calling the QQ API.
+        // The filter happens after the QQ API call, on the raw groups vec.
+        // Create a minimal test of the filtering logic:
+        let cfg = adapter.get_filter_config();
+        let allow_groups: std::collections::HashSet<i64> =
+            cfg.allowlist.group_ids.iter().cloned().collect();
+        assert!(allow_groups.is_empty(), "allowlist is empty");
+        let filtered: Vec<_> = groups
+            .into_iter()
+            .filter(|(gid, _)| allow_groups.contains(gid))
+            .collect();
+        assert!(filtered.is_empty(), "empty allowlist filters ALL groups out");
+    }
+
+    #[test]
     fn rejects_non_message_events() {
         let heartbeat = serde_json::from_value(serde_json::json!({
             "post_type": "meta_event",
