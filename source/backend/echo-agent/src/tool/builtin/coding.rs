@@ -268,16 +268,12 @@ impl Tool for EditFileTool {
         }
         let end = end.min(total);
         // Replace lines [start-1 .. end-1] with new_content.
-        let mut new_lines: Vec<String> = Vec::new();
-        for i in 0..start.saturating_sub(1) {
-            new_lines.push(lines[i].to_string());
-        }
-        for nl in new_content.lines() {
-            new_lines.push(nl.to_string());
-        }
-        for i in end..total {
-            new_lines.push(lines[i].to_string());
-        }
+        let mut new_lines: Vec<String> = lines[..start.saturating_sub(1)]
+            .iter()
+            .map(|l| l.to_string())
+            .collect();
+        new_lines.extend(new_content.lines().map(|l| l.to_string()));
+        new_lines.extend(lines[end..total].iter().map(|l| l.to_string()));
         std::fs::write(&path, new_lines.join("\n") + "\n")
             .map_err(|e| ToolError::Execution(format!("write: {e}")))?;
         Ok(format!("edited {}: replaced lines {}-{} ({} lines)", path_str, start, end, total))

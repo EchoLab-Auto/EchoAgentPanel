@@ -841,8 +841,8 @@ fn replace_toml_section(content: &str, section: &str, new_block: &str) -> String
     let array_sub = format!("[[{section}");
     let dotted_sub = format!("[{section}.");
     let mut end = lines.len();
-    for i in (start + 1)..lines.len() {
-        let t = lines[i].trim_start();
+    for (i, l) in lines.iter().enumerate().skip(start + 1) {
+        let t = l.trim_start();
         let is_section_sub = t.starts_with(&array_sub) || t.starts_with(&dotted_sub);
         if t.starts_with('[') && !is_section_sub && t != marker {
             end = i;

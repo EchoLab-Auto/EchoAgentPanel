@@ -384,9 +384,7 @@ impl AppState {
             let mut parts: Vec<String> = Vec::new();
             let s0 = &lines[sr];
             parts.push(s0[util::col_to_byte(s0, sc)..].to_string());
-            for idx in sr + 1..er {
-                parts.push(lines[idx].clone());
-            }
+            parts.extend(lines[sr + 1..er].iter().cloned());
             let sn = &lines[er];
             parts.push(sn[..util::col_to_byte(sn, ec)].to_string());
             parts.join("\n")
