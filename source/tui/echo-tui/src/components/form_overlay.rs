@@ -107,19 +107,52 @@ impl FormOverlay {
         self.state = FormState::Inactive;
     }
 
+    /// Number of items to jump on PageUp / PageDown.
+    const PAGE_SIZE: isize = 10;
+
     // ── navigation ──
 
+    /// Move by `delta` items (wrapping), or 0 for no-op.
+    fn shift_idx(&mut self, delta: isize) {
+        let (idx, len) = match self.state {
+            FormState::Selecting => (&mut self.select_idx, self.select_items.len()),
+            FormState::Editing => (&mut self.field_idx, self.fields.len()),
+            _ => return,
+        };
+        let len = len.max(1) as isize;
+        *idx = ((*idx as isize + delta + len) % len) as usize;
+    }
+
     fn navigate(&mut self, delta: isize) {
+        self.shift_idx(delta);
+    }
+
+    /// Jump one page forward or backward.
+    fn page_navigate(&mut self, forward: bool) {
+        let delta = if forward {
+            Self::PAGE_SIZE
+        } else {
+            -Self::PAGE_SIZE
+        };
+        self.shift_idx(delta);
+    }
+
+    /// Jump to the first or last item.
+    fn jump_to(&mut self, end: bool) {
         match self.state {
             FormState::Selecting => {
-                let len = self.select_items.len().max(1) as isize;
-                let new = ((self.select_idx as isize + delta + len) % len) as usize;
-                self.select_idx = new;
+                if end {
+                    self.select_idx = self.select_items.len().saturating_sub(1);
+                } else {
+                    self.select_idx = 0;
+                }
             }
             FormState::Editing => {
-                let len = self.fields.len().max(1) as isize;
-                let new = ((self.field_idx as isize + delta + len) % len) as usize;
-                self.field_idx = new;
+                if end {
+                    self.field_idx = self.fields.len().saturating_sub(1);
+                } else {
+                    self.field_idx = 0;
+                }
             }
             _ => {}
         }
@@ -246,7 +279,9 @@ impl FormOverlay {
         let mut lines: Vec<String> = Vec::new();
         match self.state {
             FormState::Editing => {
-                lines.push(format!("── 编辑: {} ──", self.edit_label));
+                let total = self.fields.len();
+                let pos = format!("{}/{}", self.field_idx.saturating_add(1), total);
+                lines.push(format!("── 编辑: {}  ({pos}) ──", self.edit_label));
                 lines.push(String::new());
                 for (i, field) in self.fields.iter().enumerate() {
                     let mark = if i == self.field_idx { "▸ " } else { "  " };
@@ -272,7 +307,7 @@ impl FormOverlay {
                 match self.form_kind {
                     FormKind::ApiConfig => {
                         lines.push(
-                            "↑↓选字段  直接输入改值  Ctrl+S保存  Ctrl+C×1返回  Ctrl+C×2退出".into(),
+                            "↑↓选字段  PgUp/Dn翻页  直接输入改值  Ctrl+S保存  Ctrl+C×1返回  Ctrl+C×2退出".into(),
                         );
                     }
                     FormKind::QqFilter => {
@@ -284,25 +319,31 @@ impl FormOverlay {
                 }
             }
             FormState::Selecting => {
-                lines.push(format!("── {} ──", self.title));
+                let total = self.select_items.len();
+                let pos = format!("{}/{}", self.select_idx.saturating_add(1), total);
+                lines.push(format!("── {}  ({pos}) ──", self.title));
                 lines.push(String::new());
+                // Max visible width for labels (keep each row on one terminal line).
+                const LABEL_MAX_CHARS: usize = 64;
                 for (i, item) in self.select_items.iter().enumerate() {
                     let mark = if i == self.select_idx { "▸" } else { " " };
                     let radio = if item.value == "__info__" { " " } else { "●" };
-                    lines.push(format!(" {mark}{radio} {}", item.label));
+                    let label = truncate_label(&item.label, LABEL_MAX_CHARS);
+                    lines.push(format!(" {mark}{radio} {label}"));
                 }
                 lines.push(String::new());
-                match self.form_kind {
+                let nav = match self.form_kind {
                     FormKind::ApiConfig => {
-                        lines.push("↑↓选择  Enter切换  e编辑  Ctrl+C×2退出".into());
+                        "↑↓选择  PgUp/Dn翻页  Home/End首尾  Enter切换  e编辑  Ctrl+C×2退出"
                     }
                     FormKind::QqFilter => {
-                        lines.push("↑↓选择  Enter/e执行  Ctrl+C×2退出".into());
+                        "↑↓选择  PgUp/Dn翻页  Home/End首尾  Enter/e执行  Ctrl+C×2退出"
                     }
                     FormKind::SessionSelect => {
-                        lines.push("↑↓选择  Enter切换  Ctrl+C×2退出".into());
+                        "↑↓选择  PgUp/Dn翻页  Home/End首尾  Enter切换  Ctrl+C×2退出"
                     }
-                }
+                };
+                lines.push(nav.into());
             }
             FormState::Inactive => {}
         }
@@ -324,38 +365,60 @@ impl FormOverlay {
             return false;
         }
 
-        match self.state {
-            FormState::Selecting => match key.code {
-                KeyCode::Up => {
-                    self.navigate(-1);
-                    return true;
-                }
-                KeyCode::Down => {
-                    self.navigate(1);
-                    return true;
-                }
-                _ => {}
-            },
-            FormState::Editing => match key.code {
-                KeyCode::Up => {
-                    self.navigate(-1);
-                    return true;
-                }
-                KeyCode::Down => {
-                    self.navigate(1);
-                    return true;
-                }
-                // Ctrl+S only meaningful for ApiConfig forms.
-                KeyCode::Char('s') if ctrl && self.form_kind == FormKind::ApiConfig => {
-                    self.save(backend);
-                    return true;
-                }
-                _ => {}
-            },
+        // ── Shared navigation keys (both Selecting and Editing) ──
+        match key.code {
+            KeyCode::Up => {
+                self.navigate(-1);
+                return true;
+            }
+            KeyCode::Down => {
+                self.navigate(1);
+                return true;
+            }
+            KeyCode::PageUp => {
+                self.page_navigate(false);
+                return true;
+            }
+            KeyCode::PageDown => {
+                self.page_navigate(true);
+                return true;
+            }
+            KeyCode::Home => {
+                self.jump_to(false);
+                return true;
+            }
+            KeyCode::End => {
+                self.jump_to(true);
+                return true;
+            }
             _ => {}
+        }
+
+        // ── State-specific keys ──
+        if let FormState::Editing = self.state {
+            if ctrl && key.code == KeyCode::Char('s') && self.form_kind == FormKind::ApiConfig {
+                self.save(backend);
+                return true;
+            }
         }
         false
     }
+}
+
+/// Truncate a label to `max_chars` visual characters, appending "…" if cut.
+fn truncate_label(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(max_chars + 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i >= max_chars.saturating_sub(1) {
+            break;
+        }
+        out.push(ch);
+    }
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
@@ -444,7 +507,8 @@ mod tests {
         fo.activate("标题", items(2), FormKind::QqFilter);
         fo.select_idx = 1;
         let text = fo.render_text();
-        assert!(text.contains("── 标题 ──"));
+        assert!(text.contains("── 标题"), "title present: {text}");
+        assert!(text.contains("(2/2)"), "position indicator: {text}");
         assert!(text.contains("▸"));
         assert!(text.contains("item 0"));
         assert!(text.contains("item 1"));
@@ -580,5 +644,53 @@ mod tests {
         assert_eq!(fo.select_idx, 1);
         assert!(fo.handle_key(&key(KeyCode::Up, false), &backend));
         assert_eq!(fo.select_idx, 0);
+    }
+
+    #[test]
+    fn page_navigate_jumps_by_page_size() {
+        let mut fo = FormOverlay::default();
+        fo.activate("t", items(25), FormKind::QqFilter); // 25 items
+        fo.page_navigate(true);
+        assert_eq!(fo.select_idx, 10, "PageDown jumps 10 forward");
+        fo.page_navigate(true);
+        assert_eq!(fo.select_idx, 20);
+        // Wraps around.
+        fo.page_navigate(true);
+        assert_eq!(fo.select_idx, 5, "wrap: 20+10=30 % 25 = 5");
+        fo.page_navigate(false);
+        assert_eq!(fo.select_idx, 20, "wrap back: 5-10+25=20");
+    }
+
+    #[test]
+    fn jump_to_moves_to_first_and_last() {
+        let mut fo = FormOverlay::default();
+        fo.activate("t", items(5), FormKind::QqFilter);
+        fo.select_idx = 2;
+        fo.jump_to(true);
+        assert_eq!(fo.select_idx, 4, "End");
+        fo.jump_to(false);
+        assert_eq!(fo.select_idx, 0, "Home");
+    }
+
+    #[test]
+    fn render_text_includes_position_indicator() {
+        let mut fo = FormOverlay::default();
+        fo.activate("标题", items(5), FormKind::QqFilter);
+        fo.select_idx = 2;
+        let text = fo.render_text();
+        assert!(
+            text.contains("(3/5)"),
+            "position indicator in title: {text}"
+        );
+    }
+
+    #[test]
+    fn truncate_label_cuts_long_strings() {
+        let s = "x".repeat(100);
+        let t = truncate_label(&s, 20);
+        assert_eq!(t.chars().count(), 20, "truncated with …");
+        assert!(t.ends_with('…'));
+        // Short strings unchanged.
+        assert_eq!(truncate_label("hi", 20), "hi");
     }
 }
