@@ -930,4 +930,139 @@ mod tests {
         assert!(!app.state.form_overlay.is_active());
         assert!(app.state.running);
     }
+
+    fn key_event(code: KeyCode) -> crossterm::event::Event {
+        crossterm::event::Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    /// Activate a form overlay with one selectable item.
+    fn activate_form(
+        app: &mut App,
+        kind: crate::components::form_overlay::FormKind,
+        items: Vec<(&str, &str)>,
+    ) {
+        app.state.form_overlay.activate(
+            "test",
+            items
+                .into_iter()
+                .map(
+                    |(label, value)| crate::components::form_overlay::SelectItem {
+                        label: label.into(),
+                        value: value.into(),
+                    },
+                )
+                .collect(),
+            kind,
+        );
+    }
+
+    #[test]
+    fn form_escape_from_selecting_exits_config_mode() {
+        let mut app = app();
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::ApiConfig,
+            vec![("x", "y")],
+        );
+        app.handle_input(&key_event(KeyCode::Esc));
+        assert!(!app.state.form_overlay.is_active(), "Esc closes the form");
+        assert_eq!(app.state.mode, ConversationMode::Normal);
+    }
+
+    #[test]
+    fn form_escape_from_editing_returns_to_selecting() {
+        let mut app = app();
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::ApiConfig,
+            vec![("x", "y")],
+        );
+        app.state
+            .form_overlay
+            .set_fields(vec![crate::components::form_overlay::FormField {
+                label: "Model".into(),
+                value: String::new(),
+                kind: crate::components::form_overlay::FieldKind::Text,
+            }]);
+        app.state.form_overlay.enter_edit();
+        assert_eq!(
+            app.state.form_overlay.state,
+            crate::components::form_overlay::FormState::Editing
+        );
+
+        app.handle_input(&key_event(KeyCode::Esc));
+        assert!(
+            app.state.form_overlay.is_active(),
+            "Esc in Editing returns to Selecting"
+        );
+        assert_eq!(
+            app.state.form_overlay.state,
+            crate::components::form_overlay::FormState::Selecting
+        );
+    }
+
+    #[test]
+    fn form_e_edits_api_config_with_current_values() {
+        let mut app = app();
+        app.state.status.provider = "deepseek".into();
+        app.state.status.model = "ds-v4".into();
+        app.state.status.base_url = "http://x".into();
+        app.state.status.system_prompt = "你好".into();
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::ApiConfig,
+            vec![("1. deepseek", "1")],
+        );
+
+        app.handle_input(&key_event(KeyCode::Char('e')));
+        assert_eq!(
+            app.state.form_overlay.state,
+            crate::components::form_overlay::FormState::Editing
+        );
+        let fields = &app.state.form_overlay.fields;
+        assert_eq!(fields.len(), 5);
+        assert_eq!(fields[0].value, "deepseek");
+        assert_eq!(fields[1].value, "ds-v4");
+        assert_eq!(fields[2].value, "http://x");
+        assert_eq!(fields[4].value, "你好");
+    }
+
+    #[test]
+    fn form_e_on_qq_add_user_enters_single_field_edit() {
+        let mut app = app();
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::QqFilter,
+            vec![("[+] 手动输入QQ号添加用户", "allowlist_add_user")],
+        );
+        app.handle_input(&key_event(KeyCode::Char('e')));
+        assert_eq!(
+            app.state.form_overlay.state,
+            crate::components::form_overlay::FormState::Editing
+        );
+        assert_eq!(app.state.form_overlay.fields.len(), 1);
+        assert_eq!(app.state.form_overlay.fields[0].label, "QQ号");
+    }
+
+    #[test]
+    fn form_enter_switches_gate_mode_and_sends_command() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let mut app = App::new(
+            Backend::new(std::sync::Arc::new(bridge)),
+            Theme::dark(),
+            Keybindings::default(),
+        );
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::QqFilter,
+            vec![("● 白名单模式", "gate_mode:allowlist")],
+        );
+        app.handle_input(&key_event(KeyCode::Enter));
+        assert_eq!(
+            handle.try_recv_command(),
+            Some(BackendCommand::SetQqGateMode {
+                mode: echo_adapter::GateMode::Allowlist
+            })
+        );
+    }
 }

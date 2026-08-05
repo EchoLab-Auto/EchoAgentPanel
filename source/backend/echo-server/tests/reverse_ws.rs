@@ -35,13 +35,14 @@ impl Handler for EchoBackHandler {
     }
 }
 
-/// Start a server on a random local port and return its address.
+/// Start a server on a random local port and return its address + tracker.
 async fn start_server(
     registry: HandlerRegistry,
     access_token: Option<String>,
-) -> std::net::SocketAddr {
+) -> (std::net::SocketAddr, ConnectionTracker) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let tracker = ConnectionTracker::default();
     let server = Server::new(
         ServerConfig {
             bind_address: addr.to_string(),
@@ -49,11 +50,11 @@ async fn start_server(
             heartbeat_interval: None,
         },
         Arc::new(registry),
-        ConnectionTracker::default(),
+        tracker.clone(),
         None,
     );
     tokio::spawn(server.run_with_listener(listener));
-    addr
+    (addr, tracker)
 }
 
 /// Connect a mock NapCat with the given self id.
@@ -118,7 +119,7 @@ fn heartbeat_event() -> serde_json::Value {
 async fn event_dispatch_and_api_correlation() {
     let mut registry = HandlerRegistry::new();
     registry.register(EchoBackHandler);
-    let addr = start_server(registry, None).await;
+    let (addr, _tracker) = start_server(registry, None).await;
 
     let (mut ws, _) = connect_mock_napcat(addr, "10001", None).await.unwrap();
 
@@ -184,7 +185,7 @@ async fn event_dispatch_and_api_correlation() {
 /// A connection with a bad (or missing) token must be rejected with 401.
 #[tokio::test]
 async fn rejects_connection_without_valid_token() {
-    let addr = start_server(HandlerRegistry::new(), Some("secret".to_string())).await;
+    let (addr, _tracker) = start_server(HandlerRegistry::new(), Some("secret".to_string())).await;
 
     let err = connect_mock_napcat(addr, "10001", None)
         .await
@@ -208,7 +209,7 @@ async fn rejects_connection_without_valid_token() {
 async fn unknown_event_is_ignored() {
     let mut registry = HandlerRegistry::new();
     registry.register(EchoBackHandler);
-    let addr = start_server(registry, None).await;
+    let (addr, _tracker) = start_server(registry, None).await;
 
     let (mut ws, _) = connect_mock_napcat(addr, "10001", None).await.unwrap();
     ws.send(Message::Text(
@@ -231,4 +232,80 @@ async fn unknown_event_is_ignored() {
     let Message::Text(_) = frame else {
         panic!("expected a text frame");
     };
+}
+
+/// A Pass from a low-priority handler must fall through to the next one.
+#[tokio::test]
+async fn handler_priority_chain_falls_through() {
+    /// Passes everything — must not produce any API call.
+    struct PassEverything;
+
+    #[async_trait]
+    impl Handler for PassEverything {
+        fn name(&self) -> &str {
+            "pass-all"
+        }
+        fn priority(&self) -> i32 {
+            100
+        }
+        async fn handle(&self, _ctx: &Context, _event: &Event) -> HandleResult {
+            HandleResult::Pass
+        }
+    }
+
+    let mut registry = HandlerRegistry::new();
+    registry.register(PassEverything);
+    registry.register(EchoBackHandler); // priority 100 default, registered later
+    let (addr, _tracker) = start_server(registry, None).await;
+
+    let (mut ws, _) = connect_mock_napcat(addr, "10001", None).await.unwrap();
+    ws.send(Message::Text(private_message_event("hi").to_string()))
+        .await
+        .unwrap();
+
+    // The fall-through handler must still produce the API call.
+    let frame = tokio::time::timeout(Duration::from_secs(5), ws.next())
+        .await
+        .expect("timed out waiting for the API request")
+        .unwrap()
+        .unwrap();
+    let Message::Text(text) = frame else {
+        panic!("expected a text frame");
+    };
+    let req: ApiRequest = serde_json::from_str(&text).unwrap();
+    assert_eq!(req.action, "send_private_msg");
+}
+
+/// Connections are tracked while alive and removed on disconnect.
+#[tokio::test]
+async fn connection_tracker_tracks_lifecycle() {
+    let (addr, tracker) = start_server(HandlerRegistry::new(), None).await;
+    assert_eq!(tracker.active_connections(), 0);
+
+    let (mut ws, _) = connect_mock_napcat(addr, "10001", None).await.unwrap();
+    // Allow the server to register the connection.
+    for _ in 0..20 {
+        if tracker.active_connections() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(tracker.active_connections(), 1, "connection registered");
+    let conn = &tracker.connections()[0];
+    assert_eq!(conn.self_id, 10001);
+    assert_eq!(conn.role, "Universal");
+
+    // Disconnect and wait for the tracker to remove the entry.
+    ws.close(None).await.unwrap();
+    for _ in 0..40 {
+        if tracker.active_connections() == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        tracker.active_connections(),
+        0,
+        "connection removed on close"
+    );
 }
