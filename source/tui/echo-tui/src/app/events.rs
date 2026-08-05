@@ -148,6 +148,7 @@ impl App {
                 self.state.settings.active_api = active_api;
             }
             BackendEvent::GroupList { groups } => {
+                self.state.qq_groups_loaded = true;
                 self.state.qq_groups = groups
                     .into_iter()
                     .map(|g| (g.group_id, g.group_name))

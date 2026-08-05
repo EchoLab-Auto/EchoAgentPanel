@@ -146,6 +146,35 @@ impl QqAdapter {
             .push(handler);
     }
 
+    /// Get ALL groups without gate-mode filtering (privileged — used by TUI).
+    pub async fn get_all_groups(&self) -> Result<Vec<(i64, String)>, String> {
+        let ctx = self
+            .inner
+            .active_context
+            .lock()
+            .map_err(|e| format!("lock poisoned: {e}"))?
+            .clone()
+            .ok_or("no QQ connection active")?;
+        let request = echo_core::action::actions::get_group_list();
+        let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
+        let groups: Vec<(i64, String)> = resp
+            .data
+            .as_array()
+            .ok_or("unexpected response format")?
+            .iter()
+            .filter_map(|v| {
+                let gid = v.get("group_id")?.as_i64()?;
+                let name = v
+                    .get("group_name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("(unknown)")
+                    .to_string();
+                Some((gid, name))
+            })
+            .collect();
+        Ok(groups)
+    }
+
     /// Get the QQ friend list via the active QQ connection.
     pub async fn get_friend_list(&self) -> Result<Vec<(i64, String)>, String> {
         let ctx = self
@@ -646,6 +675,14 @@ impl Adapter for QqAdapter {
     }
 
     async fn get_friend_list(&self) -> Result<Vec<(i64, String)>, AdapterError> {
+        self.get_friend_list().await.map_err(AdapterError::Internal)
+    }
+
+    async fn get_all_groups(&self) -> Result<Vec<(i64, String)>, AdapterError> {
+        self.get_all_groups().await.map_err(AdapterError::Internal)
+    }
+
+    async fn get_all_friends(&self) -> Result<Vec<(i64, String)>, AdapterError> {
         self.get_friend_list().await.map_err(AdapterError::Internal)
     }
 

@@ -351,7 +351,9 @@ impl Agent {
             }
             BackendCommand::RequestGroupList => {
                 let groups = match self.adapters.get("qq") {
-                    Some(adapter) => match adapter.get_groups().await {
+                    Some(adapter) => match adapter.get_all_groups().await {
+                        // ^^^ privileged: bypasses gate filtering so the TUI can
+                        //     always show all groups for allowlist/denylist management.
                         Ok(groups) => {
                             let result: Vec<crate::event::GroupInfo> = groups
                                 .into_iter()
@@ -378,13 +380,14 @@ impl Agent {
                         Vec::new()
                     }
                 };
-                if !groups.is_empty() {
-                    self.emit(BackendEvent::GroupList { groups });
-                }
+                // Always emit the event — even an empty list tells the
+                // TUI to replace "(正在获取…)" with "(无)".
+                self.emit(BackendEvent::GroupList { groups });
             }
             BackendCommand::RequestFriendList => {
                 if let Some(adapter) = self.adapters.get("qq") {
-                    match adapter.get_friend_list().await {
+                    match adapter.get_all_friends().await {
+                        // ^^^ privileged: returns all friends unfiltered for TUI picker.
                         Ok(friends) => {
                             let result: Vec<crate::event::FriendInfo> = friends
                                 .into_iter()

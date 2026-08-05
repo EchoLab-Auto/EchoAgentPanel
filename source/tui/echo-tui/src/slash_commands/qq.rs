@@ -272,9 +272,14 @@ pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny:
         value: "__info__".into(),
     });
 
-    if state.qq_groups.is_empty() {
+    if !state.qq_groups_loaded {
         items.push(SelectItem {
             label: "  (正在获取群列表…)".into(),
+            value: "__info__".into(),
+        });
+    } else if state.qq_groups.is_empty() {
+        items.push(SelectItem {
+            label: "  (未加入任何群，或当前门控模式下无可见群)".into(),
             value: "__info__".into(),
         });
     } else {
@@ -320,20 +325,6 @@ pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny:
         value: "__info__".into(),
     });
 
-    // ── Manual user entry ──
-    items.push(SelectItem {
-        label: format!("[+] 手动输入QQ号添加用户到{kind_label}"),
-        value: format!("{prefix}_add_user"),
-    });
-    items.push(SelectItem {
-        label: format!("[×] 手动输入QQ号从{kind_label}移除用户"),
-        value: format!("{prefix}_remove_user"),
-    });
-
-    items.push(SelectItem {
-        label: String::new(),
-        value: "__info__".into(),
-    });
     let tip = if is_deny {
         "📋 黑名单为空则不禁用任何人"
     } else {

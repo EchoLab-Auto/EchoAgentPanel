@@ -177,6 +177,18 @@ pub trait Adapter: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Get ALL groups without gate-mode filtering (privileged — used by TUI).
+    /// Default: same as [`get_groups`](Self::get_groups).
+    async fn get_all_groups(&self) -> Result<Vec<(i64, String)>, AdapterError> {
+        self.get_groups().await
+    }
+
+    /// Get ALL friends without any filtering (privileged — used by TUI).
+    /// Default: same as [`get_friend_list`](Self::get_friend_list).
+    async fn get_all_friends(&self) -> Result<Vec<(i64, String)>, AdapterError> {
+        self.get_friend_list().await
+    }
+
     /// Update the adapter's runtime allowlist.  Default: no-op.
     fn update_allowlist(&self, _user_ids: Vec<String>, _group_ids: Vec<String>) {}
 
