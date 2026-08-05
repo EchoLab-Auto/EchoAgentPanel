@@ -1065,4 +1065,91 @@ mod tests {
             })
         );
     }
+
+    #[tokio::test]
+    async fn submit_in_qq_filter_edit_sends_allowlist_command() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let mut app = App::new(
+            Backend::new(std::sync::Arc::new(bridge)),
+            Theme::dark(),
+            Keybindings::default(),
+        );
+        // Simulate the "add user to allowlist" edit state.
+        app.state.form_overlay.activate(
+            "qq",
+            vec![crate::components::form_overlay::SelectItem {
+                label: "[+] 手动输入".into(),
+                value: "allowlist_add_user".into(),
+            }],
+            crate::components::form_overlay::FormKind::QqFilter,
+        );
+        app.state.form_overlay.edit_label = "allowlist_add_user".into();
+        app.state
+            .form_overlay
+            .set_fields(vec![crate::components::form_overlay::FormField {
+                label: "QQ号".into(),
+                value: String::new(),
+                kind: crate::components::form_overlay::FieldKind::Text,
+            }]);
+        app.state.form_overlay.enter_edit();
+
+        app.handle_submit("123456".into());
+        assert!(
+            !app.state.form_overlay.is_active(),
+            "form closes after submit"
+        );
+        // handle_filter_action sends UpdateQqAllowlist, then the submit
+        // path sends RequestQqFilterConfig.
+        let mut commands = Vec::new();
+        while let Some(cmd) = handle.try_recv_command() {
+            commands.push(cmd);
+        }
+        assert!(
+            commands.iter().any(|c| matches!(
+                c,
+                BackendCommand::UpdateQqAllowlist { user_ids, .. }
+                    if user_ids.as_slice() == [123456]
+            )),
+            "UpdateQqAllowlist expected, got {commands:?}"
+        );
+        assert!(commands.contains(&BackendCommand::RequestQqFilterConfig));
+    }
+
+    #[tokio::test]
+    async fn submit_in_api_config_mode_routes_to_api_handler() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let mut app = App::new(
+            Backend::new(std::sync::Arc::new(bridge)),
+            Theme::dark(),
+            Keybindings::default(),
+        );
+        app.state.mode = ConversationMode::ApiConfig;
+
+        app.handle_submit("key sk-123".into());
+        let cmd = handle.try_recv_command().expect("command sent");
+        match cmd {
+            BackendCommand::UpdateApiConfig { api_key, .. } => assert_eq!(api_key, "sk-123"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_normal_sends_message() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let mut app = App::new(
+            Backend::new(std::sync::Arc::new(bridge)),
+            Theme::dark(),
+            Keybindings::default(),
+        );
+        app.state.active_session_id = Some("qq:dm::123".into());
+
+        app.handle_submit("你好".into());
+        assert_eq!(
+            handle.try_recv_command(),
+            Some(BackendCommand::SendMessage {
+                session_id: "qq:dm::123".into(),
+                content: "你好".into()
+            })
+        );
+    }
 }
