@@ -1,6 +1,6 @@
 # Testing Strategy
 
-350+ tests across three layers, covering every source file in all 7 crates.
+400+ tests across four layers, covering every source file in all 8 crates.
 
 ## Layers
 
@@ -9,16 +9,29 @@ Located next to the code in `#[cfg(test)] mod tests` blocks.
 
 - **Protocol** (echo-core): OneBot event parsing for every variant family
   (message / notice / request / meta), message segments, action builders,
-  unknown-type preservation.
-- **Filtering** (echo-adapter): allowlist / denylist / rate limit / keyword /
-  content length / admin bypass, pipeline ordering and short-circuit.
-- **Security** (echo-agent tools): path-traversal guards for read/write/edit,
-  dangerous command patterns, absolute-path rejection.
-- **TUI** (echo-tui): components (chat_view, form_overlay, command_palette,
-  settings_popup, status_bar, help_popup), core state (AppState), slash
-  commands, Ctrl+C double-press exit.
+  unknown-type preservation, sender nickname (card vs nickname fallback).
+- **Filtering** (echo-adapter): allowlist / denylist / rate limit (sliding
+  window with real-time expiry + per-user/per-group/global bucket isolation) /
+  keyword / content length / admin bypass, pipeline ordering and short-circuit.
+- **Security** (echo-agent tools): path-traversal guards for read/write/edit
+  (canonicalize + workspace containment), dangerous command patterns,
+  absolute-path rejection, 50-result search cap.
+- **TUI** (echo-tui): all 7 components tested (chat_view, form_overlay,
+  command_palette, settings_popup, status_bar, help_popup, prompt_input),
+  AppState core logic (mouse selection, session ops, Ctrl+C exit),
+  handle_submit routing (QQ filter → API config → plain send),
+  slash commands (/clear, /help, /adapters, /api commands).
 - **Persistence** (echo-agent): session save/load round-trips, lenient
   malformed-entry recovery, idle eviction, ConfigStore atomic patches.
+- **LLM providers** (OpenAI / Anthropic): request body builders (tool-call
+  grouping, system-message joining, malformed-argument fallback).
+- **SSE streaming** (OpenAI / Anthropic): pure-function `parse_sse_event` /
+  `parse_anthropic_event` — content deltas, parallel tool-call deltas,
+  `[DONE]` termination, in-stream error payloads, malformed data skips.
+- **Calculator**: recursive-descent parser: operator precedence/associativity,
+  floating-point, unary minus, whitespace, 8 malformed patterns.
+- **Skill system**: keyword matching (case-insensitive, empty keywords),
+  deterministic multi-hit ordering, recursive SKILL.md discovery.
 
 ### 2. Property tests (proptest)
 Generated inputs that must satisfy invariants:
@@ -27,16 +40,32 @@ Generated inputs that must satisfy invariants:
 - `ChatMessage` / `ToolCall` JSON round-trips.
 - Message-event JSON parse → serialize → parse stability for arbitrary
   Unicode text (quotes, control chars, CJK).
+- Rich segment (multi-message) round-trips.
 
 ### 3. Integration tests (`tests/` dirs)
 
-- `echo-server/tests/reverse_ws.rs` — real WS server + raw client:
-  event dispatch → handler → API correlation, token rejection.
-- `echo-agent/tests/agent_integration.rs` — real Agent driven through the
-  bridge: SendMessage → LLM → MessageSent event, session creation, clear,
-  system prompt propagation, model switch.
+- `echo-server/tests/reverse_ws.rs` — real WS server + raw WebSocket client:
+  event dispatch → handler → action → response correlation, token rejection,
+  handler-priority chain fall-through, connection lifecycle (tracker insert/remove).
+- `echo-agent/tests/agent_integration.rs` — real Agent driven through the bridge:
+  SendMessage → LLM → MessageSent event, session creation, clear, system prompt
+  propagation, model switch, API profile switch/delete, skill toggle, **skill
+  keyword → prompt injection**, **non-trigger caching**, **concurrent turn
+  serialization** (slow provider → no interleaving).
+- `echo-server/src/management.rs` (inline integration tests) — management WS
+  server on ephemeral port: Panel command → agent bridge, agent event → Panel
+  forward.
 - `echo-adapter-qq` — NapCat client against a `wiremock` HTTP server:
   login status detection, WebUI fallback, reverse-WS config, QR fetch.
+
+### 4. Concurrency tests
+Multi-threaded tokio runtime (`#[tokio::test(flavor = "multi_thread")]`):
+
+- `SessionManager::get_or_create` — 32 concurrent callers on the same key
+  produce exactly 1 session (DashMap entry API).
+- `Agent::process_message` — two concurrent messages to the same session
+  with a slow (50 ms) provider produce non-interleaved history
+  (turn_lock serialization verified by role order).
 
 ## Mocks & fixtures
 
@@ -44,8 +73,9 @@ Generated inputs that must satisfy invariants:
   `temp_config_file` helper. Deliberately does **not** depend on echo-agent
   (a dev-dependency cycle would compile echo-agent twice and break type
   identity).
-- Mock LLM providers live inside echo-agent's own test module and the
-  agent integration tests.
+- Mock LLM providers (`StaticProvider`, `SlowProvider`, `MockProvider`,
+  `ScriptedProvider`) live inside echo-agent's test module and the agent
+  integration tests.
 
 ## Quality gates (CI)
 
@@ -64,3 +94,6 @@ cargo fmt --all --check
 - OneBot `notify` notice type parsed as `Unknown` (wrong serde tag).
 - Session dirty flag cleared before a successful write (data loss).
 - Silent serialization / teardown failures now logged.
+- OpenID SSE `error` events silently skipped (choices field missing `serde(default)`).
+- Rate-limit per-user bucket isolation — u1 overflow didn't affect u2.
+- Anthropic SSE tool-use content block — only Text was handled, ToolUse was silently dropped.

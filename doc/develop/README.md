@@ -4,12 +4,12 @@
 
 | Document | Content |
 |---|---|
-| [architecture.md](architecture.md) | Crate dependency graph, data flow, state machines |
-| [agent.md](agent.md) | Agent loop, LLM providers, tools, sessions, BackendBridge |
-| [adapter.md](adapter.md) | Adapter trait, QQ adapter, filter pipeline, NapCatClient |
-| [tui.md](tui.md) | Layout, components, slash commands, mouse selection, event loop |
-| [config.md](config.md) | TOML config, env vars, profiles, persistence |
-| [testing.md](testing.md) | Test strategy: unit / property / integration layers |
+| [tui/design.md](tui/design.md) | TUI layout, components, state machine, slash commands, form overlay |
+| [config/persistence.md](config/persistence.md) | ConfigStore, agent & gate persistence, atomic writes, sessions |
+| [adapter/qq/gating.md](adapter/qq/gating.md) | QQ message gating pipeline (5-layer), runtime mutability |
+| [testing.md](testing.md) | Test strategy: unit / proptest / integration / concurrency layers |
+
+> 架构/Agent/Adapter/Config 的通用文档已删除——这些信息通过源码注释（`//! module doc`）和 README 维护，避免文档与代码分叉。
 
 ## Quick Reference
 
@@ -22,9 +22,10 @@ EchoAgentPanel/
 │   ├── backend/
 │   │   ├── echo-core/         # OneBot v11 protocol types
 │   │   ├── echo-server/       # Reverse WebSocket server
-│   │   ├── echo-adapter/      # Adapter abstraction (trait + filter)
-│   │   ├── echo-agent/        # Agent framework (LLM + tools + skills)
-│   │   └── echo-adapter-qq/   # QQ/OneBot adapter implementation
+│   │   ├── echo-adapter/      # Adapter trait + filter pipeline + ConfigStore
+│   │   ├── echo-agent/        # Agent framework (agent/commands, adapter_bridge)
+│   │   ├── echo-adapter-qq/   # QQ/OneBot adapter (adapter/filter, handler)
+│   │   └── echo-test-utils/   # Shared test mocks (dev-dependency only)
 │   ├── tui/
 │   │   └── echo-tui/          # Terminal UI
 │   └── echo/                  # Binary entry point
@@ -38,11 +39,17 @@ EchoAgentPanel/
 
 ### Key Traits
 - `LlmProvider` — LLM backend abstraction (OpenAI/Anthropic/Ollama)
-- `Tool` — LLM-callable function (calculator, adapter mgmt, QQ tools)
-- `Adapter` — Platform bridge (QQ/OneBot)
-- `MessageFilter` — Inbound message filter (allowlist, rate limit, etc.)
-- `Handler` — OneBot event handler (priority-ordered chain)
-- `Component` — TUI component (render + handle_event)
+- `Tool` — LLM-callable function (calculator, adapter mgmt, coding tools)
+- `Adapter` — Platform bridge (QQ/OneBot); `AgentBridge` — adapter→agent dependency inversion
+- `MessageFilter` — Inbound message filter (allowlist, denylist, rate limit, keyword, content length)
+- `Handler` — OneBot event handler (priority-ordered chain, panic isolation)
+- `Component` — TUI component (render + handle_event, 7 implementors)
+
+### Key Abstractions
+- `ConfigStore` — Atomic TOML read-modify-write (shared by Agent + QqAdapter, eliminates concurrent-write races)
+- `GateMode` — Strongly-typed gating mode (`None` / `Allowlist` / `Denylist`), serialised as snake_case for wire compatibility
+- `AdapterBridge` — echo-agent implements `AgentBridge` trait so echo-adapter-qq has zero dependency on echo-agent
+- `FanoutHandle` — Multi-subscriber event fanout with stale subscriber pruning
 
 ### Key State
 - `Agent` — Provider, tools, skills, sessions, adapters

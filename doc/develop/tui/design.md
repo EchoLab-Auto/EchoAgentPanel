@@ -9,12 +9,12 @@ echo-tui 是 EchoAgentPanel 的终端用户界面。它实现了一个 opencode 
 ```
 ┌─ lib.rs (入口) ──────────────────────────────────────────────┐
 │  run_tui() → 终端初始化 → App::run() → 终端清理              │
-├─ app.rs (核心编排) ──────────────────────────────────────────┤
-│  App: 主循环、输入路由、渲染调度、后端事件分发                  │
+├─ app/mod.rs (核心编排) ──────────────────────────────────────┤
+│  App: 主循环、输入路由、渲染调度、handle_submit 路由          │
+├─ app/events.rs (事件处理) ───────────────────────────────────┤
+│  App::apply_backend_event: 所有 BackendEvent → UI 状态       │
 ├─ state.rs (数据模型) ────────────────────────────────────────┤
-│  AppState: 42字段的中央状态、所有领域类型                      │
-├─ input.rs (内联在 app.rs) ───────────────────────────────────┤
-│  handle_input, handle_key, handle_form_key, handle_submit     │
+│  AppState: 中央状态、所有领域类型、坐标映射、选区逻辑         │
 ├─ components/ (渲染组件) ─────────────────────────────────────┤
 │  chat_view, prompt_input, status_bar, form_overlay,           │
 │  command_palette, settings_popup, help_popup                  │
@@ -25,13 +25,13 @@ echo-tui 是 EchoAgentPanel 的终端用户界面。它实现了一个 opencode 
 ├─ util.rs (工具函数) ─────────────────────────────────────────┤
 │  CJK宽度计算、时间戳格式化、panic捕获                          │
 ├─ backend.rs (桥接) ──────────────────────────────────────────┤
-│  Backend: 对 BackendBridge 的薄封装                            │
+│  Backend: Mpsc/WS 双传输封装，WS 自动重连（指数退避）         │
 ├─ event.rs (事件枚举) ────────────────────────────────────────┤
-│  Event::Input (键盘/鼠标/终端事件)                             │
+│  Event::Input (键盘/鼠标/终端事件)                            │
 ├─ keybindings.rs (按键绑定) ──────────────────────────────────┤
-│  KeyChord + Keybindings 可配置结构体                           │
+│  KeyChord + Keybindings 可配置结构体                          │
 └─ theme.rs (主题) ────────────────────────────────────────────┤
-│  Theme: dark/light 双主题色板                                  │
+│  Theme: dark/light 双主题色板（亮度层次验证）                  │
 ```
 
 ## 核心数据结构
@@ -54,8 +54,8 @@ echo-tui 是 EchoAgentPanel 的终端用户界面。它实现了一个 opencode 
 ### 设计决策：中央状态 vs 组件内状态
 
 - **为什么集中**：TUI 组件之间共享状态频繁（如输入框需要读写斜杠菜单状态，聊天区需要读写滚动状态），分散状态会导致复杂的消息传递
-- **代价**：`AppState` 有 42 个字段，修改时需要理解影响范围
-- **缓解措施**：将纯数据类型拆分到 `state.rs`，`AppState` 方法按功能分组（会话、选区、持久化、toast）
+- **代价**：`AppState` 有 40+ 个字段，修改时需要理解影响范围
+- **缓解措施**：纯数据类型拆分到 `state.rs`，`AppState` 方法按功能分组（会话、选区、坐标映射、toast），门控模式使用强类型 `GateMode` 枚举
 
 ## 主循环
 
@@ -82,8 +82,9 @@ loop {
 
 **关键设计**：
 - `pending_submit` / `pending_command` / `pending_slash` 是三个独立队列，互不干扰
-- `handle_submit()` 内部按优先级拦截：QQ 表单 > API 配置 > 普通消息
+- `handle_submit()` 内部按优先级拦截：QQ 表单编辑 → API 配置模式 → 普通消息
 - 后端事件在渲染前批量处理，确保一帧内状态一致
+- `apply_backend_event` 独立为 `app/events.rs`，大型 match 避免影响主循环可读性
 
 ## 输入路由
 
@@ -219,8 +220,9 @@ enum ComponentResult { Consumed, Pass }
 ```
 BackendCommand::SendMessage / RequestState / ClearSession
   / UpdateQqAllowlist / UpdateQqDenylist / RequestQqFilterConfig
-  / StartAdapter / StopAdapter / ...
+  / SetQqGateMode (携带 GateMode 枚举) / ...
   → Backend::send() → BackendBridge mpsc → Agent::apply_command()
+      (commands.rs)
 ```
 
 ### 事件 (Agent → TUI)
@@ -228,9 +230,9 @@ BackendCommand::SendMessage / RequestState / ClearSession
 ```
 Agent::emit(BackendEvent)
   → BackendBridge mpsc → Backend::drain_events()
-    → App::apply_backend_event()
+    → App::apply_backend_event() (app/events.rs)
       ├── 更新 state.status / state.sessions / state.messages
-      ├── 更新 state.qq_filter / state.qq_groups (缓存)
+      ├── 更新 state.qq_filter / state.qq_gate_mode / state.qq_groups (缓存)
       └── state.toast() (信息提示)
 ```
 
@@ -239,6 +241,8 @@ Agent::emit(BackendEvent)
 - 命令和事件都通过 mpsc channel 异步传递
 - TUI 不直接调用 agent 方法，避免阻塞渲染线程
 - 后端事件在渲染前批量排空，保证一帧内状态一致性
+- `GateMode` 枚举在 TUI 侧直接使用 `echo_adapter::GateMode`，WS JSON 层用 snake_case 保持 wire 兼容
+- WEB 传输模式支持自动重连（指数退避 1s → 30s cap）
 
 ## 关键设计决策汇总
 
@@ -249,4 +253,5 @@ Agent::emit(BackendEvent)
 5. **帧缓冲选区**：文本选择不走系统选区，而是应用内自绘高亮 + OSC 52 复制，不依赖终端特性
 6. **CJK 感知**：所有列计算使用 visual width（`unicode_width`），正确处理中文字符占 2 列的情况
 7. **OSC 52 回退链**：剪贴板优先用系统工具(xclip/xsel/wl-copy/pbcopy)，均不可用时回退 OSC 52
-8. **纯函数管道重建**：QQ 白名单/黑名单的运行时更新通过配置+运行时覆盖→新管道实现，无副作用
+8. **枚举化门控**：GateMode 作为跨层枚举（echo-adapter → echo-agent → echo-tui），编译期杜绝非法值
+9. **事件处理分离**：`apply_backend_event` 独立为 `app/events.rs`，大型 match 不影响主循环可读性

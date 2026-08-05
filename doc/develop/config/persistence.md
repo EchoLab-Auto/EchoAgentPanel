@@ -2,14 +2,17 @@
 
 ## 概述
 
-EchoAgentPanel 的配置分为两类持久化方式：
+EchoAgentPanel 的配置通过一个共享的 `ConfigStore` 进行原子化读写。
 
-| 类型 | 机制 | 文件 |
+| 类型 | 机制 | 写入 section |
 |---|---|---|
-| Agent 配置（API key、模型、prompt） | `replace_toml_section` 替换 `[agent]` section | 启动时 `--config` 指定的文件 |
-| QQ 门控配置（gate mode、白名单、黑名单） | `toml::Value` 解析→修改→序列化 | 同上 |
+| Agent 配置（API key、模型、prompt、profiles） | `ConfigStore::patch()` 替换 `[agent]` | `[agent]` |
+| QQ 门控配置（gate mode、白名单、黑名单） | `ConfigStore::patch()` 替换 `[adapters.qq]` | `[adapters.qq.gate]` + `[adapters.qq.filter]` |
 
-两者都使用**原子写入**（写 tmp → rename），避免写入中途崩溃导致配置损坏。
+`ConfigStore` 内部使用 `std::sync::Mutex` 序列化所有写入，读写一次全文件，
+两个调用者（Agent 和 QqAdapter）共享同一实例，**杜绝并发写互相覆盖**。
+
+写入流程：`read TOML → apply patch → write to .tmp → rename`（原子替换）。
 
 ## Agent 配置持久化
 
@@ -32,15 +35,20 @@ Panel 操作 (/api ...)
   → Core 的 Agent::apply_command()
     → 更新内存中的 AgentConfig
     → Agent::persist_config(&cfg)
-      → 序列化 [agent] section 为 TOML
-      → replace_toml_section(content, "agent", new_block)
-      → 写入 {path}.tmp → rename → {path}
+      → tom_l::Value::try_from(cfg)
+      → ConfigStore::patch(|root| root.insert("agent", value))
+        → 读取全文件 → 修改 [agent] → 写入 .tmp → rename
 ```
 
 ### 写入的文件位置
 
 ```
-Core 启动时 --config 指定的文件（如 config/echo-agent-core.local.toml）的 [agent] section
+Core 启动时 --config 指定的文件（如 config/echo-agent-core.local.toml）
+
+ConfigStore 由 main.rs 创建一次，分发给 Agent 和 QqAdapter：
+  let config_store = echo_adapter::ConfigStore::new(args.config_path());
+  agent.set_config_store(config_store.clone());
+  qq_adapter.set_config_store(config_store.clone());
 ```
 
 Panel 自身不读写 Core 配置文件——所有配置操作都通过 Core 的 management
@@ -52,7 +60,6 @@ WebSocket API 下发，持久化统一在 Core 进程内完成。
 - `[adapters.qq.server]`（bind_address、access_token、heartbeat_interval）
 - `[adapters.qq.trigger]`（dm_auto_reply、group_at_reply）
 - `[logging]`
-- `[bot]`
 
 ## QQ 门控配置持久化
 
@@ -75,12 +82,17 @@ Panel 操作 (/qq setting)（经 management WS）
     → 更新内存中的 runtime 字段
     → rebuild_filter_pipeline()（立即生效）
     → persist_filter()
-      → toml::from_str() 解析配置文件
-      → 修改 adapters.qq.gate.mode
-      → 修改 adapters.qq.filter.allowlist / denylist
-      → toml::to_string_pretty() 序列化
-      → 写入 {path}.tmp → rename → {path}
+      → get_filter_config() + get_gate_mode()
+      → ConfigStore::patch(|root| {
+           在 root 中更新 adapters.qq.gate.mode
+           在 root 中更新 adapters.qq.filter.allowlist/denylist
+           Ok(())
+        })
+        → 读取全文件 → 修改 [adapters.qq] → 写入 .tmp → rename
 ```
+
+> 注：`persist_filter` 和 `Agent::persist_config` 共享同一个 `ConfigStore` 实例。
+> 两者在不同时机调用，但通过 `ConfigStore` 内部的 `Mutex` 保证不会并发覆写。
 
 ### 写入的 section
 
@@ -100,8 +112,9 @@ group_ids = []
 ### 线程安全
 
 - `QqInner` 中所有运行时字段使用 `StdMutex` 保护
-- `persist_filter()` 锁定 `config_path` 和 `gate_mode`，不阻塞消息处理
+- `persist_filter()` 锁定 `config_store`（共享的 `ConfigStore` 内部 Mutex），不阻塞消息处理
 - 过滤管道使用 `Arc<FilterPipeline>`，读取时克隆 Arc（O(1)），不持锁
+- `ConfigStore` 的 Mutex 是 `std::sync::Mutex`（非 tokio），一次 patch 持锁时间仅限文件 I/O
 
 ### 不持久化的内容
 
