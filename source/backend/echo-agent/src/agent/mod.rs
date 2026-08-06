@@ -340,22 +340,41 @@ impl Agent {
         });
 
         let mut system_prompt = self.build_system_prompt(content).await;
-        if session.session_key.platform.eq_ignore_ascii_case("qq") {
+        // Distinguish input origin by content markers, NOT by the session's
+        // platform. A QQ session can receive backend/TUI input (no hook), and
+        // that must be answered in the backend — never pushed to QQ.
+        let is_qq_hook = content.contains("<qq_message_hook>");
+        let is_timer = content.contains("<timer_event>");
+        let is_qq_session = session.session_key.platform.eq_ignore_ascii_case("qq");
+        if is_qq_hook {
             system_prompt.push_str(
                 "\n\n# QQ transport boundary\n\
-                 Inputs wrapped in <qq_message_hook> are external QQ messages. \
+                 This input is an external QQ message (<qq_message_hook>). \
                  Read sender and group data from the structured hook payload.\n\
-                 Inputs wrapped in <timer_event> are scheduled backend tasks, \
-                 not new QQ messages. Unwrapped inputs are also backend \
-                 instructions, not QQ chat messages.\n\
-                 To send anything visible on QQ, you MUST call send_private_msg \
-                 or send_group_msg with the explicit target ID. Never treat your \
-                 normal assistant output as a QQ reply; it is backend-only.\n\
                  Every <qq_message_hook> input MUST be answered exactly once via \
-                 a send tool (send_private_msg for private chats, send_group_msg \
-                 for groups). Read the target ID from the hook payload — never \
-                 invent one. Do not claim you replied before the send tool returns \
-                 success.",
+                 a send tool: send_private_msg for private chats (user_id from \
+                 payload.sender.user_id), send_group_msg for groups (group_id \
+                 from payload.channel.group_id). Read the target ID from the \
+                 hook payload — never invent one. Your normal assistant output \
+                 is backend-only and invisible to the QQ user; to send anything \
+                 visible on QQ you MUST call send_private_msg or send_group_msg. \
+                 Do not claim you replied before the send tool returns success.",
+            );
+        } else if is_timer {
+            system_prompt.push_str(
+                "\n\n# Backend task boundary\n\
+                 This input is a scheduled backend task (<timer_event>), not an \
+                 incoming QQ message. Your normal output is backend-only text. \
+                 Only if the task explicitly asks to deliver a message to QQ, \
+                 call send_private_msg or send_group_msg with an explicit target ID.",
+            );
+        } else if is_qq_session {
+            system_prompt.push_str(
+                "\n\n# Backend input boundary\n\
+                 This input was typed locally (TUI/backend), not received from \
+                 QQ. Reply directly in the backend. Do NOT call send_private_msg \
+                 or send_group_msg unless the user explicitly asks you to send a \
+                 message to a QQ user or group.",
             );
         }
 

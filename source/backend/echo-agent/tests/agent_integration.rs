@@ -420,8 +420,77 @@ async fn always_skill_coexists_with_keyword_skill_and_qq_context() {
     assert!(prompt.contains("QQ 单段通常不超过 30 个字符"));
     assert!(prompt.contains("Triggered skill: calc"));
     assert!(prompt.contains("使用 calculator 工具"));
-    assert!(prompt.contains("# QQ transport boundary"));
-    assert!(prompt.contains("MUST call send_private_msg"));
+    // This message was typed in the backend/TUI (no hook), so it must be
+    // answered in the backend — not forced through a QQ send tool.
+    assert!(
+        prompt.contains("# Backend input boundary"),
+        "backend input boundary missing: {prompt}"
+    );
+    assert!(
+        prompt.contains("Do NOT call send_private_msg"),
+        "backend input must forbid QQ sends: {prompt}"
+    );
+    assert!(
+        !prompt.contains("MUST be answered exactly once"),
+        "backend input must not trigger QQ hook rules: {prompt}"
+    );
+}
+
+#[tokio::test]
+async fn qq_hook_input_enforces_transport_boundary() {
+    let (agent, provider) = test_agent("ok");
+    let key = SessionKey::parse("qq:dm::123").unwrap();
+    let session = agent.sessions.get_or_create(&key, "u".into(), None);
+    let hook = concat!(
+        "<qq_message_hook>\n",
+        "{\"event\":\"qq_message\",\"channel\":{\"type\":\"private\"},\"sender\":{\"user_id\":\"123\"},\"content\":\"hello\"}\n",
+        "</qq_message_hook>"
+    );
+
+    agent.process_message(&session, hook).await.unwrap();
+
+    let prompt = provider.last_system_prompt().await;
+    assert!(
+        prompt.contains("# QQ transport boundary"),
+        "QQ hook must get the transport boundary: {prompt}"
+    );
+    assert!(
+        prompt.contains("MUST be answered exactly once"),
+        "QQ hook must force a send tool reply: {prompt}"
+    );
+}
+
+#[tokio::test]
+async fn backend_input_in_qq_session_stays_in_backend() {
+    let (agent, provider) = test_agent("ok");
+    let key = SessionKey::parse("qq:dm::123").unwrap();
+    let session = agent.sessions.get_or_create(&key, "u".into(), None);
+
+    // Backend/TUI input routed into a QQ session: no hook marker.
+    agent.process_message(&session, "你好").await.unwrap();
+
+    let prompt = provider.last_system_prompt().await;
+    assert!(
+        prompt.contains("# Backend input boundary"),
+        "backend input boundary missing: {prompt}"
+    );
+    assert!(
+        !prompt.contains("# QQ transport boundary"),
+        "backend input must not get QQ transport rules: {prompt}"
+    );
+}
+
+#[tokio::test]
+async fn local_tui_input_has_no_qq_boundary() {
+    let (agent, provider) = test_agent("ok");
+    let key = SessionKey::local_tui();
+    let session = agent.sessions.get_or_create(&key, "u".into(), None);
+
+    agent.process_message(&session, "你好").await.unwrap();
+
+    let prompt = provider.last_system_prompt().await;
+    assert!(!prompt.contains("# QQ transport boundary"));
+    assert!(!prompt.contains("# Backend input boundary"));
 }
 
 #[tokio::test]

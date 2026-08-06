@@ -3,6 +3,7 @@
 pub mod adapter;
 pub mod calculator;
 pub mod coding;
+pub mod websearch;
 
 /// Register all built-in tools into a registry.
 pub fn register_all(
@@ -11,6 +12,7 @@ pub fn register_all(
     workspace: std::path::PathBuf,
 ) {
     registry.register(std::sync::Arc::new(calculator::CalculatorTool));
+    registry.register(std::sync::Arc::new(websearch::WebSearchTool));
     adapter::register_adapter_tools(registry, adapters);
     coding::register_coding_tools(registry, workspace);
 }

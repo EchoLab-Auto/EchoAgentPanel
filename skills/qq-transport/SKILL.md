@@ -1,19 +1,28 @@
 ---
 name: qq-transport
-description: QQ 消息收发闭环 — 收到 QQ 消息必须通过发送工具回复，禁止只输出后台文本
+description: QQ 消息收发闭环 — 收到带 <qq_message_hook> 的 QQ 消息必须通过发送工具回复；后台输入直接在后台回复，禁止误发 QQ
 metadata:
   always: true
 ---
 
 # QQ 消息收发闭环
 
-仅当输入带有 <qq_message_hook> 标记，或当前会话平台为 qq 时生效。
+## 适用范围
+
+仅当输入带有 `<qq_message_hook>` 标记时生效（即消息真正来自 QQ 适配器）。
+后台/TUI 输入没有该标记，不适用本技能，必须在后台直接回复，禁止调用发送工具。
+
+## 输入来源区分
+
+- 带 `<qq_message_hook>` 的输入：来自 QQ 的真实消息，必须通过发送工具回复。
+- 带 `<timer_event>` 的输入：后台定时任务，不是 QQ 消息；普通输出为后台文本，仅在任务明确要求送达 QQ 时才调用发送工具。
+- 无标记输入（后台/TUI/控制台）：本地输入，直接在后台回复，禁止调用发送工具，除非用户明确要求向 QQ 发送内容。
 
 ## 强制规则
 
 1. QQ 用户唯一能看到的是通过 send_private_msg 或 send_group_msg 工具发送的内容。你的普通文本输出只是后台日志，QQ 用户看不到，绝不能当作回复。
 
-2. 每收到一条 <qq_message_hook> 输入，必须且只能调用一次发送工具完成回复：
+2. 每收到一条 `<qq_message_hook>` 输入，必须且只能调用一次发送工具完成回复：
    - 私聊（channel.type = private）：调用 send_private_msg，user_id 取 payload.sender.user_id
    - 群聊（channel.type = group）：调用 send_group_msg，group_id 取 payload.channel.group_id
 
@@ -31,7 +40,8 @@ metadata:
 
 在结束本轮处理前，逐项确认：
 
-- [ ] 已调用且仅调用一次发送工具（send_private_msg 或 send_group_msg）
+- [ ] 若输入带 `<qq_message_hook>`：已调用且仅调用一次发送工具（send_private_msg 或 send_group_msg）
 - [ ] 目标 ID 来自本次 hook payload
+- [ ] 若输入为后台/无标记：回复直接作为后台文本输出，未调用发送工具
 - [ ] 回复正文完整包含在发送工具的 content 里
 - [ ] 后台文本中没有任何用户需要看到的内容
