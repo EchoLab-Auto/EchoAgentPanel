@@ -38,6 +38,14 @@ pub struct QqAdapterConfig {
     /// `127.0.0.1` when running everything on one host.
     #[serde(default = "default_napcat_host")]
     pub napcat_host: String,
+    /// Docker container name of NapCat. Used to copy files into the container
+    /// (`docker cp`) when the Docker CLI is available.
+    #[serde(default = "default_napcat_container")]
+    pub napcat_container: String,
+    /// Writable directory inside the NapCat container where files are copied
+    /// to, and which is considered "already visible to NapCat".
+    #[serde(default = "default_napcat_data_dir")]
+    pub napcat_container_data_dir: String,
 }
 
 fn default_napcat_url() -> String {
@@ -50,6 +58,14 @@ fn default_onebot_url() -> String {
 
 fn default_napcat_host() -> String {
     "host.docker.internal".into()
+}
+
+fn default_napcat_container() -> String {
+    "napcat".into()
+}
+
+fn default_napcat_data_dir() -> String {
+    "/app/napcat/data".into()
 }
 
 impl Default for QqAdapterConfig {
@@ -65,6 +81,8 @@ impl Default for QqAdapterConfig {
             napcat_webui_url: default_napcat_url(),
             napcat_onebot_url: default_onebot_url(),
             napcat_host: default_napcat_host(),
+            napcat_container: default_napcat_container(),
+            napcat_container_data_dir: default_napcat_data_dir(),
         }
     }
 }

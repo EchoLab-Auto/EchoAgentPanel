@@ -63,6 +63,10 @@ pub(crate) struct QqInner {
     pub(crate) gate_mode: StdMutex<QqGateMode>,
     /// Shared config store for persisting gate/filter changes.
     pub(crate) config_store: StdMutex<Option<echo_adapter::ConfigStore>>,
+    /// Resolves local file paths into paths/URLs visible to NapCat, so
+    /// `send_file` works even when the agent and NapCat are on different
+    /// hosts (agent on host, NapCat in Docker).
+    pub(crate) file_bridge: crate::file_bridge::FileBridge,
 }
 
 /// Wrapper to make a boxed handler satisfy the `Handler` trait constraint.
@@ -104,6 +108,12 @@ impl QqAdapter {
             "denylist" => QqGateMode::Denylist,
             _ => QqGateMode::None,
         };
+        // Clone the NapCat bridge parameters before `config` is moved into the
+        // struct initializer below.
+        let napcat_onebot_url = config.napcat_onebot_url.clone();
+        let napcat_host = config.napcat_host.clone();
+        let napcat_container = config.napcat_container.clone();
+        let napcat_container_data_dir = config.napcat_container_data_dir.clone();
         let adapter = Self {
             name: "qq".into(),
             inner: Arc::new(QqInner {
@@ -126,13 +136,17 @@ impl QqAdapter {
                 runtime_denylist_groups: StdMutex::new(dg),
                 gate_mode: StdMutex::new(gate_mode),
                 config_store: StdMutex::new(None),
+                file_bridge: crate::file_bridge::FileBridge::new(
+                    &napcat_onebot_url,
+                    &napcat_host,
+                    &napcat_container,
+                    &napcat_container_data_dir,
+                ),
             }),
         };
-        // Build the pipeline respecting gate mode.
         adapter.rebuild_filter_pipeline();
         adapter
     }
-
     async fn maintain_napcat_connection(
         inner: Arc<QqInner>,
         napcat: NapCatClient,
@@ -500,14 +514,22 @@ impl QqAdapter {
 
     /// Upload a file to a group via the active QQ connection.
     ///
-    /// `file_path` must be a path on the machine running NapCat (inside the
-    /// container when deployed via docker). `file_name` is the display name.
+    /// `file_path` is a path on the machine running the agent (the host). It
+    /// is transparently bridged to a location NapCat can read: container paths
+    /// pass through, `docker cp` is attempted when available, and otherwise a
+    /// local HTTP file server hands the file to NapCat via URL.
+    /// `file_name` is the display name shown in QQ.
     pub async fn upload_group_file(
         &self,
         group_id: i64,
         file_path: &str,
         file_name: &str,
     ) -> Result<String, String> {
+        let remote = self
+            .inner
+            .file_bridge
+            .resolve(file_path, file_name)
+            .await?;
         let ctx = self
             .inner
             .active_context
@@ -515,7 +537,7 @@ impl QqAdapter {
             .map_err(|e| format!("lock poisoned: {e}"))?
             .clone()
             .ok_or("no QQ connection active")?;
-        let request = echo_core::action::actions::upload_group_file(group_id, file_path, file_name);
+        let request = echo_core::action::actions::upload_group_file(group_id, &remote, file_name);
         let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
         if resp.is_ok() {
             Ok(format!("file uploaded to group {group_id}"))
@@ -528,14 +550,21 @@ impl QqAdapter {
 
     /// Upload a file to a private chat via the active QQ connection.
     ///
-    /// `file_path` must be a path on the machine running NapCat (inside the
-    /// container when deployed via docker). `file_name` is the display name.
+    /// `file_path` is a path on the machine running the agent (the host). It
+    /// is transparently bridged to a location NapCat can read (see
+    /// [`upload_group_file`](Self::upload_group_file)).
+    /// `file_name` is the display name shown in QQ.
     pub async fn upload_private_file(
         &self,
         user_id: i64,
         file_path: &str,
         file_name: &str,
     ) -> Result<String, String> {
+        let remote = self
+            .inner
+            .file_bridge
+            .resolve(file_path, file_name)
+            .await?;
         let ctx = self
             .inner
             .active_context
@@ -544,7 +573,7 @@ impl QqAdapter {
             .clone()
             .ok_or("no QQ connection active")?;
         let request =
-            echo_core::action::actions::upload_private_file(user_id, file_path, file_name);
+            echo_core::action::actions::upload_private_file(user_id, &remote, file_name);
         let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
         if resp.is_ok() {
             Ok(format!("file uploaded to user {user_id}"))

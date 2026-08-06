@@ -88,10 +88,12 @@ pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Ar
     registry.register(Arc::new(QqToolWrapper {
         name: "send_file".into(),
         description: "Upload a local file to a QQ chat (group or private). \
-                      file_path must be an absolute path on the machine running NapCat \
-                      (inside the container when deployed via docker). file_name is the \
-                      display name in QQ. Requires target_type (group|private), target_id, \
-                      file_path and file_name.".into(),
+                      file_path is an absolute path on THIS machine (where the agent \
+                      runs) — the framework transparently bridges it to NapCat \
+                      (docker cp when possible, otherwise a local HTTP URL that NapCat \
+                      pulls from). file_name is the display name in QQ. Requires \
+                      target_type (group|private), target_id, file_path and file_name."
+            .into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -106,7 +108,7 @@ pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Ar
                 },
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute path to the file on the NapCat host machine (inside the docker container when deployed via docker)"
+                    "description": "Absolute path to the file on THIS machine (the agent host); the framework bridges it to NapCat automatically"
                 },
                 "file_name": {
                     "type": "string",
@@ -118,6 +120,9 @@ pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Ar
         adapter: qq,
     }));
 }
+
+// ---------------------------------------------------------------------------
+// Internal wrapper
 
 // ---------------------------------------------------------------------------
 // Internal wrapper

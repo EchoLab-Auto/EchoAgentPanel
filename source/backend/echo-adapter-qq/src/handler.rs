@@ -172,6 +172,12 @@ mod tests {
             runtime_denylist_groups: StdMutex::new(Vec::new()),
             gate_mode: StdMutex::new(QqGateMode::None),
             config_store: StdMutex::new(None),
+            file_bridge: crate::file_bridge::FileBridge::new(
+                "http://localhost:3000",
+                "127.0.0.1",
+                "napcat",
+                "/app/napcat/data",
+            ),
         })
     }
 
