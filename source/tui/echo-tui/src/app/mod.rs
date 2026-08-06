@@ -15,8 +15,14 @@ use ratatui::{Frame, Terminal};
 
 use crate::backend::Backend;
 use crate::components::{
-    chat_view::ChatView, command_palette::PaletteAction, help_popup::HelpPopup,
-    prompt_input::PromptInput, settings_popup::SettingsPopup, status_bar::StatusBar, Component,
+    chat_view::ChatView,
+    command_palette::PaletteAction,
+    help_popup::HelpPopup,
+    prompt_input::PromptInput,
+    settings_popup::SettingsPopup,
+    status_bar::StatusBar,
+    task_panel::{TaskInspector, TaskStatusBar},
+    Component,
 };
 use crate::event::Event;
 use crate::keybindings::Keybindings;
@@ -36,6 +42,8 @@ pub struct App {
     command_palette: command_palette::CommandPalette,
     settings_popup: SettingsPopup,
     help_popup: HelpPopup,
+    task_status_bar: TaskStatusBar,
+    task_inspector: TaskInspector,
 }
 
 impl App {
@@ -49,6 +57,8 @@ impl App {
             command_palette: command_palette::CommandPalette,
             settings_popup: SettingsPopup,
             help_popup: HelpPopup,
+            task_status_bar: TaskStatusBar,
+            task_inspector: TaskInspector,
         }
     }
 
@@ -224,6 +234,13 @@ impl App {
         // ── 鼠标：滚轮滚动 + 文本选择 ──
         if let crossterm::event::Event::Mouse(mouse) = ev {
             use crossterm::event::MouseEventKind;
+            if self.state.show_task_inspector {
+                let _ = self.task_inspector.handle_event(
+                    &Event::Input(crossterm::event::Event::Mouse(*mouse)),
+                    &mut self.state,
+                );
+                return;
+            }
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
                     self.state.chat_scroll = self.state.chat_scroll.saturating_add(3);
@@ -234,7 +251,15 @@ impl App {
                     return;
                 }
                 MouseEventKind::Down(_) => {
-                    if self.state.no_modal() && self.state.point_in_conv(mouse.column, mouse.row) {
+                    if self.state.no_modal()
+                        && self.state.point_in_task_bar(mouse.column, mouse.row)
+                    {
+                        self.state.show_task_inspector = true;
+                        self.state.task_inspector_selection = 0;
+                        self.state.task_inspector_scroll = 0;
+                    } else if self.state.no_modal()
+                        && self.state.point_in_conv(mouse.column, mouse.row)
+                    {
                         self.state.begin_selection(mouse.column, mouse.row);
                     } else if self.state.no_modal() {
                         self.state.clear_selection();
@@ -354,6 +379,18 @@ impl App {
         }
 
         // Modals take priority.
+        if self.state.show_task_inspector {
+            let chord = util::chord_of(key);
+            if chord == self.state.keybindings.task_inspector {
+                self.state.show_task_inspector = false;
+            } else {
+                let _ = self.task_inspector.handle_event(
+                    &Event::Input(crossterm::event::Event::Key(*key)),
+                    &mut self.state,
+                );
+            }
+            return;
+        }
         if self.state.show_help {
             let _ = self.help_popup.handle_event(
                 &Event::Input(crossterm::event::Event::Key(*key)),
@@ -393,6 +430,12 @@ impl App {
         }
         if chord == kb.help {
             self.state.show_help = true;
+            return;
+        }
+        if chord == kb.task_inspector {
+            self.state.show_task_inspector = true;
+            self.state.task_inspector_selection = 0;
+            self.state.task_inspector_scroll = 0;
             return;
         }
 
@@ -762,9 +805,10 @@ impl App {
                 ratatui::layout::Constraint::Length(2),
                 ratatui::layout::Constraint::Min(0),
                 ratatui::layout::Constraint::Length(prompt_height),
+                ratatui::layout::Constraint::Length(1),
             ])
             .split(area);
-        let (top, main, prompt_area) = (chunks[0], chunks[1], chunks[2]);
+        let (top, main, prompt_area, task_area) = (chunks[0], chunks[1], chunks[2], chunks[3]);
         self.status_bar.render(f, top, &self.state);
 
         // Build rendered lines for mouse coordinate mapping.
@@ -824,6 +868,8 @@ impl App {
         }
 
         self.prompt_input.render(f, prompt_area, &self.state);
+        self.state.task_bar_area = task_area;
+        self.task_status_bar.render(f, task_area, &self.state);
 
         if self.state.show_palette {
             self.command_palette.render(f, area, &self.state);
@@ -833,6 +879,9 @@ impl App {
         }
         if self.state.show_help {
             self.help_popup.render(f, area, &self.state);
+        }
+        if self.state.show_task_inspector {
+            self.task_inspector.render(f, area, &self.state);
         }
     }
 }
@@ -908,6 +957,20 @@ mod tests {
         app.handle_input(&key(KeyCode::Enter));
         assert_eq!(app.state.pending_submit.as_deref(), Some("g"));
         assert_eq!(app.state.chat_scroll, 0);
+    }
+
+    #[test]
+    fn ctrl_b_temporarily_opens_and_closes_task_inspector() {
+        let mut app = app();
+        let ctrl_b =
+            crossterm::event::Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        app.handle_input(&ctrl_b);
+        assert!(app.state.show_task_inspector);
+        app.handle_input(&ctrl_b);
+        assert!(!app.state.show_task_inspector);
+        app.handle_input(&ctrl_b);
+        app.handle_input(&key(KeyCode::Esc));
+        assert!(!app.state.show_task_inspector);
     }
 
     #[test]
@@ -991,6 +1054,29 @@ mod tests {
                 .join("\n");
             assert!(text.contains("Subagent"), "width {width}: {text}");
             assert!(text.contains("run_subagent"), "width {width}: {text}");
+        }
+    }
+
+    #[test]
+    fn task_inspector_renders_on_narrow_and_wide_terminals() {
+        for width in [40, 80, 140] {
+            let mut app = app();
+            app.state.start_subagent("s1", "分析实现方案");
+            app.state.show_task_inspector = true;
+            let backend = ratatui::backend::TestBackend::new(width, 24);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let text = (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("Subagent"), "width {width}: {text}");
+            assert!(text.contains("s1"), "width {width}: {text}");
         }
     }
 

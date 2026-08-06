@@ -118,7 +118,11 @@ impl Agent {
                 if self.sessions.clear(&session_id).await {
                     self.emit(BackendEvent::Error {
                         session_id: Some(session_id),
-                        message: "session cleared".into(),
+                        message: if self.sessions.shared_context_enabled() {
+                            "shared context cleared".into()
+                        } else {
+                            "session cleared".into()
+                        },
                     });
                 }
             }
@@ -130,6 +134,8 @@ impl Agent {
                 let key = SessionKey::parse(&session_id).unwrap_or_else(SessionKey::local_tui);
                 let session = self.sessions.get_or_create(&key, "local user".into(), None);
                 let sid = session.id.clone();
+                let received_at_ms = chrono::Utc::now().timestamp_millis();
+                let message_sequence = self.next_message_sequence();
                 // Notify TUI that a session exists so it can set active_session_id.
                 self.emit(BackendEvent::SessionUpdated {
                     session: session.info(String::new()),
@@ -146,9 +152,32 @@ impl Agent {
                     },
                     group_name: None,
                     content: content.clone(),
-                    timestamp: chrono::Utc::now().timestamp(),
+                    timestamp: received_at_ms / 1000,
+                    received_at_ms,
+                    message_sequence,
                 });
-                match self.process_message(&session, &content).await {
+                let backend_input = serde_json::json!({
+                    "event": "backend_message",
+                    "message_sequence": message_sequence,
+                    "received_at_ms": received_at_ms,
+                    "session": {
+                        "id": sid,
+                        "platform": key.platform,
+                        "scope": key.scope,
+                        "scope_id": key.scope_id,
+                        "user_id": key.user_id
+                    },
+                    "content": content
+                });
+                let backend_input =
+                    format!("<backend_message_hook>{backend_input}</backend_message_hook>");
+                tracing::info!(
+                    message_sequence,
+                    session = %session.id,
+                    received_at_ms,
+                    "backend message received"
+                );
+                match self.process_message(&session, &backend_input).await {
                     Ok(reply) => {
                         self.emit(BackendEvent::AgentOutput {
                             session_id: sid,

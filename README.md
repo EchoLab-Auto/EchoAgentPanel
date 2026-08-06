@@ -40,6 +40,33 @@ QQ 出站必须显式调用 `send_private_msg` 或 `send_group_msg` tool。
 
 ## 快速开始
 
+### 一键安装（Linux + systemd）
+
+本机已安装 Rust/Cargo、Git 和 systemd 用户服务后，在仓库根目录执行：
+
+```bash
+./scripts/install.sh
+# 同时设置 QQ 管理员（可选）：
+./scripts/install.sh --owner-qq 123456789
+```
+
+安装器会在 `~/.local` 下安装 Panel 命令和独立运行文件，在
+`~/.config/echo-agent-panel` 保留配置，并立即启用
+`echo-agent-panel-core.service`。之后运行 `echo-agent-panel` 即可打开 TUI；
+Core 状态与日志可通过以下命令查看：
+
+```bash
+systemctl --user status echo-agent-panel-core.service
+journalctl --user -u echo-agent-panel-core.service -f
+```
+
+安装模式会启用受控的 `framework_update` tool。向本机 Panel 中的 Agent 明确提出
+更新请求，或由配置的 QQ 管理员提出请求后，Agent 可启动独立更新服务。更新器只做
+Git 快进、锁定构建和原子二进制替换，成功后才重启 Core。详细机制和路径见
+[安装与自更新文档](doc/develop/install.md)。
+
+以下步骤用于源码开发或手动部署。
+
 ### 1. 部署 NapCat
 
 ```bash
@@ -133,6 +160,9 @@ Panel 与 Core 使用各自独立的配置文件。
 [logging]
 level = "info"
 format = "text"
+log_file = ""             # Panel 留空时使用 logs/echo-agent-panel.log
+max_file_size_mb = 20
+max_files = 5
 
 [tui]
 enabled = true
@@ -151,6 +181,9 @@ management_address = "127.0.0.1:3132"    # Panel 连接地址
 [logging]
 level = "info"
 format = "text"
+log_file = ""             # Core 留空时使用 stdout/systemd journal
+max_file_size_mb = 20
+max_files = 5
 
 [adapters.qq]
 enabled = true
@@ -184,6 +217,8 @@ api_key = ""
 system_prompt = "请你使用中文"
 max_tool_iterations = 1024
 memory_limit = 40
+# true 时 TUI、QQ 私聊和 QQ 群共享同一份 Agent 记忆；多用户部署请谨慎开启
+shared_context = false
 skills_dir = "skills"
 ```
 
@@ -199,10 +234,21 @@ Agent 还内置以下编排工具，无需额外配置：
 | `list_timers` | 查询当前会话的待执行定时任务 |
 | `cancel_timer` | 取消当前会话的定时任务 |
 | `run_subagent` | 使用隔离上下文执行一次子任务并把结果交回主 Agent |
+| `spawn_background_task` | 挂起长任务并立即返回，完成后按创建顺序整合 |
+| `spawn_parallel_task` | 并发运行最多 8 个临时分支，并分别投递到后台/私聊/群 |
+| `list_background_tasks` | 查询当前来源会话创建的后台任务及状态 |
+| `cancel_background_task` | 取消当前来源会话创建的后台任务 |
+| `send_backend_message` | 将后台分支结果显式投递到指定 TUI 会话 |
+| `framework_update` | 安装模式下查看或触发受控的框架自更新 |
 
 定时器到期后以 `<timer_event>` 后台事件重新进入原会话；若要通知 QQ，
 Agent 仍须显式调用 QQ 发送工具。定时器目前仅保存在内存中，Core 重启后失效。
-subagent 不继承工具，不能自行发送 QQ 消息或执行外部操作。
+同步 `run_subagent` 不继承工具。后台任务基于创建时的共享历史快照运行，可使用
+非消息工具，但不能直接发送 QQ 或后台消息；完成结果进入有序整合队列，由主 Agent
+按声明目标显式投递。即使后创建的任务先完成，也不会越过先创建的任务写入共享历史。
+详细设计见 [后台任务与并行分支](doc/develop/agent/background-tasks.md)。
+`framework_update` 默认关闭，仅一键安装器会启用；本地 TUI 和配置的 QQ 管理员
+可调用，执行更新还要求显式确认。
 
 Panel 中通过 `/api`、`/qq setting` 等命令修改的配置，会经 Core 的
 management WebSocket API 下发，并由 Core 持久化回 `echo-agent-core.toml`。

@@ -94,14 +94,30 @@ pub struct Session {
 
 impl Session {
     pub fn new(key: &SessionKey, nickname: String, group_name: Option<String>) -> Self {
+        Self::with_context(
+            key,
+            nickname,
+            group_name,
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(tokio::sync::Mutex::new(())),
+        )
+    }
+
+    fn with_context(
+        key: &SessionKey,
+        nickname: String,
+        group_name: Option<String>,
+        history: Arc<Mutex<Vec<ChatMessage>>>,
+        turn_lock: Arc<tokio::sync::Mutex<()>>,
+    ) -> Self {
         Self {
             id: key.to_session_id(),
             session_key: key.clone(),
             nickname,
             group_name,
             last_active: Arc::new(AtomicI64::new(chrono::Utc::now().timestamp())),
-            history: Arc::new(Mutex::new(Vec::new())),
-            turn_lock: Arc::new(tokio::sync::Mutex::new(())),
+            history,
+            turn_lock,
         }
     }
 
@@ -133,6 +149,9 @@ impl Session {
 pub struct SessionManager {
     sessions: Arc<DashMap<String, Session>>,
     memory_limit: usize,
+    shared_context: bool,
+    shared_history: Arc<Mutex<Vec<ChatMessage>>>,
+    shared_turn_lock: Arc<tokio::sync::Mutex<()>>,
     persist_path: std::sync::Mutex<Option<std::path::PathBuf>>,
     dirty: std::sync::atomic::AtomicBool,
 }
@@ -142,6 +161,9 @@ impl Clone for SessionManager {
         Self {
             sessions: Arc::clone(&self.sessions),
             memory_limit: self.memory_limit,
+            shared_context: self.shared_context,
+            shared_history: Arc::clone(&self.shared_history),
+            shared_turn_lock: Arc::clone(&self.shared_turn_lock),
             persist_path: std::sync::Mutex::new(
                 self.persist_path.lock().expect("poisoned").clone(),
             ),
@@ -165,9 +187,16 @@ const SESSION_IDLE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 impl SessionManager {
     pub fn new(memory_limit: usize) -> Self {
+        Self::with_shared_context(memory_limit, false)
+    }
+
+    pub fn with_shared_context(memory_limit: usize, shared_context: bool) -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
             memory_limit,
+            shared_context,
+            shared_history: Arc::new(Mutex::new(Vec::new())),
+            shared_turn_lock: Arc::new(tokio::sync::Mutex::new(())),
             persist_path: std::sync::Mutex::new(None),
             dirty: std::sync::atomic::AtomicBool::new(false),
         }
@@ -249,36 +278,30 @@ impl SessionManager {
     /// Serialize all sessions. Returns `None` on failure so the caller can
     /// skip the write instead of silently replacing the file with garbage.
     fn serialize(&self) -> Option<String> {
+        if self.shared_context {
+            let history = self.shared_history.try_lock().ok()?;
+            let sessions = self.all().iter().map(session_metadata).collect::<Vec<_>>();
+            return serde_json::to_string_pretty(&serde_json::json!({
+                "version": 2,
+                "shared_context": true,
+                "shared_history": serialize_messages(&history),
+                "sessions": sessions,
+            }))
+            .map_err(|error| {
+                tracing::error!(%error, "session serialization failed, skipping save");
+                error
+            })
+            .ok();
+        }
+
         let sessions: Vec<serde_json::Value> = self
             .all()
             .iter()
             .filter_map(|s| {
                 let history = s.history.try_lock().ok()?;
-                let msgs: Vec<serde_json::Value> = history
-                    .iter()
-                    .map(|m| {
-                        serde_json::json!({
-                            "role": match m.role {
-                                crate::llm::ChatRole::System => "system",
-                                crate::llm::ChatRole::User => "user",
-                                crate::llm::ChatRole::Assistant => "assistant",
-                                crate::llm::ChatRole::Tool => "tool",
-                            },
-                            "content": m.content,
-                        })
-                    })
-                    .collect();
-                Some(serde_json::json!({
-                    "id": s.id,
-                    "platform": s.session_key.platform,
-                    "scope": s.session_key.scope,
-                    "scope_id": s.session_key.scope_id,
-                    "user_id": s.session_key.user_id,
-                    "nickname": s.nickname,
-                    "group_name": s.group_name,
-                    "last_active": s.last_active(),
-                    "history": msgs,
-                }))
+                let mut value = session_metadata(s);
+                value["history"] = serde_json::Value::Array(serialize_messages(&history));
+                Some(value)
             })
             .collect();
         match serde_json::to_string_pretty(&sessions) {
@@ -291,11 +314,22 @@ impl SessionManager {
     }
 
     fn deserialize(&self, data: &str) -> usize {
-        let Ok(sessions) = serde_json::from_str::<Vec<serde_json::Value>>(data) else {
+        let Ok(root) = serde_json::from_str::<serde_json::Value>(data) else {
             return 0;
         };
+        let (sessions, persisted_shared_history) = match &root {
+            serde_json::Value::Array(sessions) => (sessions.as_slice(), None),
+            serde_json::Value::Object(_) => {
+                let Some(sessions) = root["sessions"].as_array() else {
+                    return 0;
+                };
+                (sessions.as_slice(), root["shared_history"].as_array())
+            }
+            _ => return 0,
+        };
         let mut count = 0;
-        for s in &sessions {
+        let mut legacy_histories = Vec::new();
+        for s in sessions {
             let Some(_id) = s["id"].as_str() else {
                 continue;
             };
@@ -308,29 +342,36 @@ impl SessionManager {
             let nickname = s["nickname"].as_str().unwrap_or("").into();
             let group_name = s["group_name"].as_str().map(|g| g.to_string());
             let session = self.get_or_create(&key, nickname, group_name);
-            if let Some(history) = s["history"].as_array() {
-                let msgs: Vec<ChatMessage> = history
-                    .iter()
-                    .filter_map(|m| {
-                        Some(ChatMessage {
-                            role: match m["role"].as_str()? {
-                                "system" => crate::llm::ChatRole::System,
-                                "user" => crate::llm::ChatRole::User,
-                                "assistant" => crate::llm::ChatRole::Assistant,
-                                "tool" => crate::llm::ChatRole::Tool,
-                                _ => return None,
-                            },
-                            content: m["content"].as_str()?.into(),
-                            tool_calls: None,
-                            tool_call_id: None,
-                        })
-                    })
-                    .collect();
+            if let Some(last_active) = s["last_active"].as_i64() {
+                session.last_active.store(last_active, Ordering::Relaxed);
+            }
+            if !self.shared_context {
+                let history = persisted_shared_history.or_else(|| s["history"].as_array());
+                let msgs = history.map_or_else(Vec::new, |history| deserialize_messages(history));
                 if let Ok(mut hist) = session.history.try_lock() {
                     *hist = msgs;
                 }
+            } else if persisted_shared_history.is_none() {
+                if let Some(history) = s["history"].as_array() {
+                    legacy_histories.push((
+                        s["last_active"].as_i64().unwrap_or_default(),
+                        deserialize_messages(history),
+                    ));
+                }
             }
             count += 1;
+        }
+
+        if self.shared_context {
+            let mut history = persisted_shared_history
+                .map(|history| deserialize_messages(history))
+                .unwrap_or_else(|| merge_legacy_histories(legacy_histories));
+            if history.len() > self.memory_limit {
+                history.drain(..history.len() - self.memory_limit);
+            }
+            if let Ok(mut shared) = self.shared_history.try_lock() {
+                *shared = history;
+            }
         }
         count
     }
@@ -358,7 +399,17 @@ impl SessionManager {
                 e.get().clone()
             }
             dashmap::mapref::entry::Entry::Vacant(v) => {
-                let session = Session::new(key, nickname, group_name);
+                let session = if self.shared_context {
+                    Session::with_context(
+                        key,
+                        nickname,
+                        group_name,
+                        Arc::clone(&self.shared_history),
+                        Arc::clone(&self.shared_turn_lock),
+                    )
+                } else {
+                    Session::new(key, nickname, group_name)
+                };
                 v.insert(session.clone());
                 session
             }
@@ -395,6 +446,74 @@ impl SessionManager {
     pub fn memory_limit(&self) -> usize {
         self.memory_limit
     }
+
+    pub fn shared_context_enabled(&self) -> bool {
+        self.shared_context
+    }
+}
+
+fn session_metadata(session: &Session) -> serde_json::Value {
+    serde_json::json!({
+        "id": session.id,
+        "platform": session.session_key.platform,
+        "scope": session.session_key.scope,
+        "scope_id": session.session_key.scope_id,
+        "user_id": session.session_key.user_id,
+        "nickname": session.nickname,
+        "group_name": session.group_name,
+        "last_active": session.last_active(),
+    })
+}
+
+fn serialize_messages(history: &[ChatMessage]) -> Vec<serde_json::Value> {
+    history
+        .iter()
+        .map(|message| {
+            serde_json::json!({
+                "role": match message.role {
+                    crate::llm::ChatRole::System => "system",
+                    crate::llm::ChatRole::User => "user",
+                    crate::llm::ChatRole::Assistant => "assistant",
+                    crate::llm::ChatRole::Tool => "tool",
+                },
+                "content": message.content,
+            })
+        })
+        .collect()
+}
+
+fn deserialize_messages(history: &[serde_json::Value]) -> Vec<ChatMessage> {
+    history
+        .iter()
+        .filter_map(|message| {
+            Some(ChatMessage {
+                role: match message["role"].as_str()? {
+                    "system" => crate::llm::ChatRole::System,
+                    "user" => crate::llm::ChatRole::User,
+                    "assistant" => crate::llm::ChatRole::Assistant,
+                    "tool" => crate::llm::ChatRole::Tool,
+                    _ => return None,
+                },
+                content: message["content"].as_str()?.into(),
+                tool_calls: None,
+                tool_call_id: None,
+            })
+        })
+        .collect()
+}
+
+fn merge_legacy_histories(mut histories: Vec<(i64, Vec<ChatMessage>)>) -> Vec<ChatMessage> {
+    histories.sort_by_key(|(last_active, _)| *last_active);
+    let Some((_, first)) = histories.first() else {
+        return Vec::new();
+    };
+    if histories.iter().all(|(_, history)| history == first) {
+        return first.clone();
+    }
+    histories
+        .into_iter()
+        .flat_map(|(_, history)| history)
+        .collect()
 }
 
 #[cfg(test)]
@@ -485,6 +604,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_context_reuses_history_and_turn_lock_across_platforms() {
+        let mgr = SessionManager::with_shared_context(10, true);
+        let local = mgr.get_or_create(&SessionKey::local_tui(), "local".into(), None);
+        let qq = mgr.get_or_create(
+            &SessionKey::parse("qq:dm::123").unwrap(),
+            "alice".into(),
+            None,
+        );
+
+        local.history.lock().await.push(ChatMessage::user("shared"));
+
+        assert!(Arc::ptr_eq(&local.history, &qq.history));
+        assert!(Arc::ptr_eq(&local.turn_lock, &qq.turn_lock));
+        assert_eq!(qq.history.lock().await[0].content, "shared");
+        assert!(mgr.clear(&qq.id).await);
+        assert!(local.history.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn isolated_context_keeps_platform_histories_separate() {
+        let mgr = SessionManager::new(10);
+        let local = mgr.get_or_create(&SessionKey::local_tui(), "local".into(), None);
+        let qq = mgr.get_or_create(
+            &SessionKey::parse("qq:dm::123").unwrap(),
+            "alice".into(),
+            None,
+        );
+
+        local.history.lock().await.push(ChatMessage::user("local"));
+
+        assert!(!Arc::ptr_eq(&local.history, &qq.history));
+        assert!(qq.history.lock().await.is_empty());
+    }
+
+    #[tokio::test]
     async fn session_info_has_platform_fields() {
         let mgr = SessionManager::new(5);
         let key = SessionKey::parse("qq:group:789:456").unwrap();
@@ -536,6 +690,59 @@ mod tests {
         assert_eq!(hist[1].content, "回复");
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn shared_context_persists_history_once_and_restores_it() {
+        let path = temp_sessions_path("shared-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        let mgr = SessionManager::with_shared_context(10, true);
+        mgr.set_persist_path(&path);
+        let local = mgr.get_or_create(&SessionKey::local_tui(), "local".into(), None);
+        let qq_key = SessionKey::parse("qq:dm::123").unwrap();
+        let _qq = mgr.get_or_create(&qq_key, "alice".into(), None);
+        local.history.lock().await.extend([
+            ChatMessage::user("from tui"),
+            ChatMessage::assistant("shared reply"),
+        ]);
+        mgr.mark_dirty();
+        mgr.save_now().await;
+
+        let root: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(root["version"], 2);
+        assert_eq!(root["shared_history"].as_array().unwrap().len(), 2);
+        assert!(root["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|session| session.get("history").is_none()));
+
+        let restored = SessionManager::with_shared_context(10, true);
+        restored.set_persist_path(&path);
+        assert_eq!(restored.load_from_file().await, 2);
+        let local = restored.get("local:tui::local_user").unwrap();
+        let qq = restored.get(&qq_key.to_session_id()).unwrap();
+        assert!(Arc::ptr_eq(&local.history, &qq.history));
+        assert_eq!(local.history.lock().await.len(), 2);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn shared_context_migrates_distinct_legacy_histories() {
+        let mgr = SessionManager::with_shared_context(10, true);
+        let restored = mgr.deserialize(
+            r#"[
+                {"id":"local:tui::local_user","platform":"local","scope":"tui","scope_id":"","user_id":"local_user","nickname":"local","last_active":1,"history":[{"role":"user","content":"local"}]},
+                {"id":"qq:dm::123","platform":"qq","scope":"dm","scope_id":"","user_id":"123","nickname":"alice","last_active":2,"history":[{"role":"user","content":"qq"}]}
+            ]"#,
+        );
+
+        assert_eq!(restored, 2);
+        let history = mgr.shared_history.try_lock().unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].content, "local");
+        assert_eq!(history[1].content, "qq");
     }
 
     #[tokio::test]

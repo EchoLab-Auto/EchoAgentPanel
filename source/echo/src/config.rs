@@ -20,6 +20,8 @@ pub struct LoggingSection {
     pub level: String,
     pub format: String,
     pub log_file: String,
+    pub max_file_size_mb: u64,
+    pub max_files: usize,
 }
 
 impl Default for LoggingSection {
@@ -28,6 +30,8 @@ impl Default for LoggingSection {
             level: "info".to_string(),
             format: "text".to_string(),
             log_file: String::new(),
+            max_file_size_mb: 20,
+            max_files: 5,
         }
     }
 }
@@ -250,6 +254,12 @@ fn validate_logging_level(logging: &LoggingSection) -> Result<()> {
             logging.level,
             LOG_LEVELS.join("/")
         );
+    }
+    if logging.max_file_size_mb == 0 {
+        anyhow::bail!("[logging] max_file_size_mb must be greater than zero");
+    }
+    if logging.max_files == 0 {
+        anyhow::bail!("[logging] max_files must be greater than zero");
     }
     Ok(())
 }

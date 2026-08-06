@@ -7,6 +7,7 @@ pub mod help_popup;
 pub mod prompt_input;
 pub mod settings_popup;
 pub mod status_bar;
+pub mod task_panel;
 pub mod toast;
 
 use ratatui::layout::Rect;

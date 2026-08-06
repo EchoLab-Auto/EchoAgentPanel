@@ -14,6 +14,8 @@ use crate::slash_commands::SlashAction;
 use crate::theme::Theme;
 use crate::util;
 
+const MAX_ORCHESTRATION_HISTORY: usize = 128;
+
 // ── Message types ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,9 +45,43 @@ impl DisplayMessage {
     }
 }
 
+fn history_display_content(content: &str) -> String {
+    let trimmed = content.trim();
+    let payload = [
+        ("qq_message_hook", "content"),
+        ("backend_message_hook", "content"),
+        ("timer_event", "task"),
+        ("background_task_event", "objective"),
+    ]
+    .into_iter()
+    .find_map(|(tag, field)| {
+        let body = trimmed
+            .strip_prefix(&format!("<{tag}>"))?
+            .strip_suffix(&format!("</{tag}>"))?
+            .trim();
+        serde_json::from_str::<serde_json::Value>(body).ok()?[field]
+            .as_str()
+            .map(str::to_string)
+    });
+    payload.unwrap_or_else(|| content.to_string())
+}
+
 #[derive(Debug, Clone)]
 pub enum MessageMetadata {
     Tool(ToolMessage),
+    Inbound(InboundMessage),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InboundMessage {
+    pub adapter_name: String,
+    pub platform: String,
+    pub user_id: String,
+    pub user_name: String,
+    pub channel: String,
+    pub group_name: Option<String>,
+    pub received_at_ms: i64,
+    pub message_sequence: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +169,125 @@ impl Default for AgentActivity {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Branch / subagent execution state ─────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrchestrationKind {
+    Background,
+    Parallel,
+    Subagent,
+    ReplyBranch,
+}
+
+impl OrchestrationKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Background => "后台",
+            Self::Parallel => "并行",
+            Self::Subagent => "Subagent",
+            Self::ReplyBranch => "临时回复",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrchestrationStatus {
+    Running,
+    AwaitingIntegration,
+    Completed,
+    Integrated,
+    Failed,
+    Cancelled,
+}
+
+impl OrchestrationStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Running => "运行中",
+            Self::AwaitingIntegration => "等待整合",
+            Self::Completed => "已完成",
+            Self::Integrated => "已整合",
+            Self::Failed => "失败",
+            Self::Cancelled => "已取消",
+        }
+    }
+
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Running | Self::AwaitingIntegration)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchStatus {
+    Running,
+    Completed,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl BranchStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Running => "运行中",
+            Self::Completed => "已完成",
+            Self::Succeeded => "成功",
+            Self::Failed => "失败",
+            Self::Cancelled => "已取消",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BranchActivity {
+    pub branch_id: String,
+    pub task: String,
+    pub target: String,
+    pub status: BranchStatus,
+    pub started_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
+    pub result: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrchestrationActivity {
+    pub id: String,
+    pub sequence: Option<u64>,
+    pub session_id: String,
+    pub kind: OrchestrationKind,
+    pub objective: String,
+    pub status: OrchestrationStatus,
+    pub created_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
+    pub integrated_at_ms: Option<i64>,
+    pub branches: Vec<BranchActivity>,
+    pub updated_at: std::time::Instant,
+}
+
+impl OrchestrationActivity {
+    pub fn completed_branches(&self) -> usize {
+        self.branches
+            .iter()
+            .filter(|branch| branch.status != BranchStatus::Running)
+            .count()
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        let end = self
+            .integrated_at_ms
+            .or(self.completed_at_ms)
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        Duration::from_millis(end.saturating_sub(self.created_at_ms).max(0) as u64)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PendingBackgroundTask {
+    kind: OrchestrationKind,
+    objective: String,
+    branches: Vec<BranchActivity>,
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -248,6 +403,14 @@ pub struct AppState {
     pub anim_tick: u64,
     /// Per-session execution lifecycle. Sessions can run concurrently.
     pub agent_activities: HashMap<String, AgentActivity>,
+    /// Detached branches and synchronous subagents, oldest first.
+    pub orchestration_tasks: Vec<OrchestrationActivity>,
+    pending_background_tasks: HashMap<String, PendingBackgroundTask>,
+    next_subagent_sequence: u64,
+    pub show_task_inspector: bool,
+    pub task_inspector_selection: usize,
+    pub task_inspector_scroll: u16,
+    pub task_bar_area: ratatui::layout::Rect,
     pub chat_flash_until: Option<std::time::Instant>,
     pub mode: ConversationMode,
     pub form_overlay: FormOverlay,
@@ -303,6 +466,13 @@ impl AppState {
             quit_armed_at: std::time::Instant::now(),
             anim_tick: 0,
             agent_activities: HashMap::new(),
+            orchestration_tasks: Vec::new(),
+            pending_background_tasks: HashMap::new(),
+            next_subagent_sequence: 0,
+            show_task_inspector: false,
+            task_inspector_selection: 0,
+            task_inspector_scroll: 0,
+            task_bar_area: ratatui::layout::Rect::default(),
             chat_flash_until: None,
             mode: ConversationMode::Normal,
             form_overlay: Default::default(),
@@ -357,6 +527,407 @@ impl AppState {
         self.agent_activities
             .entry(session_id.to_string())
             .or_default()
+    }
+
+    pub fn stage_orchestration_tool(&mut self, session_id: &str, tool_name: &str, arguments: &str) {
+        if !matches!(tool_name, "spawn_background_task" | "spawn_parallel_task") {
+            return;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(arguments) else {
+            return;
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        let pending = if tool_name == "spawn_parallel_task" {
+            let objective = value["objective"]
+                .as_str()
+                .unwrap_or("并行任务")
+                .to_string();
+            let branches = value["branches"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(index, branch)| BranchActivity {
+                    branch_id: branch["branch_id"]
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("branch-{}", index + 1)),
+                    task: branch["task"].as_str().unwrap_or("分支任务").to_string(),
+                    target: target_label(branch.get("target"), session_id),
+                    status: BranchStatus::Running,
+                    started_at_ms: now,
+                    completed_at_ms: None,
+                    result: None,
+                })
+                .collect();
+            PendingBackgroundTask {
+                kind: OrchestrationKind::Parallel,
+                objective,
+                branches,
+            }
+        } else {
+            let task = value["task"].as_str().unwrap_or("后台任务").to_string();
+            PendingBackgroundTask {
+                kind: OrchestrationKind::Background,
+                objective: task.clone(),
+                branches: vec![BranchActivity {
+                    branch_id: "main".into(),
+                    task,
+                    target: target_label(value.get("target"), session_id),
+                    status: BranchStatus::Running,
+                    started_at_ms: now,
+                    completed_at_ms: None,
+                    result: None,
+                }],
+            }
+        };
+        self.pending_background_tasks
+            .insert(session_id.to_string(), pending);
+    }
+
+    pub fn start_background_task(
+        &mut self,
+        session_id: &str,
+        task_id: &str,
+        sequence: u64,
+        branch_count: usize,
+        objective: &str,
+        created_at_ms: i64,
+    ) {
+        let pending = self.pending_background_tasks.remove(session_id);
+        let kind = pending
+            .as_ref()
+            .map(|task| task.kind)
+            .unwrap_or(if branch_count > 1 {
+                OrchestrationKind::Parallel
+            } else {
+                OrchestrationKind::Background
+            });
+        let pending_objective = pending.as_ref().map(|task| task.objective.clone());
+        let mut branches = pending.map(|task| task.branches).unwrap_or_else(|| {
+            (0..branch_count.max(1))
+                .map(|index| BranchActivity {
+                    branch_id: format!("branch-{}", index + 1),
+                    task: String::new(),
+                    target: "源会话".into(),
+                    status: BranchStatus::Running,
+                    started_at_ms: created_at_ms,
+                    completed_at_ms: None,
+                    result: None,
+                })
+                .collect()
+        });
+        for branch in &mut branches {
+            branch.started_at_ms = created_at_ms;
+        }
+        self.push_orchestration(OrchestrationActivity {
+            id: task_id.to_string(),
+            sequence: Some(sequence),
+            session_id: session_id.to_string(),
+            kind,
+            objective: if objective.trim().is_empty() {
+                pending_objective.unwrap_or_else(|| "后台任务".into())
+            } else {
+                objective.to_string()
+            },
+            status: OrchestrationStatus::Running,
+            created_at_ms,
+            completed_at_ms: None,
+            integrated_at_ms: None,
+            branches,
+            updated_at: std::time::Instant::now(),
+        });
+    }
+
+    pub fn complete_background_task(&mut self, task_id: &str, success: bool, completed_at_ms: i64) {
+        let Some(task) = self
+            .orchestration_tasks
+            .iter_mut()
+            .find(|task| task.id == task_id)
+        else {
+            return;
+        };
+        task.status = OrchestrationStatus::AwaitingIntegration;
+        task.completed_at_ms = Some(completed_at_ms);
+        task.updated_at = std::time::Instant::now();
+        for branch in &mut task.branches {
+            if branch.status == BranchStatus::Running {
+                branch.status = if success {
+                    BranchStatus::Succeeded
+                } else {
+                    BranchStatus::Completed
+                };
+                branch.completed_at_ms = Some(completed_at_ms);
+            }
+        }
+    }
+
+    pub fn integrate_background_task(
+        &mut self,
+        task_id: &str,
+        success: bool,
+        integrated_at_ms: i64,
+    ) {
+        let Some(task) = self
+            .orchestration_tasks
+            .iter_mut()
+            .find(|task| task.id == task_id)
+        else {
+            return;
+        };
+        task.status = if success {
+            OrchestrationStatus::Integrated
+        } else {
+            OrchestrationStatus::Failed
+        };
+        task.integrated_at_ms = Some(integrated_at_ms);
+        task.updated_at = std::time::Instant::now();
+    }
+
+    /// Update branch outcomes from the structured background hook.
+    pub fn apply_background_hook(&mut self, content: &str) -> bool {
+        let Some(json) = content
+            .trim()
+            .strip_prefix("<background_task_event>")
+            .and_then(|value| value.strip_suffix("</background_task_event>"))
+        else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+            return false;
+        };
+        let Some(task_id) = value["task_id"].as_str() else {
+            return false;
+        };
+        let Some(task) = self
+            .orchestration_tasks
+            .iter_mut()
+            .find(|task| task.id == task_id)
+        else {
+            return false;
+        };
+        if let Some(objective) = value["objective"].as_str() {
+            task.objective = objective.to_string();
+        }
+        task.completed_at_ms =
+            rfc3339_millis(value["completed_at"].as_str()).or(task.completed_at_ms);
+        let cancelled = value["cancelled"].as_bool().unwrap_or(false);
+        task.status = if cancelled {
+            OrchestrationStatus::Cancelled
+        } else {
+            OrchestrationStatus::AwaitingIntegration
+        };
+        for delivery in value["deliveries"].as_array().into_iter().flatten() {
+            let Some(branch_id) = delivery["branch_id"].as_str() else {
+                continue;
+            };
+            let index = task
+                .branches
+                .iter()
+                .position(|branch| branch.branch_id == branch_id)
+                .unwrap_or_else(|| {
+                    task.branches.push(BranchActivity {
+                        branch_id: branch_id.to_string(),
+                        task: String::new(),
+                        target: String::new(),
+                        status: BranchStatus::Completed,
+                        started_at_ms: task.created_at_ms,
+                        completed_at_ms: task.completed_at_ms,
+                        result: None,
+                    });
+                    task.branches.len() - 1
+                });
+            let branch = &mut task.branches[index];
+            branch.target = target_label(delivery.get("target"), &task.session_id);
+            branch.status = if cancelled {
+                BranchStatus::Cancelled
+            } else if delivery["success"].as_bool().unwrap_or(false) {
+                BranchStatus::Succeeded
+            } else {
+                BranchStatus::Failed
+            };
+            branch.started_at_ms =
+                rfc3339_millis(delivery["started_at"].as_str()).unwrap_or(branch.started_at_ms);
+            branch.completed_at_ms =
+                rfc3339_millis(delivery["completed_at"].as_str()).or(branch.completed_at_ms);
+            branch.result = delivery["result"]
+                .as_str()
+                .map(|result| bounded(result, 4_000));
+        }
+        task.updated_at = std::time::Instant::now();
+        true
+    }
+
+    pub fn start_subagent(&mut self, session_id: &str, task: &str) {
+        self.next_subagent_sequence = self.next_subagent_sequence.saturating_add(1);
+        let now = chrono::Utc::now().timestamp_millis();
+        let sequence = self.next_subagent_sequence;
+        self.push_orchestration(OrchestrationActivity {
+            id: format!("subagent-{sequence}"),
+            sequence: None,
+            session_id: session_id.to_string(),
+            kind: OrchestrationKind::Subagent,
+            objective: task.to_string(),
+            status: OrchestrationStatus::Running,
+            created_at_ms: now,
+            completed_at_ms: None,
+            integrated_at_ms: None,
+            branches: vec![BranchActivity {
+                branch_id: "subagent".into(),
+                task: task.to_string(),
+                target: "父 Agent".into(),
+                status: BranchStatus::Running,
+                started_at_ms: now,
+                completed_at_ms: None,
+                result: None,
+            }],
+            updated_at: std::time::Instant::now(),
+        });
+    }
+
+    pub fn start_reply_branch(
+        &mut self,
+        session_id: &str,
+        branch_id: &str,
+        message_sequence: u64,
+        task: &str,
+        target: &str,
+        started_at_ms: i64,
+    ) {
+        self.push_orchestration(OrchestrationActivity {
+            id: branch_id.to_string(),
+            sequence: Some(message_sequence),
+            session_id: session_id.to_string(),
+            kind: OrchestrationKind::ReplyBranch,
+            objective: task.to_string(),
+            status: OrchestrationStatus::Running,
+            created_at_ms: started_at_ms,
+            completed_at_ms: None,
+            integrated_at_ms: None,
+            branches: vec![BranchActivity {
+                branch_id: "reply".into(),
+                task: task.to_string(),
+                target: target.to_string(),
+                status: BranchStatus::Running,
+                started_at_ms,
+                completed_at_ms: None,
+                result: None,
+            }],
+            updated_at: std::time::Instant::now(),
+        });
+    }
+
+    pub fn complete_reply_branch(
+        &mut self,
+        branch_id: &str,
+        success: bool,
+        cancelled: bool,
+        completed_at_ms: i64,
+    ) {
+        let Some(task) = self
+            .orchestration_tasks
+            .iter_mut()
+            .find(|task| task.id == branch_id)
+        else {
+            return;
+        };
+        task.status = if cancelled {
+            OrchestrationStatus::Cancelled
+        } else if success {
+            OrchestrationStatus::Completed
+        } else {
+            OrchestrationStatus::Failed
+        };
+        task.completed_at_ms = Some(completed_at_ms);
+        task.updated_at = std::time::Instant::now();
+        if let Some(branch) = task.branches.first_mut() {
+            branch.status = if cancelled {
+                BranchStatus::Cancelled
+            } else if success {
+                BranchStatus::Succeeded
+            } else {
+                BranchStatus::Failed
+            };
+            branch.completed_at_ms = Some(completed_at_ms);
+        }
+    }
+
+    pub fn complete_subagent(&mut self, session_id: &str, success: bool) {
+        let Some(task) = self.orchestration_tasks.iter_mut().rev().find(|task| {
+            task.session_id == session_id
+                && task.kind == OrchestrationKind::Subagent
+                && task.status == OrchestrationStatus::Running
+        }) else {
+            return;
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        task.status = if success {
+            OrchestrationStatus::Completed
+        } else {
+            OrchestrationStatus::Failed
+        };
+        task.completed_at_ms = Some(now);
+        task.updated_at = std::time::Instant::now();
+        if let Some(branch) = task.branches.first_mut() {
+            branch.status = if success {
+                BranchStatus::Succeeded
+            } else {
+                BranchStatus::Failed
+            };
+            branch.completed_at_ms = Some(now);
+        }
+    }
+
+    pub fn attach_subagent_result(&mut self, session_id: &str, result: &str) {
+        let Some(task) =
+            self.orchestration_tasks.iter_mut().rev().find(|task| {
+                task.session_id == session_id && task.kind == OrchestrationKind::Subagent
+            })
+        else {
+            return;
+        };
+        if let Some(branch) = task.branches.first_mut() {
+            branch.result = Some(bounded(result, 4_000));
+        }
+        task.updated_at = std::time::Instant::now();
+    }
+
+    pub fn discard_staged_background(&mut self, session_id: &str) {
+        self.pending_background_tasks.remove(session_id);
+    }
+
+    pub fn selected_orchestration(&self) -> Option<&OrchestrationActivity> {
+        self.orchestration_tasks
+            .iter()
+            .rev()
+            .nth(self.task_inspector_selection)
+    }
+
+    pub fn active_orchestration_count(&self) -> usize {
+        self.orchestration_tasks
+            .iter()
+            .filter(|task| task.status.is_active())
+            .count()
+    }
+
+    pub fn point_in_task_bar(&self, x: u16, y: u16) -> bool {
+        let area = self.task_bar_area;
+        area.width > 0
+            && x >= area.x
+            && x < area.x.saturating_add(area.width)
+            && y >= area.y
+            && y < area.y.saturating_add(area.height)
+    }
+
+    fn push_orchestration(&mut self, task: OrchestrationActivity) {
+        self.orchestration_tasks.push(task);
+        if self.orchestration_tasks.len() > MAX_ORCHESTRATION_HISTORY {
+            let excess = self.orchestration_tasks.len() - MAX_ORCHESTRATION_HISTORY;
+            self.orchestration_tasks.drain(..excess);
+        }
+        self.task_inspector_selection = self
+            .task_inspector_selection
+            .min(self.orchestration_tasks.len().saturating_sub(1));
     }
 
     pub fn push_message(&mut self, session_id: &str, msg: DisplayMessage) {
@@ -429,7 +1000,11 @@ impl AppState {
     }
 
     pub fn no_modal(&self) -> bool {
-        !self.show_palette && !self.show_help && !self.show_settings && !self.show_slash
+        !self.show_palette
+            && !self.show_help
+            && !self.show_settings
+            && !self.show_slash
+            && !self.show_task_inspector
     }
 
     pub fn col_from_screen(&self, mx: u16) -> usize {
@@ -522,15 +1097,24 @@ impl AppState {
         let Ok(data) = std::fs::read_to_string(path) else {
             return;
         };
-        let Ok(sessions) = serde_json::from_str::<Vec<serde_json::Value>>(&data) else {
+        let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
             return;
         };
-        for s in &sessions {
+        let Some((sessions, shared_history)) = (match &root {
+            serde_json::Value::Array(sessions) => Some((sessions, None)),
+            serde_json::Value::Object(_) => root["sessions"]
+                .as_array()
+                .map(|sessions| (sessions, root["shared_history"].as_array())),
+            _ => None,
+        }) else {
+            return;
+        };
+        for s in sessions {
             let Some(id) = s["id"].as_str() else { continue };
             if id != session_id {
                 continue;
             }
-            let Some(history) = s["history"].as_array() else {
+            let Some(history) = shared_history.or_else(|| s["history"].as_array()) else {
                 continue;
             };
             let msgs = self.messages.entry(session_id.to_string()).or_default();
@@ -542,7 +1126,7 @@ impl AppState {
                     "tool" => MsgRole::Tool,
                     _ => MsgRole::System,
                 };
-                let content = m["content"].as_str().unwrap_or("").to_string();
+                let content = history_display_content(m["content"].as_str().unwrap_or(""));
                 msgs.push(DisplayMessage::plain(role, content, 0));
             }
             return;
@@ -596,6 +1180,55 @@ impl AppState {
         let mut sessions = self.sessions.clone();
         sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         sessions
+    }
+}
+
+fn target_label(target: Option<&serde_json::Value>, origin_session: &str) -> String {
+    let Some(target) = target else {
+        return "源会话".into();
+    };
+    match target["kind"].as_str().unwrap_or_default() {
+        "backend" => {
+            let session = target["session_id"]
+                .as_str()
+                .or_else(|| target["id"].as_str())
+                .unwrap_or(origin_session);
+            if session == origin_session {
+                "源会话".into()
+            } else {
+                format!("后台 {session}")
+            }
+        }
+        "qq_private" => format!(
+            "QQ 私聊 {}",
+            target["user_id"]
+                .as_str()
+                .or_else(|| target["id"].as_str())
+                .unwrap_or("未知")
+        ),
+        "qq_group" => format!(
+            "QQ 群 {}",
+            target["group_id"]
+                .as_str()
+                .or_else(|| target["id"].as_str())
+                .unwrap_or("未知")
+        ),
+        "origin" => "源会话".into(),
+        _ => "源会话".into(),
+    }
+}
+
+fn rfc3339_millis(value: Option<&str>) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value?)
+        .ok()
+        .map(|time| time.timestamp_millis())
+}
+
+fn bounded(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        value.to_string()
+    } else {
+        value.chars().take(max_chars).collect::<String>() + "…"
     }
 }
 
@@ -787,5 +1420,81 @@ mod tests {
         st.show_palette = false;
         st.show_help = true;
         assert!(!st.no_modal());
+        st.show_help = false;
+        st.show_task_inspector = true;
+        assert!(!st.no_modal());
+    }
+
+    #[test]
+    fn parallel_tool_and_hook_preserve_branch_details() {
+        let mut st = state();
+        st.stage_orchestration_tool(
+            "qq:private:100",
+            "spawn_parallel_task",
+            r#"{
+                "objective":"分别回复",
+                "branches":[
+                    {"branch_id":"alice","task":"回复 Alice","target":{"kind":"qq_private","id":"101"}},
+                    {"branch_id":"team","task":"回复群组","target":{"kind":"qq_group","id":"202"}}
+                ]
+            }"#,
+        );
+        st.start_background_task(
+            "qq:private:100",
+            "task-1",
+            1,
+            2,
+            "分别回复",
+            1_700_000_000_000,
+        );
+        assert_eq!(st.orchestration_tasks[0].kind, OrchestrationKind::Parallel);
+        assert_eq!(st.orchestration_tasks[0].branches[0].target, "QQ 私聊 101");
+
+        let hook = r#"<background_task_event>{
+            "task_id":"task-1",
+            "objective":"分别回复",
+            "completed_at":"2023-11-14T22:13:23.000Z",
+            "cancelled":false,
+            "deliveries":[
+                {"branch_id":"alice","target":{"kind":"qq_private","user_id":"101"},"success":true,"result":"done alice","started_at":"2023-11-14T22:13:20.000Z","completed_at":"2023-11-14T22:13:22.000Z"},
+                {"branch_id":"team","target":{"kind":"qq_group","group_id":"202"},"success":false,"result":"send failed","started_at":"2023-11-14T22:13:20.000Z","completed_at":"2023-11-14T22:13:23.000Z"}
+            ]
+        }</background_task_event>"#;
+        assert!(st.apply_background_hook(hook));
+        let task = &st.orchestration_tasks[0];
+        assert_eq!(task.status, OrchestrationStatus::AwaitingIntegration);
+        assert_eq!(task.branches[0].status, BranchStatus::Succeeded);
+        assert_eq!(task.branches[0].result.as_deref(), Some("done alice"));
+        assert_eq!(task.branches[1].status, BranchStatus::Failed);
+        assert_eq!(task.branches[1].target, "QQ 群 202");
+    }
+
+    #[test]
+    fn subagent_lifecycle_is_retained_for_inspection() {
+        let mut st = state();
+        st.start_subagent("s1", "比较方案");
+        assert_eq!(st.active_orchestration_count(), 1);
+        st.complete_subagent("s1", true);
+        st.attach_subagent_result("s1", "方案 A 更稳妥");
+        let task = st.orchestration_tasks.last().unwrap();
+        assert_eq!(task.kind, OrchestrationKind::Subagent);
+        assert_eq!(task.status, OrchestrationStatus::Completed);
+        assert_eq!(task.branches[0].result.as_deref(), Some("方案 A 更稳妥"));
+    }
+
+    #[test]
+    fn persisted_structured_hooks_render_their_human_content() {
+        assert_eq!(
+            history_display_content(
+                r#"<backend_message_hook>{"message_sequence":7,"content":"hello"}</backend_message_hook>"#
+            ),
+            "hello"
+        );
+        assert_eq!(
+            history_display_content(
+                r#"<background_task_event>{"objective":"prepare report"}</background_task_event>"#
+            ),
+            "prepare report"
+        );
     }
 }

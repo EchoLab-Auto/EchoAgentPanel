@@ -7,7 +7,8 @@ use echo_agent::{BackendEvent, SessionInfo};
 
 use crate::app::App;
 use crate::state::{
-    AgentPhase, DisplayMessage, MessageMetadata, MsgRole, ToastKind, ToolMessage, ToolMessageStatus,
+    AgentPhase, DisplayMessage, InboundMessage, MessageMetadata, MsgRole, ToastKind, ToolMessage,
+    ToolMessageStatus,
 };
 
 impl App {
@@ -61,9 +62,15 @@ impl App {
             BackendEvent::MessageReceived {
                 session_id,
                 adapter_name,
+                platform,
+                user_id,
+                user_name,
+                channel,
+                group_name,
                 content,
                 timestamp,
-                ..
+                received_at_ms,
+                message_sequence,
             } => {
                 if adapter_name == "timer" {
                     self.push_to(
@@ -72,8 +79,29 @@ impl App {
                         summarize_timer_event(&content),
                         timestamp,
                     );
+                } else if adapter_name == "background" {
+                    // This hook is internal context for the parent agent. Its structured
+                    // branch outcomes belong in the task inspector, not the chat stream.
+                    self.state.apply_background_hook(&content);
                 } else {
-                    self.push_to(session_id, MsgRole::User, content, timestamp);
+                    self.push_display_to(
+                        session_id,
+                        DisplayMessage {
+                            role: MsgRole::User,
+                            content,
+                            time: timestamp,
+                            metadata: Some(MessageMetadata::Inbound(InboundMessage {
+                                adapter_name,
+                                platform,
+                                user_id,
+                                user_name,
+                                channel,
+                                group_name,
+                                received_at_ms,
+                                message_sequence,
+                            })),
+                        },
+                    );
                 }
             }
             BackendEvent::AgentThinking { session_id } => {
@@ -98,6 +126,7 @@ impl App {
                     activity.completion_tokens.saturating_add(completion_tokens);
             }
             BackendEvent::SubagentStarted { session_id, task } => {
+                self.state.start_subagent(&session_id, &task);
                 self.state
                     .activity_mut(&session_id)
                     .transition(AgentPhase::Subagent, Some(truncate(&one_line(&task), 72)));
@@ -106,6 +135,7 @@ impl App {
                 session_id,
                 success,
             } => {
+                self.state.complete_subagent(&session_id, success);
                 let activity = self.state.activity_mut(&session_id);
                 if success {
                     activity.subagents_completed += 1;
@@ -119,12 +149,112 @@ impl App {
                     }),
                 );
             }
+            BackendEvent::ReplyBranchStarted {
+                session_id,
+                branch_id,
+                message_sequence,
+                task,
+                target,
+                started_at_ms,
+            } => {
+                self.state.start_reply_branch(
+                    &session_id,
+                    &branch_id,
+                    message_sequence,
+                    &task,
+                    &target,
+                    started_at_ms,
+                );
+            }
+            BackendEvent::ReplyBranchCompleted {
+                branch_id,
+                success,
+                cancelled,
+                completed_at_ms,
+                ..
+            } => {
+                self.state
+                    .complete_reply_branch(&branch_id, success, cancelled, completed_at_ms);
+            }
+            BackendEvent::BackgroundTaskStarted {
+                session_id,
+                task_id,
+                sequence,
+                branch_count,
+                objective,
+                created_at_ms,
+            } => {
+                self.state.start_background_task(
+                    &session_id,
+                    &task_id,
+                    sequence,
+                    branch_count,
+                    &objective,
+                    created_at_ms,
+                );
+                self.push_to(
+                    session_id,
+                    MsgRole::System,
+                    format!(
+                        "后台任务 #{sequence} 已挂起 · {branch_count} 个分支 · {} · {}",
+                        short_id(&task_id),
+                        truncate(&one_line(&objective), 96)
+                    ),
+                    created_at_ms / 1000,
+                );
+            }
+            BackendEvent::BackgroundTaskCompleted {
+                session_id,
+                task_id,
+                sequence,
+                success,
+                completed_at_ms,
+            } => {
+                self.state
+                    .complete_background_task(&task_id, success, completed_at_ms);
+                self.push_to(
+                    session_id,
+                    MsgRole::System,
+                    format!(
+                        "后台任务 #{sequence} 分支{} · {} · 等待按序整合",
+                        if success { "已完成" } else { "存在失败" },
+                        short_id(&task_id)
+                    ),
+                    completed_at_ms / 1000,
+                );
+            }
+            BackendEvent::BackgroundTaskIntegrated {
+                session_id,
+                task_id,
+                sequence,
+                success,
+                integrated_at_ms,
+            } => {
+                self.state
+                    .integrate_background_task(&task_id, success, integrated_at_ms);
+                self.push_to(
+                    session_id,
+                    MsgRole::System,
+                    format!(
+                        "后台任务 #{sequence} {} · {}",
+                        if success {
+                            "已按序整合"
+                        } else {
+                            "整合失败"
+                        },
+                        short_id(&task_id)
+                    ),
+                    integrated_at_ms / 1000,
+                );
+            }
             BackendEvent::ToolCall {
                 session_id,
                 tool_name,
                 arguments,
                 ..
             } => {
+                self.state
+                    .stage_orchestration_tool(&session_id, &tool_name, &arguments);
                 let phase = if tool_name == "run_subagent" {
                     AgentPhase::Subagent
                 } else {
@@ -166,6 +296,15 @@ impl App {
                 ..
             } => {
                 self.finish_tool_message(&session_id, &tool_name, &result);
+                if tool_name == "run_subagent" {
+                    self.state.attach_subagent_result(&session_id, &result);
+                } else if matches!(
+                    tool_name.as_str(),
+                    "spawn_background_task" | "spawn_parallel_task"
+                ) && result.trim_start().starts_with("error:")
+                {
+                    self.state.discard_staged_background(&session_id);
+                }
                 let activity = self.state.activity_mut(&session_id);
                 if tool_name != "run_subagent" {
                     activity.tools_completed += 1;
@@ -282,10 +421,13 @@ impl App {
     }
 
     fn push_to(&mut self, session_id: String, role: MsgRole, content: String, time: i64) {
-        self.state.push_message(
-            &session_id,
-            DisplayMessage::plain(role, content.clone(), time),
-        );
+        self.push_display_to(session_id, DisplayMessage::plain(role, content, time));
+    }
+
+    fn push_display_to(&mut self, session_id: String, message: DisplayMessage) {
+        let content = message.content.clone();
+        let time = message.time;
+        self.state.push_message(&session_id, message);
         if let Some(s) = self.state.sessions.iter_mut().find(|s| s.id == session_id) {
             s.last_message = content;
             s.last_active = if time > 0 { time } else { s.last_active };
@@ -434,6 +576,10 @@ fn truncate(value: &str, max_chars: usize) -> String {
     }
 }
 
+fn short_id(value: &str) -> &str {
+    value.get(..8).unwrap_or(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -554,10 +700,19 @@ mod tests {
             group_name: None,
             content: "你好".into(),
             timestamp: 1700000000,
+            received_at_ms: 1700000000123,
+            message_sequence: 42,
         });
         assert_eq!(app.state.active_messages().len(), 1);
         assert_eq!(app.state.active_messages()[0].content, "你好");
         assert_eq!(app.state.active_messages()[0].role, MsgRole::User);
+        let Some(MessageMetadata::Inbound(source)) = &app.state.active_messages()[0].metadata
+        else {
+            panic!("QQ message source metadata missing");
+        };
+        assert_eq!(source.platform, "qq");
+        assert_eq!(source.user_name, "alice");
+        assert_eq!(source.message_sequence, 42);
     }
 
     #[test]
@@ -672,12 +827,116 @@ mod tests {
         let activity = &app.state.agent_activities["s1"];
         assert_eq!(activity.phase, AgentPhase::Subagent);
         assert_eq!(activity.detail.as_deref(), Some("比较两个实现方案"));
+        assert_eq!(app.state.orchestration_tasks.len(), 1);
+        assert_eq!(
+            app.state.orchestration_tasks[0].status,
+            crate::state::OrchestrationStatus::Running
+        );
 
         app.apply_backend_event(BackendEvent::SubagentCompleted {
             session_id: "s1".into(),
             success: true,
         });
         assert_eq!(app.state.agent_activities["s1"].subagents_completed, 1);
+        assert_eq!(
+            app.state.orchestration_tasks[0].status,
+            crate::state::OrchestrationStatus::Completed
+        );
+    }
+
+    #[test]
+    fn temporary_reply_branch_is_visible_and_can_be_cancelled() {
+        let mut app = app();
+        app.apply_backend_event(BackendEvent::ReplyBranchStarted {
+            session_id: "s1".into(),
+            branch_id: "reply-1".into(),
+            message_sequence: 7,
+            task: "第二句话".into(),
+            target: "QQ 私聊 100".into(),
+            started_at_ms: 1_700_000_000_000,
+        });
+        let task = &app.state.orchestration_tasks[0];
+        assert_eq!(task.kind, crate::state::OrchestrationKind::ReplyBranch);
+        assert_eq!(task.status, crate::state::OrchestrationStatus::Running);
+        assert_eq!(task.branches[0].target, "QQ 私聊 100");
+
+        app.apply_backend_event(BackendEvent::ReplyBranchCompleted {
+            session_id: "s1".into(),
+            branch_id: "reply-1".into(),
+            message_sequence: 7,
+            success: false,
+            cancelled: true,
+            completed_at_ms: 1_700_000_001_000,
+        });
+        assert_eq!(
+            app.state.orchestration_tasks[0].status,
+            crate::state::OrchestrationStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn detached_background_task_does_not_keep_the_conversation_busy() {
+        let mut app = app();
+        app.state.active_session_id = Some("s1".into());
+        app.apply_backend_event(BackendEvent::BackgroundTaskStarted {
+            session_id: "s1".into(),
+            task_id: "12345678-abcd".into(),
+            sequence: 3,
+            branch_count: 2,
+            objective: "prepare replies".into(),
+            created_at_ms: 1_700_000_000_123,
+        });
+        assert!(!app.state.agent_activities.contains_key("s1"));
+        assert!(app.state.active_messages()[0]
+            .content
+            .contains("后台任务 #3 已挂起"));
+        assert_eq!(app.state.orchestration_tasks.len(), 1);
+        assert_eq!(app.state.orchestration_tasks[0].branches.len(), 2);
+    }
+
+    #[test]
+    fn background_hook_updates_branches_without_leaking_raw_hook_to_chat() {
+        let mut app = app();
+        app.state.active_session_id = Some("s1".into());
+        app.apply_backend_event(BackendEvent::ToolCall {
+            session_id: "s1".into(),
+            tool_name: "spawn_parallel_task".into(),
+            arguments: r#"{"objective":"reply","branches":[{"branch_id":"dm","task":"reply dm","target":{"kind":"qq_private","id":"100"}}]}"#.into(),
+        });
+        app.apply_backend_event(BackendEvent::BackgroundTaskStarted {
+            session_id: "s1".into(),
+            task_id: "task-1".into(),
+            sequence: 1,
+            branch_count: 1,
+            objective: "reply".into(),
+            created_at_ms: 1_700_000_000_000,
+        });
+        app.apply_backend_event(BackendEvent::BackgroundTaskCompleted {
+            session_id: "s1".into(),
+            task_id: "task-1".into(),
+            sequence: 1,
+            success: true,
+            completed_at_ms: 1_700_000_002_000,
+        });
+        let chat_len = app.state.active_messages().len();
+        app.apply_backend_event(BackendEvent::MessageReceived {
+            session_id: "s1".into(),
+            adapter_name: "background".into(),
+            platform: "qq".into(),
+            user_id: "1".into(),
+            user_name: "background task".into(),
+            channel: "direct".into(),
+            group_name: None,
+            content: r#"<background_task_event>{"task_id":"task-1","objective":"reply","completed_at":"2023-11-14T22:13:22.000Z","cancelled":false,"deliveries":[{"branch_id":"dm","target":{"kind":"qq_private","user_id":"100"},"success":true,"result":"sent","started_at":"2023-11-14T22:13:20.000Z","completed_at":"2023-11-14T22:13:22.000Z"}]}</background_task_event>"#.into(),
+            timestamp: 1_700_000_002,
+            received_at_ms: 1_700_000_002_100,
+            message_sequence: 9,
+        });
+        assert_eq!(app.state.active_messages().len(), chat_len);
+        let branch = &app.state.orchestration_tasks[0].branches[0];
+        assert_eq!(branch.target, "QQ 私聊 100");
+        assert_eq!(branch.result.as_deref(), Some("sent"));
+        assert_eq!(branch.status, crate::state::BranchStatus::Succeeded);
     }
 
     #[test]
