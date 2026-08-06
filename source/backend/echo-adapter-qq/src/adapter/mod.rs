@@ -238,11 +238,9 @@ impl QqAdapter {
             let self_id = self.inner.self_id.lock().ok().and_then(|g| g.clone());
             return Err(format!(
                 "QQ WebSocket未连接{}，请先使用 /qq login 登录",
-                if self_id.is_some() {
-                    format!(" (账号: {})", self_id.unwrap())
-                } else {
-                    String::new()
-                }
+                self_id
+                    .map(|id| format!(" (账号: {id})"))
+                    .unwrap_or_default()
             ));
         }
 
@@ -326,15 +324,11 @@ impl QqAdapter {
             let self_id_opt = self.inner.self_id.lock().ok().and_then(|g| g.clone());
             return Err(format!(
                 "QQ WebSocket未连接{}，请先使用 /qq login 登录",
-                if self_id_opt.is_some() {
-                    format!(" (账号: {})", self_id_opt.unwrap())
-                } else {
-                    String::new()
-                }
+                self_id_opt
+                    .map(|id| format!(" (账号: {id})"))
+                    .unwrap_or_default()
             ));
         }
-
-        // Check for active context and provide guidance if missing
         let ctx_opt = self
             .inner
             .active_context
@@ -1084,8 +1078,10 @@ mod tests {
             .mount(&onebot)
             .await;
 
-        let mut config = QqAdapterConfig::default();
-        config.napcat_onebot_url = onebot.uri();
+        let config = QqAdapterConfig {
+            napcat_onebot_url: onebot.uri(),
+            ..Default::default()
+        };
         let adapter = QqAdapter::new(config);
         adapter.inner.running.store(true, Ordering::SeqCst);
 
@@ -1099,8 +1095,10 @@ mod tests {
 
     #[test]
     fn friend_gate_respects_modes_and_owner_bypass() {
-        let mut config = QqAdapterConfig::default();
-        config.owner_qq = 999;
+        let config = QqAdapterConfig {
+            owner_qq: 999,
+            ..Default::default()
+        };
         let adapter = QqAdapter::new(config);
         let friends = || {
             vec![
@@ -1150,8 +1148,10 @@ mod tests {
             .mount(&onebot)
             .await;
 
-        let mut config = QqAdapterConfig::default();
-        config.napcat_onebot_url = onebot.uri();
+        let config = QqAdapterConfig {
+            napcat_onebot_url: onebot.uri(),
+            ..Default::default()
+        };
         let adapter = QqAdapter::new(config);
         adapter.inner.running.store(true, Ordering::SeqCst);
         adapter.update_allowlist(vec![111], vec![]);

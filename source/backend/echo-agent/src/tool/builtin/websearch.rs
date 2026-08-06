@@ -105,9 +105,7 @@ async fn search_bing(query: &str, max_results: usize) -> Result<Vec<SearchResult
         .map_err(|e| ToolError::Execution(format!("读取搜索响应失败: {e}")))?;
 
     if !status.is_success() {
-        return Err(ToolError::Execution(format!(
-            "搜索服务返回状态码 {status}"
-        )));
+        return Err(ToolError::Execution(format!("搜索服务返回状态码 {status}")));
     }
 
     Ok(parse_rss(&body, max_results))
@@ -151,7 +149,8 @@ fn clean_html(s: &str) -> String {
     }
     let tag_re = Regex::new(r"<[^>]*>").expect("tag regex");
     let ws_re = Regex::new(r"\s+").expect("ws regex");
-    ws_re.replace_all(&tag_re.replace_all(s, " "), " ")
+    ws_re
+        .replace_all(&tag_re.replace_all(s, " "), " ")
         .trim()
         .to_string()
 }
@@ -197,10 +196,12 @@ mod tests {
 
     #[test]
     fn decodes_entities() {
-        assert_eq!(decode_entities("a&amp;b&lt;c&gt;d&quot;e&#39;f"), "a&b<c>d\"e'f");
+        assert_eq!(
+            decode_entities("a&amp;b&lt;c&gt;d&quot;e&#39;f"),
+            "a&b<c>d\"e'f"
+        );
     }
 
-    #[tokio::test]
     #[tokio::test]
     #[ignore = "需要外网，按需手动运行"]
     async fn live_bing_search() {
