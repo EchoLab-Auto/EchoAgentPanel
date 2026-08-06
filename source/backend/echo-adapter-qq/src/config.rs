@@ -29,6 +29,10 @@ pub struct QqAdapterConfig {
     /// Default `http://localhost:6099`.
     #[serde(default = "default_napcat_url")]
     pub napcat_webui_url: String,
+    /// OneBot HTTP API URL used for management queries such as the full
+    /// group/friend list. Default `http://localhost:3000`.
+    #[serde(default = "default_onebot_url")]
+    pub napcat_onebot_url: String,
     /// Host used to reach NapCat's reverse-WS port when auto-configuring it.
     /// Defaults to `host.docker.internal` (NapCat in Docker); set to
     /// `127.0.0.1` when running everything on one host.
@@ -38,6 +42,10 @@ pub struct QqAdapterConfig {
 
 fn default_napcat_url() -> String {
     "http://localhost:6099".into()
+}
+
+fn default_onebot_url() -> String {
+    "http://localhost:3000".into()
 }
 
 fn default_napcat_host() -> String {
@@ -55,6 +63,7 @@ impl Default for QqAdapterConfig {
             filter: QqFilterConfig::default(),
             gate: QqGateConfig::default(),
             napcat_webui_url: default_napcat_url(),
+            napcat_onebot_url: default_onebot_url(),
             napcat_host: default_napcat_host(),
         }
     }

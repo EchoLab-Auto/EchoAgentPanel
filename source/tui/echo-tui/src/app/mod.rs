@@ -167,15 +167,23 @@ impl App {
             && self.state.form_overlay.form_kind == FormKind::QqFilter
         {
             let action = self.state.form_overlay.edit_label.clone();
-            crate::slash_commands::qq::handle_filter_action(
+            let changed = crate::slash_commands::qq::handle_filter_action(
                 &mut self.state,
                 &self.backend,
                 &action,
                 &content,
             );
-            self.state.form_overlay.deactivate();
-            self.state.menu_msg_idx = -1;
-            self.backend.send(BackendCommand::RequestQqFilterConfig);
+            if changed {
+                let is_deny = action.starts_with("denylist_");
+                let _ = self.state.form_overlay.back();
+                crate::slash_commands::qq::allowlist_deny_refresh(
+                    &mut self.state,
+                    &self.backend,
+                    is_deny,
+                );
+            } else {
+                self.state.refresh_menu_msg();
+            }
             return;
         }
 
@@ -283,6 +291,11 @@ impl App {
             let armed = self.state.quit_armed
                 && self.state.quit_armed_at.elapsed() <= Duration::from_secs(2);
             if active {
+                if self.state.form_overlay.state
+                    == crate::components::form_overlay::FormState::Editing
+                {
+                    self.prompt_input.clear_input();
+                }
                 if armed {
                     self.state.form_overlay.deactivate();
                     self.state.exit_config_mode();
@@ -406,13 +419,19 @@ impl App {
     /// If the QQ filter form is open, re-generate it so updated group/member
     /// lists appear immediately (called when GroupList or QqFilterConfig events arrive).
     pub(super) fn try_refresh_qq_filter_form(&mut self) {
-        use crate::components::form_overlay::FormKind;
-        if self.state.form_overlay.form_kind != FormKind::QqFilter {
+        use crate::components::form_overlay::{FormKind, FormState};
+        if !self.state.form_overlay.is_active()
+            || self.state.form_overlay.form_kind != FormKind::QqFilter
+            || self.state.form_overlay.state == FormState::Editing
+        {
             return;
         }
         let title = &self.state.form_overlay.title;
+        if !title.contains("白名单") && !title.contains("黑名单") {
+            return;
+        }
         let is_deny = title.contains("黑名单");
-        crate::slash_commands::qq::open_filter_form(&mut self.state, &self.backend, is_deny);
+        crate::slash_commands::qq::allowlist_deny_refresh(&mut self.state, &self.backend, is_deny);
     }
 
     /// Handle keys within the form overlay.
@@ -420,6 +439,9 @@ impl App {
         use crate::components::form_overlay::{FieldKind, FormField, FormKind, FormState};
 
         if key.code == KeyCode::Esc {
+            if self.state.form_overlay.state == FormState::Editing {
+                self.prompt_input.clear_input();
+            }
             let still_active = self.state.form_overlay.back();
             if still_active {
                 self.state.refresh_menu_msg();
@@ -448,22 +470,31 @@ impl App {
                     current_val.starts_with("allowlist_") || current_val.starts_with("denylist_");
                 let is_toggle = is_qq_action && current_val.contains("_toggle_group:");
                 let is_friend_toggle = is_qq_action && current_val.contains("_toggle_friend:");
-                let is_direct_remove = is_qq_action && current_val.contains("_remove_user:");
-                let needs_text_input = is_qq_action
+                let is_direct_remove = is_qq_action
+                    && (current_val.contains("_remove_user:")
+                        || current_val.contains("_remove_group:"));
+                let is_manual_add = is_qq_action && current_val.contains("_add_user_manual");
+                let needs_text_input = (is_qq_action
                     && !is_toggle
                     && !is_friend_toggle
                     && !is_direct_remove
-                    && !current_val.ends_with("__info__");
+                    && !current_val.ends_with("__info__"))
+                    || is_manual_add;
                 match key.code {
                     KeyCode::Char('e') if needs_text_input => {
                         if fo.form_kind == FormKind::QqFilter {
                             let val = fo.confirm().unwrap_or_default();
                             self.state.form_overlay.set_fields(vec![FormField {
-                                label: "QQ号".into(),
+                                label: if val.contains("_group") {
+                                    "群号".into()
+                                } else {
+                                    "QQ号".into()
+                                },
                                 value: String::new(),
                                 kind: FieldKind::Text,
                             }]);
                             self.state.form_overlay.edit_label = val;
+                            self.prompt_input.clear_input();
                             self.state.form_overlay.enter_edit();
                             self.state.mode = ConversationMode::Normal;
                         }
@@ -504,6 +535,7 @@ impl App {
                                 },
                             ]);
                             self.state.form_overlay.edit_label = label;
+                            self.prompt_input.clear_input();
                             self.state.form_overlay.enter_edit();
                         }
                     }
@@ -579,43 +611,14 @@ impl App {
                                     }
                                 }
                                 FormKind::QqFilter if is_direct_remove => {
-                                    // remove_user:123456 — remove user directly
-                                    if let Some(uid_str) = val.split(':').nth(1) {
-                                        if let Ok(uid) = uid_str.parse::<i64>() {
-                                            let is_deny = val.starts_with("denylist_");
-                                            let cfg = &self.state.qq_filter;
-                                            let (mut users, groups) = if is_deny {
-                                                (
-                                                    cfg.denylist_users.clone(),
-                                                    cfg.denylist_groups.clone(),
-                                                )
-                                            } else {
-                                                (
-                                                    cfg.allowlist_users.clone(),
-                                                    cfg.allowlist_groups.clone(),
-                                                )
-                                            };
-                                            users.retain(|u| *u != uid);
-                                            let cmd = if is_deny {
-                                                BackendCommand::UpdateQqDenylist {
-                                                    user_ids: users,
-                                                    group_ids: groups,
-                                                }
-                                            } else {
-                                                BackendCommand::UpdateQqAllowlist {
-                                                    user_ids: users,
-                                                    group_ids: groups,
-                                                }
-                                            };
-                                            self.backend.send(cmd);
-                                            self.backend
-                                                .send(BackendCommand::RequestQqFilterConfig);
-                                            let kind =
-                                                if is_deny { "黑名单" } else { "白名单" };
-                                            self.state.toast(
-                                                format!("已将用户 {uid} 从{kind}移除 ✓"),
-                                                ToastKind::Success,
-                                            );
+                                    if let Some(id) = val.split(':').nth(1) {
+                                        let is_deny = val.starts_with("denylist_");
+                                        if crate::slash_commands::qq::handle_filter_action(
+                                            &mut self.state,
+                                            &self.backend,
+                                            &val,
+                                            id,
+                                        ) {
                                             crate::slash_commands::qq::allowlist_deny_refresh(
                                                 &mut self.state,
                                                 &self.backend,
@@ -626,11 +629,16 @@ impl App {
                                 }
                                 FormKind::QqFilter if needs_text_input => {
                                     self.state.form_overlay.set_fields(vec![FormField {
-                                        label: "QQ号".into(),
+                                        label: if val.contains("_group") {
+                                            "群号".into()
+                                        } else {
+                                            "QQ号".into()
+                                        },
                                         value: String::new(),
                                         kind: FieldKind::Text,
                                     }]);
                                     self.state.form_overlay.edit_label = val;
+                                    self.prompt_input.clear_input();
                                     self.state.form_overlay.enter_edit();
                                     self.state.mode = ConversationMode::Normal;
                                 }
@@ -663,7 +671,10 @@ impl App {
                 }
             }
             FormState::Editing => {
-                // non-form keys fall through to prompt_input
+                let _ = self.prompt_input.handle_event(
+                    &Event::Input(crossterm::event::Event::Key(*key)),
+                    &mut self.state,
+                );
             }
             _ => {}
         }
@@ -1078,6 +1089,45 @@ mod tests {
     }
 
     #[test]
+    fn form_enter_on_qq_manual_add_accepts_typed_number() {
+        let mut app = app();
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::QqFilter,
+            vec![("手动添加用户", "allowlist_add_user_manual")],
+        );
+
+        app.handle_input(&key_event(KeyCode::Enter));
+        for ch in "123456".chars() {
+            app.handle_input(&key_event(KeyCode::Char(ch)));
+        }
+        app.handle_input(&key_event(KeyCode::Enter));
+
+        assert_eq!(app.state.pending_submit.as_deref(), Some("123456"));
+    }
+
+    #[test]
+    fn cancelling_qq_number_edit_discards_temporary_input() {
+        let mut app = app();
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::QqFilter,
+            vec![("手动添加用户", "allowlist_add_user_manual")],
+        );
+        app.handle_input(&key_event(KeyCode::Enter));
+        for ch in "123456".chars() {
+            app.handle_input(&key_event(KeyCode::Char(ch)));
+        }
+
+        app.handle_input(&key_event(KeyCode::Esc));
+        app.handle_input(&key_event(KeyCode::Esc));
+        app.handle_input(&key_event(KeyCode::Char('4')));
+        app.handle_input(&key_event(KeyCode::Enter));
+
+        assert_eq!(app.state.pending_submit.as_deref(), Some("4"));
+    }
+
+    #[test]
     fn form_enter_switches_gate_mode_and_sends_command() {
         let (bridge, handle) = echo_agent::create_bridge();
         let mut app = App::new(
@@ -1128,11 +1178,10 @@ mod tests {
 
         app.handle_submit("123456".into());
         assert!(
-            !app.state.form_overlay.is_active(),
-            "form closes after submit"
+            app.state.form_overlay.is_active(),
+            "list remains open after submit"
         );
-        // handle_filter_action sends UpdateQqAllowlist, then the submit
-        // path sends RequestQqFilterConfig.
+        assert_eq!(app.state.qq_filter.allowlist_users, vec![123456]);
         let mut commands = Vec::new();
         while let Some(cmd) = handle.try_recv_command() {
             commands.push(cmd);
@@ -1145,7 +1194,131 @@ mod tests {
             )),
             "UpdateQqAllowlist expected, got {commands:?}"
         );
-        assert!(commands.contains(&BackendCommand::RequestQqFilterConfig));
+    }
+
+    #[test]
+    fn invalid_qq_number_keeps_editor_open() {
+        let mut app = app();
+        app.state.form_overlay.activate(
+            "QQ 白名单管理",
+            vec![crate::components::form_overlay::SelectItem {
+                label: "手动添加".into(),
+                value: "allowlist_add_user_manual".into(),
+            }],
+            crate::components::form_overlay::FormKind::QqFilter,
+        );
+        app.state.form_overlay.edit_label = "allowlist_add_user_manual".into();
+        app.state.form_overlay.enter_edit();
+
+        app.handle_submit("12x34".into());
+
+        assert_eq!(
+            app.state.form_overlay.state,
+            crate::components::form_overlay::FormState::Editing
+        );
+        assert!(app.state.qq_filter.allowlist_users.is_empty());
+    }
+
+    #[test]
+    fn enter_on_existing_allowlist_user_removes_it() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let mut app = App::new(
+            Backend::new(std::sync::Arc::new(bridge)),
+            Theme::dark(),
+            Keybindings::default(),
+        );
+        app.state.qq_filter.allowlist_users = vec![123456, 234567];
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::QqFilter,
+            vec![("用户 123456", "allowlist_remove_user:123456")],
+        );
+
+        app.handle_input(&key_event(KeyCode::Enter));
+
+        assert_eq!(app.state.qq_filter.allowlist_users, vec![234567]);
+        assert!(matches!(
+            handle.try_recv_command(),
+            Some(BackendCommand::UpdateQqAllowlist { user_ids, .. })
+                if user_ids == vec![234567]
+        ));
+    }
+
+    #[test]
+    fn manual_group_add_and_direct_remove_work_without_group_list() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let mut app = App::new(
+            Backend::new(std::sync::Arc::new(bridge)),
+            Theme::dark(),
+            Keybindings::default(),
+        );
+        app.state.form_overlay.activate(
+            "QQ 白名单管理",
+            vec![crate::components::form_overlay::SelectItem {
+                label: "手动添加群".into(),
+                value: "allowlist_add_group_manual".into(),
+            }],
+            crate::components::form_overlay::FormKind::QqFilter,
+        );
+        app.state.form_overlay.edit_label = "allowlist_add_group_manual".into();
+        app.state.form_overlay.enter_edit();
+
+        app.handle_submit("987654".into());
+        assert_eq!(app.state.qq_filter.allowlist_groups, vec![987654]);
+        assert!(matches!(
+            handle.try_recv_command(),
+            Some(BackendCommand::UpdateQqAllowlist { group_ids, .. })
+                if group_ids == vec![987654]
+        ));
+
+        let remove_index = app
+            .state
+            .form_overlay
+            .select_items
+            .iter()
+            .position(|item| item.value == "allowlist_remove_group:987654")
+            .expect("saved group is shown even without a fetched group list");
+        app.state.form_overlay.select_idx = remove_index;
+        app.handle_input(&key_event(KeyCode::Enter));
+        assert!(app.state.qq_filter.allowlist_groups.is_empty());
+    }
+
+    #[test]
+    fn known_group_can_be_selected_from_group_list() {
+        let (bridge, handle) = echo_agent::create_bridge();
+        let mut app = App::new(
+            Backend::new(std::sync::Arc::new(bridge)),
+            Theme::dark(),
+            Keybindings::default(),
+        );
+        app.state.form_overlay.activate(
+            "QQ 白名单管理",
+            vec![],
+            crate::components::form_overlay::FormKind::QqFilter,
+        );
+        app.apply_backend_event(BackendEvent::GroupList {
+            groups: vec![echo_agent::event::GroupInfo {
+                group_id: 987654,
+                group_name: "known group".into(),
+            }],
+        });
+        let group_index = app
+            .state
+            .form_overlay
+            .select_items
+            .iter()
+            .position(|item| item.value == "allowlist_toggle_group:987654")
+            .expect("known group appears in the picker");
+        app.state.form_overlay.select_idx = group_index;
+
+        app.handle_input(&key_event(KeyCode::Enter));
+
+        assert_eq!(app.state.qq_filter.allowlist_groups, vec![987654]);
+        assert!(matches!(
+            handle.try_recv_command(),
+            Some(BackendCommand::UpdateQqAllowlist { group_ids, .. })
+                if group_ids == vec![987654]
+        ));
     }
 
     #[tokio::test]

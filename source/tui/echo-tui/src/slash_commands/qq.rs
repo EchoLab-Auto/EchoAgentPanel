@@ -157,6 +157,9 @@ use crate::components::form_overlay::{FormKind, FormOverlay, SelectItem};
 /// Open the QQ settings submenu with gate mode switch.
 pub fn setting(state: &mut AppState, backend: &Backend) {
     tracing::info!("TUI: /qq setting opened");
+
+    // Only request config if we don't have recent data
+    // This helps avoid excessive requests when user navigates quickly
     backend.send(BackendCommand::RequestQqFilterConfig);
 
     let mode = state.qq_gate_mode;
@@ -223,10 +226,23 @@ pub fn setting(state: &mut AppState, backend: &Backend) {
 /// Build a filter management form shared by allowlist and denylist.
 pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny: bool) {
     backend.send(BackendCommand::RequestQqFilterConfig);
+    state.qq_groups_loaded = false;
+    state.qq_friends_loaded = false;
     backend.send(BackendCommand::RequestGroupList);
-    if state.qq_friends.is_empty() {
-        backend.send(BackendCommand::RequestFriendList);
-    }
+    backend.send(BackendCommand::RequestFriendList);
+
+    render_filter_form(state, is_deny);
+}
+
+/// Rebuild an already-open filter form from cached data without issuing new
+/// backend requests. This is used by backend events and local edits.
+fn render_filter_form(state: &mut AppState, is_deny: bool) {
+    let selected_value = state.form_overlay.confirm().filter(|_| {
+        state
+            .form_overlay
+            .title
+            .contains(if is_deny { "黑名单" } else { "白名单" })
+    });
 
     let cfg = &state.qq_filter;
     let (list_users, list_groups) = if is_deny {
@@ -251,7 +267,7 @@ pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny:
     });
     for uid in list_users {
         items.push(SelectItem {
-            label: format!("  👤 {uid}"),
+            label: format!("  [×] {uid} (Enter删除)"),
             value: format!("{prefix}_remove_user:{uid}"),
         });
     }
@@ -261,14 +277,51 @@ pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny:
             value: "__info__".into(),
         });
     }
+    // Add option to manually add user by QQ number
+    items.push(SelectItem {
+        label: "  ➕ 手动添加用户 (Enter输入QQ号)".into(),
+        value: format!("{prefix}_add_user_manual"),
+    });
     items.push(SelectItem {
         label: String::new(),
         value: "__info__".into(),
     });
 
-    // ── Current groups (toggle list from QQ) ──
+    // ── Current groups ──
     items.push(SelectItem {
-        label: format!("── {kind_label}群列表 (Enter切换) ──"),
+        label: format!("── 当前{kind_label}群 ({}个) ──", list_groups.len()),
+        value: "__info__".into(),
+    });
+    for gid in list_groups {
+        let name = state
+            .qq_groups
+            .iter()
+            .find(|(known_id, _)| known_id == gid)
+            .map(|(_, name)| format!("{name} "))
+            .unwrap_or_default();
+        items.push(SelectItem {
+            label: format!("  [×] {name}({gid}) (Enter删除)"),
+            value: format!("{prefix}_remove_group:{gid}"),
+        });
+    }
+    if list_groups.is_empty() {
+        items.push(SelectItem {
+            label: "  (无)".into(),
+            value: "__info__".into(),
+        });
+    }
+    items.push(SelectItem {
+        label: "  ➕ 手动添加群 (Enter输入群号)".into(),
+        value: format!("{prefix}_add_group_manual"),
+    });
+    items.push(SelectItem {
+        label: String::new(),
+        value: "__info__".into(),
+    });
+
+    // ── Joined groups picker ──
+    items.push(SelectItem {
+        label: "── 所有已加入群 (Enter勾选/取消) ──".into(),
         value: "__info__".into(),
     });
 
@@ -303,9 +356,14 @@ pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny:
         label: "── QQ好友列表 (Enter添加/移除) ──".to_string(),
         value: "__info__".into(),
     });
-    if state.qq_friends.is_empty() {
+    if !state.qq_friends_loaded {
         items.push(SelectItem {
             label: "  (正在获取好友列表…)".into(),
+            value: "__info__".into(),
+        });
+    } else if state.qq_friends.is_empty() {
+        items.push(SelectItem {
+            label: "  (暂无好友，或QQ未连接)".into(),
             value: "__info__".into(),
         });
     } else {
@@ -335,9 +393,22 @@ pub(crate) fn open_filter_form(state: &mut AppState, backend: &Backend, is_deny:
         value: "__info__".into(),
     });
 
-    let title = format!("QQ {kind_label}管理 (↑↓选择 Enter切换 Esc退出)");
+    let title = format!("QQ {kind_label}管理 (↑↓选择 Enter/e执行 Esc退出)");
     let mut fo = FormOverlay::default();
     fo.activate(&title, items, FormKind::QqFilter);
+    let selected_index = selected_value
+        .and_then(|value| fo.select_items.iter().position(|item| item.value == value))
+        .or_else(|| {
+            fo.select_items
+                .iter()
+                .position(|item| item.value != "__info__")
+        });
+    if let Some(index) = selected_index {
+        fo.select_idx = index;
+        if index >= fo.viewport_size {
+            fo.select_scroll_offset = index + 1 - fo.viewport_size;
+        }
+    }
     state.form_overlay = fo;
     state.menu_msg_idx = -1;
     state.refresh_menu_msg();
@@ -354,8 +425,8 @@ pub fn denylist(state: &mut AppState, backend: &Backend) {
 }
 
 /// Refresh the allowlist/denylist form in-place (called after toggle).
-pub fn allowlist_deny_refresh(state: &mut AppState, backend: &Backend, is_deny: bool) {
-    open_filter_form(state, backend, is_deny);
+pub fn allowlist_deny_refresh(state: &mut AppState, _backend: &Backend, is_deny: bool) {
+    render_filter_form(state, is_deny);
 }
 
 /// Toggle a group in/out of the allowlist or denylist.  No text input needed.
@@ -385,7 +456,7 @@ pub fn handle_toggle_group(state: &mut AppState, backend: &Backend, action: &str
     if groups.contains(&group_id) {
         groups.retain(|g| *g != group_id);
         tracing::info!(%group_id, %kind_label, "TUI: remove group from filter");
-        backend.send(cmd(users, groups));
+        backend.send(cmd(users, groups.clone()));
         state.toast(
             format!("已将群 {group_id} 从{kind_label}移除 ✓"),
             ToastKind::Success,
@@ -395,14 +466,18 @@ pub fn handle_toggle_group(state: &mut AppState, backend: &Backend, action: &str
         groups.sort();
         groups.dedup();
         tracing::info!(%group_id, %kind_label, "TUI: add group to filter");
-        backend.send(cmd(users, groups));
+        backend.send(cmd(users, groups.clone()));
         state.toast(
             format!("已将群 {group_id} 添加到{kind_label} ✓"),
             ToastKind::Success,
         );
     }
-    // Refresh the form with updated state.
-    backend.send(BackendCommand::RequestQqFilterConfig);
+    if is_deny {
+        state.qq_filter.denylist_groups = groups;
+    } else {
+        state.qq_filter.allowlist_groups = groups;
+    }
+    render_filter_form(state, is_deny);
 }
 
 /// Toggle a friend in/out of the allowlist or denylist. Same logic as
@@ -439,78 +514,108 @@ pub fn handle_toggle_friend(state: &mut AppState, backend: &Backend, action: &st
 
     let cmd = if is_deny {
         BackendCommand::UpdateQqDenylist {
-            user_ids: users,
-            group_ids: groups,
+            user_ids: users.clone(),
+            group_ids: groups.clone(),
         }
     } else {
         BackendCommand::UpdateQqAllowlist {
-            user_ids: users,
-            group_ids: groups,
+            user_ids: users.clone(),
+            group_ids: groups.clone(),
         }
     };
     backend.send(cmd);
-    backend.send(BackendCommand::RequestQqFilterConfig);
+    if is_deny {
+        state.qq_filter.denylist_users = users;
+    } else {
+        state.qq_filter.allowlist_users = users;
+    }
+    render_filter_form(state, is_deny);
 }
 
-/// Handle a QQ filter action from the form overlay.  Used for text-input
-/// actions (add/remove user by QQ number).
+/// Apply a manually entered or directly selected user/group list action.
 pub fn handle_filter_action(
     state: &mut AppState,
     backend: &Backend,
     action: &str,
     qq_number: &str,
-) {
-    let qq: i64 = match qq_number.trim().parse() {
-        Ok(n) => n,
-        Err(_) => {
-            state.toast("无效的 QQ 号，请输入数字", ToastKind::Error);
-            return;
+) -> bool {
+    let number_label = if action.contains("_group") {
+        "群号"
+    } else {
+        "QQ 号"
+    };
+    let qq_number = qq_number.trim();
+    if qq_number.is_empty() || !qq_number.chars().all(|ch| ch.is_ascii_digit()) {
+        state.toast(
+            format!("无效的{number_label}，请输入数字"),
+            ToastKind::Error,
+        );
+        return false;
+    }
+    let qq: i64 = match qq_number.parse() {
+        Ok(n) if n > 0 => n,
+        _ => {
+            state.toast(
+                format!("无效的{number_label}，请输入正整数"),
+                ToastKind::Error,
+            );
+            return false;
         }
     };
 
     let cfg = &state.qq_filter;
-
+    let is_group = action.contains("_group");
     let is_add = action.contains("_add_");
     let is_deny = action.starts_with("denylist_");
     let kind_label = if is_deny { "黑名单" } else { "白名单" };
 
-    let (mut users, groups) = if is_deny {
+    let (mut users, mut groups) = if is_deny {
         (cfg.denylist_users.clone(), cfg.denylist_groups.clone())
     } else {
         (cfg.allowlist_users.clone(), cfg.allowlist_groups.clone())
     };
 
-    let already = users.contains(&qq);
+    let entries = if is_group { &mut groups } else { &mut users };
+    let already = entries.contains(&qq);
     if is_add && already {
-        state.toast(format!("用户 {qq} 已在{kind_label}中"), ToastKind::Info);
-        return;
+        let target = if is_group { "群" } else { "用户" };
+        state.toast(format!("{target} {qq} 已在{kind_label}中"), ToastKind::Info);
+        return false;
     }
 
     if is_add {
-        users.push(qq);
-        users.sort();
-        users.dedup();
+        entries.push(qq);
+        entries.sort();
+        entries.dedup();
     } else {
-        users.retain(|u| *u != qq);
+        entries.retain(|entry| *entry != qq);
     }
 
     let cmd = if is_deny {
         BackendCommand::UpdateQqDenylist {
-            user_ids: users,
-            group_ids: groups,
+            user_ids: users.clone(),
+            group_ids: groups.clone(),
         }
     } else {
         BackendCommand::UpdateQqAllowlist {
-            user_ids: users,
-            group_ids: groups,
+            user_ids: users.clone(),
+            group_ids: groups.clone(),
         }
     };
-    tracing::info!(%qq, %kind_label, is_add, "TUI: user filter action");
     backend.send(cmd);
+    if is_deny {
+        state.qq_filter.denylist_users = users;
+        state.qq_filter.denylist_groups = groups;
+    } else {
+        state.qq_filter.allowlist_users = users;
+        state.qq_filter.allowlist_groups = groups;
+    }
 
     let verb = if is_add { "添加到" } else { "从" };
+    let target = if is_group { "群" } else { "用户" };
     state.toast(
-        format!("已将用户 {qq} {verb}{kind_label} ✓"),
+        format!("已将{target} {qq} {verb}{kind_label} ✓"),
         ToastKind::Success,
     );
+    true
 }

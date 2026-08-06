@@ -396,14 +396,21 @@ impl Agent {
                                     nickname: name,
                                 })
                                 .collect();
-                            if !result.is_empty() {
-                                self.emit(BackendEvent::FriendList { friends: result });
-                            }
+                            // Always emit FriendList event, even if empty, to mark as loaded
+                            self.emit(BackendEvent::FriendList { friends: result });
                         }
                         Err(e) => {
+                            // Emit empty friend list to mark as attempted and avoid infinite loading
+                            self.emit(BackendEvent::FriendList { friends: vec![] });
+                            // Show user-friendly error message
+                            let error_msg = if e.to_string().contains("no QQ connection active") {
+                                "QQ未连接，请先使用 /qq login 登录".to_string()
+                            } else {
+                                format!("获取好友列表失败: {e}")
+                            };
                             self.emit(BackendEvent::Error {
                                 session_id: None,
-                                message: format!("failed to get friend list: {e}"),
+                                message: error_msg,
                             });
                         }
                     }

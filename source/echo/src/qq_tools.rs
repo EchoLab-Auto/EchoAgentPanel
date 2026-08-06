@@ -72,6 +72,18 @@ pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Ar
         }),
         adapter: qq,
     }));
+
+    registry.register(Arc::new(QqToolWrapper {
+        name: "get_friend_list".into(),
+        description:
+            "List QQ friends visible under the current gate mode. Returns user IDs and nicknames."
+                .into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {}
+        }),
+        adapter: qq_adapter,
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +196,49 @@ impl echo_agent::Tool for QqToolWrapper {
                 }
                 Err(e) => Err(ToolError::Execution(e)),
             },
+            "get_friend_list" => match self.adapter.get_gated_friend_list().await {
+                Ok(friends) => {
+                    let lines: Vec<String> = friends
+                        .iter()
+                        .map(|(user_id, nickname)| format!("  {user_id}: {nickname}"))
+                        .collect();
+                    if lines.is_empty() {
+                        Ok("no friends visible under the current gate".into())
+                    } else {
+                        Ok(format!(
+                            "{} visible friends:\n{}",
+                            friends.len(),
+                            lines.join("\n")
+                        ))
+                    }
+                }
+                Err(e) => Err(ToolError::Execution(e)),
+            },
             other => Err(ToolError::Execution(format!("unknown QQ tool: {other}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn registers_gate_filtered_friend_list_tool() {
+        let mut registry = echo_agent::ToolRegistry::new();
+        let adapter = Arc::new(QqAdapter::new(Default::default()));
+
+        register_qq_tools(&mut registry, adapter);
+
+        assert!(registry
+            .names()
+            .iter()
+            .any(|name| name == "get_friend_list"));
+        let definitions = registry.definitions().await;
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.name == "get_friend_list")
+            .expect("friend list tool definition");
+        assert!(definition.description.contains("gate"));
     }
 }

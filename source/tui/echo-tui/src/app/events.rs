@@ -173,12 +173,14 @@ impl App {
                     denylist_users,
                     denylist_groups,
                 };
+                self.try_refresh_qq_filter_form();
             }
             BackendEvent::FriendList { friends } => {
                 self.state.qq_friends = friends
                     .into_iter()
                     .map(|f| (f.user_id, f.nickname))
                     .collect();
+                self.state.qq_friends_loaded = true;
                 self.try_refresh_qq_filter_form();
             }
             BackendEvent::Error {
@@ -265,6 +267,53 @@ mod tests {
             self_id: Some("10001".into()),
         });
         assert!(!qq_entry(&app).unwrap().connected);
+    }
+
+    #[test]
+    fn filter_config_event_refreshes_open_allowlist() {
+        let mut app = app();
+        app.state.form_overlay.activate(
+            "QQ 白名单管理",
+            vec![],
+            crate::components::form_overlay::FormKind::QqFilter,
+        );
+
+        app.apply_backend_event(BackendEvent::QqFilterConfig {
+            allowlist_users: vec![123456],
+            allowlist_groups: vec![],
+            denylist_users: vec![],
+            denylist_groups: vec![],
+        });
+
+        assert!(app
+            .state
+            .form_overlay
+            .select_items
+            .iter()
+            .any(|item| item.value == "allowlist_remove_user:123456"));
+    }
+
+    #[test]
+    fn filter_config_event_does_not_replace_qq_settings_menu() {
+        let mut app = app();
+        app.state.form_overlay.activate(
+            "QQ 设置",
+            vec![crate::components::form_overlay::SelectItem {
+                label: "管理白名单".into(),
+                value: "qq_allowlist".into(),
+            }],
+            crate::components::form_overlay::FormKind::QqFilter,
+        );
+
+        app.apply_backend_event(BackendEvent::QqFilterConfig {
+            allowlist_users: vec![123456],
+            allowlist_groups: vec![],
+            denylist_users: vec![],
+            denylist_groups: vec![],
+        });
+
+        assert_eq!(app.state.form_overlay.title, "QQ 设置");
+        assert_eq!(app.state.form_overlay.select_items[0].value, "qq_allowlist");
     }
 
     #[test]

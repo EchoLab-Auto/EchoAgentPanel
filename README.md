@@ -150,6 +150,7 @@ enabled = true
 owner_qq = 0                            # 管理员 QQ（0=禁用，管理员消息绕过所有过滤）
 command_prefix = "/"
 napcat_webui_url = "http://localhost:6099"
+napcat_onebot_url = "http://localhost:3000" # 完整群/好友列表查询
 
 [adapters.qq.server]
 bind_address = "0.0.0.0:3131"

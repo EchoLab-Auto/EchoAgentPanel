@@ -69,6 +69,12 @@ pub struct FormOverlay {
     pub edit_label: String,
     /// Which kind of form this is.
     pub form_kind: FormKind,
+    /// Scroll offset for adaptive scrolling in Selecting mode.
+    pub select_scroll_offset: usize,
+    /// Scroll offset for adaptive scrolling in Editing mode.
+    pub edit_scroll_offset: usize,
+    /// Number of visible items in the viewport.
+    pub viewport_size: usize,
 }
 
 impl Default for FormOverlay {
@@ -82,6 +88,9 @@ impl Default for FormOverlay {
             field_idx: 0,
             edit_label: String::new(),
             form_kind: FormKind::default(),
+            select_scroll_offset: 0,
+            edit_scroll_offset: 0,
+            viewport_size: 10, // Default viewport shows 10 items
         }
     }
 }
@@ -96,19 +105,20 @@ impl FormOverlay {
     pub fn activate(&mut self, title: &str, items: Vec<SelectItem>, kind: FormKind) {
         self.state = FormState::Selecting;
         self.title = title.to_string();
+        // Calculate viewport size before moving items
+        self.viewport_size = (items.len().min(15)).max(5);
         self.select_items = items;
         self.select_idx = 0;
         self.fields.clear();
         self.field_idx = 0;
         self.form_kind = kind;
+        self.select_scroll_offset = 0;
+        self.edit_scroll_offset = 0;
     }
 
     pub fn deactivate(&mut self) {
         self.state = FormState::Inactive;
     }
-
-    /// Number of items to jump on PageUp / PageDown.
-    const PAGE_SIZE: isize = 10;
 
     // ── navigation ──
 
@@ -121,20 +131,66 @@ impl FormOverlay {
         };
         let len = len.max(1) as isize;
         *idx = ((*idx as isize + delta + len) % len) as usize;
+
+        // Adaptive scrolling based on mode
+        match self.state {
+            FormState::Selecting if !self.select_items.is_empty() => {
+                self.update_select_scroll_offset();
+            }
+            FormState::Editing if !self.fields.is_empty() => {
+                self.update_edit_scroll_offset();
+            }
+            _ => {}
+        }
     }
 
     fn navigate(&mut self, delta: isize) {
         self.shift_idx(delta);
     }
 
-    /// Jump one page forward or backward.
-    fn page_navigate(&mut self, forward: bool) {
-        let delta = if forward {
-            Self::PAGE_SIZE
-        } else {
-            -Self::PAGE_SIZE
-        };
-        self.shift_idx(delta);
+    /// Update scroll offset to ensure selected item is visible in the viewport (Selecting mode).
+    fn update_select_scroll_offset(&mut self) {
+        if self.select_items.is_empty() {
+            return;
+        }
+
+        let viewport_end = self.select_scroll_offset.saturating_add(self.viewport_size);
+        let selected = self.select_idx;
+
+        // If selected item is before viewport, scroll up
+        if selected < self.select_scroll_offset {
+            self.select_scroll_offset = selected;
+        }
+        // If selected item is after viewport, scroll down
+        else if selected >= viewport_end && self.viewport_size > 0 {
+            self.select_scroll_offset =
+                selected.saturating_sub(self.viewport_size.saturating_sub(1));
+            // Ensure we don't go beyond the list
+            let max_offset = self.select_items.len().saturating_sub(self.viewport_size);
+            self.select_scroll_offset = self.select_scroll_offset.min(max_offset);
+        }
+    }
+
+    /// Update scroll offset to ensure selected field is visible in the viewport (Editing mode).
+    fn update_edit_scroll_offset(&mut self) {
+        if self.fields.is_empty() {
+            return;
+        }
+
+        let viewport_end = self.edit_scroll_offset.saturating_add(self.viewport_size);
+        let selected = self.field_idx;
+
+        // If selected field is before viewport, scroll up
+        if selected < self.edit_scroll_offset {
+            self.edit_scroll_offset = selected;
+        }
+        // If selected field is after viewport, scroll down
+        else if selected >= viewport_end && self.viewport_size > 0 {
+            self.edit_scroll_offset = selected.saturating_sub(self.viewport_size.saturating_sub(1));
+            // Ensure we don't go beyond the list
+            let max_offset = self.fields.len().saturating_sub(self.viewport_size);
+            self.edit_scroll_offset = self.edit_scroll_offset.min(max_offset);
+        }
     }
 
     /// Jump to the first or last item.
@@ -143,15 +199,23 @@ impl FormOverlay {
             FormState::Selecting => {
                 if end {
                     self.select_idx = self.select_items.len().saturating_sub(1);
+                    // Scroll to show the last item
+                    let max_offset = self.select_items.len().saturating_sub(self.viewport_size);
+                    self.select_scroll_offset = max_offset;
                 } else {
                     self.select_idx = 0;
+                    self.select_scroll_offset = 0;
                 }
             }
             FormState::Editing => {
                 if end {
                     self.field_idx = self.fields.len().saturating_sub(1);
+                    // Scroll to show the last field
+                    let max_offset = self.fields.len().saturating_sub(self.viewport_size);
+                    self.edit_scroll_offset = max_offset;
                 } else {
                     self.field_idx = 0;
+                    self.edit_scroll_offset = 0;
                 }
             }
             _ => {}
@@ -282,36 +346,64 @@ impl FormOverlay {
                 let total = self.fields.len();
                 let pos = format!("{}/{}", self.field_idx.saturating_add(1), total);
                 lines.push(format!("── 编辑: {}  ({pos}) ──", self.edit_label));
-                lines.push(String::new());
-                for (i, field) in self.fields.iter().enumerate() {
-                    let mark = if i == self.field_idx { "▸ " } else { "  " };
-                    let display = match field.kind {
-                        FieldKind::Password => {
-                            if field.value.is_empty() {
-                                "(未设置)".to_string()
-                            } else {
-                                "***".to_string()
-                            }
-                        }
-                        FieldKind::Text => {
-                            if field.value.is_empty() {
-                                "(空)".to_string()
-                            } else {
-                                field.value.clone()
-                            }
-                        }
-                    };
-                    lines.push(format!("{mark}{}: {}", field.label, display));
+
+                // Show scroll indicators at appropriate positions
+                let has_scroll_up = self.edit_scroll_offset > 0;
+                let has_scroll_down = {
+                    let viewport_end = self
+                        .edit_scroll_offset
+                        .saturating_add(self.viewport_size)
+                        .min(total);
+                    viewport_end < total
+                };
+
+                if has_scroll_up {
+                    lines.push("    ▲ (向上滚动)".to_string());
+                } else {
+                    lines.push(String::new());
                 }
+
+                // Only render visible fields in the viewport
+                let viewport_end = self
+                    .edit_scroll_offset
+                    .saturating_add(self.viewport_size)
+                    .min(total);
+                for i in self.edit_scroll_offset..viewport_end {
+                    if let Some(field) = self.fields.get(i) {
+                        let mark = if i == self.field_idx { "▸ " } else { "  " };
+                        let display = match field.kind {
+                            FieldKind::Password => {
+                                if field.value.is_empty() {
+                                    "(未设置)".to_string()
+                                } else {
+                                    "***".to_string()
+                                }
+                            }
+                            FieldKind::Text => {
+                                if field.value.is_empty() {
+                                    "(空)".to_string()
+                                } else {
+                                    field.value.clone()
+                                }
+                            }
+                        };
+                        lines.push(format!("{mark}{}: {}", field.label, display));
+                    }
+                }
+
+                if has_scroll_down {
+                    lines.push("    ▼ (向下滚动)".to_string());
+                }
+
                 lines.push(String::new());
                 match self.form_kind {
                     FormKind::ApiConfig => {
                         lines.push(
-                            "↑↓选字段  PgUp/Dn翻页  直接输入改值  Ctrl+S保存  Ctrl+C×1返回  Ctrl+C×2退出".into(),
+                            "↑↓选字段  直接输入改值  Ctrl+S保存  Esc返回  Ctrl+C×2退出".into(),
                         );
                     }
                     FormKind::QqFilter => {
-                        lines.push("输入QQ号后 Enter确认  Esc取消".into());
+                        lines.push("输入号码后 Enter确认  Esc取消".into());
                     }
                     FormKind::SessionSelect => {
                         lines.push("选择会话后 Enter切换  Esc取消".into());
@@ -322,26 +414,49 @@ impl FormOverlay {
                 let total = self.select_items.len();
                 let pos = format!("{}/{}", self.select_idx.saturating_add(1), total);
                 lines.push(format!("── {}  ({pos}) ──", self.title));
-                lines.push(String::new());
+
+                // Show scroll indicators at appropriate positions
+                let has_scroll_up = self.select_scroll_offset > 0;
+                let has_scroll_down = {
+                    let viewport_end = self
+                        .select_scroll_offset
+                        .saturating_add(self.viewport_size)
+                        .min(total);
+                    viewport_end < total
+                };
+
+                if has_scroll_up {
+                    lines.push("    ▲ (向上滚动)".to_string());
+                } else {
+                    lines.push(String::new());
+                }
+
                 // Max visible width for labels (keep each row on one terminal line).
                 const LABEL_MAX_CHARS: usize = 64;
-                for (i, item) in self.select_items.iter().enumerate() {
-                    let mark = if i == self.select_idx { "▸" } else { " " };
-                    let radio = if item.value == "__info__" { " " } else { "●" };
-                    let label = truncate_label(&item.label, LABEL_MAX_CHARS);
-                    lines.push(format!(" {mark}{radio} {label}"));
+
+                // Only render visible items in the viewport
+                let viewport_end = self
+                    .select_scroll_offset
+                    .saturating_add(self.viewport_size)
+                    .min(total);
+                for i in self.select_scroll_offset..viewport_end {
+                    if let Some(item) = self.select_items.get(i) {
+                        let mark = if i == self.select_idx { "▸" } else { " " };
+                        let radio = if item.value == "__info__" { " " } else { "●" };
+                        let label = truncate_label(&item.label, LABEL_MAX_CHARS);
+                        lines.push(format!(" {mark}{radio} {label}"));
+                    }
                 }
+
+                if has_scroll_down {
+                    lines.push("    ▼ (向下滚动)".to_string());
+                }
+
                 lines.push(String::new());
                 let nav = match self.form_kind {
-                    FormKind::ApiConfig => {
-                        "↑↓选择  PgUp/Dn翻页  Home/End首尾  Enter切换  e编辑  Ctrl+C×2退出"
-                    }
-                    FormKind::QqFilter => {
-                        "↑↓选择  PgUp/Dn翻页  Home/End首尾  Enter/e执行  Ctrl+C×2退出"
-                    }
-                    FormKind::SessionSelect => {
-                        "↑↓选择  PgUp/Dn翻页  Home/End首尾  Enter切换  Ctrl+C×2退出"
-                    }
+                    FormKind::ApiConfig => "↑↓选择  Home/End首尾  Enter切换  e编辑  Ctrl+C×2退出",
+                    FormKind::QqFilter => "↑↓选择  Home/End首尾  Enter/e执行  Ctrl+C×2退出",
+                    FormKind::SessionSelect => "↑↓选择  Home/End首尾  Enter切换  Ctrl+C×2退出",
                 };
                 lines.push(nav.into());
             }
@@ -375,12 +490,17 @@ impl FormOverlay {
                 self.navigate(1);
                 return true;
             }
+            // PgUp/PgDn still work for faster navigation (jump by viewport size)
             KeyCode::PageUp => {
-                self.page_navigate(false);
+                // Jump up by viewport size
+                let jump = self.viewport_size as isize;
+                self.navigate(-jump);
                 return true;
             }
             KeyCode::PageDown => {
-                self.page_navigate(true);
+                // Jump down by viewport size
+                let jump = self.viewport_size as isize;
+                self.navigate(jump);
                 return true;
             }
             KeyCode::Home => {
@@ -647,18 +767,45 @@ mod tests {
     }
 
     #[test]
-    fn page_navigate_jumps_by_page_size() {
+    fn adaptive_scrolling_with_viewport() {
         let mut fo = FormOverlay::default();
-        fo.activate("t", items(25), FormKind::QqFilter); // 25 items
-        fo.page_navigate(true);
-        assert_eq!(fo.select_idx, 10, "PageDown jumps 10 forward");
-        fo.page_navigate(true);
+        fo.activate("t", items(25), FormKind::QqFilter); // 25 items, viewport size will be min(25, 15).max(5) = 15
+
+        // Initial state: scroll_offset = 0, select_idx = 0
+        assert_eq!(fo.select_scroll_offset, 0);
+        assert_eq!(fo.select_idx, 0);
+
+        // Navigate down beyond viewport to trigger scrolling
+        for _ in 0..20 {
+            fo.navigate(1);
+        }
+        // After 20 steps, select_idx should be 20 (wrapping: 0 + 20 = 20)
         assert_eq!(fo.select_idx, 20);
-        // Wraps around.
-        fo.page_navigate(true);
-        assert_eq!(fo.select_idx, 5, "wrap: 20+10=30 % 25 = 5");
-        fo.page_navigate(false);
-        assert_eq!(fo.select_idx, 20, "wrap back: 5-10+25=20");
+
+        // Scroll offset should have adjusted to keep selected item visible
+        // viewport_end = scroll_offset + 15 should be >= 20
+        let viewport_end = fo.select_scroll_offset + fo.viewport_size;
+        assert!(
+            viewport_end > fo.select_idx,
+            "selected item should be in viewport"
+        );
+
+        // Navigate to first item using jump_to
+        fo.jump_to(false);
+        assert_eq!(fo.select_idx, 0);
+        assert_eq!(
+            fo.select_scroll_offset, 0,
+            "scroll should reset when jumping to start"
+        );
+
+        // Navigate to last item using jump_to
+        fo.jump_to(true);
+        assert_eq!(fo.select_idx, 24);
+        // Scroll offset should show last items
+        assert!(
+            fo.select_scroll_offset > 0,
+            "scroll should adjust when jumping to end"
+        );
     }
 
     #[test]

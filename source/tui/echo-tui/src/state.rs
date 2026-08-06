@@ -158,6 +158,8 @@ pub struct AppState {
     pub qq_groups_loaded: bool,
     /// Cached QQ friend list (for allowlist/denylist picker).
     pub qq_friends: Vec<(i64, String)>,
+    /// Whether the friend list has been fetched at least once.
+    pub qq_friends_loaded: bool,
     // Mouse text selection
     pub selecting: bool,
     pub sel_anchor: Option<(usize, usize)>,
@@ -208,6 +210,7 @@ impl AppState {
             qq_groups: Vec::new(),
             qq_groups_loaded: false,
             qq_friends: Vec::new(),
+            qq_friends_loaded: false,
             selecting: false,
             sel_anchor: None,
             sel_other: None,

@@ -170,6 +170,7 @@ mod tests {
             subscribers: StdMutex::new(Vec::new()),
             filter: StdMutex::new(None),
             shutdown_tx: StdMutex::new(None),
+            napcat_config_task: StdMutex::new(None),
             tracker: echo_server::ConnectionTracker::default(),
             agent_bridge: StdMutex::new(None),
             extra_handlers: StdMutex::new(Vec::new()),

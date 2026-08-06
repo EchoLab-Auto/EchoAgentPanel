@@ -23,6 +23,8 @@ system_prompt = "请你使用中文"
 [adapters.qq]
 # 是否启用 QQ 适配器（启动时自动连接 NapCat）。
 enabled = false
+# NapCat OneBot HTTP API，用于读取完整群和好友列表。
+napcat_onebot_url = "http://localhost:3000"
 # 允许执行管理员命令（status/shutdown）的 QQ 号，0 表示禁用管理员命令。
 owner_qq = 0
 # 命令前缀。

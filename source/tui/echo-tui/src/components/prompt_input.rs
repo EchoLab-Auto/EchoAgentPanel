@@ -288,7 +288,7 @@ impl Component for PromptInput {
 }
 
 impl PromptInput {
-    fn clear_input(&mut self) {
+    pub(crate) fn clear_input(&mut self) {
         self.textarea.select_all();
         self.textarea.delete_line_by_end();
         self.textarea.move_cursor(tui_textarea::CursorMove::Bottom);

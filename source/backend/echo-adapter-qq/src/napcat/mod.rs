@@ -51,6 +51,12 @@ where
     })
 }
 
+fn json_i64(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+}
+
 /// NapCat connection result.
 #[derive(Debug)]
 pub enum NapCatState {
@@ -168,6 +174,78 @@ impl NapCatClient {
             nickname,
             message: Some("via OneBot API".into()),
         })
+    }
+
+    async fn onebot_action(&self, action: &str) -> Result<serde_json::Value, String> {
+        let url = format!("{}/{action}", self.onebot_url);
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .map_err(|e| format!("OneBot {action} HTTP error: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(format!("OneBot {action} returned HTTP {status}"));
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("OneBot {action} parse error: {e}"))?;
+        let retcode = body.get("retcode").and_then(json_i64).unwrap_or(0);
+        if retcode != 0 || body.get("status").and_then(|v| v.as_str()) == Some("failed") {
+            let message = body
+                .get("message")
+                .or_else(|| body.get("wording"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown OneBot error");
+            return Err(format!("OneBot {action} failed ({retcode}): {message}"));
+        }
+        body.get("data")
+            .cloned()
+            .ok_or_else(|| format!("OneBot {action} response has no data"))
+    }
+
+    /// Fetch every group visible to the logged-in QQ account.
+    pub async fn get_group_list(&self) -> Result<Vec<(i64, String)>, String> {
+        let data = self.onebot_action("get_group_list").await?;
+        let groups = data
+            .as_array()
+            .ok_or("OneBot get_group_list data is not an array")?
+            .iter()
+            .filter_map(|item| {
+                let id = json_i64(item.get("group_id")?)?;
+                let name = item
+                    .get("group_name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("(unknown)")
+                    .to_string();
+                Some((id, name))
+            })
+            .collect();
+        Ok(groups)
+    }
+
+    /// Fetch every friend visible to the logged-in QQ account.
+    pub async fn get_friend_list(&self) -> Result<Vec<(i64, String)>, String> {
+        let data = self.onebot_action("get_friend_list").await?;
+        let friends = data
+            .as_array()
+            .ok_or("OneBot get_friend_list data is not an array")?
+            .iter()
+            .filter_map(|item| {
+                let id = json_i64(item.get("user_id")?)?;
+                let name = item
+                    .get("nickname")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("(unknown)")
+                    .to_string();
+                Some((id, name))
+            })
+            .collect();
+        Ok(friends)
     }
 
     // ---- reverse WebSocket configuration ----
@@ -327,6 +405,48 @@ mod tests {
         let status = client.login_status().await.expect("fallback works");
         assert!(status.online);
         assert_eq!(status.user_id.as_deref(), Some("777"));
+    }
+
+    #[tokio::test]
+    async fn get_group_list_returns_all_groups_with_numeric_or_string_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/get_group_list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "retcode": 0,
+                "data": [
+                    {"group_id": 111, "group_name": "alpha"},
+                    {"group_id": "222", "group_name": "beta"}
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let client = NapCatClient::with_onebot_url("http://localhost:1", &server.uri());
+
+        assert_eq!(
+            client.get_group_list().await.unwrap(),
+            vec![(111, "alpha".into()), (222, "beta".into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn get_group_list_reports_onebot_failure() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/get_group_list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "failed",
+                "retcode": 1404,
+                "message": "not logged in",
+                "data": null
+            })))
+            .mount(&server)
+            .await;
+        let client = NapCatClient::with_onebot_url("http://localhost:1", &server.uri());
+
+        let error = client.get_group_list().await.unwrap_err();
+        assert!(error.contains("not logged in"), "{error}");
     }
 
     #[tokio::test]

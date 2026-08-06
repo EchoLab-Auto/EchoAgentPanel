@@ -192,6 +192,8 @@ Inactive ──activate()──→ Selecting ──enter_edit()──→ Editing
 | QqFilter | /qq allowlist | Enter=切换群/e=输QQ号 | 单字段 QQ 号输入 |
 | SessionSelect | /resume | Enter=切换会话 | 无编辑 |
 
+> 📖 **详细交互设计**: 参见 [QQ Setting 交互设计文档](./qq-setting-interaction.md) 了解完整的 `/qq setting` 交互流程、状态管理和用户体验设计。
+
 ### 关键设计决策
 
 - **内嵌渲染而非弹窗**：表单作为系统消息显示在聊天区，用户可以滚动查看上下文

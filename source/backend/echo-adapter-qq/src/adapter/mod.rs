@@ -17,6 +17,11 @@ use echo_server::{ConnCallback, Context, HandlerRegistry, Server, ServerConfig};
 use tokio::sync::mpsc;
 
 use crate::config::QqAdapterConfig;
+use crate::napcat::NapCatState;
+use crate::NapCatClient;
+
+const NAPCAT_INITIAL_CHECK_DELAY: Duration = Duration::from_secs(2);
+const NAPCAT_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Gating mode — mutually exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +46,7 @@ pub(crate) struct QqInner {
     pub(crate) subscribers: StdMutex<Vec<mpsc::UnboundedSender<AdapterEvent>>>,
     pub(crate) filter: StdMutex<Option<Arc<FilterPipeline>>>,
     pub(crate) shutdown_tx: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    pub(crate) napcat_config_task: StdMutex<Option<tokio::task::AbortHandle>>,
     pub(crate) tracker: echo_server::ConnectionTracker,
     /// Agent bridge (set externally before start). Adapters depend only on
     /// the [`echo_adapter::AgentBridge`] trait, not on echo-agent itself.
@@ -110,6 +116,7 @@ impl QqAdapter {
                 subscribers: StdMutex::new(Vec::new()),
                 filter: StdMutex::new(None), // built below via rebuild_filter_pipeline
                 shutdown_tx: StdMutex::new(None),
+                napcat_config_task: StdMutex::new(None),
                 tracker: echo_server::ConnectionTracker::default(),
                 agent_bridge: StdMutex::new(None),
                 extra_handlers: StdMutex::new(Vec::new()),
@@ -124,6 +131,51 @@ impl QqAdapter {
         // Build the pipeline respecting gate mode.
         adapter.rebuild_filter_pipeline();
         adapter
+    }
+
+    async fn maintain_napcat_connection(
+        inner: Arc<QqInner>,
+        napcat: NapCatClient,
+        ws_url: String,
+        token: String,
+        initial_delay: Duration,
+        retry_interval: Duration,
+    ) {
+        tokio::time::sleep(initial_delay).await;
+
+        let mut last_state = None;
+        while inner.running.load(Ordering::SeqCst) && !inner.connected.load(Ordering::SeqCst) {
+            match napcat.check().await {
+                NapCatState::Online { user_id, nickname } => {
+                    if last_state != Some("online") {
+                        tracing::info!(
+                            %user_id,
+                            %nickname,
+                            %ws_url,
+                            "NapCat online - configuring reverse WebSocket"
+                        );
+                    }
+                    if let Err(e) = napcat.configure_reverse_ws(&ws_url, &token).await {
+                        tracing::warn!(error = %e, "NapCat auto-config failed; will retry");
+                    }
+                    last_state = Some("online");
+                }
+                NapCatState::WaitingForLogin => {
+                    if last_state != Some("waiting") {
+                        tracing::info!("NapCat running, waiting for QQ login");
+                    }
+                    last_state = Some("waiting");
+                }
+                NapCatState::Unreachable => {
+                    if last_state != Some("unreachable") {
+                        tracing::info!("NapCat API is not reachable; waiting for it to start");
+                    }
+                    last_state = Some("unreachable");
+                }
+            }
+
+            tokio::time::sleep(retry_interval).await;
+        }
     }
 
     /// Set the agent reference — must be called before start().
@@ -148,13 +200,72 @@ impl QqAdapter {
 
     /// Get ALL groups without gate-mode filtering (privileged — used by TUI).
     pub async fn get_all_groups(&self) -> Result<Vec<(i64, String)>, String> {
-        let ctx = self
+        // Add diagnostic logging
+        let connected = self.inner.connected.load(Ordering::SeqCst);
+        let running = self.inner.running.load(Ordering::SeqCst);
+        let has_context = self
+            .inner
+            .active_context
+            .lock()
+            .ok()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+
+        tracing::info!(
+            "get_all_groups called - connected: {}, running: {}, has_context: {}, self_id: {:?}",
+            connected,
+            running,
+            has_context,
+            self.inner.self_id.lock().ok()
+        );
+
+        // First check if QQ adapter is running
+        if !running {
+            return Err("QQ适配器未启动，请检查配置".to_string());
+        }
+
+        let napcat = NapCatClient::with_onebot_url(
+            &self.inner.config.napcat_webui_url,
+            &self.inner.config.napcat_onebot_url,
+        );
+        match napcat.get_group_list().await {
+            Ok(groups) => return Ok(groups),
+            Err(error) => {
+                tracing::debug!(%error, "OneBot HTTP group list unavailable; trying WebSocket");
+            }
+        }
+
+        // Fall back to reverse WebSocket when the HTTP API is unavailable.
+        if !connected {
+            let self_id = self.inner.self_id.lock().ok().and_then(|g| g.clone());
+            return Err(format!(
+                "QQ WebSocket未连接{}，请先使用 /qq login 登录",
+                if self_id.is_some() {
+                    format!(" (账号: {})", self_id.unwrap())
+                } else {
+                    String::new()
+                }
+            ));
+        }
+
+        // Check for active context and provide guidance if missing
+        let ctx_opt = self
             .inner
             .active_context
             .lock()
             .map_err(|e| format!("lock poisoned: {e}"))?
-            .clone()
-            .ok_or("no QQ connection active")?;
+            .clone();
+
+        let ctx = match ctx_opt {
+            Some(ctx) => ctx,
+            None => {
+                // QQ is connected but API context not yet activated
+                return Err(
+                    "QQ已连接但API上下文尚未激活，请发送任意消息到QQ群组来激活API功能".to_string(),
+                );
+            }
+        };
+
         let request = echo_core::action::actions::get_group_list();
         let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
         let groups: Vec<(i64, String)> = resp
@@ -177,13 +288,72 @@ impl QqAdapter {
 
     /// Get the QQ friend list via the active QQ connection.
     pub async fn get_friend_list(&self) -> Result<Vec<(i64, String)>, String> {
-        let ctx = self
+        // Add diagnostic logging
+        let connected = self.inner.connected.load(Ordering::SeqCst);
+        let running = self.inner.running.load(Ordering::SeqCst);
+        let has_context = self
+            .inner
+            .active_context
+            .lock()
+            .ok()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+
+        tracing::info!(
+            "get_friend_list called - connected: {}, running: {}, has_context: {}, self_id: {:?}",
+            connected,
+            running,
+            has_context,
+            self.inner.self_id.lock().ok()
+        );
+
+        // First check if QQ adapter is running
+        if !running {
+            return Err("QQ适配器未启动，请检查配置".to_string());
+        }
+
+        let napcat = NapCatClient::with_onebot_url(
+            &self.inner.config.napcat_webui_url,
+            &self.inner.config.napcat_onebot_url,
+        );
+        match napcat.get_friend_list().await {
+            Ok(friends) => return Ok(friends),
+            Err(error) => {
+                tracing::debug!(%error, "OneBot HTTP friend list unavailable; trying WebSocket");
+            }
+        }
+
+        // Fall back to reverse WebSocket when the HTTP API is unavailable.
+        if !connected {
+            let self_id_opt = self.inner.self_id.lock().ok().and_then(|g| g.clone());
+            return Err(format!(
+                "QQ WebSocket未连接{}，请先使用 /qq login 登录",
+                if self_id_opt.is_some() {
+                    format!(" (账号: {})", self_id_opt.unwrap())
+                } else {
+                    String::new()
+                }
+            ));
+        }
+
+        // Check for active context and provide guidance if missing
+        let ctx_opt = self
             .inner
             .active_context
             .lock()
             .map_err(|e| format!("lock poisoned: {e}"))?
-            .clone()
-            .ok_or("no QQ connection active")?;
+            .clone();
+
+        let ctx = match ctx_opt {
+            Some(ctx) => ctx,
+            None => {
+                // QQ is connected but API context not yet activated
+                return Err(
+                    "QQ已连接但API上下文尚未激活，请发送任意消息到QQ群组来激活API功能".to_string(),
+                );
+            }
+        };
+
         let request = echo_core::action::actions::get_friend_list();
         let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
         let friends: Vec<(i64, String)> = resp
@@ -202,6 +372,41 @@ impl QqAdapter {
             })
             .collect();
         Ok(friends)
+    }
+
+    /// Get the friend list visible under the current gate configuration.
+    /// The TUI deliberately uses [`get_friend_list`](Self::get_friend_list)
+    /// instead so administrators can still edit the complete list.
+    pub async fn get_gated_friend_list(&self) -> Result<Vec<(i64, String)>, String> {
+        let friends = self.get_friend_list().await?;
+        Ok(self.apply_friend_gate(friends))
+    }
+
+    fn apply_friend_gate(&self, mut friends: Vec<(i64, String)>) -> Vec<(i64, String)> {
+        let mode = self.get_gate_mode();
+        if mode == QqGateMode::None {
+            return friends;
+        }
+
+        let cfg = self.get_filter_config();
+        let owner = self.inner.config.owner_qq;
+        match mode {
+            QqGateMode::Allowlist => {
+                let allowed: std::collections::HashSet<i64> =
+                    cfg.allowlist.user_ids.into_iter().collect();
+                // An empty user allowlist does not restrict direct messages.
+                if !allowed.is_empty() {
+                    friends.retain(|(user_id, _)| *user_id == owner || allowed.contains(user_id));
+                }
+            }
+            QqGateMode::Denylist => {
+                let denied: std::collections::HashSet<i64> =
+                    cfg.denylist.user_ids.into_iter().collect();
+                friends.retain(|(user_id, _)| *user_id == owner || !denied.contains(user_id));
+            }
+            QqGateMode::None => {}
+        }
+        friends
     }
 
     /// Get group list via the active QQ connection.
@@ -410,6 +615,8 @@ impl Adapter for QqAdapter {
                 tracing::info!(%self_id, "NapCat client connected via reverse WebSocket");
             } else {
                 tracing::warn!("NapCat client disconnected");
+                // Clear active context when disconnected
+                *inner_cb.active_context.lock().expect("ctx poisoned") = None;
             }
             inner_cb.connected.store(connected, Ordering::SeqCst);
             if let Some(ref bridge) = *inner_cb.agent_bridge.lock().expect("agent bridge poisoned")
@@ -454,36 +661,27 @@ impl Adapter for QqAdapter {
             inner.running.store(false, Ordering::SeqCst);
         });
 
-        // Auto-configure NapCat reverse WebSocket (background).
-        // NapCat usually runs in Docker — reach the host via the configured
-        // host (default host.docker.internal).
+        // Keep trying until NapCat has logged in and established the reverse
+        // WebSocket. Startup commonly happens before the QR login completes.
         let napcat_url = self.inner.config.napcat_webui_url.clone();
+        let onebot_url = self.inner.config.napcat_onebot_url.clone();
         let napcat_host = self.inner.config.napcat_host.clone();
         let port = bind_addr.split(':').next_back().unwrap_or("3131");
         let ws_url = format!("ws://{napcat_host}:{port}");
         let token = self.inner.config.server.access_token.clone();
-        tokio::spawn(async move {
-            let napcat = crate::NapCatClient::new(&napcat_url);
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            match napcat.check().await {
-                crate::napcat::NapCatState::Online { user_id, nickname } => {
-                    tracing::info!(%user_id, %nickname, "NapCat detected — configuring reverse WS to {ws_url}");
-                    if let Err(e) = napcat.configure_reverse_ws(&ws_url, &token).await {
-                        tracing::warn!(error = %e, "NapCat auto-config failed");
-                    }
-                }
-                crate::napcat::NapCatState::WaitingForLogin => {
-                    tracing::info!(
-                        "NapCat running, not logged in — will try auto-config after login"
-                    );
-                }
-                crate::napcat::NapCatState::Unreachable => {
-                    tracing::info!(
-                        "NapCat WebUI not reachable at {napcat_url} — skipping auto-config"
-                    );
-                }
-            }
-        });
+        let config_task = tokio::spawn(Self::maintain_napcat_connection(
+            self.inner.clone(),
+            NapCatClient::with_onebot_url(&napcat_url, &onebot_url),
+            ws_url,
+            token,
+            NAPCAT_INITIAL_CHECK_DELAY,
+            NAPCAT_RETRY_INTERVAL,
+        ));
+        *self
+            .inner
+            .napcat_config_task
+            .lock()
+            .map_err(|e| AdapterError::Internal(e.to_string()))? = Some(config_task.abort_handle());
 
         tracing::info!(address = %bind_addr, "QQ adapter started");
         Ok(())
@@ -501,6 +699,15 @@ impl Adapter for QqAdapter {
             .take();
         if let Some(tx) = tx {
             let _ = tx.send(());
+        }
+        if let Some(handle) = self
+            .inner
+            .napcat_config_task
+            .lock()
+            .map_err(|e| AdapterError::Internal(e.to_string()))?
+            .take()
+        {
+            handle.abort();
         }
         self.inner.running.store(false, Ordering::SeqCst);
         Ok(())
@@ -750,6 +957,157 @@ impl Adapter for QqAdapter {
 mod tests {
     use super::*;
     use echo_core::Event;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn mount_login_info(server: &MockServer, user_id: i64) {
+        Mock::given(method("POST"))
+            .and(path("/get_login_info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "retcode": 0,
+                "data": {"user_id": user_id, "nickname": "bot"}
+            })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn configures_reverse_ws_when_login_completes_after_startup() {
+        let onebot = MockServer::start().await;
+        mount_login_info(&onebot, 0).await;
+
+        let webui = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/network/wsReverse"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&webui)
+            .await;
+
+        let adapter = QqAdapter::new(QqAdapterConfig::default());
+        adapter.inner.running.store(true, Ordering::SeqCst);
+        let client = NapCatClient::with_onebot_url(&webui.uri(), &onebot.uri());
+        let task = tokio::spawn(QqAdapter::maintain_napcat_connection(
+            adapter.inner.clone(),
+            client,
+            "ws://host.docker.internal:3131".into(),
+            String::new(),
+            Duration::ZERO,
+            Duration::from_millis(10),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(webui.received_requests().await.unwrap().is_empty());
+
+        onebot.reset().await;
+        mount_login_info(&onebot, 10001).await;
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if !webui.received_requests().await.unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("reverse WebSocket configuration was not requested");
+
+        adapter.inner.connected.store(true, Ordering::SeqCst);
+        task.await.expect("maintenance task failed");
+    }
+
+    #[tokio::test]
+    async fn all_groups_use_onebot_http_without_websocket_context() {
+        let onebot = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/get_group_list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "retcode": 0,
+                "data": [{"group_id": 987654, "group_name": "known group"}]
+            })))
+            .mount(&onebot)
+            .await;
+
+        let mut config = QqAdapterConfig::default();
+        config.napcat_onebot_url = onebot.uri();
+        let adapter = QqAdapter::new(config);
+        adapter.inner.running.store(true, Ordering::SeqCst);
+
+        assert_eq!(
+            adapter.get_all_groups().await.unwrap(),
+            vec![(987654, "known group".into())]
+        );
+        assert!(!adapter.inner.connected.load(Ordering::SeqCst));
+        assert!(adapter.inner.active_context.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn friend_gate_respects_modes_and_owner_bypass() {
+        let mut config = QqAdapterConfig::default();
+        config.owner_qq = 999;
+        let adapter = QqAdapter::new(config);
+        let friends = || {
+            vec![
+                (111, "allowed".into()),
+                (222, "other".into()),
+                (999, "owner".into()),
+            ]
+        };
+
+        assert_eq!(adapter.apply_friend_gate(friends()), friends());
+
+        adapter.update_allowlist(vec![], vec![123]);
+        adapter.set_gate_mode(QqGateMode::Allowlist);
+        assert_eq!(
+            adapter.apply_friend_gate(friends()),
+            friends(),
+            "a group-only allowlist does not restrict direct-message friends"
+        );
+
+        adapter.update_allowlist(vec![111], vec![]);
+        assert_eq!(
+            adapter.apply_friend_gate(friends()),
+            vec![(111, "allowed".into()), (999, "owner".into())]
+        );
+
+        adapter.update_denylist(vec![222, 999], vec![]);
+        adapter.set_gate_mode(QqGateMode::Denylist);
+        assert_eq!(
+            adapter.apply_friend_gate(friends()),
+            vec![(111, "allowed".into()), (999, "owner".into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn gated_friend_list_filters_onebot_results() {
+        let onebot = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/get_friend_list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "retcode": 0,
+                "data": [
+                    {"user_id": 111, "nickname": "allowed"},
+                    {"user_id": 222, "nickname": "blocked"}
+                ]
+            })))
+            .mount(&onebot)
+            .await;
+
+        let mut config = QqAdapterConfig::default();
+        config.napcat_onebot_url = onebot.uri();
+        let adapter = QqAdapter::new(config);
+        adapter.inner.running.store(true, Ordering::SeqCst);
+        adapter.update_allowlist(vec![111], vec![]);
+        adapter.set_gate_mode(QqGateMode::Allowlist);
+
+        assert_eq!(
+            adapter.get_gated_friend_list().await.unwrap(),
+            vec![(111, "allowed".into())]
+        );
+    }
 
     fn private_event(text: &str) -> Event {
         serde_json::from_value(serde_json::json!({
