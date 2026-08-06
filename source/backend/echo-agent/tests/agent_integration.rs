@@ -5,10 +5,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use echo_adapter::AdapterRegistry;
-use echo_agent::llm::{ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, Usage};
+use echo_agent::llm::{
+    ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, Usage,
+};
+use echo_agent::tool::{Tool, ToolError};
 use echo_agent::{
     Agent, AgentConfig, BackendCommand, BackendEvent, SessionKey, SkillRegistry, ToolRegistry,
 };
+use std::collections::VecDeque;
 
 /// A static-reply provider that counts calls and records the last system prompt.
 struct StaticProvider {
@@ -52,6 +56,81 @@ impl StaticProvider {
             .await
             .clone()
             .unwrap_or_default()
+    }
+}
+
+/// A provider that replays a fixed script of responses, recording the last
+/// system prompt seen. Used to exercise the delivery-correction loop.
+struct ScriptedProvider {
+    script: tokio::sync::Mutex<VecDeque<ChatResponse>>,
+    calls: AtomicUsize,
+    last_system_prompt: tokio::sync::Mutex<Option<String>>,
+}
+
+#[async_trait]
+impl LlmProvider for ScriptedProvider {
+    fn name(&self) -> &str {
+        "scripted"
+    }
+    fn default_model(&self) -> &str {
+        "scripted-model"
+    }
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let system = &request.messages[0];
+        assert_eq!(system.role, echo_agent::llm::ChatRole::System);
+        *self.last_system_prompt.lock().await = Some(system.content.clone());
+        self.script
+            .lock()
+            .await
+            .pop_front()
+            .ok_or_else(|| LlmError::Config("script exhausted".into()))
+    }
+    async fn chat_stream(
+        &self,
+        _request: &ChatRequest,
+        _tx: tokio::sync::mpsc::UnboundedSender<ChatChunk>,
+    ) -> Result<(), LlmError> {
+        Ok(())
+    }
+}
+
+impl ScriptedProvider {
+    fn new(script: Vec<ChatResponse>) -> Self {
+        Self {
+            script: tokio::sync::Mutex::new(script.into()),
+            calls: AtomicUsize::new(0),
+            last_system_prompt: tokio::sync::Mutex::new(None),
+        }
+    }
+    async fn last_system_prompt(&self) -> String {
+        self.last_system_prompt
+            .lock()
+            .await
+            .clone()
+            .unwrap_or_default()
+    }
+}
+
+/// A tool that returns a canned result.
+struct MockTool {
+    name: &'static str,
+    result: String,
+}
+
+#[async_trait]
+impl Tool for MockTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "mock tool"
+    }
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    async fn execute(&self, _arguments: serde_json::Value) -> Result<String, ToolError> {
+        Ok(self.result.clone())
     }
 }
 
@@ -438,7 +517,42 @@ async fn always_skill_coexists_with_keyword_skill_and_qq_context() {
 
 #[tokio::test]
 async fn qq_hook_input_enforces_transport_boundary() {
-    let (agent, provider) = test_agent("ok");
+    // First answer comes without a send tool, forcing a delivery correction;
+    // then the agent calls send_private_msg and finishes with a direct reply.
+    let script = vec![
+        ChatResponse {
+            content: Some("backend only".into()),
+            tool_calls: vec![],
+            usage: Usage::default(),
+        },
+        ChatResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "send_1".into(),
+                name: "send_private_msg".into(),
+                arguments: r#"{"user_id":123,"content":"收到"}"#.into(),
+            }],
+            usage: Usage::default(),
+        },
+        ChatResponse {
+            content: Some("delivered".into()),
+            tool_calls: vec![],
+            usage: Usage::default(),
+        },
+    ];
+    let provider = Arc::new(ScriptedProvider::new(script));
+    let mut tools = ToolRegistry::new();
+    tools.register(Arc::new(MockTool {
+        name: "send_private_msg",
+        result: "private message sent".into(),
+    }));
+    let agent = Arc::new(Agent::new(
+        provider.clone(),
+        AgentConfig::default(),
+        SkillRegistry::new(),
+        tools,
+        Arc::new(AdapterRegistry::new()),
+    ));
     let key = SessionKey::parse("qq:dm::123").unwrap();
     let session = agent.sessions.get_or_create(&key, "u".into(), None);
     let hook = concat!(

@@ -705,8 +705,8 @@ impl Agent {
         });
 
         let delivery_plan = DeliveryPlan::from_input(content);
-        let shared_context = self.config.read().await.shared_context;
         let mut system_prompt = self.build_system_prompt(content).await;
+        // Distinguish input origin by content markers, NOT by the session's
         // Distinguish input origin by content markers, NOT by the session's
         // platform. A QQ session can receive backend/TUI input (no hook), and
         // that must be answered in the backend — never pushed to QQ.
@@ -744,15 +744,6 @@ impl Agent {
                  To send anything visible on QQ, you MUST call send_private_msg \
                  or send_group_msg with the explicit target ID. Never treat your \
                  normal assistant output as a QQ reply; it is backend-only.\n\
-                 Every <qq_message_hook> input MUST be answered exactly once via \
-                 a send tool: send_private_msg for private chats (user_id from \
-                 payload.sender.user_id), send_group_msg for groups (group_id \
-                 from payload.channel.group_id). Read the target ID from the \
-                 hook payload — never invent one. Your normal assistant output \
-                 is backend-only and invisible to the QQ user; to send anything \
-                 visible on QQ you MUST call send_private_msg or send_group_msg. \
-                 Do not claim you replied before the send tool returns success.",
-            );
                  Every <qq_message_hook> input MUST be answered exactly once via \
                  a send tool: send_private_msg for private chats (user_id from \
                  payload.sender.user_id), send_group_msg for groups (group_id \
