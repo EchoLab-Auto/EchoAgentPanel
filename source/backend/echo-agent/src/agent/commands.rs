@@ -150,7 +150,7 @@ impl Agent {
                 });
                 match self.process_message(&session, &content).await {
                     Ok(reply) => {
-                        self.emit(BackendEvent::MessageSent {
+                        self.emit(BackendEvent::AgentOutput {
                             session_id: sid,
                             content: reply,
                         });

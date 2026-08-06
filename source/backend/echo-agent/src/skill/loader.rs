@@ -29,9 +29,12 @@ pub fn load_skill(path: &Path) -> Result<Skill, SkillError> {
 
 fn parse_skill(path: &Path, text: &str) -> Result<Skill, SkillError> {
     let (frontmatter, body) = split_frontmatter(text);
-    let (mut name, mut description, mut keywords) = (String::new(), String::new(), Vec::new());
-    for line in frontmatter.lines() {
-        let line = line.trim();
+    let (mut name, mut description, mut keywords, mut always) =
+        (String::new(), String::new(), Vec::new(), false);
+    let mut in_metadata = false;
+    for raw_line in frontmatter.lines() {
+        let is_indented = raw_line.starts_with([' ', '\t']);
+        let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -40,12 +43,16 @@ fn parse_skill(path: &Path, text: &str) -> Result<Skill, SkillError> {
         };
         let key = key.trim();
         let value = value.trim();
+        if !is_indented {
+            in_metadata = key == "metadata";
+        }
         match key {
             "name" => name = value.trim_matches('"').trim_matches('\'').to_string(),
             "description" => description = value.trim_matches('"').trim_matches('\'').to_string(),
             "keywords" => {
                 keywords = parse_list(value);
             }
+            "always" if in_metadata => always = value.eq_ignore_ascii_case("true"),
             _ => {}
         }
     }
@@ -62,6 +69,7 @@ fn parse_skill(path: &Path, text: &str) -> Result<Skill, SkillError> {
             name,
             description,
             keywords,
+            always,
             enabled: true,
         },
         instructions: body.trim().to_string(),
@@ -187,5 +195,19 @@ keywords: [天气, 新闻, "搜索"]
         let text = "---\ndescription: 使用 https://example.com 搜索\n---\n";
         let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
         assert_eq!(skill.metadata.description, "使用 https://example.com 搜索");
+    }
+
+    #[test]
+    fn parses_always_from_metadata() {
+        let text = "---\nname: concise\ndescription: d\nmetadata:\n  always: true\n---\nbody";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert!(skill.metadata.always);
+    }
+
+    #[test]
+    fn ignores_top_level_always() {
+        let text = "---\nname: concise\nalways: true\n---\nbody";
+        let skill = parse_skill(Path::new("/x/SKILL.md"), text).unwrap();
+        assert!(!skill.metadata.always);
     }
 }

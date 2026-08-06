@@ -77,6 +77,27 @@ pub mod actions {
         )
     }
 
+    /// Upload a file to a group chat.
+    ///
+    /// `file` is a path on the machine running the OneBot implementation
+    /// (e.g. inside the NapCat container). `name` is the display name in QQ.
+    pub fn upload_group_file(group_id: i64, file: &str, name: &str) -> ApiRequest {
+        ApiRequest::new(
+            "upload_group_file",
+            json!({ "group_id": group_id, "file": file, "name": name }),
+        )
+    }
+
+    /// Upload a file to a private chat.
+    ///
+    /// `file` is a path on the machine running the OneBot implementation
+    /// (e.g. inside the NapCat container). `name` is the display name in QQ.
+    pub fn upload_private_file(user_id: i64, file: &str, name: &str) -> ApiRequest {
+        ApiRequest::new(
+            "upload_private_file",
+            json!({ "user_id": user_id, "file": file, "name": name }),
+        )
+    }
     /// Send a message to either a group or a private chat.
     pub fn send_msg(
         message_type: &str,
@@ -232,6 +253,23 @@ mod tests {
         assert_eq!(actions::get_version().action, "get_version");
         assert_eq!(actions::get_friend_list().action, "get_friend_list");
         assert_eq!(actions::delete_msg(42).action, "delete_msg");
+    }
+
+    #[test]
+    fn upload_actions_carry_target_file_and_name() {
+        let group = actions::upload_group_file(30001, "/tmp/a.pdf", "a.pdf");
+        let json = serde_json::to_value(&group).unwrap();
+        assert_eq!(json["action"], "upload_group_file");
+        assert_eq!(json["params"]["group_id"], 30001);
+        assert_eq!(json["params"]["file"], "/tmp/a.pdf");
+        assert_eq!(json["params"]["name"], "a.pdf");
+
+        let private = actions::upload_private_file(20001, "/tmp/b.zip", "b.zip");
+        let json = serde_json::to_value(&private).unwrap();
+        assert_eq!(json["action"], "upload_private_file");
+        assert_eq!(json["params"]["user_id"], 20001);
+        assert_eq!(json["params"]["file"], "/tmp/b.zip");
+        assert_eq!(json["params"]["name"], "b.zip");
     }
 
     #[test]

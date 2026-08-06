@@ -106,7 +106,7 @@ impl FormOverlay {
         self.state = FormState::Selecting;
         self.title = title.to_string();
         // Calculate viewport size before moving items
-        self.viewport_size = (items.len().min(15)).max(5);
+        self.viewport_size = items.len().clamp(5, 15);
         self.select_items = items;
         self.select_idx = 0;
         self.fields.clear();

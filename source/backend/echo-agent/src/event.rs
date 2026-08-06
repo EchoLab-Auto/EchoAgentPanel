@@ -75,6 +75,16 @@ pub enum BackendEvent {
         prompt_tokens: u32,
         completion_tokens: u32,
     },
+    /// An isolated subagent started processing a task for the parent agent.
+    SubagentStarted {
+        session_id: String,
+        task: String,
+    },
+    /// An isolated subagent finished and returned control to the parent agent.
+    SubagentCompleted {
+        session_id: String,
+        success: bool,
+    },
     /// Agent invoked a tool.
     ToolCall {
         session_id: String,
@@ -87,10 +97,15 @@ pub enum BackendEvent {
         tool_name: String,
         result: String,
     },
-    /// Agent generated a reply.
-    MessageSent {
+    /// Agent generated backend output. This is never sent to a platform
+    /// automatically; platform delivery requires an explicit tool call.
+    AgentOutput {
         session_id: String,
         content: String,
+    },
+    /// The agent turn finished, including turns whose backend output is empty.
+    AgentCompleted {
+        session_id: String,
     },
     /// A session was created or updated.
     SessionUpdated {

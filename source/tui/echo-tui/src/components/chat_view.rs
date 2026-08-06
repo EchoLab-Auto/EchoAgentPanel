@@ -14,7 +14,9 @@ use ratatui::Frame;
 
 use super::{Component, ComponentResult};
 use crate::event::Event;
-use crate::state::{AppState, MsgRole, SPINNER};
+use crate::state::{
+    AgentPhase, AppState, MessageMetadata, MsgRole, ToolMessage, ToolMessageStatus, SPINNER,
+};
 
 #[derive(Debug, Default)]
 pub struct ChatView;
@@ -34,11 +36,6 @@ impl ChatView {
         let messages = state.active_messages();
         let conv_width = area_width.saturating_sub(2) as usize;
 
-        let thinking = state.llm_in_flight
-            && messages
-                .last()
-                .is_some_and(|m| m.role == MsgRole::System && m.content == "… 思考中");
-        let spinner = SPINNER[(state.anim_tick % SPINNER.len() as u64) as usize];
         let flash_active = state
             .chat_flash_until
             .is_some_and(|t| std::time::Instant::now() < t);
@@ -48,18 +45,21 @@ impl ChatView {
         for (i, m) in messages.iter().enumerate() {
             let is_last = i == n - 1;
             let flash = is_last && flash_active;
-            let content = if thinking && is_last {
-                format!("{spinner} 思考中")
-            } else {
-                m.content.clone()
-            };
             lines.extend(render_message(
                 m,
-                &content,
+                &m.content,
                 conv_width as u16,
                 state.theme,
                 flash,
+                state.anim_tick,
             ));
+        }
+
+        if let Some(activity) = state
+            .active_activity()
+            .filter(|activity| activity.phase.is_busy())
+        {
+            lines.extend(render_activity(activity, state, conv_width as u16));
         }
 
         let line_texts: Vec<String> = lines
@@ -143,10 +143,14 @@ fn render_message(
     width: u16,
     theme: crate::theme::Theme,
     flash: bool,
+    anim_tick: u64,
 ) -> Vec<Line<'static>> {
+    if let Some(MessageMetadata::Tool(tool)) = &m.metadata {
+        return render_tool_message(tool, width, theme, anim_tick);
+    }
     let (label, color) = match m.role {
         MsgRole::User => ("你", theme.user_fg),
-        MsgRole::Agent => ("Agent", theme.agent_fg),
+        MsgRole::Backend => ("后台", theme.agent_fg),
         MsgRole::Tool => ("工具", theme.tool_fg),
         MsgRole::System => ("系统", theme.system_fg),
     };
@@ -187,7 +191,8 @@ fn render_message(
             let mut current = String::new();
             let mut col = 0usize;
             for ch in line.chars() {
-                if col >= wrap_width {
+                let char_width = crate::util::str_visual_width(&ch.to_string());
+                if col + char_width > wrap_width && !current.is_empty() {
                     out.push(Line::from(Span::styled(
                         std::mem::take(&mut current),
                         body_style,
@@ -195,7 +200,7 @@ fn render_message(
                     col = 0;
                 }
                 current.push(ch);
-                col += 1;
+                col += char_width;
             }
             out.push(Line::from(Span::styled(current, body_style)));
         }
@@ -204,6 +209,133 @@ fn render_message(
     }
     out.push(Line::default());
     out
+}
+
+fn render_tool_message(
+    tool: &ToolMessage,
+    width: u16,
+    theme: crate::theme::Theme,
+    anim_tick: u64,
+) -> Vec<Line<'static>> {
+    let (symbol, status, color, elapsed) = match tool.status {
+        ToolMessageStatus::Running => (
+            SPINNER[(anim_tick % SPINNER.len() as u64) as usize],
+            "执行中",
+            theme.tool_fg,
+            tool.started_at.elapsed(),
+        ),
+        ToolMessageStatus::Succeeded => {
+            ('✓', "完成", theme.success, tool.elapsed.unwrap_or_default())
+        }
+        ToolMessageStatus::Failed => ('×', "失败", theme.error, tool.elapsed.unwrap_or_default()),
+    };
+    let heading = truncate_visual(
+        &format!(
+            "{symbol} 工具 · {} · {status} · {}",
+            tool.name,
+            super::status_bar::format_duration(elapsed)
+        ),
+        width as usize,
+    );
+    let mut lines = vec![Line::from(Span::styled(
+        heading,
+        Style::default().fg(color).bold(),
+    ))];
+    if !tool.input.is_empty() {
+        lines.extend(render_detail_line("输入", &tool.input, width, theme.dim));
+    }
+    if let Some(output) = &tool.output {
+        let label = if tool.status == ToolMessageStatus::Failed {
+            "错误"
+        } else {
+            "结果"
+        };
+        lines.extend(render_detail_line(label, output, width, theme.fg));
+    }
+    lines.push(Line::default());
+    lines
+}
+
+fn render_detail_line(
+    label: &'static str,
+    content: &str,
+    width: u16,
+    color: ratatui::style::Color,
+) -> Vec<Line<'static>> {
+    let prefix = format!("  {label}  ");
+    let prefix_width = crate::util::str_visual_width(&prefix);
+    let available = (width as usize).saturating_sub(prefix_width);
+    let content = truncate_visual(content, available);
+    vec![Line::from(vec![
+        Span::styled(prefix, Style::default().fg(color).bold()),
+        Span::styled(content, Style::default().fg(color)),
+    ])]
+}
+
+fn render_activity(
+    activity: &crate::state::AgentActivity,
+    state: &AppState,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let spinner = SPINNER[(state.anim_tick % SPINNER.len() as u64) as usize];
+    let (phase, color) = match activity.phase {
+        AgentPhase::Thinking => ("Agent 正在思考", state.theme.agent_fg),
+        AgentPhase::Tool => ("Agent 正在调用工具", state.theme.tool_fg),
+        AgentPhase::Subagent => ("Subagent 正在工作", state.theme.accent),
+        AgentPhase::Completed | AgentPhase::Failed => return Vec::new(),
+    };
+    let mut title = format!(
+        "{spinner} {phase} · {}",
+        super::status_bar::format_duration(activity.phase_elapsed())
+    );
+    if let Some(detail) = &activity.detail {
+        title.push_str(&format!(" · {detail}"));
+    }
+    title = truncate_visual(&title, width as usize);
+    let mut summary = Vec::new();
+    if activity.tools_completed > 0 {
+        summary.push(format!("工具 {}", activity.tools_completed));
+    }
+    if activity.subagents_completed > 0 {
+        summary.push(format!("Subagent {}", activity.subagents_completed));
+    }
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "─".repeat(width.min(24) as usize),
+            Style::default().fg(state.theme.border),
+        )),
+        Line::from(Span::styled(title, Style::default().fg(color).bold())),
+    ];
+    if !summary.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("  本轮已完成 {}", summary.join(" · ")),
+            state.theme.dim,
+        )));
+    }
+    lines
+}
+
+fn truncate_visual(value: &str, max_width: usize) -> String {
+    if crate::util::str_visual_width(value) <= max_width {
+        return value.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let ellipsis_width = crate::util::str_visual_width("…");
+    let content_width = max_width.saturating_sub(ellipsis_width);
+    let mut output = String::new();
+    let mut width = 0;
+    for ch in value.chars() {
+        let char_width = crate::util::str_visual_width(&ch.to_string());
+        if width + char_width > content_width {
+            break;
+        }
+        output.push(ch);
+        width += char_width;
+    }
+    output.push('…');
+    output
 }
 
 #[cfg(test)]
@@ -216,14 +348,7 @@ mod tests {
     fn test_state() -> AppState {
         let mut st = AppState::new(Theme::dark(), Keybindings::default());
         st.active_session_id = Some("s1".into());
-        st.push_message(
-            "s1",
-            DisplayMessage {
-                role: MsgRole::User,
-                content: "你好".into(),
-                time: 0,
-            },
-        );
+        st.push_message("s1", DisplayMessage::plain(MsgRole::User, "你好", 0));
         st
     }
 
@@ -251,11 +376,7 @@ mod tests {
         let mut st = test_state();
         st.push_message(
             "s1",
-            DisplayMessage {
-                role: MsgRole::Agent,
-                content: "x".repeat(100),
-                time: 0,
-            },
+            DisplayMessage::plain(MsgRole::Backend, "x".repeat(100), 0),
         );
         let view = ChatView;
         let (lines, _) = view.build_lines(&st, 20); // narrow area → wrap
@@ -265,6 +386,18 @@ mod tests {
             "100 chars at width 18 must wrap to several lines, got {}",
             lines.len()
         );
+    }
+
+    #[test]
+    fn build_lines_wraps_cjk_by_terminal_column_width() {
+        let mut state = test_state();
+        state.messages.get_mut("s1").unwrap()[0].content = "中文中文中文".into();
+        let (_, texts) = ChatView.build_lines(&state, 8);
+        let body: Vec<_> = texts
+            .iter()
+            .filter(|line| line.contains('中') || line.contains('文'))
+            .collect();
+        assert!(body.len() >= 2, "CJK text should wrap by visual width");
     }
 
     #[test]
@@ -308,17 +441,54 @@ mod tests {
 
     #[test]
     fn render_message_includes_timestamp_when_set() {
-        let m = DisplayMessage {
-            role: MsgRole::Agent,
-            content: "hi".into(),
-            time: 1700000000,
-        };
-        let lines = render_message(&m, "hi", 80, Theme::dark(), false);
+        let m = DisplayMessage::plain(MsgRole::Backend, "hi", 1700000000);
+        let lines = render_message(&m, "hi", 80, Theme::dark(), false, 0);
         let text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
             .collect();
-        assert!(text.contains("Agent"));
+        assert!(text.contains("后台"));
         assert!(text.contains("["), "timestamp should be shown");
+    }
+
+    #[test]
+    fn running_activity_is_rendered_without_persisting_placeholder_message() {
+        let mut state = test_state();
+        state.start_agent_activity("s1");
+        let (_, texts) = ChatView.build_lines(&state, 80);
+        assert!(texts.iter().any(|text| text.contains("Agent 正在思考")));
+        assert_eq!(state.active_messages().len(), 1);
+    }
+
+    #[test]
+    fn tool_message_shows_status_input_result_and_elapsed_time() {
+        let message = DisplayMessage {
+            role: MsgRole::Tool,
+            content: "calculator".into(),
+            time: 0,
+            metadata: Some(MessageMetadata::Tool(ToolMessage {
+                name: "calculator".into(),
+                input: "expression=1+1".into(),
+                output: Some("2".into()),
+                status: ToolMessageStatus::Succeeded,
+                started_at: std::time::Instant::now(),
+                elapsed: Some(std::time::Duration::from_millis(20)),
+            })),
+        };
+        let lines = render_message(&message, "", 80, Theme::dark(), false, 0);
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect::<String>();
+        assert!(text.contains("工具 · calculator · 完成"));
+        assert!(text.contains("输入"));
+        assert!(text.contains("结果"));
+    }
+
+    #[test]
+    fn visual_truncation_respects_cjk_width() {
+        let value = truncate_visual("中文abcdef", 6);
+        assert!(crate::util::str_visual_width(&value) <= 6);
+        assert!(value.ends_with('…'));
     }
 }

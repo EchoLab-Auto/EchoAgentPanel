@@ -153,7 +153,7 @@ mod tests {
     fn ignores_event_frames() {
         let (bridge, _handle) = echo_agent::create_bridge();
         let text =
-            r#"{"type":"event","payload":{"MessageSent":{"session_id":"s1","content":"hi"}}}"#;
+            r#"{"type":"event","payload":{"AgentOutput":{"session_id":"s1","content":"hi"}}}"#;
         assert!(handle_inbound_text(text, &bridge).is_none());
     }
 
@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn panel_command_reaches_agent_bridge() {
+    async fn panel_command_reaches_agent_backend() {
         let (bridge, handle, addr) = start_test_server().await;
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
             .await
@@ -268,7 +268,7 @@ mod tests {
             .expect("connect");
 
         // Emit an event from the agent side; the server forwards it.
-        handle.emit(echo_agent::BackendEvent::MessageSent {
+        handle.emit(echo_agent::BackendEvent::AgentOutput {
             session_id: "s1".into(),
             content: "回复".into(),
         });
@@ -288,7 +288,7 @@ mod tests {
         }
         let ev = received.expect("event forwarded to panel");
         match ev {
-            echo_agent::BackendEvent::MessageSent { content, .. } => assert_eq!(content, "回复"),
+            echo_agent::BackendEvent::AgentOutput { content, .. } => assert_eq!(content, "回复"),
             other => panic!("wrong event: {other:?}"),
         }
         let _ = bridge;

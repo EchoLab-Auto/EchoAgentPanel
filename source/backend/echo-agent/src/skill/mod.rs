@@ -11,17 +11,19 @@ use thiserror::Error;
 pub mod loader;
 
 /// Skill metadata (Tier 1 — cheap, always loaded).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillMetadata {
     pub name: String,
     pub description: String,
     /// Keywords that trigger this skill when they appear in a message.
     pub keywords: Vec<String>,
+    /// Whether this skill is included in every conversation.
+    pub always: bool,
     pub enabled: bool,
 }
 
 /// A loaded skill definition (Tier 2 — full instructions).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skill {
     pub metadata: SkillMetadata,
     pub instructions: String,
@@ -43,7 +45,7 @@ impl Skill {
 }
 
 /// Registry of discovered skills.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SkillRegistry {
     skills: HashMap<String, Skill>,
 }
@@ -59,10 +61,14 @@ impl SkillRegistry {
         if dir.is_empty() || !std::path::Path::new(dir).exists() {
             return Ok(registry);
         }
-        for entry in walkdir::WalkDir::new(dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in walkdir::WalkDir::new(dir) {
+            let entry = entry.map_err(|error| SkillError::Load {
+                path: error
+                    .path()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| dir.to_string()),
+                err: error.to_string(),
+            })?;
             let path = entry.path();
             if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some("SKILL.md") {
                 let skill = loader::load_skill(path)?;
@@ -86,10 +92,21 @@ impl SkillRegistry {
         let mut matched: Vec<&Skill> = self
             .skills
             .values()
-            .filter(|s| s.matches(content))
+            .filter(|s| !s.metadata.always && s.matches(content))
             .collect();
         matched.sort_by_key(|s| s.metadata.name.clone());
         matched.into_iter().next()
+    }
+
+    /// Enabled skills whose instructions apply to every conversation.
+    pub fn always_enabled(&self) -> Vec<&Skill> {
+        let mut skills: Vec<&Skill> = self
+            .skills
+            .values()
+            .filter(|skill| skill.metadata.enabled && skill.metadata.always)
+            .collect();
+        skills.sort_by_key(|skill| skill.metadata.name.clone());
+        skills
     }
 
     pub fn set_enabled(&mut self, name: &str, enabled: bool) -> bool {
@@ -99,6 +116,16 @@ impl SkillRegistry {
                 true
             }
             None => false,
+        }
+    }
+
+    /// Preserve runtime enable/disable choices across a filesystem reload.
+    /// Newly discovered skills keep their loader default (`enabled = true`).
+    pub fn inherit_enabled_from(&mut self, previous: &Self) {
+        for (name, skill) in &mut self.skills {
+            if let Some(old) = previous.skills.get(name) {
+                skill.metadata.enabled = old.metadata.enabled;
+            }
         }
     }
 
@@ -114,9 +141,10 @@ impl SkillRegistry {
                 } else {
                     format!(" (触发词: {})", s.metadata.keywords.join("、"))
                 };
+                let always = if s.metadata.always { " (常驻)" } else { "" };
                 format!(
-                    "- {}: {}{}",
-                    s.metadata.name, s.metadata.description, keywords
+                    "- {}: {}{}{}",
+                    s.metadata.name, s.metadata.description, always, keywords
                 )
             })
             .collect();
@@ -161,6 +189,7 @@ mod tests {
                 name: name.into(),
                 description: "desc".into(),
                 keywords: keywords.iter().map(|k| k.to_string()).collect(),
+                always: false,
                 enabled: true,
             },
             instructions: "instructions".into(),
@@ -221,6 +250,60 @@ mod tests {
             reg.find_matching("触发消息").unwrap().metadata.name,
             "alpha"
         );
+    }
+
+    #[test]
+    fn always_enabled_is_sorted_and_ignores_disabled_skills() {
+        let mut reg = SkillRegistry::new();
+        let mut zeta = skill("zeta", &[]);
+        zeta.metadata.always = true;
+        reg.register(zeta);
+        let mut alpha = skill("alpha", &[]);
+        alpha.metadata.always = true;
+        reg.register(alpha);
+        let mut disabled = skill("disabled", &[]);
+        disabled.metadata.always = true;
+        disabled.metadata.enabled = false;
+        reg.register(disabled);
+
+        let names: Vec<&str> = reg
+            .always_enabled()
+            .iter()
+            .map(|skill| skill.metadata.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["alpha", "zeta"]);
+    }
+
+    #[test]
+    fn always_skill_is_not_returned_as_keyword_match() {
+        let mut reg = SkillRegistry::new();
+        let mut always = skill("always", &["触发"]);
+        always.metadata.always = true;
+        reg.register(always);
+
+        assert!(reg.find_matching("触发").is_none());
+        assert_eq!(reg.always_enabled().len(), 1);
+    }
+
+    #[test]
+    fn reload_inherits_enabled_state_but_keeps_new_content() {
+        let mut previous = SkillRegistry::new();
+        let mut old = skill("calc", &["old"]);
+        old.metadata.enabled = false;
+        previous.register(old);
+
+        let mut reloaded = SkillRegistry::new();
+        let mut updated = skill("calc", &["new"]);
+        updated.instructions = "updated instructions".into();
+        reloaded.register(updated);
+        reloaded.register(skill("new-skill", &["new"]));
+        reloaded.inherit_enabled_from(&previous);
+
+        let calc = reloaded.get("calc").unwrap();
+        assert!(!calc.metadata.enabled);
+        assert_eq!(calc.metadata.keywords, vec!["new"]);
+        assert_eq!(calc.instructions, "updated instructions");
+        assert!(reloaded.get("new-skill").unwrap().metadata.enabled);
     }
 
     #[test]

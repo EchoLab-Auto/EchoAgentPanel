@@ -32,9 +32,11 @@ Cargo workspace，源码位于 `source/`：
 | `echo-test-utils` | `source/backend/echo-test-utils` | 测试共享 mock（仅 dev-dependency，不依赖 echo-agent） |
 | `echo` | `source/echo` | 可执行程序：配置加载、接线、多运行模式 |
 
-关键设计：适配器只依赖 `echo_adapter::AgentBridge` trait（由 echo-agent 实现），
-`echo-adapter-qq` 不依赖 `echo-agent`；所有 TOML 持久化经共享的
-`echo_adapter::ConfigStore`（原子 read-modify-write），避免并发写丢失。
+关键设计：适配器只依赖单向的 `echo_adapter::InboundMessageHook` trait，
+`echo-adapter-qq` 不依赖 `echo-agent`。Agent 后台输出不会自动发送到 QQ；
+QQ 出站必须显式调用 `send_private_msg` 或 `send_group_msg` tool。
+所有 TOML 持久化经共享的 `echo_adapter::ConfigStore`
+（原子 read-modify-write），避免并发写丢失。
 
 ## 快速开始
 
@@ -69,13 +71,18 @@ Core 与 Panel 可部署在不同机器：Core 的 `[core] management_address` �
 
 ### 3. 验证
 
-- **私聊**机器人任意消息 → Agent 自动回复
-- **群聊** @机器人 → Agent 回复
+- **私聊**机器人任意消息 → QQ hook 投递来源和正文，Agent 调用 tool 回复
+- **群聊** @机器人 → QQ hook 投递群和发送人信息，Agent 调用 tool 回复
 - TUI 中输入 `/qq login` 查看扫码状态
 
 ## TUI 用法
 
 全屏模式，布局：`状态栏 | 聊天区 | 输入框`。
+
+顶部运行面板按当前会话显示 `就绪 / 思考 / 工具 / Subagent / 完成 / 失败`
+阶段、阶段耗时、本轮总耗时、工具与 Subagent 次数及 Token 用量。聊天区底部会在
+运行期间显示动态进度；工具调用的输入摘要、结果和耗时合并在同一条记录中，敏感
+参数会自动隐藏。切换会话列表也会标记各会话的后台运行阶段。
 
 | 按键 | 功能 |
 |---|---|
@@ -179,6 +186,23 @@ max_tool_iterations = 1024
 memory_limit = 40
 skills_dir = "skills"
 ```
+
+Core 会每秒检查一次 `skills_dir`。新增、修改或删除任意递归目录下的
+`SKILL.md` 后会自动重载，无需重启；运行时禁用的 skill 在重载后仍保持禁用。
+如果新文件暂时无法读取或解析，Core 会继续使用上一版注册表并记录警告。
+
+Agent 还内置以下编排工具，无需额外配置：
+
+| 工具 | 用途 |
+|---|---|
+| `schedule_timer` | 按相对秒数或 RFC 3339 时间创建会话内定时任务 |
+| `list_timers` | 查询当前会话的待执行定时任务 |
+| `cancel_timer` | 取消当前会话的定时任务 |
+| `run_subagent` | 使用隔离上下文执行一次子任务并把结果交回主 Agent |
+
+定时器到期后以 `<timer_event>` 后台事件重新进入原会话；若要通知 QQ，
+Agent 仍须显式调用 QQ 发送工具。定时器目前仅保存在内存中，Core 重启后失效。
+subagent 不继承工具，不能自行发送 QQ 消息或执行外部操作。
 
 Panel 中通过 `/api`、`/qq setting` 等命令修改的配置，会经 Core 的
 management WebSocket API 下发，并由 Core 持久化回 `echo-agent-core.toml`。

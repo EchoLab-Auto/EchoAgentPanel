@@ -43,21 +43,19 @@ pub struct AdapterInfo {
     pub configured: bool,
 }
 
-/// Bridge that platform adapters use to route inbound messages into the
+/// Hook that platform adapters use to deliver inbound messages into the
 /// agent framework, without depending on echo-agent directly.
 ///
-/// The agent framework implements this trait; adapters hold an
-/// `Arc<dyn AgentBridge>` and call [`handle_incoming_message`]
-/// (AgentBridge::handle_incoming_message) from their handlers.
+/// This boundary is deliberately one-way. Agent output is not returned from
+/// the hook; sending a platform message must happen through an adapter tool.
 #[async_trait]
-pub trait AgentBridge: Send + Sync {
-    /// Route one inbound platform message through the agent.
+pub trait InboundMessageHook: Send + Sync {
+    /// Deliver one inbound platform message to the agent.
     ///
-    /// The bridge owns session lookup, agent event emission, and LLM
-    /// processing. Returns the reply text to send back, or `None` when no
-    /// reply is needed; `Err` carries a user-facing error message.
-    async fn handle_incoming_message(&self, msg: IncomingMessage)
-        -> Result<Option<String>, String>;
+    /// The hook owns session lookup, event emission, and LLM processing.
+    /// A successful return only acknowledges processing; it never contains
+    /// text for the adapter to send automatically.
+    async fn on_incoming_message(&self, msg: IncomingMessage) -> Result<(), String>;
 
     /// Notify the agent that an adapter's connection state changed.
     fn on_connection_state(&self, adapter_name: &str, connected: bool, self_id: Option<String>);

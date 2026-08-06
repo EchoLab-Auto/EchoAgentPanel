@@ -6,7 +6,9 @@
 use echo_agent::{BackendEvent, SessionInfo};
 
 use crate::app::App;
-use crate::state::{DisplayMessage, MsgRole, ToastKind};
+use crate::state::{
+    AgentPhase, DisplayMessage, MessageMetadata, MsgRole, ToastKind, ToolMessage, ToolMessageStatus,
+};
 
 impl App {
     pub(super) fn apply_backend_event(&mut self, ev: BackendEvent) {
@@ -58,28 +60,64 @@ impl App {
             }
             BackendEvent::MessageReceived {
                 session_id,
+                adapter_name,
                 content,
                 timestamp,
                 ..
             } => {
-                self.push_to(session_id, MsgRole::User, content, timestamp);
+                if adapter_name == "timer" {
+                    self.push_to(
+                        session_id,
+                        MsgRole::System,
+                        summarize_timer_event(&content),
+                        timestamp,
+                    );
+                } else {
+                    self.push_to(session_id, MsgRole::User, content, timestamp);
+                }
             }
             BackendEvent::AgentThinking { session_id } => {
-                self.state.llm_in_flight = true;
-                self.push_to(session_id, MsgRole::System, "… 思考中".into(), 0);
+                self.state.start_agent_activity(&session_id);
             }
-            BackendEvent::LlmRequest { model, .. } => {
+            BackendEvent::LlmRequest { session_id, model } => {
                 self.state.status.model = model;
+                self.state
+                    .activity_mut(&session_id)
+                    .transition(AgentPhase::Thinking, None);
             }
             BackendEvent::LlmResponse {
+                session_id,
                 model,
                 prompt_tokens,
                 completion_tokens,
-                ..
             } => {
                 self.state.status.model = model;
-                self.state.llm_in_flight = false;
-                let _ = (prompt_tokens, completion_tokens);
+                let activity = self.state.activity_mut(&session_id);
+                activity.prompt_tokens = activity.prompt_tokens.saturating_add(prompt_tokens);
+                activity.completion_tokens =
+                    activity.completion_tokens.saturating_add(completion_tokens);
+            }
+            BackendEvent::SubagentStarted { session_id, task } => {
+                self.state
+                    .activity_mut(&session_id)
+                    .transition(AgentPhase::Subagent, Some(truncate(&one_line(&task), 72)));
+            }
+            BackendEvent::SubagentCompleted {
+                session_id,
+                success,
+            } => {
+                let activity = self.state.activity_mut(&session_id);
+                if success {
+                    activity.subagents_completed += 1;
+                }
+                activity.transition(
+                    AgentPhase::Thinking,
+                    Some(if success {
+                        "正在整合 subagent 结果".into()
+                    } else {
+                        "subagent 失败，正在恢复".into()
+                    }),
+                );
             }
             BackendEvent::ToolCall {
                 session_id,
@@ -87,13 +125,39 @@ impl App {
                 arguments,
                 ..
             } => {
-                self.state.tool_in_flight = Some((tool_name.clone(), std::time::Instant::now()));
-                self.push_to(
-                    session_id,
-                    MsgRole::Tool,
-                    format!("🔧 {tool_name}({arguments})"),
-                    0,
+                let phase = if tool_name == "run_subagent" {
+                    AgentPhase::Subagent
+                } else {
+                    AgentPhase::Tool
+                };
+                let detail = summarize_arguments(&arguments);
+                self.state
+                    .activity_mut(&session_id)
+                    .transition(phase, Some(tool_name.clone()));
+                self.state.push_message(
+                    &session_id,
+                    DisplayMessage {
+                        role: MsgRole::Tool,
+                        content: tool_name.clone(),
+                        time: chrono::Utc::now().timestamp(),
+                        metadata: Some(MessageMetadata::Tool(ToolMessage {
+                            name: tool_name,
+                            input: detail,
+                            output: None,
+                            status: ToolMessageStatus::Running,
+                            started_at: std::time::Instant::now(),
+                            elapsed: None,
+                        })),
+                    },
                 );
+                if let Some(session) = self
+                    .state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                {
+                    session.last_message = "[工具执行中]".into();
+                }
             }
             BackendEvent::ToolResult {
                 session_id,
@@ -101,23 +165,35 @@ impl App {
                 result,
                 ..
             } => {
-                self.state.tool_in_flight = None;
-                let snippet: String = result.chars().take(80).collect();
-                self.push_to(
-                    session_id,
-                    MsgRole::Tool,
-                    format!("✓ {tool_name}: {snippet}"),
-                    0,
-                );
+                self.finish_tool_message(&session_id, &tool_name, &result);
+                let activity = self.state.activity_mut(&session_id);
+                if tool_name != "run_subagent" {
+                    activity.tools_completed += 1;
+                }
+                activity.transition(AgentPhase::Thinking, None);
             }
-            BackendEvent::MessageSent {
+            BackendEvent::AgentOutput {
                 session_id,
                 content,
                 ..
             } => {
-                self.state.llm_in_flight = false;
+                if self
+                    .state
+                    .agent_activities
+                    .get(&session_id)
+                    .is_some_and(|activity| activity.phase.is_busy())
+                {
+                    self.state
+                        .activity_mut(&session_id)
+                        .transition(AgentPhase::Completed, None);
+                }
                 let ts = chrono::Utc::now().timestamp();
-                self.push_to(session_id, MsgRole::Agent, content, ts);
+                self.push_to(session_id, MsgRole::Backend, content, ts);
+            }
+            BackendEvent::AgentCompleted { session_id } => {
+                self.state
+                    .activity_mut(&session_id)
+                    .transition(AgentPhase::Completed, None);
             }
             BackendEvent::SessionUpdated { session } => {
                 self.upsert_session(session);
@@ -187,8 +263,19 @@ impl App {
                 session_id,
                 message,
             } => {
-                self.state.llm_in_flight = false;
-                let _ = session_id;
+                if let Some(session_id) = session_id {
+                    if self
+                        .state
+                        .agent_activities
+                        .get(&session_id)
+                        .is_some_and(|activity| activity.phase.is_busy())
+                    {
+                        self.state.activity_mut(&session_id).transition(
+                            AgentPhase::Failed,
+                            Some(truncate(&one_line(&message), 72)),
+                        );
+                    }
+                }
                 self.state.toast(message, ToastKind::Error);
             }
         }
@@ -197,15 +284,64 @@ impl App {
     fn push_to(&mut self, session_id: String, role: MsgRole, content: String, time: i64) {
         self.state.push_message(
             &session_id,
-            DisplayMessage {
-                role,
-                content: content.clone(),
-                time,
-            },
+            DisplayMessage::plain(role, content.clone(), time),
         );
         if let Some(s) = self.state.sessions.iter_mut().find(|s| s.id == session_id) {
             s.last_message = content;
             s.last_active = if time > 0 { time } else { s.last_active };
+        }
+    }
+
+    fn finish_tool_message(&mut self, session_id: &str, tool_name: &str, result: &str) {
+        let failed = result.trim_start().starts_with("error:");
+        let messages = self
+            .state
+            .messages
+            .entry(session_id.to_string())
+            .or_default();
+        if let Some(tool) = messages.iter_mut().rev().find_map(|message| {
+            let Some(MessageMetadata::Tool(tool)) = message.metadata.as_mut() else {
+                return None;
+            };
+            (tool.name == tool_name && tool.status == ToolMessageStatus::Running).then_some(tool)
+        }) {
+            tool.status = if failed {
+                ToolMessageStatus::Failed
+            } else {
+                ToolMessageStatus::Succeeded
+            };
+            tool.output = Some(summarize_result(result));
+            tool.elapsed = Some(tool.started_at.elapsed());
+        } else {
+            messages.push(DisplayMessage {
+                role: MsgRole::Tool,
+                content: tool_name.to_string(),
+                time: chrono::Utc::now().timestamp(),
+                metadata: Some(MessageMetadata::Tool(ToolMessage {
+                    name: tool_name.to_string(),
+                    input: String::new(),
+                    output: Some(summarize_result(result)),
+                    status: if failed {
+                        ToolMessageStatus::Failed
+                    } else {
+                        ToolMessageStatus::Succeeded
+                    },
+                    started_at: std::time::Instant::now(),
+                    elapsed: Some(std::time::Duration::ZERO),
+                })),
+            });
+        }
+        self.state.chat_scroll = 0;
+        self.state.chat_flash_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(700));
+        if let Some(session) = self
+            .state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        {
+            session.last_message =
+                format!("[工具{}] {tool_name}", if failed { "失败" } else { "完成" });
         }
     }
 
@@ -218,6 +354,83 @@ impl App {
         if self.state.active_session_id.is_none() {
             self.state.active_session_id = Some(session.id);
         }
+    }
+}
+
+fn summarize_timer_event(content: &str) -> String {
+    let json = content
+        .strip_prefix("<timer_event>")
+        .and_then(|value| value.strip_suffix("</timer_event>"));
+    let task = json
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .and_then(|value| value["task"].as_str().map(str::to_string));
+    match task {
+        Some(task) => format!("定时任务触发 · {}", truncate(&one_line(&task), 120)),
+        None => "定时任务触发".into(),
+    }
+}
+
+fn summarize_arguments(arguments: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(arguments) {
+        Ok(value) => summarize_value(&value, None),
+        Err(_) => truncate(&one_line(arguments), 120),
+    }
+}
+
+fn summarize_result(result: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(result) {
+        Ok(value) => truncate(&summarize_value(&value, None), 140),
+        Err(_) => truncate(&one_line(result), 140),
+    }
+}
+
+fn summarize_value(value: &serde_json::Value, key: Option<&str>) -> String {
+    if key.is_some_and(is_sensitive_key) {
+        return "[已隐藏]".into();
+    }
+    match value {
+        serde_json::Value::Null => "null".into(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::String(value) => truncate(&one_line(value), 64),
+        serde_json::Value::Array(values) => {
+            let items = values
+                .iter()
+                .take(3)
+                .map(|value| summarize_value(value, None))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if values.len() > 3 {
+                format!("[{items}, …]")
+            } else {
+                format!("[{items}]")
+            }
+        }
+        serde_json::Value::Object(values) => values
+            .iter()
+            .take(4)
+            .map(|(key, value)| format!("{key}={}", summarize_value(value, Some(key))))
+            .collect::<Vec<_>>()
+            .join(" · "),
+    }
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    ["token", "secret", "password", "api_key", "access_key"]
+        .iter()
+        .any(|needle| key.contains(needle))
+}
+
+fn one_line(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        value.to_string()
+    } else {
+        value.chars().take(max_chars).collect::<String>() + "…"
     }
 }
 
@@ -348,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn message_sent_marks_agent_role() {
+    fn agent_output_marks_backend_role() {
         let mut app = app();
         app.apply_backend_event(BackendEvent::SessionUpdated {
             session: echo_agent::SessionInfo {
@@ -362,12 +575,12 @@ mod tests {
                 last_message: String::new(),
             },
         });
-        app.apply_backend_event(BackendEvent::MessageSent {
+        app.apply_backend_event(BackendEvent::AgentOutput {
             session_id: "s1".into(),
             content: "回复".into(),
         });
         assert_eq!(app.state.active_messages().len(), 1);
-        assert_eq!(app.state.active_messages()[0].role, MsgRole::Agent);
+        assert_eq!(app.state.active_messages()[0].role, MsgRole::Backend);
     }
 
     #[test]
@@ -398,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_and_result_update_flags() {
+    fn tool_call_and_result_update_one_timeline_entry() {
         let mut app = app();
         app.apply_backend_event(BackendEvent::SessionUpdated {
             session: echo_agent::SessionInfo {
@@ -417,22 +630,97 @@ mod tests {
             tool_name: "calc".into(),
             arguments: "{}".into(),
         });
-        assert!(app.state.tool_in_flight.is_some());
+        assert_eq!(app.state.agent_activities["s1"].phase, AgentPhase::Tool);
+        assert_eq!(app.state.active_messages().len(), 1);
+        let Some(MessageMetadata::Tool(tool)) = &app.state.active_messages()[0].metadata else {
+            panic!("tool metadata missing");
+        };
+        assert_eq!(tool.status, ToolMessageStatus::Running);
         app.apply_backend_event(BackendEvent::ToolResult {
             session_id: "s1".into(),
             tool_name: "calc".into(),
             result: "42".into(),
         });
-        assert!(app.state.tool_in_flight.is_none());
+        assert_eq!(app.state.active_messages().len(), 1);
+        let Some(MessageMetadata::Tool(tool)) = &app.state.active_messages()[0].metadata else {
+            panic!("tool metadata missing");
+        };
+        assert_eq!(tool.status, ToolMessageStatus::Succeeded);
+        assert_eq!(tool.output.as_deref(), Some("42"));
+        assert_eq!(app.state.agent_activities["s1"].tools_completed, 1);
     }
 
     #[test]
-    fn error_event_toasts() {
+    fn targeted_error_marks_the_session_failed() {
         let mut app = app();
+        app.state.start_agent_activity("s1");
         app.apply_backend_event(BackendEvent::Error {
-            session_id: None,
+            session_id: Some("s1".into()),
             message: "LLM 超时".into(),
         });
-        assert!(!app.state.llm_in_flight);
+        assert_eq!(app.state.agent_activities["s1"].phase, AgentPhase::Failed);
+    }
+
+    #[test]
+    fn subagent_events_have_a_distinct_phase() {
+        let mut app = app();
+        app.state.active_session_id = Some("s1".into());
+        app.apply_backend_event(BackendEvent::SubagentStarted {
+            session_id: "s1".into(),
+            task: "比较两个实现方案".into(),
+        });
+        let activity = &app.state.agent_activities["s1"];
+        assert_eq!(activity.phase, AgentPhase::Subagent);
+        assert_eq!(activity.detail.as_deref(), Some("比较两个实现方案"));
+
+        app.apply_backend_event(BackendEvent::SubagentCompleted {
+            session_id: "s1".into(),
+            success: true,
+        });
+        assert_eq!(app.state.agent_activities["s1"].subagents_completed, 1);
+    }
+
+    #[test]
+    fn llm_response_keeps_turn_running_until_agent_completed() {
+        let mut app = app();
+        app.apply_backend_event(BackendEvent::AgentThinking {
+            session_id: "s1".into(),
+        });
+        app.apply_backend_event(BackendEvent::LlmRequest {
+            session_id: "s1".into(),
+            model: "model".into(),
+        });
+        app.apply_backend_event(BackendEvent::LlmResponse {
+            session_id: "s1".into(),
+            model: "model".into(),
+            prompt_tokens: 10,
+            completion_tokens: 4,
+        });
+        let activity = &app.state.agent_activities["s1"];
+        assert_eq!(activity.phase, AgentPhase::Thinking);
+        assert_eq!(activity.prompt_tokens + activity.completion_tokens, 14);
+
+        app.apply_backend_event(BackendEvent::AgentCompleted {
+            session_id: "s1".into(),
+        });
+        assert_eq!(
+            app.state.agent_activities["s1"].phase,
+            AgentPhase::Completed
+        );
+    }
+
+    #[test]
+    fn tool_argument_summary_redacts_secrets() {
+        let summary =
+            summarize_arguments(r#"{"api_key":"secret-value","query":"a very useful query"}"#);
+        assert!(!summary.contains("secret-value"));
+        assert!(summary.contains("[已隐藏]"));
+        assert!(summary.contains("query="));
+    }
+
+    #[test]
+    fn timer_event_is_presented_as_a_backend_task() {
+        let content = r#"<timer_event>{"task":"发送提醒"}</timer_event>"#;
+        assert_eq!(summarize_timer_event(content), "定时任务触发 · 发送提醒");
     }
 }

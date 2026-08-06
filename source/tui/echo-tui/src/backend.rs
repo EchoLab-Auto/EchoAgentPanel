@@ -157,7 +157,7 @@ mod tests {
     async fn drain_events_empties_shared_buffer() {
         let (bridge, handle) = echo_agent::create_bridge();
         let backend = Backend::new(Arc::new(bridge));
-        handle.emit(BackendEvent::MessageSent {
+        handle.emit(BackendEvent::AgentOutput {
             session_id: "s1".into(),
             content: "hi".into(),
         });
@@ -179,7 +179,7 @@ mod tests {
     async fn drain_events_appends_to_existing_vec() {
         let (bridge, handle) = echo_agent::create_bridge();
         let backend = Backend::new(Arc::new(bridge));
-        handle.emit(BackendEvent::MessageSent {
+        handle.emit(BackendEvent::AgentOutput {
             session_id: "s".into(),
             content: "x".into(),
         });

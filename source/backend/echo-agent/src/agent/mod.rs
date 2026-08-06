@@ -1,7 +1,9 @@
 //! The agent loop: LLM + tools + skills + memory composed into one reply.
 
 mod commands;
+mod orchestration;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -35,6 +37,9 @@ pub struct Agent {
     /// await points, contention is negligible).
     pub handle: tokio::sync::RwLock<Option<Arc<BackendHandle>>>,
     system_prompt_cache: RwLock<Option<String>>,
+    skill_reload_started: AtomicBool,
+    orchestration_started: AtomicBool,
+    timer_scheduler: orchestration::TimerScheduler,
     /// Cancels background tasks (session eviction / save) on shutdown.
     cancel: tokio_util::sync::CancellationToken,
 }
@@ -60,6 +65,7 @@ impl Agent {
         let eviction_sessions = sessions.clone();
         let cancel = tokio_util::sync::CancellationToken::new();
         let eviction_cancel = cancel.clone();
+        let timer_scheduler = orchestration::TimerScheduler::new(cancel.clone());
         let agent = Self {
             provider: RwLock::new(provider),
             config: RwLock::new(config),
@@ -71,6 +77,9 @@ impl Agent {
             adapters,
             handle: tokio::sync::RwLock::new(None),
             system_prompt_cache: RwLock::new(None),
+            skill_reload_started: AtomicBool::new(false),
+            orchestration_started: AtomicBool::new(false),
+            timer_scheduler,
             cancel,
         };
         // Spawn periodic session eviction (every 5 minutes).
@@ -132,6 +141,148 @@ impl Agent {
         });
     }
 
+    /// Watch the configured skill directory and reload changed `SKILL.md`
+    /// files. Runtime enable/disable choices survive content reloads.
+    pub async fn start_skill_reload_task(self: &Arc<Self>) {
+        let skills_dir = self.config.read().await.skills_dir.clone();
+        if skills_dir.trim().is_empty()
+            || self
+                .skill_reload_started
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+        {
+            return;
+        }
+
+        let agent = Arc::clone(self);
+        let cancel = self.cancel.clone();
+        tracing::info!(path = %skills_dir, interval_seconds = 1, "skill hot reload started");
+        tokio::spawn(async move {
+            let start = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+            let mut interval = tokio::time::interval_at(start, std::time::Duration::from_secs(1));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(error) = agent.reload_skills(&skills_dir).await {
+                            tracing::warn!(%error, path = %skills_dir, "skill hot reload failed; keeping previous registry");
+                        }
+                    }
+                    _ = cancel.cancelled() => break,
+                }
+            }
+        });
+    }
+
+    /// Start delivery of scheduled timer events back into their originating sessions.
+    pub fn start_orchestration_task(self: &Arc<Self>) {
+        if self
+            .orchestration_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let Some(mut receiver) = self.timer_scheduler.take_receiver() else {
+            self.orchestration_started.store(false, Ordering::Release);
+            tracing::warn!("timer event receiver unavailable");
+            return;
+        };
+
+        let agent = Arc::clone(self);
+        let cancel = self.cancel.clone();
+        tokio::spawn(async move {
+            loop {
+                let event = tokio::select! {
+                    event = receiver.recv() => match event {
+                        Some(event) => event,
+                        None => break,
+                    },
+                    _ = cancel.cancelled() => break,
+                };
+                agent.timer_scheduler.mark_delivered(&event.id).await;
+                let Some(key) = crate::session::SessionKey::parse(&event.session_id) else {
+                    tracing::warn!(timer_id = %event.id, session_id = %event.session_id, "timer session is invalid");
+                    continue;
+                };
+                let session = agent
+                    .sessions
+                    .get(&event.session_id)
+                    .unwrap_or_else(|| agent.sessions.get_or_create(&key, "timer".into(), None));
+                let input = serde_json::json!({
+                    "event": "timer",
+                    "timer_id": event.id,
+                    "due_at": event.due_at.to_rfc3339(),
+                    "session": {
+                        "id": event.session_id,
+                        "platform": key.platform,
+                        "scope": key.scope,
+                        "scope_id": key.scope_id,
+                        "user_id": key.user_id
+                    },
+                    "task": event.task
+                });
+                let input = format!("<timer_event>{input}</timer_event>");
+                agent.emit(BackendEvent::MessageReceived {
+                    session_id: session.id.clone(),
+                    adapter_name: "timer".into(),
+                    platform: session.session_key.platform.clone(),
+                    user_id: session.session_key.user_id.clone(),
+                    user_name: "timer".into(),
+                    channel: if session.session_key.scope == "group" {
+                        format!("group:{}", session.session_key.scope_id)
+                    } else {
+                        "direct".into()
+                    },
+                    group_name: session.group_name.clone(),
+                    content: input.clone(),
+                    timestamp: chrono::Utc::now().timestamp(),
+                });
+                match agent.process_message(&session, &input).await {
+                    Ok(content) if !content.trim().is_empty() => {
+                        agent.emit(BackendEvent::AgentOutput {
+                            session_id: session.id.clone(),
+                            content,
+                        });
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::warn!(%error, timer_id = %event.id, "timer task failed");
+                        agent.emit(BackendEvent::Error {
+                            session_id: Some(session.id.clone()),
+                            message: format!("timer {} failed: {error}", event.id),
+                        });
+                    }
+                }
+            }
+        });
+    }
+
+    async fn reload_skills(&self, skills_dir: &str) -> Result<bool, String> {
+        if !std::path::Path::new(skills_dir).exists() {
+            return Ok(false);
+        }
+
+        let dir = skills_dir.to_string();
+        let mut reloaded = tokio::task::spawn_blocking(move || SkillRegistry::discover(&dir))
+            .await
+            .map_err(|error| format!("skill reload task failed: {error}"))?
+            .map_err(|error| error.to_string())?;
+
+        let mut current = self.skills.lock().await;
+        reloaded.inherit_enabled_from(&current);
+        if *current == reloaded {
+            return Ok(false);
+        }
+
+        let names = reloaded.names();
+        *current = reloaded;
+        drop(current);
+        *self.system_prompt_cache.write().await = None;
+        tracing::info!(skills = ?names, path = %skills_dir, "skills hot reloaded");
+        Ok(true)
+    }
+
     pub fn attach(&self, handle: Arc<BackendHandle>) {
         if let Ok(mut h) = self.handle.try_write() {
             *h = Some(handle);
@@ -188,7 +339,25 @@ impl Agent {
             session_id: session_id.clone(),
         });
 
-        let system_prompt = self.build_system_prompt(content).await;
+        let mut system_prompt = self.build_system_prompt(content).await;
+        if session.session_key.platform.eq_ignore_ascii_case("qq") {
+            system_prompt.push_str(
+                "\n\n# QQ transport boundary\n\
+                 Inputs wrapped in <qq_message_hook> are external QQ messages. \
+                 Read sender and group data from the structured hook payload.\n\
+                 Inputs wrapped in <timer_event> are scheduled backend tasks, \
+                 not new QQ messages. Unwrapped inputs are also backend \
+                 instructions, not QQ chat messages.\n\
+                 To send anything visible on QQ, you MUST call send_private_msg \
+                 or send_group_msg with the explicit target ID. Never treat your \
+                 normal assistant output as a QQ reply; it is backend-only.\n\
+                 Every <qq_message_hook> input MUST be answered exactly once via \
+                 a send tool (send_private_msg for private chats, send_group_msg \
+                 for groups). Read the target ID from the hook payload — never \
+                 invent one. Do not claim you replied before the send tool returns \
+                 success.",
+            );
+        }
 
         // Append user message to session history (bounded).
         {
@@ -206,7 +375,8 @@ impl Agent {
             messages.extend(history.iter().cloned());
         }
 
-        let tools = self.tools.definitions().await;
+        let mut tools = (*self.tools.definitions().await).clone();
+        tools.extend(orchestration::tool_definitions());
         // max_tool_iterations == 0 still allows one direct reply (without tools).
         let max_iterations = self.config.read().await.max_tool_iterations.max(1);
 
@@ -219,7 +389,7 @@ impl Agent {
             let request = ChatRequest {
                 model: model.clone(),
                 messages: messages.clone(),
-                tools: Some((*tools).clone()),
+                tools: Some(tools.clone()),
                 temperature: None,
                 max_tokens: None,
             };
@@ -244,6 +414,9 @@ impl Agent {
                         .push(ChatMessage::assistant(reply.clone()));
                 }
                 self.sessions.mark_dirty();
+                self.emit(BackendEvent::AgentCompleted {
+                    session_id: session_id.clone(),
+                });
                 return Ok(reply);
             }
 
@@ -271,16 +444,81 @@ impl Agent {
             arguments: call.arguments.clone(),
         });
         let args = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-        let result = match self.tools.execute(&call.name, args).await {
-            Ok(r) => r,
-            Err(e) => format!("error: {}", e),
-        };
+        let result = match call.name.as_str() {
+            "schedule_timer" => self.timer_scheduler.schedule(session_id, args).await,
+            "list_timers" => Ok(self.timer_scheduler.list(session_id).await),
+            "cancel_timer" => self.timer_scheduler.cancel(session_id, args).await,
+            "run_subagent" => self.run_subagent(session_id, args).await,
+            _ => self
+                .tools
+                .execute(&call.name, args)
+                .await
+                .map_err(|error| error.to_string()),
+        }
+        .unwrap_or_else(|error| format!("error: {error}"));
         self.emit(BackendEvent::ToolResult {
             session_id: session_id.to_string(),
             tool_name: call.name.clone(),
             result: result.clone(),
         });
         result
+    }
+
+    async fn run_subagent(
+        &self,
+        session_id: &str,
+        arguments: serde_json::Value,
+    ) -> Result<String, String> {
+        let args = orchestration::parse_subagent_args(arguments)?;
+        self.emit(BackendEvent::SubagentStarted {
+            session_id: session_id.to_string(),
+            task: args.task.clone(),
+        });
+        let mut messages = vec![ChatMessage::system(
+            "You are an isolated subagent. Complete the bounded task and return a concise, factual result to the parent agent. You have no tools and must not claim to perform external actions or communicate with users.",
+        )];
+        if let Some(context) = args.context {
+            messages.push(ChatMessage::user(format!("Context:\n{context}")));
+        }
+        messages.push(ChatMessage::user(format!("Task:\n{}", args.task)));
+        let request = ChatRequest {
+            model: self.active_model().await,
+            messages,
+            tools: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        let provider = self.provider.read().await.clone();
+        let response = match provider.chat(&request).await {
+            Ok(response) => response,
+            Err(error) => {
+                self.emit(BackendEvent::SubagentCompleted {
+                    session_id: session_id.to_string(),
+                    success: false,
+                });
+                return Err(format!("subagent request failed: {error}"));
+            }
+        };
+        if !response.tool_calls.is_empty() {
+            self.emit(BackendEvent::SubagentCompleted {
+                session_id: session_id.to_string(),
+                success: false,
+            });
+            return Err("subagent attempted a tool call, but subagents have no tools".into());
+        }
+        let content = response.content.unwrap_or_default();
+        if content.trim().is_empty() {
+            self.emit(BackendEvent::SubagentCompleted {
+                session_id: session_id.to_string(),
+                success: false,
+            });
+            return Err("subagent returned an empty result".into());
+        }
+        self.emit(BackendEvent::SubagentCompleted {
+            session_id: session_id.to_string(),
+            success: true,
+        });
+        Ok(content)
     }
 
     /// System prompt = base prompt + skill metadata + triggered skill instructions.
@@ -298,6 +536,12 @@ impl Agent {
         if !skills.is_empty() {
             prompt.push_str("\n\n# Available skills\n");
             prompt.push_str(&skills.metadata_lines());
+        }
+        for skill in skills.always_enabled() {
+            prompt.push_str(&format!(
+                "\n\n# Active skill: {}\n{}",
+                skill.metadata.name, skill.instructions
+            ));
         }
         if let Some(matched) = matched {
             prompt.push_str(&format!(
@@ -675,6 +919,7 @@ pub mod tests {
                 name: "calc".into(),
                 description: "d".into(),
                 keywords: vec!["calc".into()],
+                always: false,
                 enabled: true,
             },
             instructions: "use calculator tool".into(),
@@ -696,12 +941,96 @@ pub mod tests {
         assert!(prompt.contains("calculator"));
     }
 
+    #[tokio::test]
+    async fn skill_directory_hot_reloads_updates_additions_and_deletions() {
+        let dir = std::env::temp_dir().join(format!("echo-skill-reload-{}", uuid::Uuid::new_v4()));
+        let style_dir = dir.join("style");
+        std::fs::create_dir_all(&style_dir).unwrap();
+        let style_path = style_dir.join("SKILL.md");
+        std::fs::write(
+            &style_path,
+            "---\nname: style\ndescription: style\nmetadata:\n  always: true\n---\nold instructions",
+        )
+        .unwrap();
+
+        let config = AgentConfig {
+            skills_dir: dir.display().to_string(),
+            ..Default::default()
+        };
+        let initial = SkillRegistry::discover(&config.skills_dir).unwrap();
+        let provider = Arc::new(MockProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: "ok".into(),
+        });
+        let agent = Arc::new(Agent::new(
+            provider,
+            config,
+            initial,
+            ToolRegistry::new(),
+            Arc::new(AdapterRegistry::new()),
+        ));
+
+        let first_prompt = agent.build_system_prompt("plain input").await;
+        assert!(first_prompt.contains("old instructions"));
+        agent.start_skill_reload_task().await;
+
+        std::fs::write(
+            &style_path,
+            "---\nname: style\ndescription: updated\nmetadata:\n  always: true\n---\nnew instructions",
+        )
+        .unwrap();
+        let extra_dir = dir.join("extra");
+        std::fs::create_dir_all(&extra_dir).unwrap();
+        std::fs::write(
+            extra_dir.join("SKILL.md"),
+            "---\nname: extra\ndescription: extra\nkeywords: [extra]\n---\nextra instructions",
+        )
+        .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(4), async {
+            loop {
+                let skills = agent.skills.lock().await;
+                let updated = skills
+                    .get("style")
+                    .is_some_and(|skill| skill.instructions == "new instructions");
+                let added = skills.get("extra").is_some();
+                drop(skills);
+                if updated && added {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("modified and added skills should hot reload");
+
+        let second_prompt = agent.build_system_prompt("plain input").await;
+        assert!(second_prompt.contains("new instructions"));
+        assert!(!second_prompt.contains("old instructions"));
+
+        std::fs::remove_file(&style_path).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(4), async {
+            loop {
+                if agent.skills.lock().await.get("style").is_none() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("deleted skill should be removed by hot reload");
+
+        agent.shutdown().await;
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     // ── Tool calling loop ──────────────────────────────────────────────────
 
     /// LLM provider that replays a fixed script of responses.
     struct ScriptedProvider {
         script: tokio::sync::Mutex<std::collections::VecDeque<ChatResponse>>,
         calls: Arc<AtomicUsize>,
+        requests: tokio::sync::Mutex<Vec<ChatRequest>>,
     }
 
     impl ScriptedProvider {
@@ -709,6 +1038,7 @@ pub mod tests {
             Self {
                 script: tokio::sync::Mutex::new(script.into()),
                 calls: Arc::new(AtomicUsize::new(0)),
+                requests: tokio::sync::Mutex::new(Vec::new()),
             }
         }
         fn call_count(&self) -> usize {
@@ -727,6 +1057,7 @@ pub mod tests {
         async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             assert_eq!(request.messages[0].role, crate::llm::ChatRole::System);
+            self.requests.lock().await.push(request.clone());
             self.script
                 .lock()
                 .await
@@ -863,5 +1194,164 @@ pub mod tests {
         let session = agent.sessions.get_or_create(&key, "user".into(), None);
         let reply = agent.process_message(&session, "hi").await.unwrap();
         assert_eq!(reply, "done");
+    }
+
+    #[tokio::test]
+    async fn subagent_runs_without_tools_and_returns_to_parent() {
+        let script = vec![
+            ChatResponse {
+                content: None,
+                tool_calls: vec![ToolCall {
+                    id: "subagent_1".into(),
+                    name: "run_subagent".into(),
+                    arguments: serde_json::json!({
+                        "task": "Compare two approaches",
+                        "context": "Only use the supplied facts"
+                    })
+                    .to_string(),
+                }],
+                usage: Usage::default(),
+            },
+            ChatResponse {
+                content: Some("isolated result".into()),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+            ChatResponse {
+                content: Some("parent final".into()),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+        ];
+        let provider = Arc::new(ScriptedProvider::new(script));
+        let agent = test_agent(provider.clone());
+        let session = agent
+            .sessions
+            .get_or_create(&SessionKey::local_tui(), "user".into(), None);
+
+        let reply = agent
+            .process_message(&session, "delegate this")
+            .await
+            .unwrap();
+
+        assert_eq!(reply, "parent final");
+        let requests = provider.requests.lock().await;
+        assert_eq!(requests.len(), 3);
+        assert!(
+            requests[1].tools.is_none(),
+            "subagent must not receive tools"
+        );
+        assert!(requests[1]
+            .messages
+            .iter()
+            .any(|message| message.content.contains("Compare two approaches")));
+        let parent_tools = requests[0].tools.as_ref().unwrap();
+        assert!(parent_tools
+            .iter()
+            .any(|definition| definition.name == "run_subagent"));
+    }
+
+    #[tokio::test]
+    async fn timers_are_scoped_to_the_originating_session_and_can_be_cancelled() {
+        let provider = Arc::new(MockProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: "ok".into(),
+        });
+        let agent = test_agent(provider);
+        let schedule = ToolCall {
+            id: "schedule_1".into(),
+            name: "schedule_timer".into(),
+            arguments: serde_json::json!({
+                "delay_seconds": 3600,
+                "task": "send a reminder"
+            })
+            .to_string(),
+        };
+        let scheduled = agent.run_tool("local:tui::one", &schedule).await;
+        let timer_id = serde_json::from_str::<serde_json::Value>(&scheduled).unwrap()["timer_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let listed = agent
+            .run_tool(
+                "local:tui::one",
+                &ToolCall {
+                    id: "list_1".into(),
+                    name: "list_timers".into(),
+                    arguments: "{}".into(),
+                },
+            )
+            .await;
+        assert!(listed.contains(&timer_id));
+
+        let cancel = ToolCall {
+            id: "cancel_1".into(),
+            name: "cancel_timer".into(),
+            arguments: serde_json::json!({ "timer_id": timer_id }).to_string(),
+        };
+        let rejected = agent.run_tool("local:tui::two", &cancel).await;
+        assert!(rejected.contains("not found in the current session"));
+        let cancelled = agent.run_tool("local:tui::one", &cancel).await;
+        assert!(cancelled.contains("cancelled"));
+        agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn due_timer_reenters_the_original_session() {
+        let script = vec![
+            ChatResponse {
+                content: None,
+                tool_calls: vec![ToolCall {
+                    id: "schedule_now".into(),
+                    name: "schedule_timer".into(),
+                    arguments: serde_json::json!({
+                        "delay_seconds": 0,
+                        "task": "perform the due task"
+                    })
+                    .to_string(),
+                }],
+                usage: Usage::default(),
+            },
+            ChatResponse {
+                content: Some("timer scheduled".into()),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+            ChatResponse {
+                content: Some("timer completed".into()),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+        ];
+        let provider = Arc::new(ScriptedProvider::new(script));
+        let agent = Arc::new(test_agent(provider.clone()));
+        agent.start_orchestration_task();
+        let session = agent
+            .sessions
+            .get_or_create(&SessionKey::local_tui(), "user".into(), None);
+
+        let reply = agent
+            .process_message(&session, "remind me now")
+            .await
+            .unwrap();
+        assert_eq!(reply, "timer scheduled");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if provider.call_count() == 3 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("due timer should invoke the agent");
+
+        let history = session.history.lock().await;
+        assert_eq!(history.len(), 4);
+        assert!(history[2].content.starts_with("<timer_event>"));
+        assert_eq!(history[3].content, "timer completed");
+        drop(history);
+        agent.shutdown().await;
     }
 }

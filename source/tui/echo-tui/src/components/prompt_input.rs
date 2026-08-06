@@ -6,11 +6,12 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use tui_textarea::{Input, Key, TextArea};
+use unicode_width::UnicodeWidthChar;
 
 use super::{Component, ComponentResult};
 use crate::event::Event;
@@ -26,6 +27,21 @@ pub struct PromptInput {
 }
 
 impl PromptInput {
+    const MIN_HEIGHT: u16 = 3;
+    const MAX_HEIGHT: u16 = 8;
+
+    /// Grow with multiline input, while leaving enough room for the conversation.
+    pub(crate) fn preferred_height(&self, terminal_height: u16) -> u16 {
+        let content_height = self.textarea.lines().len().min(6) as u16;
+        let desired = content_height.saturating_add(2).max(Self::MIN_HEIGHT);
+        let available = terminal_height.saturating_sub(4).max(1);
+        desired.min(Self::MAX_HEIGHT).min(available)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.textarea.is_empty()
+    }
+
     /// 输入内容若以 `/` 开头则返回命令过滤串（支持多词命令如 /adapter start）。
     fn slash_filter(&self) -> Option<String> {
         let text = self.textarea.lines().join(" ");
@@ -134,41 +150,52 @@ impl Component for PromptInput {
                 Style::default().fg(if focused { theme.subtitle } else { theme.faint }),
             ));
         let inner = block.inner(area);
-        // 多行/超宽内容渲染光标可见切片（textarea 内部滚动偏移未公开，
-        // 以光标位置推导：保证光标所在行列始终可见）。
+        f.render_widget(
+            block.style(Style::default().bg(theme.panel_bg).fg(theme.fg)),
+            area,
+        );
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        // Keep the insertion point visible using terminal display columns rather than
+        // character counts, which matters for Chinese and other wide characters.
         let lines = self.textarea.lines();
         let (cursor_row, cursor_col) = self.textarea.cursor();
-        let first_row = cursor_row.saturating_sub(inner.height.saturating_sub(1) as usize);
-        let start_col = cursor_col.saturating_sub(inner.width.saturating_sub(1) as usize);
-        let visible: Vec<String> = lines
+        let visible_height = inner.height as usize;
+        let first_row = cursor_row.saturating_sub(visible_height.saturating_sub(1));
+        let cursor_visual_col = visual_prefix_width(&lines[cursor_row], cursor_col);
+        let start_col =
+            horizontal_start(&lines[cursor_row], cursor_visual_col, inner.width as usize);
+        let visible: Vec<Line> = lines
             .iter()
             .skip(first_row)
-            .take(inner.height.max(1) as usize)
-            .map(|l| {
-                l.chars()
-                    .skip(start_col)
-                    .take(inner.width.max(1) as usize)
-                    .collect()
-            })
+            .take(visible_height)
+            .map(|line| Line::from(visible_columns(line, start_col, inner.width as usize)))
             .collect();
-        let rendered = if visible.is_empty() {
-            String::new()
-        } else {
-            visible.join("\n")
-        };
-        let p = Paragraph::new(rendered)
-            .style(Style::default().bg(theme.panel_bg).fg(theme.fg))
-            .block(block);
-        f.render_widget(p, area);
-        // 占位提示（最弱亮度），未选中时说明如何进入输入
+
         if self.textarea.is_empty() {
-            let hint = if focused {
-                "/ 命令 · 输入消息，Enter 发送，Shift+Enter 换行 · Esc 取消选中"
-            } else {
-                "Tab 选中输入框后开始输入"
-            };
-            let hint = Paragraph::new(hint).style(Style::default().fg(theme.faint));
+            let hint = Paragraph::new(" 输入消息或 / 命令")
+                .style(Style::default().bg(theme.panel_bg).fg(theme.faint));
             f.render_widget(hint, inner);
+        } else {
+            let text =
+                Paragraph::new(visible).style(Style::default().bg(theme.panel_bg).fg(theme.fg));
+            f.render_widget(text, inner);
+        }
+
+        let cursor_x = inner.x
+            + cursor_visual_col
+                .saturating_sub(start_col)
+                .min(inner.width.saturating_sub(1) as usize) as u16;
+        let cursor_y = inner.y + cursor_row.saturating_sub(first_row) as u16;
+        if let Some(cell) = f.buffer_mut().cell_mut((cursor_x, cursor_y)) {
+            cell.set_style(
+                Style::default()
+                    .fg(theme.panel_bg)
+                    .bg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            );
         }
     }
 
@@ -275,8 +302,12 @@ impl Component for PromptInput {
             return ComponentResult::Consumed;
         }
 
-        // 输入历史导航（↑/↓，与终端逻辑一致）
-        if key.code == KeyCode::Up || key.code == KeyCode::Down {
+        // Plain Up/Down navigate history only for a single-line draft. Multiline
+        // input and modified arrows retain the textarea's native cursor movement.
+        if matches!(key.code, KeyCode::Up | KeyCode::Down)
+            && key.modifiers == KeyModifiers::NONE
+            && self.textarea.lines().len() == 1
+        {
             return self.navigate_history(key.code, state);
         }
 
@@ -285,6 +316,57 @@ impl Component for PromptInput {
         self.refresh_slash_state(state);
         ComponentResult::Consumed
     }
+}
+
+fn char_width(ch: char) -> usize {
+    ch.width().unwrap_or(1)
+}
+
+fn visual_prefix_width(line: &str, char_col: usize) -> usize {
+    line.chars().take(char_col).map(char_width).sum()
+}
+
+/// Align the horizontal viewport to a character boundary at or after the
+/// minimum start column, so a wide character is never split at the left edge.
+fn horizontal_start(line: &str, cursor_col: usize, width: usize) -> usize {
+    let minimum = cursor_col.saturating_sub(width.saturating_sub(1));
+    let mut visual_col = 0;
+    for ch in line.chars() {
+        if visual_col >= minimum {
+            return visual_col;
+        }
+        visual_col += char_width(ch);
+    }
+    visual_col
+}
+
+fn visible_columns(line: &str, start: usize, width: usize) -> String {
+    let mut visual_col = 0;
+    let mut output_width = 0;
+    let mut output = String::new();
+
+    for ch in line.chars() {
+        let ch_width = char_width(ch);
+        let next_col = visual_col + ch_width;
+        if next_col <= start {
+            visual_col = next_col;
+            continue;
+        }
+        if visual_col < start {
+            let gap = (next_col - start).min(width);
+            output.extend(std::iter::repeat(' ').take(gap));
+            output_width += gap;
+            visual_col = next_col;
+            continue;
+        }
+        if output_width + ch_width > width {
+            break;
+        }
+        output.push(ch);
+        output_width += ch_width;
+        visual_col = next_col;
+    }
+    output
 }
 
 impl PromptInput {
@@ -400,10 +482,11 @@ mod tests {
     use crate::{keybindings::Keybindings, theme::Theme};
 
     fn key(code: KeyCode) -> Event {
-        Event::Input(crossterm::event::Event::Key(KeyEvent::new(
-            code,
-            KeyModifiers::NONE,
-        )))
+        key_with_modifiers(code, KeyModifiers::NONE)
+    }
+
+    fn key_with_modifiers(code: KeyCode, modifiers: KeyModifiers) -> Event {
+        Event::Input(crossterm::event::Event::Key(KeyEvent::new(code, modifiers)))
     }
 
     fn state() -> AppState {
@@ -452,5 +535,83 @@ mod tests {
         input.handle_event(&key(KeyCode::Enter), &mut st);
         assert_eq!(st.pending_submit.as_deref(), Some("hi"));
         assert!(st.pending_slash.is_none());
+    }
+
+    #[test]
+    fn left_and_right_edit_between_cjk_characters() {
+        let mut input = PromptInput::default();
+        let mut st = state();
+        for c in ['你', '好'] {
+            input.handle_event(&key(KeyCode::Char(c)), &mut st);
+        }
+
+        input.handle_event(&key(KeyCode::Left), &mut st);
+        input.handle_event(&key(KeyCode::Char('，')), &mut st);
+        assert_eq!(input.textarea.lines(), ["你，好"]);
+        assert_eq!(input.textarea.cursor(), (0, 2));
+
+        input.handle_event(&key(KeyCode::Right), &mut st);
+        assert_eq!(input.textarea.cursor(), (0, 3));
+    }
+
+    #[test]
+    fn up_and_down_move_inside_multiline_input() {
+        let mut input = PromptInput::default();
+        let mut st = state();
+        for c in ['a', 'b', 'c'] {
+            input.handle_event(&key(KeyCode::Char(c)), &mut st);
+        }
+        input.handle_event(
+            &key_with_modifiers(KeyCode::Enter, KeyModifiers::SHIFT),
+            &mut st,
+        );
+        for c in ['x', 'y'] {
+            input.handle_event(&key(KeyCode::Char(c)), &mut st);
+        }
+
+        input.handle_event(&key(KeyCode::Up), &mut st);
+        assert_eq!(input.textarea.cursor(), (0, 2));
+        input.handle_event(&key(KeyCode::Char('!')), &mut st);
+        assert_eq!(input.textarea.lines(), ["ab!c", "xy"]);
+
+        input.handle_event(&key(KeyCode::Down), &mut st);
+        assert_eq!(input.textarea.cursor(), (1, 2));
+    }
+
+    #[test]
+    fn prompt_height_grows_with_lines_and_is_capped() {
+        let mut input = PromptInput::default();
+        assert_eq!(input.preferred_height(24), 3);
+        for _ in 0..10 {
+            input.textarea.insert_newline();
+        }
+        assert_eq!(input.preferred_height(24), 8);
+        assert_eq!(input.preferred_height(7), 3);
+    }
+
+    #[test]
+    fn long_cjk_input_keeps_high_contrast_cursor_visible() {
+        let mut input = PromptInput::default();
+        let mut st = state();
+        for c in "这是一个很长的中文输入内容".chars() {
+            input.handle_event(&key(KeyCode::Char(c)), &mut st);
+        }
+
+        let backend = ratatui::backend::TestBackend::new(14, 3);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| input.render(frame, frame.area(), &st))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let cursor_cells = buffer
+            .content()
+            .iter()
+            .filter(|cell| cell.bg == st.theme.accent)
+            .count();
+        assert_eq!(
+            cursor_cells, 1,
+            "cursor should remain visible in a narrow input"
+        );
     }
 }

@@ -31,7 +31,8 @@ Located next to the code in `#[cfg(test)] mod tests` blocks.
 - **Calculator**: recursive-descent parser: operator precedence/associativity,
   floating-point, unary minus, whitespace, 8 malformed patterns.
 - **Skill system**: keyword matching (case-insensitive, empty keywords),
-  deterministic multi-hit ordering, recursive SKILL.md discovery.
+  deterministic multi-hit ordering, recursive SKILL.md discovery, runtime
+  enable-state preservation, and hot reload for updates/additions/deletions.
 
 ### 2. Property tests (proptest)
 Generated inputs that must satisfy invariants:
@@ -47,13 +48,13 @@ Generated inputs that must satisfy invariants:
 - `echo-server/tests/reverse_ws.rs` — real WS server + raw WebSocket client:
   event dispatch → handler → action → response correlation, token rejection,
   handler-priority chain fall-through, connection lifecycle (tracker insert/remove).
-- `echo-agent/tests/agent_integration.rs` — real Agent driven through the bridge:
-  SendMessage → LLM → MessageSent event, session creation, clear, system prompt
+- `echo-agent/tests/agent_integration.rs` — real Agent driven through the backend:
+  SendMessage → LLM → AgentOutput event, session creation, clear, system prompt
   propagation, model switch, API profile switch/delete, skill toggle, **skill
   keyword → prompt injection**, **non-trigger caching**, **concurrent turn
   serialization** (slow provider → no interleaving).
 - `echo-server/src/management.rs` (inline integration tests) — management WS
-  server on ephemeral port: Panel command → agent bridge, agent event → Panel
+  server on ephemeral port: Panel command → agent backend, agent event → Panel
   forward.
 - `echo-adapter-qq` — NapCat client against a `wiremock` HTTP server:
   login status detection, WebUI fallback, reverse-WS config, QR fetch.

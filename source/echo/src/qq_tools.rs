@@ -19,7 +19,7 @@ pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Ar
     let qq = qq_adapter.clone();
     registry.register(Arc::new(QqToolWrapper {
         name: "send_group_msg".into(),
-        description: "Send a text message to a QQ group. Requires group_id and content.".into(),
+        description: "Send a text message to a QQ group. This is the only way to produce QQ-visible group output. Requires group_id and content.".into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -34,8 +34,7 @@ pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Ar
     let qq = qq_adapter.clone();
     registry.register(Arc::new(QqToolWrapper {
         name: "send_private_msg".into(),
-        description: "Send a text message to a QQ user privately. Requires user_id and content."
-            .into(),
+        description: "Send a private text message to a QQ user. This is the only way to produce QQ-visible private output. Requires user_id and content.".into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -82,7 +81,41 @@ pub fn register_qq_tools(registry: &mut echo_agent::ToolRegistry, qq_adapter: Ar
             "type": "object",
             "properties": {}
         }),
-        adapter: qq_adapter,
+        adapter: qq_adapter.clone(),
+    }));
+
+    let qq = qq_adapter.clone();
+    registry.register(Arc::new(QqToolWrapper {
+        name: "send_file".into(),
+        description: "Upload a local file to a QQ chat (group or private). \
+                      file_path must be an absolute path on the machine running NapCat \
+                      (inside the container when deployed via docker). file_name is the \
+                      display name in QQ. Requires target_type (group|private), target_id, \
+                      file_path and file_name.".into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "Where to send: 'group' uploads to a group, 'private' to a user"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "QQ group ID (when target_type=group) or QQ user ID (when private)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the file on the NapCat host machine (inside the docker container when deployed via docker)"
+                },
+                "file_name": {
+                    "type": "string",
+                    "description": "Display file name in QQ, e.g. report.pdf"
+                }
+            },
+            "required": ["target_type", "target_id", "file_path", "file_name"]
+        }),
+        adapter: qq,
     }));
 }
 
@@ -214,6 +247,35 @@ impl echo_agent::Tool for QqToolWrapper {
                 }
                 Err(e) => Err(ToolError::Execution(e)),
             },
+            "send_file" => {
+                let target_type = arguments["target_type"]
+                    .as_str()
+                    .ok_or_else(|| ToolError::InvalidArguments("target_type required".into()))?;
+                let target_id = arguments["target_id"]
+                    .as_i64()
+                    .ok_or_else(|| ToolError::InvalidArguments("target_id required".into()))?;
+                let file_path = arguments["file_path"]
+                    .as_str()
+                    .ok_or_else(|| ToolError::InvalidArguments("file_path required".into()))?;
+                let file_name = arguments["file_name"]
+                    .as_str()
+                    .ok_or_else(|| ToolError::InvalidArguments("file_name required".into()))?;
+                match target_type {
+                    "group" => self
+                        .adapter
+                        .upload_group_file(target_id, file_path, file_name)
+                        .await
+                        .map_err(ToolError::Execution),
+                    "private" => self
+                        .adapter
+                        .upload_private_file(target_id, file_path, file_name)
+                        .await
+                        .map_err(ToolError::Execution),
+                    other => Err(ToolError::InvalidArguments(format!(
+                        "target_type must be 'group' or 'private', got '{other}'"
+                    ))),
+                }
+            }
             other => Err(ToolError::Execution(format!("unknown QQ tool: {other}"))),
         }
     }
@@ -240,5 +302,44 @@ mod tests {
             .find(|definition| definition.name == "get_friend_list")
             .expect("friend list tool definition");
         assert!(definition.description.contains("gate"));
+    }
+
+    #[tokio::test]
+    async fn send_tools_are_declared_as_the_qq_output_boundary() {
+        let mut registry = echo_agent::ToolRegistry::new();
+        let adapter = Arc::new(QqAdapter::new(Default::default()));
+
+        register_qq_tools(&mut registry, adapter);
+
+        let definitions = registry.definitions().await;
+        for name in ["send_private_msg", "send_group_msg"] {
+            let definition = definitions
+                .iter()
+                .find(|definition| definition.name == name)
+                .unwrap_or_else(|| panic!("missing QQ send tool: {name}"));
+            assert!(
+                definition.description.contains("only way"),
+                "{name} must describe the explicit QQ output boundary"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn registers_send_file_tool() {
+        let mut registry = echo_agent::ToolRegistry::new();
+        let adapter = Arc::new(QqAdapter::new(Default::default()));
+
+        register_qq_tools(&mut registry, adapter);
+
+        let definitions = registry.definitions().await;
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.name == "send_file")
+            .expect("send_file tool registered");
+        assert!(definition.description.contains("file_path"));
+        assert!(definition.description.contains("NapCat"));
+        let params = definition.parameters.as_ref().expect("parameters present");
+        assert!(params["properties"]["target_type"]["enum"][0] == "group");
+        assert!(params["properties"]["target_type"]["enum"][1] == "private");
     }
 }

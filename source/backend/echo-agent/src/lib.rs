@@ -20,7 +20,7 @@ pub mod session;
 pub mod skill;
 pub mod tool;
 
-pub use adapter_bridge::AdapterBridge;
+pub use adapter_bridge::AgentMessageHook;
 pub use agent::Agent;
 pub use bridge::{create_bridge, BackendBridge, BackendHandle, FanoutHandle};
 pub use command::BackendCommand;

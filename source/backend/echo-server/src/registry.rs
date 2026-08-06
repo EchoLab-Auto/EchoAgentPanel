@@ -113,6 +113,37 @@ impl Context {
             .await
     }
 
+    /// Upload a file to a group chat via the OneBot action.
+    ///
+    /// `file` is a path on the OneBot host (NapCat container), `name` is the
+    /// file name shown in QQ.
+    pub async fn upload_group_file(
+        &self,
+        group_id: i64,
+        file: &str,
+        name: &str,
+    ) -> Result<ApiResponse, EchoServerError> {
+        self.send_api(echo_core::action::actions::upload_group_file(
+            group_id, file, name,
+        ))
+        .await
+    }
+
+    /// Upload a file to a private chat via the OneBot action.
+    ///
+    /// `file` is a path on the OneBot host (NapCat container), `name` is the
+    /// file name shown in QQ.
+    pub async fn upload_private_file(
+        &self,
+        user_id: i64,
+        file: &str,
+        name: &str,
+    ) -> Result<ApiResponse, EchoServerError> {
+        self.send_api(echo_core::action::actions::upload_private_file(
+            user_id, file, name,
+        ))
+        .await
+    }
     /// Reply to a message: private messages get a DM; group messages get a
     /// group message that mentions the sender.
     pub async fn reply_to(

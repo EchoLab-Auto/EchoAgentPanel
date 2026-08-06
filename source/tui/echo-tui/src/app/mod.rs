@@ -396,11 +396,21 @@ impl App {
             return;
         }
 
-        // Scroll keys — route to chat view even when input is active.
-        if key.code == kb.scroll_up.code
-            || key.code == kb.scroll_down.code
-            || key.code == kb.scroll_top.code
-            || key.code == kb.scroll_bottom.code
+        // End edits the current line while a draft exists; on an empty prompt it
+        // retains its chat-scroll-to-bottom behavior.
+        if key.code == KeyCode::End && !self.prompt_input.is_empty() {
+            let _ = self.prompt_input.handle_event(
+                &Event::Input(crossterm::event::Event::Key(*key)),
+                &mut self.state,
+            );
+            return;
+        }
+
+        // Match the full chord so, for example, plain `g` is not mistaken for Ctrl+G.
+        if chord == kb.scroll_up
+            || chord == kb.scroll_down
+            || chord == kb.scroll_top
+            || chord == kb.scroll_bottom
         {
             let _ = self.chat_view.handle_event(
                 &Event::Input(crossterm::event::Event::Key(*key)),
@@ -744,13 +754,14 @@ impl App {
     pub fn render(&mut self, f: &mut Frame) {
         let area = f.area();
         f.render_widget(ratatui::widgets::Clear, area);
+        let prompt_height = self.prompt_input.preferred_height(area.height);
 
         let chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
-                ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Length(2),
                 ratatui::layout::Constraint::Min(0),
-                ratatui::layout::Constraint::Length(3),
+                ratatui::layout::Constraint::Length(prompt_height),
             ])
             .split(area);
         let (top, main, prompt_area) = (chunks[0], chunks[1], chunks[2]);
@@ -891,6 +902,29 @@ mod tests {
     }
 
     #[test]
+    fn plain_g_reaches_prompt_instead_of_triggering_ctrl_g_scroll() {
+        let mut app = app();
+        app.handle_input(&key(KeyCode::Char('g')));
+        app.handle_input(&key(KeyCode::Enter));
+        assert_eq!(app.state.pending_submit.as_deref(), Some("g"));
+        assert_eq!(app.state.chat_scroll, 0);
+    }
+
+    #[test]
+    fn end_moves_prompt_cursor_when_draft_is_not_empty() {
+        let mut app = app();
+        for c in ['a', 'b', 'c'] {
+            app.handle_input(&key(KeyCode::Char(c)));
+        }
+        app.handle_input(&key(KeyCode::Left));
+        app.handle_input(&key(KeyCode::Left));
+        app.handle_input(&key(KeyCode::End));
+        app.handle_input(&key(KeyCode::Char('!')));
+        app.handle_input(&key(KeyCode::Enter));
+        assert_eq!(app.state.pending_submit.as_deref(), Some("abc!"));
+    }
+
+    #[test]
     fn settings_render_with_huge_profile_list_does_not_panic() {
         let mut app = app();
         for i in 0..100_000 {
@@ -912,6 +946,52 @@ mod tests {
         }));
         assert!(result.is_ok(), "海量 profile 渲染不应 panic");
         assert!(app.state.settings.list_len() > 100_000);
+    }
+
+    #[test]
+    fn runtime_panel_and_subagent_activity_render_across_terminal_widths() {
+        for width in [40, 80, 140] {
+            let mut app = app();
+            app.apply_backend_event(BackendEvent::SessionUpdated {
+                session: echo_agent::SessionInfo {
+                    id: "s1".into(),
+                    platform: "qq".into(),
+                    nickname: "alice".into(),
+                    scope: "dm".into(),
+                    user_id: "10001".into(),
+                    group_name: None,
+                    last_active: 0,
+                    last_message: String::new(),
+                },
+            });
+            app.apply_backend_event(BackendEvent::AgentThinking {
+                session_id: "s1".into(),
+            });
+            app.apply_backend_event(BackendEvent::ToolCall {
+                session_id: "s1".into(),
+                tool_name: "run_subagent".into(),
+                arguments: r#"{"task":"分析实现方案"}"#.into(),
+            });
+            app.apply_backend_event(BackendEvent::SubagentStarted {
+                session_id: "s1".into(),
+                task: "分析实现方案".into(),
+            });
+
+            let backend = ratatui::backend::TestBackend::new(width, 24);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let text = (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("Subagent"), "width {width}: {text}");
+            assert!(text.contains("run_subagent"), "width {width}: {text}");
+        }
     }
 
     fn ctrl_c() -> crossterm::event::Event {

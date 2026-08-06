@@ -1,5 +1,5 @@
 //! The main QQ message handler — trigger gating, filter pipeline, and
-//! agent routing.
+//! delivery to the agent's inbound hook.
 //!
 //! Extracted from `QqAdapter::start()` so the handler logic can be tested
 //! independently.
@@ -74,34 +74,20 @@ impl echo_server::Handler for QqHandler {
 
         tracing::debug!(user = %msg.user_id, channel = %msg.channel, "QQ message accepted, routing to agent");
 
-        // If an agent bridge is set, process through it.
-        let bridge = self
+        // Deliver to the one-way hook. Agent output can only reach QQ through
+        // an explicit send tool; it is never returned through this boundary.
+        let hook = self
             .inner
-            .agent_bridge
+            .message_hook
             .lock()
-            .expect("agent bridge poisoned")
+            .expect("message hook poisoned")
             .clone();
-        if let Some(bridge) = bridge {
-            match bridge.handle_incoming_message(msg).await {
-                Ok(Some(reply)) => {
-                    if !reply.trim().is_empty() {
-                        if let Some(message) = message_event {
-                            let _ = ctx.reply_to(message, reply.clone()).await;
-                        }
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    tracing::warn!(error = %e, "agent processing failed");
-                    if let Some(message) = message_event {
-                        let _ = ctx
-                            .reply_to(message, "（处理消息出错，请稍后再试）".to_string())
-                            .await;
-                    }
-                }
+        if let Some(hook) = hook {
+            if let Err(error) = hook.on_incoming_message(msg).await {
+                tracing::warn!(%error, "inbound message hook failed");
             }
         } else {
-            // No agent — forward to subscribers.
+            // No hook — forward to subscribers.
             let adapter_event = AdapterEvent::MessageReceived(msg);
             let subs = self.inner.subscribers.lock().expect("subs poisoned");
             for tx in subs.iter() {
@@ -124,27 +110,29 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::Mutex as StdMutex;
 
-    /// A scriptable AgentBridge for handler tests.
-    struct MockBridge {
-        replies: StdMutex<Vec<Result<Option<String>, String>>>,
+    /// A scriptable inbound hook for handler tests.
+    struct MockHook {
+        result: StdMutex<Option<Result<(), String>>>,
+        messages: StdMutex<Vec<echo_adapter::IncomingMessage>>,
     }
 
-    impl MockBridge {
-        fn new(reply: Result<Option<String>, String>) -> Self {
+    impl MockHook {
+        fn new(result: Result<(), String>) -> Self {
             Self {
-                replies: StdMutex::new(vec![reply]),
+                result: StdMutex::new(Some(result)),
+                messages: StdMutex::new(Vec::new()),
             }
         }
     }
 
     #[async_trait]
-    impl echo_adapter::AgentBridge for MockBridge {
-        async fn handle_incoming_message(
+    impl echo_adapter::InboundMessageHook for MockHook {
+        async fn on_incoming_message(
             &self,
-            _msg: echo_adapter::IncomingMessage,
-        ) -> Result<Option<String>, String> {
-            let mut replies = self.replies.lock().unwrap();
-            replies.pop().unwrap_or(Ok(None))
+            msg: echo_adapter::IncomingMessage,
+        ) -> Result<(), String> {
+            self.messages.lock().unwrap().push(msg);
+            self.result.lock().unwrap().take().unwrap_or(Ok(()))
         }
         fn on_connection_state(
             &self,
@@ -172,7 +160,7 @@ mod tests {
             shutdown_tx: StdMutex::new(None),
             napcat_config_task: StdMutex::new(None),
             tracker: echo_server::ConnectionTracker::default(),
-            agent_bridge: StdMutex::new(None),
+            message_hook: StdMutex::new(None),
             extra_handlers: StdMutex::new(Vec::new()),
             runtime_allowlist_users: StdMutex::new(Vec::new()),
             runtime_allowlist_groups: StdMutex::new(Vec::new()),
@@ -294,11 +282,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dm_message_routes_to_bridge_and_replies() {
-        let bridge: Arc<dyn echo_adapter::AgentBridge> =
-            Arc::new(MockBridge::new(Ok(Some("pong".into()))));
+    async fn dm_message_routes_to_hook_without_automatic_reply() {
+        let hook = Arc::new(MockHook::new(Ok(())));
         let inner = test_inner(QqTriggerConfig::default());
-        *inner.agent_bridge.lock().unwrap() = Some(bridge.clone());
+        *inner.message_hook.lock().unwrap() = Some(hook.clone());
         let handler = QqHandler::new(inner);
         let (ctx, mut api_rx) = test_ctx();
 
@@ -306,22 +293,19 @@ mod tests {
             handler.handle(&ctx, &private_event("ping")).await,
             HandleResult::Handled
         );
-        // The bridge's reply is sent back over the API channel.
-        match api_rx.recv().await.expect("reply queued") {
-            Outgoing::Api(req) => {
-                assert_eq!(req.action, "send_private_msg");
-                assert_eq!(req.params["message"][0]["data"]["text"], "pong");
-            }
-            other => panic!("expected Api outgoing, got {other:?}"),
-        }
+        assert_eq!(hook.messages.lock().unwrap().len(), 1);
+        assert!(
+            api_rx.try_recv().is_err(),
+            "hook must not auto-send a reply"
+        );
     }
 
     #[tokio::test]
-    async fn bridge_error_replies_apology() {
-        let bridge: Arc<dyn echo_adapter::AgentBridge> =
-            Arc::new(MockBridge::new(Err("llm down".into())));
+    async fn hook_error_does_not_send_platform_message() {
+        let hook: Arc<dyn echo_adapter::InboundMessageHook> =
+            Arc::new(MockHook::new(Err("llm down".into())));
         let inner = test_inner(QqTriggerConfig::default());
-        *inner.agent_bridge.lock().unwrap() = Some(bridge);
+        *inner.message_hook.lock().unwrap() = Some(hook);
         let handler = QqHandler::new(inner);
         let (ctx, mut api_rx) = test_ctx();
 
@@ -329,13 +313,7 @@ mod tests {
             handler.handle(&ctx, &private_event("ping")).await,
             HandleResult::Handled
         );
-        match api_rx.recv().await.expect("apology queued") {
-            Outgoing::Api(req) => {
-                let text = req.params["message"][0]["data"]["text"].as_str().unwrap();
-                assert!(text.contains("出错"), "unexpected text: {text}");
-            }
-            other => panic!("expected Api outgoing, got {other:?}"),
-        }
+        assert!(api_rx.try_recv().is_err(), "hook errors must stay internal");
     }
 
     #[tokio::test]

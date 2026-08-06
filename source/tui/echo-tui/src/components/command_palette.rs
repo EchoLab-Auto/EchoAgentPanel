@@ -14,7 +14,7 @@ use ratatui::Frame;
 
 use super::{Component, ComponentResult};
 use crate::event::Event;
-use crate::state::{AppState, PaletteMode};
+use crate::state::{AgentPhase, AppState, PaletteMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteAction {
@@ -60,13 +60,14 @@ impl CommandPalette {
                     format!("💬 {}", s.nickname)
                 };
                 let marker = if active { "● " } else { "○ " };
+                let phase = session_phase_label(state, &s.id);
                 let preview: String = s.last_message.chars().take(24).collect();
                 let preview_part = if preview.is_empty() {
                     String::new()
                 } else {
                     format!("  {preview}")
                 };
-                format!("{marker}{name}{preview_part}")
+                format!("{marker}{phase}{name}{preview_part}")
             })
             .collect()
     }
@@ -86,6 +87,11 @@ impl CommandPalette {
                     format!("💬 {}", s.nickname)
                 };
                 let marker = if active { "● " } else { "○ " };
+                let phase = state
+                    .agent_activities
+                    .get(&s.id)
+                    .map(|activity| activity.phase);
+                let phase_label = session_phase_label(state, &s.id);
                 let name_style = if active {
                     Style::default().fg(theme.title).bold()
                 } else {
@@ -93,7 +99,21 @@ impl CommandPalette {
                 };
                 let preview: String = s.last_message.chars().take(24).collect();
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{marker}{name}"), name_style),
+                    Span::styled(marker, name_style),
+                    Span::styled(
+                        phase_label,
+                        Style::default()
+                            .fg(match phase {
+                                Some(AgentPhase::Tool) => theme.tool_fg,
+                                Some(AgentPhase::Subagent) => theme.accent,
+                                Some(AgentPhase::Completed) => theme.success,
+                                Some(AgentPhase::Failed) => theme.error,
+                                Some(AgentPhase::Thinking) => theme.agent_fg,
+                                None => theme.faint,
+                            })
+                            .bold(),
+                    ),
+                    Span::styled(name, name_style),
                     if preview.is_empty() {
                         Span::styled("", theme.faint)
                     } else {
@@ -103,6 +123,22 @@ impl CommandPalette {
             })
             .collect()
     }
+}
+
+fn session_phase_label(state: &AppState, session_id: &str) -> String {
+    match state
+        .agent_activities
+        .get(session_id)
+        .map(|activity| activity.phase)
+    {
+        Some(AgentPhase::Thinking) => "[思考] ",
+        Some(AgentPhase::Tool) => "[工具] ",
+        Some(AgentPhase::Subagent) => "[子任务] ",
+        Some(AgentPhase::Completed) => "[完成] ",
+        Some(AgentPhase::Failed) => "[失败] ",
+        None => "",
+    }
+    .into()
 }
 
 impl Component for CommandPalette {
@@ -249,6 +285,18 @@ mod tests {
         assert!(labels[1].contains("alice"));
         // DM sessions get a 💬 prefix; group sessions show plain nickname.
         assert!(labels[1].contains("💬"));
+    }
+
+    #[test]
+    fn session_labels_expose_background_activity() {
+        let mut state = state_with_sessions();
+        state.start_agent_activity("new");
+        state
+            .activity_mut("old")
+            .transition(AgentPhase::Subagent, Some("task".into()));
+        let labels = CommandPalette.session_labels(&state);
+        assert!(labels[0].contains("[思考]"));
+        assert!(labels[1].contains("[子任务]"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ base_url = "https://api.deepseek.com/anthropic"
 api_key = ""
 max_tool_iterations = 1024
 memory_limit = 40
-skills_dir = "skills"
+skills_dir = "skills"                    # 递归发现 SKILL.md，运行时自动热重载
 system_prompt = "请你使用中文"
 
 [adapters.qq]

@@ -19,7 +19,7 @@ use crate::util;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MsgRole {
     User,
-    Agent,
+    Backend,
     Tool,
     System,
 }
@@ -29,6 +29,110 @@ pub struct DisplayMessage {
     pub role: MsgRole,
     pub content: String,
     pub time: i64,
+    pub metadata: Option<MessageMetadata>,
+}
+
+impl DisplayMessage {
+    pub fn plain(role: MsgRole, content: impl Into<String>, time: i64) -> Self {
+        Self {
+            role,
+            content: content.into(),
+            time,
+            metadata: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum MessageMetadata {
+    Tool(ToolMessage),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolMessageStatus {
+    Running,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolMessage {
+    pub name: String,
+    pub input: String,
+    pub output: Option<String>,
+    pub status: ToolMessageStatus,
+    pub started_at: std::time::Instant,
+    pub elapsed: Option<Duration>,
+}
+
+// ── Agent execution state ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentPhase {
+    Thinking,
+    Tool,
+    Subagent,
+    Completed,
+    Failed,
+}
+
+impl AgentPhase {
+    pub fn is_busy(self) -> bool {
+        matches!(self, Self::Thinking | Self::Tool | Self::Subagent)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentActivity {
+    pub phase: AgentPhase,
+    pub detail: Option<String>,
+    pub turn_started_at: std::time::Instant,
+    pub phase_started_at: std::time::Instant,
+    pub finished_elapsed: Option<Duration>,
+    pub tools_completed: usize,
+    pub subagents_completed: usize,
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+}
+
+impl AgentActivity {
+    pub fn new() -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            phase: AgentPhase::Thinking,
+            detail: None,
+            turn_started_at: now,
+            phase_started_at: now,
+            finished_elapsed: None,
+            tools_completed: 0,
+            subagents_completed: 0,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+        }
+    }
+
+    pub fn transition(&mut self, phase: AgentPhase, detail: Option<String>) {
+        self.phase = phase;
+        self.detail = detail;
+        self.phase_started_at = std::time::Instant::now();
+        self.finished_elapsed = matches!(phase, AgentPhase::Completed | AgentPhase::Failed)
+            .then(|| self.turn_started_at.elapsed());
+    }
+
+    pub fn total_elapsed(&self) -> Duration {
+        self.finished_elapsed
+            .unwrap_or_else(|| self.turn_started_at.elapsed())
+    }
+
+    pub fn phase_elapsed(&self) -> Duration {
+        self.phase_started_at.elapsed()
+    }
+}
+
+impl Default for AgentActivity {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -142,8 +246,8 @@ pub struct AppState {
     pub quit_armed: bool,
     pub quit_armed_at: std::time::Instant,
     pub anim_tick: u64,
-    pub llm_in_flight: bool,
-    pub tool_in_flight: Option<(String, std::time::Instant)>,
+    /// Per-session execution lifecycle. Sessions can run concurrently.
+    pub agent_activities: HashMap<String, AgentActivity>,
     pub chat_flash_until: Option<std::time::Instant>,
     pub mode: ConversationMode,
     pub form_overlay: FormOverlay,
@@ -198,8 +302,7 @@ impl AppState {
             quit_armed: false,
             quit_armed_at: std::time::Instant::now(),
             anim_tick: 0,
-            llm_in_flight: false,
-            tool_in_flight: None,
+            agent_activities: HashMap::new(),
             chat_flash_until: None,
             mode: ConversationMode::Normal,
             form_overlay: Default::default(),
@@ -230,6 +333,30 @@ impl AppState {
             Some(id) => self.messages.get(id).map(|v| v.as_slice()).unwrap_or(&[]),
             None => &[],
         }
+    }
+
+    pub fn active_activity(&self) -> Option<&AgentActivity> {
+        self.active_session_id
+            .as_deref()
+            .and_then(|id| self.agent_activities.get(id))
+    }
+
+    pub fn busy_session_count(&self) -> usize {
+        self.agent_activities
+            .values()
+            .filter(|activity| activity.phase.is_busy())
+            .count()
+    }
+
+    pub fn start_agent_activity(&mut self, session_id: &str) {
+        self.agent_activities
+            .insert(session_id.to_string(), AgentActivity::new());
+    }
+
+    pub fn activity_mut(&mut self, session_id: &str) -> &mut AgentActivity {
+        self.agent_activities
+            .entry(session_id.to_string())
+            .or_default()
     }
 
     pub fn push_message(&mut self, session_id: &str, msg: DisplayMessage) {
@@ -267,11 +394,7 @@ impl AppState {
         }
         self.push_message(
             &sid,
-            DisplayMessage {
-                role: MsgRole::System,
-                content: text,
-                time: chrono::Utc::now().timestamp(),
-            },
+            DisplayMessage::plain(MsgRole::System, text, chrono::Utc::now().timestamp()),
         );
         self.menu_msg_idx = (self.messages.get(&sid).map(|m| m.len()).unwrap_or(1) - 1) as isize;
     }
@@ -415,16 +538,12 @@ impl AppState {
             for m in history {
                 let role = match m["role"].as_str().unwrap_or("user") {
                     "user" => MsgRole::User,
-                    "assistant" => MsgRole::Agent,
+                    "assistant" => MsgRole::Backend,
                     "tool" => MsgRole::Tool,
                     _ => MsgRole::System,
                 };
                 let content = m["content"].as_str().unwrap_or("").to_string();
-                msgs.push(DisplayMessage {
-                    role,
-                    content,
-                    time: 0,
-                });
+                msgs.push(DisplayMessage::plain(role, content, 0));
             }
             return;
         }
@@ -454,11 +573,7 @@ impl AppState {
         }
         self.push_message(
             &session_id,
-            DisplayMessage {
-                role: MsgRole::System,
-                content: text,
-                time: chrono::Utc::now().timestamp(),
-            },
+            DisplayMessage::plain(MsgRole::System, text, chrono::Utc::now().timestamp()),
         );
     }
 
@@ -515,18 +630,21 @@ mod tests {
     }
 
     #[test]
+    fn completed_activity_freezes_total_elapsed_time() {
+        let mut activity = AgentActivity::new();
+        activity.turn_started_at = std::time::Instant::now() - Duration::from_secs(2);
+        activity.transition(AgentPhase::Completed, None);
+        let completed_elapsed = activity.total_elapsed();
+        activity.turn_started_at -= Duration::from_secs(30);
+        assert_eq!(activity.total_elapsed(), completed_elapsed);
+    }
+
+    #[test]
     fn push_message_scrolls_to_bottom_and_flashes() {
         let mut st = state();
         st.active_session_id = Some("s1".into());
         st.chat_scroll = 50;
-        st.push_message(
-            "s1",
-            DisplayMessage {
-                role: MsgRole::User,
-                content: "hi".into(),
-                time: 0,
-            },
-        );
+        st.push_message("s1", DisplayMessage::plain(MsgRole::User, "hi", 0));
         assert_eq!(st.chat_scroll, 0, "new message snaps to bottom");
         assert!(st.chat_flash_until.is_some());
         assert_eq!(st.active_messages().len(), 1);

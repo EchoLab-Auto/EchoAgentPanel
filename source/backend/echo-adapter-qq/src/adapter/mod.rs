@@ -48,9 +48,9 @@ pub(crate) struct QqInner {
     pub(crate) shutdown_tx: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
     pub(crate) napcat_config_task: StdMutex<Option<tokio::task::AbortHandle>>,
     pub(crate) tracker: echo_server::ConnectionTracker,
-    /// Agent bridge (set externally before start). Adapters depend only on
-    /// the [`echo_adapter::AgentBridge`] trait, not on echo-agent itself.
-    pub(crate) agent_bridge: StdMutex<Option<Arc<dyn echo_adapter::AgentBridge>>>,
+    /// One-way inbound hook (set externally before start). Adapters depend
+    /// only on echo-adapter abstractions, not on echo-agent itself.
+    pub(crate) message_hook: StdMutex<Option<Arc<dyn echo_adapter::InboundMessageHook>>>,
     /// Extra handlers to register alongside the internal QQ handler.
     pub(crate) extra_handlers: StdMutex<Vec<Box<dyn echo_server::Handler>>>,
     /// Runtime allowlist overrides (takes precedence over config file values).
@@ -118,7 +118,7 @@ impl QqAdapter {
                 shutdown_tx: StdMutex::new(None),
                 napcat_config_task: StdMutex::new(None),
                 tracker: echo_server::ConnectionTracker::default(),
-                agent_bridge: StdMutex::new(None),
+                message_hook: StdMutex::new(None),
                 extra_handlers: StdMutex::new(Vec::new()),
                 runtime_allowlist_users: StdMutex::new(au),
                 runtime_allowlist_groups: StdMutex::new(ag),
@@ -178,15 +178,13 @@ impl QqAdapter {
         }
     }
 
-    /// Set the agent reference — must be called before start().
-    /// Attach the agent bridge (implemented by echo-agent) that routes
-    /// inbound messages into the LLM loop.
-    pub fn set_agent(&self, bridge: Arc<dyn echo_adapter::AgentBridge>) {
+    /// Attach the one-way inbound hook before starting the adapter.
+    pub fn set_message_hook(&self, hook: Arc<dyn echo_adapter::InboundMessageHook>) {
         *self
             .inner
-            .agent_bridge
+            .message_hook
             .lock()
-            .expect("agent bridge poisoned") = Some(bridge);
+            .expect("message hook poisoned") = Some(hook);
     }
 
     /// Register an additional handler (e.g. Echo, Help, Admin).
@@ -506,6 +504,63 @@ impl QqAdapter {
         serde_json::to_string(&resp.data).map_err(|e| e.to_string())
     }
 
+    /// Upload a file to a group via the active QQ connection.
+    ///
+    /// `file_path` must be a path on the machine running NapCat (inside the
+    /// container when deployed via docker). `file_name` is the display name.
+    pub async fn upload_group_file(
+        &self,
+        group_id: i64,
+        file_path: &str,
+        file_name: &str,
+    ) -> Result<String, String> {
+        let ctx = self
+            .inner
+            .active_context
+            .lock()
+            .map_err(|e| format!("lock poisoned: {e}"))?
+            .clone()
+            .ok_or("no QQ connection active")?;
+        let request = echo_core::action::actions::upload_group_file(group_id, file_path, file_name);
+        let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
+        if resp.is_ok() {
+            Ok(format!("file uploaded to group {group_id}"))
+        } else {
+            Err(resp
+                .error_message()
+                .unwrap_or_else(|| "upload failed".into()))
+        }
+    }
+
+    /// Upload a file to a private chat via the active QQ connection.
+    ///
+    /// `file_path` must be a path on the machine running NapCat (inside the
+    /// container when deployed via docker). `file_name` is the display name.
+    pub async fn upload_private_file(
+        &self,
+        user_id: i64,
+        file_path: &str,
+        file_name: &str,
+    ) -> Result<String, String> {
+        let ctx = self
+            .inner
+            .active_context
+            .lock()
+            .map_err(|e| format!("lock poisoned: {e}"))?
+            .clone()
+            .ok_or("no QQ connection active")?;
+        let request =
+            echo_core::action::actions::upload_private_file(user_id, file_path, file_name);
+        let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
+        if resp.is_ok() {
+            Ok(format!("file uploaded to user {user_id}"))
+        } else {
+            Err(resp
+                .error_message()
+                .unwrap_or_else(|| "upload failed".into()))
+        }
+    }
+
     pub(crate) fn convert_message(event: &OneBotEvent) -> Option<IncomingMessage> {
         let msg = event.as_message()?;
         if matches!(msg, MessageEvent::Unknown) {
@@ -619,9 +674,8 @@ impl Adapter for QqAdapter {
                 *inner_cb.active_context.lock().expect("ctx poisoned") = None;
             }
             inner_cb.connected.store(connected, Ordering::SeqCst);
-            if let Some(ref bridge) = *inner_cb.agent_bridge.lock().expect("agent bridge poisoned")
-            {
-                bridge.on_connection_state("qq", connected, Some(self_id.to_string()));
+            if let Some(ref hook) = *inner_cb.message_hook.lock().expect("message hook poisoned") {
+                hook.on_connection_state("qq", connected, Some(self_id.to_string()));
             }
         });
 

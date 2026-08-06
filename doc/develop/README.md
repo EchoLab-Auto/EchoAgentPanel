@@ -40,7 +40,7 @@ EchoAgentPanel/
 ### Key Traits
 - `LlmProvider` — LLM backend abstraction (OpenAI/Anthropic/Ollama)
 - `Tool` — LLM-callable function (calculator, adapter mgmt, coding tools)
-- `Adapter` — Platform bridge (QQ/OneBot); `AgentBridge` — adapter→agent dependency inversion
+- `Adapter` — Platform integration (QQ/OneBot); `InboundMessageHook` — one-way adapter→agent input
 - `MessageFilter` — Inbound message filter (allowlist, denylist, rate limit, keyword, content length)
 - `Handler` — OneBot event handler (priority-ordered chain, panic isolation)
 - `Component` — TUI component (render + handle_event, 7 implementors)
@@ -48,7 +48,7 @@ EchoAgentPanel/
 ### Key Abstractions
 - `ConfigStore` — Atomic TOML read-modify-write (shared by Agent + QqAdapter, eliminates concurrent-write races)
 - `GateMode` — Strongly-typed gating mode (`None` / `Allowlist` / `Denylist`), serialised as snake_case for wire compatibility
-- `AdapterBridge` — echo-agent implements `AgentBridge` trait so echo-adapter-qq has zero dependency on echo-agent
+- `AgentMessageHook` — echo-agent implements the one-way `InboundMessageHook`; platform output requires tools
 - `FanoutHandle` — Multi-subscriber event fanout with stale subscriber pruning
 
 ### Key State
@@ -58,11 +58,13 @@ EchoAgentPanel/
 - `QqInner` — QQ adapter internal state (running, connected, active_context)
 
 ### Key Flows
-1. **QQ message → Agent reply**: QqHandler → trigger gating → filter pipeline → agent.process_message → ctx.reply_to
-2. **TUI message → Agent reply**: prompt_input → pending_submit → BackendCommand::SendMessage → agent.process_message → BackendEvent::MessageSent → chat_view
-3. **Slash command**: prompt_input [/] → show_slash → pending_slash → slash_commands::dispatch → toast()
-4. **API config**: /api → FormOverlay::Selecting → e → FormOverlay::Editing → Ctrl+S → persist_config
-5. **Adapter lifecycle**: QqAdapter::start() → bind port → spawn server task → accept connections → QqHandler
+1. **QQ input hook**: QqHandler → trigger gating → filter pipeline → AgentMessageHook → structured `qq_message` input
+2. **QQ output tool**: Agent tool call → `send_private_msg` / `send_group_msg` → QqAdapter::send_message
+3. **TUI backend input**: prompt_input → BackendCommand::SendMessage → agent.process_message → BackendEvent::AgentOutput
+4. **Slash command**: prompt_input [/] → show_slash → pending_slash → slash_commands::dispatch → toast()
+5. **API config**: /api → FormOverlay::Selecting → e → FormOverlay::Editing → Ctrl+S → persist_config
+6. **Adapter lifecycle**: QqAdapter::start() → bind port → spawn server task → accept connections → QqHandler
+7. **Skill hot reload**: periodic scan → discover SKILL.md → preserve enabled state → replace registry → clear prompt cache
 
 ### Build & Run
 

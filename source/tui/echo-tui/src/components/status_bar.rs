@@ -1,75 +1,80 @@
-//! Top status bar: connection state, model, provider, skills.
+//! Two-line runtime status panel.
 //!
-//! 亮度层次：连接状态（title 最亮）> 模型/provider（fg）> 快捷键提示（faint 最弱）。
-//! 动效：断开时连接点闪烁、LLM 在途 spinner、工具执行指示。
+//! The first row answers where the agent is connected. The second row answers
+//! what the active conversation is doing right now.
+
+use std::time::Duration;
 
 use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::style::{Style, Stylize};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::{Component, ComponentResult};
 use crate::event::Event;
-use crate::state::{AppState, SPINNER};
+use crate::state::{AgentPhase, AppState, SPINNER};
 
 #[derive(Debug, Default)]
 pub struct StatusBar;
 
 impl StatusBar {
-    /// Plain-text status line (without styling). Pure function, unit-testable.
-    fn status_text(&self, state: &AppState) -> String {
-        let status = &state.status;
-
-        // Adapter indicator — a single dot showing if any adapter is connected.
-        let any_connected = status.adapters.iter().any(|a| a.connected);
-        let mut parts: Vec<String> = Vec::new();
-        if status.adapters.is_empty() {
-            parts.push("○".into());
-        } else if any_connected {
-            parts.push("●".into());
-        } else {
-            parts.push("○".into());
-        }
-
-        // LLM 在途：spinner + 思考中（模型名前置）
-        if state.llm_in_flight {
-            let frame = SPINNER[(state.anim_tick % SPINNER.len() as u64) as usize];
-            parts.push(format!("  |  {frame} 思考中…"));
-        }
-        if !status.model.is_empty() {
-            parts.push(format!("  |  模型: {}", status.model));
-        }
-        if !status.provider.is_empty() {
-            parts.push(format!("  ({})", status.provider));
-        }
-        // 当前会话（侧边栏移除后的身份提示）
-        if let Some(s) = state.active_session() {
-            let label = if s.group_name.is_some() {
-                format!("会话: {}", s.nickname)
+    /// Plain text rows, kept separate from styling for responsive tests.
+    fn status_text(&self, state: &AppState, width: u16) -> (String, String) {
+        let connection = connection_text(state);
+        let mut context = connection;
+        if let Some(session) = state.active_session() {
+            let scope = if session.group_name.is_some() {
+                "群聊"
+            } else if session.platform == "local" {
+                "本地"
             } else {
-                format!("会话: 💬 {}", s.nickname)
+                "私聊"
             };
-            parts.push(format!("  |  {label}"));
+            context.push_str(&format!("  |  {scope} · {}", session.nickname));
         }
-        // 工具执行中：不确定进度条（░▒▓ 按帧扫动）
-        if let Some((tool, _started)) = &state.tool_in_flight {
-            parts.push(format!("  |  工具 {tool} 执行中"));
+        if !state.status.model.is_empty() {
+            context.push_str(&format!("  |  {}", state.status.model));
+            if width >= 110 && !state.status.provider.is_empty() {
+                context.push_str(&format!(" ({})", state.status.provider));
+            }
         }
-        if !status.skills.is_empty() {
-            parts.push(format!("  |  技能: {}", status.skills.len()));
+        if width >= 130 && !state.status.skills.is_empty() {
+            context.push_str(&format!("  |  技能 {}", state.status.skills.len()));
         }
-        parts.push("  Tab 选中输入 · ^X 前缀 · ^C×2 退出 · ? 帮助".into());
-        parts.concat()
+
+        let mut runtime = runtime_text(state);
+        if width >= 100 {
+            runtime.push_str("  |  ^X 命令  ? 帮助  ^C×2 退出");
+        }
+        (
+            fit_width(&context, width as usize),
+            fit_width(&runtime, width as usize),
+        )
     }
 }
 
 impl Component for StatusBar {
     fn render(&self, f: &mut Frame, area: Rect, state: &AppState) {
         let theme = state.theme;
+        let (context, runtime) = self.status_text(state, area.width);
+        let runtime_color = match state.active_activity().map(|activity| activity.phase) {
+            Some(AgentPhase::Tool) => theme.tool_fg,
+            Some(AgentPhase::Subagent) => theme.accent,
+            Some(AgentPhase::Completed) => theme.success,
+            Some(AgentPhase::Failed) => theme.error,
+            Some(AgentPhase::Thinking) => theme.agent_fg,
+            None => theme.dim,
+        };
+        let lines = vec![
+            Line::from(Span::styled(context, Style::default().fg(theme.fg))),
+            Line::from(Span::styled(
+                runtime,
+                Style::default().fg(runtime_color).bold(),
+            )),
+        ];
         f.render_widget(
-            Paragraph::new(Line::from(self.status_text(state)))
-                .style(Style::default().fg(theme.fg).bg(theme.bg)),
+            Paragraph::new(lines).style(Style::default().bg(theme.panel_bg)),
             area,
         );
     }
@@ -79,11 +84,123 @@ impl Component for StatusBar {
     }
 }
 
+fn connection_text(state: &AppState) -> String {
+    if state.status.adapters.is_empty() {
+        return "○ 适配器状态未知".into();
+    }
+    let connected: Vec<_> = state
+        .status
+        .adapters
+        .iter()
+        .filter(|adapter| adapter.connected)
+        .map(|adapter| adapter.display_name.as_str())
+        .collect();
+    if !connected.is_empty() {
+        format!("● {} 已连接", connected.join(", "))
+    } else if state.status.adapters.iter().any(|adapter| adapter.running) {
+        "◐ 适配器运行中，等待连接".into()
+    } else {
+        "○ 适配器未运行".into()
+    }
+}
+
+fn runtime_text(state: &AppState) -> String {
+    let spinner = SPINNER[(state.anim_tick % SPINNER.len() as u64) as usize];
+    let mut text = match state.active_activity() {
+        None => "Agent 就绪".into(),
+        Some(activity) => match activity.phase {
+            AgentPhase::Thinking => format!(
+                "{spinner} Agent 运行中 · 思考 · {}",
+                format_duration(activity.phase_elapsed())
+            ),
+            AgentPhase::Tool => format!(
+                "{spinner} Agent 运行中 · 工具 {} · {}",
+                activity.detail.as_deref().unwrap_or("未知"),
+                format_duration(activity.phase_elapsed())
+            ),
+            AgentPhase::Subagent => format!(
+                "{spinner} Subagent 运行中 · {} · {}",
+                activity.detail.as_deref().unwrap_or("分析任务"),
+                format_duration(activity.phase_elapsed())
+            ),
+            AgentPhase::Completed => completed_text(activity, "✓ Agent 已完成"),
+            AgentPhase::Failed => {
+                let mut value = completed_text(activity, "× Agent 失败");
+                if let Some(detail) = &activity.detail {
+                    value.push_str(&format!(" · {detail}"));
+                }
+                value
+            }
+        },
+    };
+    let current_is_busy = state
+        .active_activity()
+        .is_some_and(|activity| activity.phase.is_busy()) as usize;
+    let other_busy = state.busy_session_count().saturating_sub(current_is_busy);
+    if other_busy > 0 {
+        text.push_str(&format!("  |  其他运行会话 {other_busy}"));
+    }
+    text
+}
+
+fn completed_text(activity: &crate::state::AgentActivity, prefix: &str) -> String {
+    let mut parts = vec![
+        prefix.to_string(),
+        format_duration(activity.total_elapsed()),
+    ];
+    if activity.tools_completed > 0 {
+        parts.push(format!("工具 {}", activity.tools_completed));
+    }
+    if activity.subagents_completed > 0 {
+        parts.push(format!("Subagent {}", activity.subagents_completed));
+    }
+    let tokens = activity
+        .prompt_tokens
+        .saturating_add(activity.completion_tokens);
+    if tokens > 0 {
+        parts.push(format!("Token {tokens}"));
+    }
+    parts.join(" · ")
+}
+
+pub(crate) fn format_duration(duration: Duration) -> String {
+    if duration.as_secs() >= 60 {
+        format!(
+            "{}m{:02}s",
+            duration.as_secs() / 60,
+            duration.as_secs() % 60
+        )
+    } else if duration.as_secs() >= 10 {
+        format!("{}s", duration.as_secs())
+    } else {
+        format!("{:.1}s", duration.as_secs_f32())
+    }
+}
+
+fn fit_width(value: &str, width: usize) -> String {
+    if crate::util::str_visual_width(value) <= width {
+        return value.to_string();
+    }
+    if width <= 1 {
+        return "…".chars().take(width).collect();
+    }
+    let mut output = String::new();
+    for ch in value.chars() {
+        let candidate = format!("{output}{ch}…");
+        if crate::util::str_visual_width(&candidate) > width {
+            break;
+        }
+        output.push(ch);
+    }
+    output.push('…');
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::keybindings::Keybindings;
-    use crate::state::AdapterStatusEntry;
+    use crate::state::{AdapterStatusEntry, AgentActivity};
     use crate::theme::Theme;
 
     fn state() -> AppState {
@@ -91,63 +208,70 @@ mod tests {
     }
 
     #[test]
-    fn shows_dim_dot_when_no_adapters() {
-        let st = state();
+    fn distinguishes_adapter_states() {
         let bar = StatusBar;
-        let text = bar.status_text(&st);
-        assert!(text.starts_with("○"));
-    }
-
-    #[test]
-    fn shows_solid_dot_when_connected() {
-        let mut st = state();
-        st.status.set_adapter_state(AdapterStatusEntry {
+        let mut state = state();
+        assert!(bar.status_text(&state, 120).0.contains("状态未知"));
+        state.status.set_adapter_state(AdapterStatusEntry {
             name: "qq".into(),
-            display_name: "qq".into(),
-            connected: true,
+            display_name: "QQ".into(),
             running: true,
-            self_id: Some("10001".into()),
-            bind_address: String::new(),
-            started_at: None,
+            ..Default::default()
         });
-        let bar = StatusBar;
-        assert!(bar.status_text(&st).starts_with("●"));
+        assert!(bar.status_text(&state, 120).0.contains("等待连接"));
+        state.status.adapters[0].connected = true;
+        assert!(bar.status_text(&state, 120).0.contains("QQ 已连接"));
     }
 
     #[test]
-    fn shows_model_and_provider() {
-        let mut st = state();
-        st.status.model = "deepseek-v4-flash".into();
-        st.status.provider = "deepseek".into();
+    fn clearly_names_every_runtime_phase() {
         let bar = StatusBar;
-        let text = bar.status_text(&st);
-        assert!(text.contains("模型: deepseek-v4-flash"));
-        assert!(text.contains("(deepseek)"));
+        let mut state = state();
+        state.active_session_id = Some("s1".into());
+        let mut activity = AgentActivity::new();
+        state.agent_activities.insert("s1".into(), activity.clone());
+        assert!(bar.status_text(&state, 120).1.contains("思考"));
+
+        activity.transition(AgentPhase::Tool, Some("calculator".into()));
+        state.agent_activities.insert("s1".into(), activity.clone());
+        assert!(bar.status_text(&state, 120).1.contains("工具 calculator"));
+
+        activity.transition(AgentPhase::Subagent, Some("分析方案".into()));
+        state.agent_activities.insert("s1".into(), activity.clone());
+        assert!(bar.status_text(&state, 120).1.contains("Subagent 运行中"));
+
+        activity.transition(AgentPhase::Completed, None);
+        state.agent_activities.insert("s1".into(), activity);
+        assert!(bar.status_text(&state, 120).1.contains("已完成"));
     }
 
     #[test]
-    fn shows_thinking_when_llm_in_flight() {
-        let mut st = state();
-        st.llm_in_flight = true;
+    fn narrow_status_never_exceeds_available_width() {
+        let mut state = state();
+        state.status.model = "a-very-long-model-name-that-must-be-truncated".into();
         let bar = StatusBar;
-        assert!(bar.status_text(&st).contains("思考中"));
+        let (first, second) = bar.status_text(&state, 24);
+        assert!(crate::util::str_visual_width(&first) <= 24);
+        assert!(crate::util::str_visual_width(&second) <= 24);
     }
 
     #[test]
-    fn shows_tool_and_skill_counters() {
-        let mut st = state();
-        st.tool_in_flight = Some(("calculator".into(), std::time::Instant::now()));
-        st.status.skills = vec!["calc".into(), "web".into()];
-        let bar = StatusBar;
-        let text = bar.status_text(&st);
-        assert!(text.contains("工具 calculator"));
-        assert!(text.contains("技能: 2"));
+    fn duration_format_is_stable() {
+        assert_eq!(format_duration(Duration::from_millis(1250)), "1.2s");
+        assert_eq!(format_duration(Duration::from_secs(12)), "12s");
+        assert_eq!(format_duration(Duration::from_secs(65)), "1m05s");
     }
 
     #[test]
-    fn always_shows_help_hint() {
-        let st = state();
-        let bar = StatusBar;
-        assert!(bar.status_text(&st).contains("Tab 选中输入"));
+    fn runtime_reports_other_busy_sessions() {
+        let mut state = state();
+        state.active_session_id = Some("s1".into());
+        state
+            .agent_activities
+            .insert("s1".into(), AgentActivity::new());
+        state
+            .agent_activities
+            .insert("s2".into(), AgentActivity::new());
+        assert!(runtime_text(&state).contains("其他运行会话 1"));
     }
 }

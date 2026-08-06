@@ -72,7 +72,7 @@ fn test_agent(reply: &'static str) -> (Arc<Agent>, Arc<StaticProvider>) {
 }
 
 #[tokio::test]
-async fn send_message_command_produces_reply_event() {
+async fn send_message_command_produces_agent_output_event() {
     let (agent, provider) = test_agent("你好，世界");
     let (bridge, handle) = echo_agent::create_bridge();
     agent.attach(Arc::new(handle));
@@ -96,9 +96,9 @@ async fn send_message_command_produces_reply_event() {
     assert!(
         events.iter().any(|ev| matches!(
             ev,
-            BackendEvent::MessageSent { content, .. } if content == "你好，世界"
+            BackendEvent::AgentOutput { content, .. } if content == "你好，世界"
         )),
-        "MessageSent event expected, got {events:?}"
+        "AgentOutput event expected, got {events:?}"
     );
 }
 
@@ -309,6 +309,7 @@ async fn toggle_skill_enables_and_disables() {
             name: "calc".into(),
             description: "d".into(),
             keywords: vec!["计算".into()],
+            always: false,
             enabled: true,
         },
         instructions: "use calculator".into(),
@@ -355,6 +356,7 @@ async fn skill_keyword_injects_instructions_into_prompt() {
             name: "calc".into(),
             description: "算术计算".into(),
             keywords: vec!["计算".into()],
+            always: false,
             enabled: true,
         },
         instructions: "使用 calculator 工具计算表达式".into(),
@@ -383,6 +385,46 @@ async fn skill_keyword_injects_instructions_into_prompt() {
 }
 
 #[tokio::test]
+async fn always_skill_coexists_with_keyword_skill_and_qq_context() {
+    let (agent, provider) = test_agent("ok");
+    agent.skills.lock().await.register(echo_agent::Skill {
+        metadata: echo_agent::skill::SkillMetadata {
+            name: "concise-dialogue".into(),
+            description: "简洁表达".into(),
+            keywords: vec![],
+            always: true,
+            enabled: true,
+        },
+        instructions: "QQ 单段通常不超过 30 个字符".into(),
+    });
+    agent.skills.lock().await.register(echo_agent::Skill {
+        metadata: echo_agent::skill::SkillMetadata {
+            name: "calc".into(),
+            description: "算术计算".into(),
+            keywords: vec!["计算".into()],
+            always: false,
+            enabled: true,
+        },
+        instructions: "使用 calculator 工具".into(),
+    });
+
+    agent
+        .apply_command(BackendCommand::SendMessage {
+            session_id: "qq:dm::123".into(),
+            content: "帮我计算 1+1".into(),
+        })
+        .await;
+
+    let prompt = provider.last_system_prompt().await;
+    assert!(prompt.contains("Active skill: concise-dialogue"));
+    assert!(prompt.contains("QQ 单段通常不超过 30 个字符"));
+    assert!(prompt.contains("Triggered skill: calc"));
+    assert!(prompt.contains("使用 calculator 工具"));
+    assert!(prompt.contains("# QQ transport boundary"));
+    assert!(prompt.contains("MUST call send_private_msg"));
+}
+
+#[tokio::test]
 async fn non_triggering_message_uses_cached_prompt() {
     let (agent, provider) = test_agent("ok");
     agent.skills.lock().await.register(echo_agent::Skill {
@@ -390,6 +432,7 @@ async fn non_triggering_message_uses_cached_prompt() {
             name: "calc".into(),
             description: "算术计算".into(),
             keywords: vec!["计算".into()],
+            always: false,
             enabled: true,
         },
         instructions: "use calculator".into(),

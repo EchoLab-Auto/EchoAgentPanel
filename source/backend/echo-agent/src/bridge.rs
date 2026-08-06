@@ -12,7 +12,7 @@
 //! {"type":"command","command":{"SendMessage":{"session_id":"...","content":"..."}}}
 //!
 //! // Core → Panel
-//! {"type":"event","event":{"MessageSent":{"session_id":"...","content":"..."}}}
+//! {"type":"event","event":{"AgentOutput":{"session_id":"...","content":"..."}}}
 //! ```
 
 use tokio::sync::{mpsc, Mutex};
@@ -140,7 +140,7 @@ impl FanoutHandle {
 /// Serialises as:
 /// ```json
 /// {"type":"command","payload":{"SendMessage":{"session_id":"...","content":"..."}}}
-/// {"type":"event","payload":{"MessageSent":{"session_id":"...","content":"..."}}}
+/// {"type":"event","payload":{"AgentOutput":{"session_id":"...","content":"..."}}}
 /// ```
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn event_roundtrip_via_ws() {
-        let ev = BackendEvent::MessageSent {
+        let ev = BackendEvent::AgentOutput {
             session_id: "user_0".into(),
             content: "回复内容".into(),
         };
@@ -222,7 +222,7 @@ mod tests {
         let msg = deserialize_message(&text).unwrap();
         match msg {
             WsMessage::Event(e) => match e {
-                BackendEvent::MessageSent {
+                BackendEvent::AgentOutput {
                     session_id,
                     content,
                 } => {
@@ -232,6 +232,35 @@ mod tests {
                 other => panic!("wrong event variant: {other:?}"),
             },
             other => panic!("wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn execution_lifecycle_events_roundtrip_via_ws() {
+        let events = [
+            BackendEvent::SubagentStarted {
+                session_id: "s1".into(),
+                task: "compare designs".into(),
+            },
+            BackendEvent::SubagentCompleted {
+                session_id: "s1".into(),
+                success: true,
+            },
+            BackendEvent::AgentCompleted {
+                session_id: "s1".into(),
+            },
+        ];
+        for event in events {
+            let text = serialize_event(&event);
+            let decoded = deserialize_message(&text).expect("lifecycle event should decode");
+            match decoded {
+                WsMessage::Event(BackendEvent::SubagentStarted { session_id, .. })
+                | WsMessage::Event(BackendEvent::SubagentCompleted { session_id, .. })
+                | WsMessage::Event(BackendEvent::AgentCompleted { session_id }) => {
+                    assert_eq!(session_id, "s1");
+                }
+                other => panic!("wrong lifecycle event: {other:?}"),
+            }
         }
     }
 
@@ -272,7 +301,7 @@ mod tests {
         let (ev_rx, cmd_tx) = handle.subscribe().await;
         // Emit an event and verify it reaches the subscriber.
         handle
-            .emit(BackendEvent::MessageSent {
+            .emit(BackendEvent::AgentOutput {
                 session_id: "s1".into(),
                 content: "hi".into(),
             })
@@ -280,7 +309,7 @@ mod tests {
         let mut rx = ev_rx;
         let ev = rx.try_recv().expect("event should be delivered");
         match ev {
-            BackendEvent::MessageSent { content, .. } => assert_eq!(content, "hi"),
+            BackendEvent::AgentOutput { content, .. } => assert_eq!(content, "hi"),
             other => panic!("wrong event: {other:?}"),
         }
         let _ = cmd_tx;
@@ -292,7 +321,7 @@ mod tests {
         let (mut rx1, _) = handle.subscribe().await;
         let (mut rx2, _) = handle.subscribe().await;
         handle
-            .emit(BackendEvent::MessageSent {
+            .emit(BackendEvent::AgentOutput {
                 session_id: "s".into(),
                 content: "x".into(),
             })
@@ -312,14 +341,14 @@ mod tests {
         // A few emits: the dead sender must be pruned, the live one served.
         for i in 0..3 {
             handle
-                .emit(BackendEvent::MessageSent {
+                .emit(BackendEvent::AgentOutput {
                     session_id: "s".into(),
                     content: format!("m{i}"),
                 })
                 .await;
         }
         match live_rx.try_recv().unwrap() {
-            BackendEvent::MessageSent { session_id, .. } => assert_eq!(session_id, "s"),
+            BackendEvent::AgentOutput { session_id, .. } => assert_eq!(session_id, "s"),
             other => panic!("wrong event: {other:?}"),
         }
         assert!(
