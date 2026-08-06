@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SOURCE_DIR=""
+BINARY=""
+STATUS_FILE=""
+UPDATE_MODE=remote
+
+usage() {
+    cat <<'EOF'
+Usage: scripts/update.sh [--local] --source <dir> --binary <path> --status <path>
+
+Modes:
+  remote (default)  Fetch and fast-forward the clean managed checkout.
+  --local           Build the current source tree exactly as it is, including
+                    uncommitted changes. No fetch or merge is performed.
+EOF
+}
+
+while (($#)); do
+    case "$1" in
+        --source)
+            SOURCE_DIR=${2:-}
+            shift 2
+            ;;
+        --binary)
+            BINARY=${2:-}
+            shift 2
+            ;;
+        --status)
+            STATUS_FILE=${2:-}
+            shift 2
+            ;;
+        --local)
+            UPDATE_MODE=local
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "error: unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ -z "$SOURCE_DIR" || -z "$BINARY" || -z "$STATUS_FILE" ]]; then
+    echo "error: --source, --binary and --status are required" >&2
+    usage >&2
+    exit 2
+fi
+
+STATE_DIR=$(dirname -- "$STATUS_FILE")
+REVISION_FILE="$STATE_DIR/installed-revision"
+LOCK_FILE="$STATE_DIR/update.lock"
+PHASE=initializing
+
+write_status() {
+    local state=$1 message=$2 revision=${3:-unknown}
+    local temporary="$STATUS_FILE.tmp"
+    {
+        printf 'state=%s\n' "$state"
+        printf 'revision=%s\n' "$revision"
+        printf 'message=%s\n' "$message"
+        printf 'updated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >"$temporary"
+    mv -f "$temporary" "$STATUS_FILE"
+}
+
+on_error() {
+    local code=$?
+    trap - ERR
+    write_status failed "update failed during $PHASE" "$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    exit "$code"
+}
+trap on_error ERR
+
+install -d -m 755 "$STATE_DIR" "$(dirname -- "$BINARY")"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    write_status busy "another update is already running"
+    exit 0
+fi
+
+for command in cargo git install systemctl; do
+    command -v "$command" >/dev/null 2>&1 || {
+        write_status failed "required command not found: $command"
+        exit 1
+    }
+done
+if [[ ! -f "$SOURCE_DIR/Cargo.toml" ]]; then
+    write_status failed "source Cargo.toml is missing"
+    exit 1
+fi
+
+core_was_active=0
+if systemctl --user is-active --quiet echo-agent-panel-core.service 2>/dev/null; then
+    core_was_active=1
+fi
+installed=$(cat "$REVISION_FILE" 2>/dev/null || true)
+current=$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+if [[ "$UPDATE_MODE" == local ]]; then
+    target="local:$current"
+    if ! git -C "$SOURCE_DIR" diff --quiet 2>/dev/null \
+        || ! git -C "$SOURCE_DIR" diff --cached --quiet 2>/dev/null \
+        || [[ -n "$(git -C "$SOURCE_DIR" ls-files --others --exclude-standard 2>/dev/null)" ]]; then
+        target+="+dirty"
+    fi
+    write_status running "building local source tree" "$target"
+else
+    if [[ ! -d "$SOURCE_DIR/.git" ]]; then
+        write_status failed "managed source checkout is missing"
+        exit 1
+    fi
+    if ! git -C "$SOURCE_DIR" diff --quiet || ! git -C "$SOURCE_DIR" diff --cached --quiet; then
+        write_status failed "managed source has tracked local changes; refusing to overwrite"
+        exit 1
+    fi
+
+    branch=$(git -C "$SOURCE_DIR" branch --show-current)
+    if [[ -z "$branch" ]]; then
+        write_status failed "managed source is on a detached HEAD"
+        exit 1
+    fi
+
+    PHASE=fetching
+    write_status running "fetching origin/$branch" "$current"
+    git -C "$SOURCE_DIR" fetch --prune origin "$branch"
+    target=$(git -C "$SOURCE_DIR" rev-parse FETCH_HEAD)
+    if ! git -C "$SOURCE_DIR" merge-base --is-ancestor "$current" "$target"; then
+        write_status failed "origin/$branch is not a fast-forward" "$current"
+        exit 1
+    fi
+    git -C "$SOURCE_DIR" merge --ff-only "$target"
+
+    if [[ "$installed" == "$target" && -x "$BINARY" ]]; then
+        write_status current "already up to date" "$target"
+        exit 0
+    fi
+fi
+
+PHASE=building
+write_status running "building revision $target" "$target"
+cargo build --release --locked -p echo --manifest-path "$SOURCE_DIR/Cargo.toml"
+
+PHASE=installing
+temporary=$(mktemp "${BINARY}.new.XXXXXX")
+trap 'rm -f "$temporary"' EXIT
+install -m 755 "$SOURCE_DIR/target/release/echo-agent-panel" "$temporary"
+rollback="${BINARY}.rollback"
+if [[ -x "$BINARY" && ! -x "$rollback" ]]; then
+    rollback_temporary=$(mktemp "${rollback}.new.XXXXXX")
+    install -m 755 "$BINARY" "$rollback_temporary"
+    mv -f "$rollback_temporary" "$rollback"
+fi
+mv -f "$temporary" "$BINARY"
+trap - EXIT
+
+if ((core_was_active)); then
+    PHASE=restarting
+    if ! systemctl --user restart echo-agent-panel-core.service; then
+        restart_failed=1
+    else
+        sleep 3
+        if systemctl --user is-active --quiet echo-agent-panel-core.service; then
+            restart_failed=0
+        else
+            restart_failed=1
+        fi
+    fi
+    if ((restart_failed)); then
+        if [[ -x "$rollback" ]]; then
+            mv -f "$rollback" "$BINARY"
+            systemctl --user restart echo-agent-panel-core.service || true
+            write_status rolled_back "new Core failed health check; restored previous binary" "$installed"
+        else
+            write_status failed "new Core failed health check and no rollback binary exists" "$target"
+        fi
+        exit 1
+    fi
+fi
+
+if [[ -f "$SOURCE_DIR/scripts/update.sh" ]]; then
+    updater="$(dirname -- "$BINARY")/update.sh"
+    updater_temporary=$(mktemp "${updater}.new.XXXXXX")
+    if ! install -m 755 "$SOURCE_DIR/scripts/update.sh" "$updater_temporary" \
+        || ! mv -f "$updater_temporary" "$updater"; then
+        rm -f "$updater_temporary"
+        echo "warning: binary updated, but updater script refresh failed" >&2
+    fi
+fi
+
+rm -f "$rollback"
+printf '%s\n' "$target" >"$REVISION_FILE"
+if [[ "$UPDATE_MODE" == local ]]; then
+    write_status updated "installed successfully from local source" "$target"
+else
+    write_status updated "updated successfully" "$target"
+fi

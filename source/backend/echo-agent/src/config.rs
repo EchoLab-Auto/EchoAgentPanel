@@ -14,6 +14,28 @@ pub struct ApiProfile {
     pub api_key: String,
 }
 
+/// Policy for the privileged framework self-update tool.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SelfUpdateConfig {
+    /// Register the `framework_update` tool. Disabled for source/dev runs.
+    pub enabled: bool,
+    /// Allow requests originating from the local TUI session.
+    pub allow_local: bool,
+    /// Additional QQ user IDs allowed to request an update.
+    pub allowed_qq_users: Vec<u64>,
+}
+
+impl Default for SelfUpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_local: true,
+            allowed_qq_users: Vec::new(),
+        }
+    }
+}
+
 impl ApiProfile {
     pub fn new(
         name: impl Into<String>,
@@ -52,6 +74,10 @@ pub struct AgentConfig {
     pub skills_dir: String,
     /// Maximum conversation messages kept per session.
     pub memory_limit: usize,
+    /// Share one bounded conversation history across all platform sessions.
+    pub shared_context: bool,
+    /// Privileged framework update policy.
+    pub self_update: SelfUpdateConfig,
 }
 
 impl Default for AgentConfig {
@@ -68,6 +94,8 @@ impl Default for AgentConfig {
             max_tool_iterations: 5,
             skills_dir: "skills".into(),
             memory_limit: 40,
+            shared_context: false,
+            self_update: SelfUpdateConfig::default(),
         }
     }
 }
@@ -261,5 +289,20 @@ mod tests {
         assert_eq!(parsed.api_profiles[0].name, "p1");
         // api_key is skipped in serialisation but defaults to empty on load.
         assert!(parsed.api_key.is_empty());
+    }
+
+    #[test]
+    fn self_update_is_disabled_by_default() {
+        let config = AgentConfig::default();
+        assert!(!config.self_update.enabled);
+        assert!(config.self_update.allow_local);
+        assert!(config.self_update.allowed_qq_users.is_empty());
+    }
+
+    #[test]
+    fn shared_context_is_opt_in_and_deserializes() {
+        assert!(!AgentConfig::default().shared_context);
+        let config: AgentConfig = toml::from_str("shared_context = true").unwrap();
+        assert!(config.shared_context);
     }
 }

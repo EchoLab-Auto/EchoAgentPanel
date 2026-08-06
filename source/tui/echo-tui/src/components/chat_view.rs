@@ -15,7 +15,8 @@ use ratatui::Frame;
 use super::{Component, ComponentResult};
 use crate::event::Event;
 use crate::state::{
-    AgentPhase, AppState, MessageMetadata, MsgRole, ToolMessage, ToolMessageStatus, SPINNER,
+    AgentPhase, AppState, InboundMessage, MessageMetadata, MsgRole, ToolMessage, ToolMessageStatus,
+    SPINNER,
 };
 
 #[derive(Debug, Default)]
@@ -148,27 +149,55 @@ fn render_message(
     if let Some(MessageMetadata::Tool(tool)) = &m.metadata {
         return render_tool_message(tool, width, theme, anim_tick);
     }
-    let (label, color) = match m.role {
-        MsgRole::User => ("你", theme.user_fg),
-        MsgRole::Backend => ("后台", theme.agent_fg),
-        MsgRole::Tool => ("工具", theme.tool_fg),
-        MsgRole::System => ("系统", theme.system_fg),
+    let (label, color) = match (&m.role, &m.metadata) {
+        (MsgRole::User, Some(MessageMetadata::Inbound(source))) => {
+            (inbound_label(source), theme.user_fg)
+        }
+        (MsgRole::User, _) => ("后台输入".into(), theme.user_fg),
+        (MsgRole::Backend, _) => ("Agent 后台输出".into(), theme.agent_fg),
+        (MsgRole::Tool, _) => ("工具".into(), theme.tool_fg),
+        (MsgRole::System, _) => ("系统".into(), theme.system_fg),
     };
     let time = if m.time > 0 {
         chrono::DateTime::from_timestamp(m.time, 0)
             .map(|d| {
                 d.with_timezone(&chrono::Local)
-                    .format("%H:%M:%S")
+                    .format("%m-%d %H:%M:%S %:z")
                     .to_string()
             })
             .unwrap_or_default()
     } else {
         String::new()
     };
-    let time_str = if time.is_empty() {
+    let mut time_parts = (!time.is_empty())
+        .then_some(time)
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(MessageMetadata::Inbound(source)) = &m.metadata {
+        if source.received_at_ms > 0
+            && source
+                .received_at_ms
+                .saturating_sub(m.time.saturating_mul(1000))
+                .abs()
+                >= 1_000
+        {
+            if let Some(received) = chrono::DateTime::from_timestamp_millis(source.received_at_ms) {
+                time_parts.push(format!(
+                    "收 {}",
+                    received
+                        .with_timezone(&chrono::Local)
+                        .format("%H:%M:%S%.3f")
+                ));
+            }
+        }
+        if source.message_sequence > 0 {
+            time_parts.push(format!("#{}", source.message_sequence));
+        }
+    }
+    let time_str = if time_parts.is_empty() {
         String::new()
     } else {
-        format!(" [{time}]")
+        format!(" [{}]", time_parts.join(" · "))
     };
     let header_style = if flash {
         Style::default().fg(color).bold().bg(theme.highlight_bg)
@@ -209,6 +238,32 @@ fn render_message(
     }
     out.push(Line::default());
     out
+}
+
+fn inbound_label(source: &InboundMessage) -> String {
+    if source.adapter_name.eq_ignore_ascii_case("local")
+        || source.platform.eq_ignore_ascii_case("local")
+    {
+        return "后台输入".into();
+    }
+    let sender = if source.user_name.trim().is_empty() {
+        source.user_id.clone()
+    } else {
+        format!("{} ({})", source.user_name, source.user_id)
+    };
+    if source.platform.eq_ignore_ascii_case("qq") {
+        if source.channel.starts_with("group:") {
+            let group = source
+                .group_name
+                .as_deref()
+                .filter(|name| !name.trim().is_empty())
+                .or_else(|| source.channel.strip_prefix("group:"))
+                .unwrap_or("未知群");
+            return format!("QQ 群 · {group} · {sender}");
+        }
+        return format!("QQ 私聊 · {sender}");
+    }
+    format!("{} · {sender}", source.platform)
 }
 
 fn render_tool_message(
@@ -366,7 +421,7 @@ mod tests {
         assert!(!lines.is_empty());
         assert_eq!(texts.len(), lines.len());
         // Header line contains the role label.
-        assert!(texts[0].contains("你"));
+        assert!(texts[0].contains("后台输入"));
         // Body line contains the content.
         assert!(texts.iter().any(|t| t.contains("你好")));
     }
@@ -449,6 +504,62 @@ mod tests {
             .collect();
         assert!(text.contains("后台"));
         assert!(text.contains("["), "timestamp should be shown");
+    }
+
+    #[test]
+    fn inbound_headers_distinguish_qq_private_group_and_backend_inputs() {
+        let private = DisplayMessage {
+            role: MsgRole::User,
+            content: "hi".into(),
+            time: 0,
+            metadata: Some(MessageMetadata::Inbound(InboundMessage {
+                adapter_name: "qq".into(),
+                platform: "qq".into(),
+                user_id: "123".into(),
+                user_name: "alice".into(),
+                channel: "direct".into(),
+                group_name: None,
+                received_at_ms: 0,
+                message_sequence: 7,
+            })),
+        };
+        let group = DisplayMessage {
+            metadata: Some(MessageMetadata::Inbound(InboundMessage {
+                channel: "group:456".into(),
+                group_name: Some("开发群".into()),
+                ..match private.metadata.clone().unwrap() {
+                    MessageMetadata::Inbound(source) => source,
+                    MessageMetadata::Tool(_) => unreachable!(),
+                }
+            })),
+            ..private.clone()
+        };
+        let backend = DisplayMessage::plain(MsgRole::User, "local", 0);
+        let backend_in_qq_session = DisplayMessage {
+            metadata: Some(MessageMetadata::Inbound(InboundMessage {
+                adapter_name: "local".into(),
+                platform: "qq".into(),
+                user_id: "123".into(),
+                user_name: "local user".into(),
+                channel: "direct".into(),
+                group_name: None,
+                received_at_ms: 0,
+                message_sequence: 8,
+            })),
+            ..backend.clone()
+        };
+
+        let text = |message: &DisplayMessage| {
+            render_message(message, &message.content, 100, Theme::dark(), false, 0)
+                .into_iter()
+                .flat_map(|line| line.spans.into_iter().map(|span| span.content.into_owned()))
+                .collect::<String>()
+        };
+        assert!(text(&private).contains("QQ 私聊 · alice (123)"));
+        assert!(text(&private).contains("#7"));
+        assert!(text(&group).contains("QQ 群 · 开发群 · alice (123)"));
+        assert!(text(&backend).contains("后台输入"));
+        assert!(text(&backend_in_qq_session).contains("后台输入"));
     }
 
     #[test]

@@ -12,6 +12,8 @@ pub struct Keybindings {
     pub settings: KeyChord,
     /// Show keybinding help ('?').
     pub help: KeyChord,
+    /// Open the detached branch / subagent inspector.
+    pub task_inspector: KeyChord,
     /// Scroll chat up / down.
     pub scroll_up: KeyChord,
     pub scroll_down: KeyChord,
@@ -47,6 +49,7 @@ impl Default for Keybindings {
             session_switch: KeyChord::plain(KeyCode::Char('o')),
             settings: KeyChord::plain(KeyCode::Char('s')),
             help: KeyChord::plain(KeyCode::Char('?')),
+            task_inspector: KeyChord::ctrl(KeyCode::Char('b')),
             scroll_up: KeyChord::plain(KeyCode::PageUp),
             scroll_down: KeyChord::plain(KeyCode::PageDown),
             scroll_top: KeyChord::ctrl(KeyCode::Char('g')),
@@ -70,6 +73,8 @@ mod tests {
         assert!(kb.scroll_top.modifiers.contains(KeyModifiers::CONTROL));
         assert_eq!(kb.scroll_bottom.code, KeyCode::End);
         assert_eq!(kb.help.code, KeyCode::Char('?'));
+        assert_eq!(kb.task_inspector.code, KeyCode::Char('b'));
+        assert!(kb.task_inspector.modifiers.contains(KeyModifiers::CONTROL));
     }
 
     #[test]

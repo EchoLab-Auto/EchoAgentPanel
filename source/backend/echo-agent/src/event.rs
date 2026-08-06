@@ -55,7 +55,12 @@ pub enum BackendEvent {
         channel: String,
         group_name: Option<String>,
         content: String,
+        /// Source/platform timestamp in Unix seconds.
         timestamp: i64,
+        /// Core receive timestamp in Unix milliseconds.
+        received_at_ms: i64,
+        /// Monotonic sequence assigned by this Core process.
+        message_sequence: u64,
     },
 
     // ---- Agent processing (platform-agnostic) ----
@@ -84,6 +89,52 @@ pub enum BackendEvent {
     SubagentCompleted {
         session_id: String,
         success: bool,
+    },
+    /// A QQ message was routed through a temporary reply branch because the
+    /// shared foreground conversation was already occupied.
+    ReplyBranchStarted {
+        session_id: String,
+        branch_id: String,
+        message_sequence: u64,
+        task: String,
+        target: String,
+        started_at_ms: i64,
+    },
+    /// A temporary QQ reply branch finished or was cancelled.
+    ReplyBranchCompleted {
+        session_id: String,
+        branch_id: String,
+        message_sequence: u64,
+        success: bool,
+        cancelled: bool,
+        completed_at_ms: i64,
+    },
+    /// A detached background task was accepted. It does not keep the parent
+    /// conversation in a busy state.
+    BackgroundTaskStarted {
+        session_id: String,
+        task_id: String,
+        sequence: u64,
+        branch_count: usize,
+        objective: String,
+        created_at_ms: i64,
+    },
+    /// All branches finished. Integration may still wait for an earlier task.
+    BackgroundTaskCompleted {
+        session_id: String,
+        task_id: String,
+        sequence: u64,
+        success: bool,
+        completed_at_ms: i64,
+    },
+    /// A completed task was committed to the shared context and its delivery
+    /// plan was processed by the parent agent.
+    BackgroundTaskIntegrated {
+        session_id: String,
+        task_id: String,
+        sequence: u64,
+        success: bool,
+        integrated_at_ms: i64,
     },
     /// Agent invoked a tool.
     ToolCall {

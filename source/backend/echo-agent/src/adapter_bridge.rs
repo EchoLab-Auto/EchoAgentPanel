@@ -44,6 +44,21 @@ impl InboundMessageHook for AgentMessageHook {
                 .sessions
                 .get_or_create(&key, msg.user_name.clone(), msg.group_name.clone());
         let session_id = session.id.clone();
+        let received_at_ms = chrono::Utc::now().timestamp_millis();
+        let message_sequence = agent.next_message_sequence();
+
+        tracing::info!(
+            message_sequence,
+            adapter = %msg.adapter_name,
+            platform = %msg.platform,
+            user = %msg.user_id,
+            channel = %msg.channel,
+            session = %session_id,
+            source_timestamp = msg.timestamp,
+            received_at_ms,
+            receive_lag_ms = received_at_ms.saturating_sub(msg.timestamp.saturating_mul(1000)),
+            "inbound adapter message received"
+        );
 
         agent.emit(BackendEvent::SessionUpdated {
             session: session.info(String::new()),
@@ -58,28 +73,149 @@ impl InboundMessageHook for AgentMessageHook {
             group_name: msg.group_name.clone(),
             content: msg.content.clone(),
             timestamp: msg.timestamp,
+            received_at_ms,
+            message_sequence,
         });
 
-        let hook_input = format_hook_input(&msg);
-        match agent.process_message(&session, &hook_input).await {
-            Ok(output) => {
-                if !output.trim().is_empty() {
-                    agent.emit(BackendEvent::AgentOutput {
-                        session_id,
-                        content: output,
+        let hook_input = format_hook_input(&msg, message_sequence, received_at_ms);
+        agent.record_incoming_message(&session, &hook_input).await;
+        let history_snapshot = agent.history_snapshot(&session).await;
+
+        // Cancellation is a transport-level control command. Handle it before
+        // reserving a conversation turn so it can interrupt work immediately.
+        if let Some(cancel_all) = recall_command_scope(&msg.content) {
+            let cancelled = agent.cancel_requested_work(&session_id, cancel_all).await;
+            tracing::info!(
+                session = %session_id,
+                message_sequence,
+                cancel_all,
+                cancelled,
+                "QQ cancellation command handled"
+            );
+            let reply = if cancelled > 0 {
+                if cancel_all && cancelled > 1 {
+                    format!("已停止 {cancelled} 个进行中的任务。")
+                } else {
+                    "已停止当前任务。".into()
+                }
+            } else {
+                "当前没有可停止的任务。".into()
+            };
+            let group_id = msg.channel.group_id().map(str::to_string);
+            let agent = Arc::clone(agent);
+            tokio::spawn(async move {
+                let sent = agent
+                    .send_control_reply(&session, group_id.as_deref(), &reply)
+                    .await;
+                agent
+                    .record_control_reply(&session, reply.clone(), message_sequence)
+                    .await;
+                if let Err(error) = sent {
+                    tracing::warn!(%error, session = %session_id, "cancellation acknowledgement failed");
+                    agent.emit(BackendEvent::Error {
+                        session_id: Some(session_id),
+                        message: error,
                     });
                 }
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "agent processing failed");
-                agent.emit(BackendEvent::Error {
-                    session_id: Some(session_id),
-                    message: e.to_string(),
-                });
-                Err(e.to_string())
-            }
+            });
+            return Ok(());
         }
+
+        // Reserve the shared foreground lock without waiting. If another turn
+        // owns it, this message gets an isolated temporary reply branch.
+        let foreground_guard = session.turn_lock.clone().try_lock_owned().ok();
+        let branch = foreground_guard.is_none();
+        let registration = agent.register_inbound_turn(&session_id, message_sequence, branch);
+        let branch_id = registration.id.clone();
+        if branch {
+            tracing::info!(
+                session = %session_id,
+                message_sequence,
+                branch_id = %branch_id,
+                started_at_ms = chrono::Utc::now().timestamp_millis(),
+                "foreground occupied; temporary QQ reply branch started"
+            );
+            agent.emit(BackendEvent::ReplyBranchStarted {
+                session_id: session_id.clone(),
+                branch_id: branch_id.clone(),
+                message_sequence,
+                task: msg.content.clone(),
+                target: reply_target(&msg),
+                started_at_ms: chrono::Utc::now().timestamp_millis(),
+            });
+        }
+
+        let agent = Arc::clone(agent);
+        tokio::spawn(async move {
+            let _foreground_guard = foreground_guard;
+            let turn_cancel = registration.cancel.clone();
+            let result = agent
+                .process_recorded_message(
+                    &session,
+                    &hook_input,
+                    history_snapshot,
+                    turn_cancel.clone(),
+                )
+                .await;
+            let cancelled = turn_cancel.is_cancelled()
+                || result.as_ref().err().is_some_and(Agent::is_turn_cancelled);
+            agent.finish_inbound_turn(&branch_id);
+
+            if registration.branch {
+                tracing::info!(
+                    session = %session_id,
+                    message_sequence,
+                    branch_id = %branch_id,
+                    success = result.is_ok() && !cancelled,
+                    cancelled,
+                    completed_at_ms = chrono::Utc::now().timestamp_millis(),
+                    "temporary QQ reply branch finished"
+                );
+                agent.emit(BackendEvent::ReplyBranchCompleted {
+                    session_id: session_id.clone(),
+                    branch_id: branch_id.clone(),
+                    message_sequence,
+                    success: result.is_ok() && !cancelled,
+                    cancelled,
+                    completed_at_ms: chrono::Utc::now().timestamp_millis(),
+                });
+            }
+            match result {
+                Ok(output) => {
+                    if !output.trim().is_empty() {
+                        agent.emit(BackendEvent::AgentOutput {
+                            session_id: session_id.clone(),
+                            content: output,
+                        });
+                    }
+                    tracing::info!(
+                        session = %session_id,
+                        message_sequence,
+                        branch,
+                        "inbound adapter message processed"
+                    );
+                }
+                Err(error) if Agent::is_turn_cancelled(&error) => {
+                    agent.emit(BackendEvent::AgentCompleted {
+                        session_id: session_id.clone(),
+                    });
+                    tracing::info!(
+                        session = %session_id,
+                        message_sequence,
+                        branch,
+                        "inbound adapter task cancelled"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(%error, session = %session_id, branch, "agent processing failed");
+                    agent.emit(BackendEvent::Error {
+                        session_id: Some(session_id),
+                        message: error.to_string(),
+                    });
+                }
+            }
+        });
+        Ok(())
     }
 
     fn on_connection_state(&self, adapter_name: &str, connected: bool, self_id: Option<String>) {
@@ -94,7 +230,7 @@ impl InboundMessageHook for AgentMessageHook {
 /// Encode an adapter event as a clearly marked, structured hook input.
 /// Message content stays inside JSON so it cannot be confused with source
 /// metadata such as sender or group identifiers.
-fn format_hook_input(msg: &IncomingMessage) -> String {
+fn format_hook_input(msg: &IncomingMessage, message_sequence: u64, received_at_ms: i64) -> String {
     let channel = match &msg.channel {
         ChannelType::Direct => serde_json::json!({
             "type": "private"
@@ -116,6 +252,8 @@ fn format_hook_input(msg: &IncomingMessage) -> String {
         },
         "at_me": msg.at_me,
         "timestamp": msg.timestamp,
+        "received_at_ms": received_at_ms,
+        "message_sequence": message_sequence,
         "content": msg.content,
         "metadata": msg.metadata
     });
@@ -126,23 +264,221 @@ fn format_hook_input(msg: &IncomingMessage) -> String {
     )
 }
 
+fn reply_target(msg: &IncomingMessage) -> String {
+    match &msg.channel {
+        ChannelType::Direct => format!("QQ 私聊 {}", msg.user_id),
+        ChannelType::Group { group_id } => format!("QQ 群 {group_id}"),
+    }
+}
+
+/// Returns `Some(true)` for "cancel all" and `Some(false)` for the newest task.
+fn recall_command_scope(content: &str) -> Option<bool> {
+    let normalized = content
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && !"，。！？,.!?；;：:".contains(*ch))
+        .collect::<String>();
+    let cancel_all = [
+        "全部停止",
+        "停止全部任务",
+        "取消全部任务",
+        "撤回全部任务",
+        "终止全部任务",
+        "cancelall",
+        "/cancelall",
+    ];
+    if cancel_all.contains(&normalized.as_str()) {
+        return Some(true);
+    }
+    let cancel_one = [
+        "停",
+        "停止",
+        "取消",
+        "撤回",
+        "算了",
+        "不用了",
+        "别做了",
+        "不要继续了",
+        "不用继续了",
+        "停止任务",
+        "停止当前任务",
+        "停下当前任务",
+        "取消任务",
+        "取消当前任务",
+        "取消刚才的任务",
+        "撤回任务",
+        "撤回刚才的任务",
+        "终止任务",
+        "终止当前任务",
+        "stop",
+        "cancel",
+        "abort",
+        "/cancel",
+    ];
+    cancel_one.contains(&normalized.as_str()).then_some(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::tests::MockProvider;
+    use crate::llm::{
+        ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, Usage,
+    };
+    use crate::tool::{Tool, ToolError};
     use echo_adapter::types::{ChannelType, IncomingMessage};
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct BridgeProvider {
+        calls: AtomicUsize,
+        reply: String,
+    }
+
+    #[async_trait]
+    impl LlmProvider for BridgeProvider {
+        fn name(&self) -> &str {
+            "bridge-test"
+        }
+
+        fn default_model(&self) -> &str {
+            "bridge-test"
+        }
+
+        async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 0 {
+                let is_group = request
+                    .messages
+                    .iter()
+                    .any(|message| message.content.contains(r#""type": "group""#));
+                let (name, arguments) = if is_group {
+                    ("send_group_msg", r#"{"group_id":999,"content":"ok"}"#)
+                } else {
+                    ("send_private_msg", r#"{"user_id":123456,"content":"ok"}"#)
+                };
+                return Ok(ChatResponse {
+                    content: None,
+                    tool_calls: vec![ToolCall {
+                        id: "send".into(),
+                        name: name.into(),
+                        arguments: arguments.into(),
+                    }],
+                    usage: Usage::default(),
+                });
+            }
+            Ok(ChatResponse {
+                content: Some(self.reply.clone()),
+                tool_calls: Vec::new(),
+                usage: Usage::default(),
+            })
+        }
+
+        async fn chat_stream(
+            &self,
+            _request: &ChatRequest,
+            _tx: tokio::sync::mpsc::UnboundedSender<ChatChunk>,
+        ) -> Result<(), LlmError> {
+            Ok(())
+        }
+    }
+
+    struct SendTool(&'static str);
+
+    #[async_trait]
+    impl Tool for SendTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+
+        fn description(&self) -> &str {
+            "test QQ send"
+        }
+
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        async fn execute(&self, _arguments: serde_json::Value) -> Result<String, ToolError> {
+            Ok("message sent".into())
+        }
+    }
+
+    struct BlockingProvider {
+        entered: Arc<AtomicUsize>,
+        seen_sequences: Arc<std::sync::Mutex<Vec<Vec<u64>>>>,
+    }
+
+    #[async_trait]
+    impl LlmProvider for BlockingProvider {
+        fn name(&self) -> &str {
+            "blocking-test"
+        }
+
+        fn default_model(&self) -> &str {
+            "blocking-test"
+        }
+
+        async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+            let sequences = request
+                .messages
+                .iter()
+                .filter_map(|message| crate::agent::structured_message_sequence(&message.content))
+                .collect::<Vec<_>>();
+            self.seen_sequences
+                .lock()
+                .expect("seen sequences poisoned")
+                .push(sequences);
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            std::future::pending().await
+        }
+
+        async fn chat_stream(
+            &self,
+            _request: &ChatRequest,
+            _tx: tokio::sync::mpsc::UnboundedSender<ChatChunk>,
+        ) -> Result<(), LlmError> {
+            Ok(())
+        }
+    }
+
+    struct CountingSendTool {
+        name: &'static str,
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl Tool for CountingSendTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn description(&self) -> &str {
+            "count test sends"
+        }
+
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        async fn execute(&self, _arguments: serde_json::Value) -> Result<String, ToolError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok("message sent".into())
+        }
+    }
 
     fn mock_agent(reply: &str) -> Arc<Agent> {
-        let provider = Arc::new(MockProvider {
-            calls: Arc::new(AtomicUsize::new(0)),
+        let provider = Arc::new(BridgeProvider {
+            calls: AtomicUsize::new(0),
             reply: reply.to_string(),
         });
+        let mut tools = crate::tool::ToolRegistry::new();
+        tools.register(Arc::new(SendTool("send_private_msg")));
+        tools.register(Arc::new(SendTool("send_group_msg")));
         Arc::new(Agent::new(
             provider,
             crate::config::AgentConfig::default(),
             crate::skill::SkillRegistry::new(),
-            crate::tool::ToolRegistry::new(),
+            tools,
             Arc::new(echo_adapter::registry::AdapterRegistry::new()),
         ))
     }
@@ -162,11 +498,30 @@ mod tests {
         }
     }
 
+    async fn wait_until(mut predicate: impl FnMut() -> bool) {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !predicate() {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("condition should become true");
+    }
+
     #[tokio::test]
     async fn routes_message_through_one_way_hook() {
         let hook = AgentMessageHook::new(mock_agent("后台完成"));
         let result = hook.on_incoming_message(dm_message("hello")).await;
         assert_eq!(result, Ok(()));
+        wait_until(|| {
+            hook.agent
+                .sessions
+                .all()
+                .first()
+                .and_then(|session| session.history.try_lock().ok())
+                .is_some_and(|history| history.len() >= 2)
+        })
+        .await;
 
         // The session was created with the QQ scoping.
         let sessions = hook.agent.sessions.all();
@@ -206,5 +561,74 @@ mod tests {
         let hook = AgentMessageHook::new(mock_agent("x"));
         // Must not panic with no handle attached.
         hook.on_connection_state("qq", true, Some("10001".into()));
+    }
+
+    #[tokio::test]
+    async fn occupied_conversation_branches_and_recall_cancels_running_turns() {
+        let entered = Arc::new(AtomicUsize::new(0));
+        let sends = Arc::new(AtomicUsize::new(0));
+        let seen_sequences = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let provider = Arc::new(BlockingProvider {
+            entered: Arc::clone(&entered),
+            seen_sequences: Arc::clone(&seen_sequences),
+        });
+        let mut tools = crate::tool::ToolRegistry::new();
+        for name in ["send_private_msg", "send_group_msg"] {
+            tools.register(Arc::new(CountingSendTool {
+                name,
+                calls: Arc::clone(&sends),
+            }));
+        }
+        let agent = Arc::new(Agent::new(
+            provider,
+            crate::config::AgentConfig::default(),
+            crate::skill::SkillRegistry::new(),
+            tools,
+            Arc::new(echo_adapter::registry::AdapterRegistry::new()),
+        ));
+        let hook = AgentMessageHook::new(Arc::clone(&agent));
+
+        hook.on_incoming_message(dm_message("第一句话"))
+            .await
+            .unwrap();
+        wait_until(|| entered.load(Ordering::SeqCst) >= 1).await;
+        hook.on_incoming_message(dm_message("第二句话"))
+            .await
+            .unwrap();
+        wait_until(|| entered.load(Ordering::SeqCst) >= 2).await;
+        assert_eq!(agent.active_inbound_turn_count(), 2);
+        assert_eq!(agent.active_inbound_branch_count(), 1);
+        let snapshots = seen_sequences
+            .lock()
+            .expect("seen sequences poisoned")
+            .clone();
+        assert!(snapshots.iter().any(|sequences| sequences == &[1]));
+        assert!(snapshots.iter().any(|sequences| sequences == &[1, 2]));
+
+        hook.on_incoming_message(dm_message("取消全部任务"))
+            .await
+            .unwrap();
+        wait_until(|| agent.active_inbound_turn_count() == 0).await;
+        wait_until(|| sends.load(Ordering::SeqCst) == 1).await;
+
+        let session = agent.sessions.all().pop().unwrap();
+        let history = session.history.lock().await;
+        let user_sequences = history
+            .iter()
+            .filter_map(|message| crate::agent::structured_message_sequence(&message.content))
+            .collect::<Vec<_>>();
+        assert_eq!(user_sequences, vec![1, 2, 3]);
+        assert!(history
+            .iter()
+            .any(|message| message.content == "已停止 2 个进行中的任务。"));
+    }
+
+    #[test]
+    fn recall_detection_is_explicit_and_avoids_normal_questions() {
+        assert_eq!(recall_command_scope("取消当前任务"), Some(false));
+        assert_eq!(recall_command_scope(" /cancel-all "), None);
+        assert_eq!(recall_command_scope("取消全部任务"), Some(true));
+        assert_eq!(recall_command_scope("取消任务应该如何实现？"), None);
+        assert_eq!(recall_command_scope("不要取消，继续执行"), None);
     }
 }

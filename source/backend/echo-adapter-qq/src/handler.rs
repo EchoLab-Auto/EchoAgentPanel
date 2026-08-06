@@ -72,7 +72,11 @@ impl echo_server::Handler for QqHandler {
             }
         }
 
-        tracing::debug!(user = %msg.user_id, channel = %msg.channel, "QQ message accepted, routing to agent");
+        tracing::info!(
+            user = %msg.user_id,
+            channel = %msg.channel,
+            "QQ message accepted, routing to agent"
+        );
 
         // Deliver to the one-way hook. Agent output can only reach QQ through
         // an explicit send tool; it is never returned through this boundary.

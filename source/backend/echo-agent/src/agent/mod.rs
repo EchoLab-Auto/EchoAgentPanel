@@ -3,10 +3,11 @@
 mod commands;
 mod orchestration;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
 use tokio::sync::{Mutex, RwLock};
 
 use echo_adapter::AdapterRegistry;
@@ -19,6 +20,22 @@ use crate::llm::{ChatMessage, ChatRequest, LlmProvider, ToolCall};
 use crate::session::{Session, SessionManager};
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
+
+const TURN_CANCELLED: &str = "agent turn cancelled by requester";
+
+#[derive(Debug, Clone)]
+struct ActiveInboundTurn {
+    session_id: String,
+    message_sequence: u64,
+    branch: bool,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
+pub(crate) struct InboundTurnRegistration {
+    pub id: String,
+    pub cancel: tokio_util::sync::CancellationToken,
+    pub branch: bool,
+}
 
 /// The agent: owns provider, tools, skills, sessions, adapters, and emits events.
 pub struct Agent {
@@ -40,6 +57,9 @@ pub struct Agent {
     skill_reload_started: AtomicBool,
     orchestration_started: AtomicBool,
     timer_scheduler: orchestration::TimerScheduler,
+    background_tasks: orchestration::BackgroundTaskManager,
+    active_inbound_turns: DashMap<String, ActiveInboundTurn>,
+    next_message_sequence: AtomicU64,
     /// Cancels background tasks (session eviction / save) on shutdown.
     cancel: tokio_util::sync::CancellationToken,
 }
@@ -61,11 +81,13 @@ impl Agent {
         tools: ToolRegistry,
         adapters: Arc<AdapterRegistry>,
     ) -> Self {
-        let sessions = SessionManager::new(config.memory_limit);
+        let sessions =
+            SessionManager::with_shared_context(config.memory_limit, config.shared_context);
         let eviction_sessions = sessions.clone();
         let cancel = tokio_util::sync::CancellationToken::new();
         let eviction_cancel = cancel.clone();
         let timer_scheduler = orchestration::TimerScheduler::new(cancel.clone());
+        let background_tasks = orchestration::BackgroundTaskManager::new(cancel.clone());
         let agent = Self {
             provider: RwLock::new(provider),
             config: RwLock::new(config),
@@ -80,6 +102,9 @@ impl Agent {
             skill_reload_started: AtomicBool::new(false),
             orchestration_started: AtomicBool::new(false),
             timer_scheduler,
+            background_tasks,
+            active_inbound_turns: DashMap::new(),
+            next_message_sequence: AtomicU64::new(1),
             cancel,
         };
         // Spawn periodic session eviction (every 5 minutes).
@@ -183,78 +208,216 @@ impl Agent {
         {
             return;
         }
-        let Some(mut receiver) = self.timer_scheduler.take_receiver() else {
+        let timer_receiver = self.timer_scheduler.take_receiver();
+        let background_receiver = self.background_tasks.take_receiver();
+        if timer_receiver.is_none() && background_receiver.is_none() {
             self.orchestration_started.store(false, Ordering::Release);
-            tracing::warn!("timer event receiver unavailable");
+            tracing::warn!("orchestration event receivers unavailable");
             return;
-        };
+        }
 
-        let agent = Arc::clone(self);
-        let cancel = self.cancel.clone();
-        tokio::spawn(async move {
-            loop {
-                let event = tokio::select! {
-                    event = receiver.recv() => match event {
-                        Some(event) => event,
-                        None => break,
-                    },
-                    _ = cancel.cancelled() => break,
-                };
-                agent.timer_scheduler.mark_delivered(&event.id).await;
-                let Some(key) = crate::session::SessionKey::parse(&event.session_id) else {
-                    tracing::warn!(timer_id = %event.id, session_id = %event.session_id, "timer session is invalid");
-                    continue;
-                };
-                let session = agent
-                    .sessions
-                    .get(&event.session_id)
-                    .unwrap_or_else(|| agent.sessions.get_or_create(&key, "timer".into(), None));
-                let input = serde_json::json!({
-                    "event": "timer",
-                    "timer_id": event.id,
-                    "due_at": event.due_at.to_rfc3339(),
-                    "session": {
-                        "id": event.session_id,
-                        "platform": key.platform,
-                        "scope": key.scope,
-                        "scope_id": key.scope_id,
-                        "user_id": key.user_id
-                    },
-                    "task": event.task
-                });
-                let input = format!("<timer_event>{input}</timer_event>");
-                agent.emit(BackendEvent::MessageReceived {
-                    session_id: session.id.clone(),
-                    adapter_name: "timer".into(),
-                    platform: session.session_key.platform.clone(),
-                    user_id: session.session_key.user_id.clone(),
-                    user_name: "timer".into(),
-                    channel: if session.session_key.scope == "group" {
-                        format!("group:{}", session.session_key.scope_id)
-                    } else {
-                        "direct".into()
-                    },
-                    group_name: session.group_name.clone(),
-                    content: input.clone(),
-                    timestamp: chrono::Utc::now().timestamp(),
-                });
-                match agent.process_message(&session, &input).await {
-                    Ok(content) if !content.trim().is_empty() => {
-                        agent.emit(BackendEvent::AgentOutput {
-                            session_id: session.id.clone(),
-                            content,
-                        });
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        tracing::warn!(%error, timer_id = %event.id, "timer task failed");
-                        agent.emit(BackendEvent::Error {
-                            session_id: Some(session.id.clone()),
-                            message: format!("timer {} failed: {error}", event.id),
-                        });
+        if let Some(mut receiver) = timer_receiver {
+            let agent = Arc::clone(self);
+            let cancel = self.cancel.clone();
+            tokio::spawn(async move {
+                loop {
+                    let event = tokio::select! {
+                        event = receiver.recv() => match event {
+                            Some(event) => event,
+                            None => break,
+                        },
+                        _ = cancel.cancelled() => break,
+                    };
+                    agent.timer_scheduler.mark_delivered(&event.id).await;
+                    let Some(key) = crate::session::SessionKey::parse(&event.session_id) else {
+                        tracing::warn!(timer_id = %event.id, session_id = %event.session_id, "timer session is invalid");
+                        continue;
+                    };
+                    let session = agent.sessions.get(&event.session_id).unwrap_or_else(|| {
+                        agent.sessions.get_or_create(&key, "timer".into(), None)
+                    });
+                    let received_at_ms = chrono::Utc::now().timestamp_millis();
+                    let message_sequence = agent.next_message_sequence();
+                    let input = serde_json::json!({
+                        "event": "timer",
+                        "message_sequence": message_sequence,
+                        "received_at_ms": received_at_ms,
+                        "timer_id": event.id,
+                        "due_at": event.due_at.to_rfc3339(),
+                        "session": {
+                            "id": event.session_id,
+                            "platform": key.platform,
+                            "scope": key.scope,
+                            "scope_id": key.scope_id,
+                            "user_id": key.user_id
+                        },
+                        "task": event.task
+                    });
+                    let input = format!("<timer_event>{input}</timer_event>");
+                    agent.emit(BackendEvent::MessageReceived {
+                        session_id: session.id.clone(),
+                        adapter_name: "timer".into(),
+                        platform: session.session_key.platform.clone(),
+                        user_id: session.session_key.user_id.clone(),
+                        user_name: "timer".into(),
+                        channel: if session.session_key.scope == "group" {
+                            format!("group:{}", session.session_key.scope_id)
+                        } else {
+                            "direct".into()
+                        },
+                        group_name: session.group_name.clone(),
+                        content: input.clone(),
+                        timestamp: received_at_ms / 1000,
+                        received_at_ms,
+                        message_sequence,
+                    });
+                    match agent.process_message(&session, &input).await {
+                        Ok(content) if !content.trim().is_empty() => {
+                            agent.emit(BackendEvent::AgentOutput {
+                                session_id: session.id.clone(),
+                                content,
+                            });
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            tracing::warn!(%error, timer_id = %event.id, "timer task failed");
+                            agent.emit(BackendEvent::Error {
+                                session_id: Some(session.id.clone()),
+                                message: format!("timer {} failed: {error}", event.id),
+                            });
+                        }
                     }
                 }
+            });
+        }
+
+        if let Some(mut receiver) = background_receiver {
+            let agent = Arc::clone(self);
+            let cancel = self.cancel.clone();
+            tokio::spawn(async move {
+                let mut ordered = orchestration::OrderedCompletionBuffer::new();
+                loop {
+                    let completion = tokio::select! {
+                        completion = receiver.recv() => match completion {
+                            Some(completion) => completion,
+                            None => break,
+                        },
+                        _ = cancel.cancelled() => break,
+                    };
+                    let success = !completion.cancelled
+                        && completion.branches.iter().all(|branch| branch.success);
+                    agent.emit(BackendEvent::BackgroundTaskCompleted {
+                        session_id: completion.session_id.clone(),
+                        task_id: completion.task_id.clone(),
+                        sequence: completion.sequence,
+                        success,
+                        completed_at_ms: completion.completed_at.timestamp_millis(),
+                    });
+                    for completion in ordered.push(completion) {
+                        agent.integrate_background_completion(completion).await;
+                    }
+                }
+            });
+        }
+    }
+
+    async fn integrate_background_completion(
+        &self,
+        completion: orchestration::BackgroundCompletion,
+    ) {
+        let success =
+            !completion.cancelled && completion.branches.iter().all(|branch| branch.success);
+        let Some(key) = crate::session::SessionKey::parse(&completion.session_id) else {
+            tracing::warn!(
+                task_id = %completion.task_id,
+                session = %completion.session_id,
+                "background completion session is invalid"
+            );
+            return;
+        };
+        let session = self
+            .sessions
+            .get(&completion.session_id)
+            .unwrap_or_else(|| {
+                self.sessions
+                    .get_or_create(&key, "background task".into(), None)
+            });
+        let received_at_ms = chrono::Utc::now().timestamp_millis();
+        let message_sequence = self.next_message_sequence();
+        let deliveries = completion
+            .branches
+            .iter()
+            .map(|branch| serde_json::json!({
+                "branch_id": branch.branch_id,
+                "target": branch.target,
+                "success": branch.success,
+                "result": branch.result,
+                "started_at": branch.started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                "completed_at": branch.completed_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            }))
+            .collect::<Vec<_>>();
+        let payload = serde_json::json!({
+            "event": "background_task_completed",
+            "message_sequence": message_sequence,
+            "received_at_ms": received_at_ms,
+            "task_id": completion.task_id,
+            "task_sequence": completion.sequence,
+            "objective": completion.objective,
+            "created_at": completion.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "completed_at": completion.completed_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "cancelled": completion.cancelled,
+            "origin_session": completion.session_id,
+            "deliveries": deliveries
+        });
+        let input = format!("<background_task_event>{payload}</background_task_event>");
+        self.emit(BackendEvent::MessageReceived {
+            session_id: session.id.clone(),
+            adapter_name: "background".into(),
+            platform: key.platform,
+            user_id: key.user_id,
+            user_name: "background task".into(),
+            channel: if key.scope == "group" {
+                format!("group:{}", key.scope_id)
+            } else {
+                "direct".into()
+            },
+            group_name: session.group_name.clone(),
+            content: input.clone(),
+            timestamp: completion.completed_at.timestamp(),
+            received_at_ms,
+            message_sequence,
+        });
+        tracing::info!(
+            task_id = %completion.task_id,
+            task_sequence = completion.sequence,
+            session = %session.id,
+            created_at = %completion.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            completed_at = %completion.completed_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "integrating background task in creation order"
+        );
+        let integrated = match self.process_message(&session, &input).await {
+            Ok(_) => true,
+            Err(error) => {
+                tracing::warn!(%error, task_id = %completion.task_id, "background integration failed");
+                self.emit(BackendEvent::Error {
+                    session_id: Some(session.id.clone()),
+                    message: format!(
+                        "background task {} integration failed: {error}",
+                        completion.task_id
+                    ),
+                });
+                false
             }
+        };
+        self.background_tasks
+            .mark_integrated(&completion.task_id)
+            .await;
+        self.emit(BackendEvent::BackgroundTaskIntegrated {
+            session_id: session.id,
+            task_id: completion.task_id,
+            sequence: completion.sequence,
+            success: success && integrated,
+            integrated_at_ms: chrono::Utc::now().timestamp_millis(),
         });
     }
 
@@ -313,6 +476,177 @@ impl Agent {
         }
     }
 
+    pub(crate) fn next_message_sequence(&self) -> u64 {
+        self.next_message_sequence.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub(crate) fn register_inbound_turn(
+        &self,
+        session_id: &str,
+        message_sequence: u64,
+        branch: bool,
+    ) -> InboundTurnRegistration {
+        let id = uuid::Uuid::new_v4().to_string();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        self.active_inbound_turns.insert(
+            id.clone(),
+            ActiveInboundTurn {
+                session_id: session_id.to_string(),
+                message_sequence,
+                branch,
+                cancel: cancel.clone(),
+            },
+        );
+        InboundTurnRegistration { id, cancel, branch }
+    }
+
+    pub(crate) fn finish_inbound_turn(&self, turn_id: &str) {
+        self.active_inbound_turns.remove(turn_id);
+    }
+
+    /// Cancel the newest active turn belonging to the command sender. Branches
+    /// win ties so a follow-up cancellation targets the temporary work first.
+    pub(crate) fn cancel_inbound_turns(&self, session_id: &str, all: bool) -> usize {
+        let mut turns = self
+            .active_inbound_turns
+            .iter()
+            .filter(|turn| turn.session_id == session_id)
+            .map(|turn| (turn.message_sequence, turn.branch, turn.cancel.clone()))
+            .collect::<Vec<_>>();
+        turns.sort_by_key(|(sequence, branch, _)| (*sequence, *branch));
+        if !all {
+            turns = turns.into_iter().rev().take(1).collect();
+        }
+        let count = turns.len();
+        for (_, _, cancel) in turns {
+            cancel.cancel();
+        }
+        count
+    }
+
+    pub(crate) async fn cancel_requested_work(&self, session_id: &str, all: bool) -> usize {
+        let foreground = self.cancel_inbound_turns(session_id, all);
+        let background = if all || foreground == 0 {
+            self.background_tasks
+                .cancel_running_for_session(session_id, all)
+                .await
+        } else {
+            0
+        };
+        foreground + background
+    }
+
+    pub(crate) async fn record_incoming_message(&self, session: &Session, content: &str) {
+        let mut history = session.history.lock().await;
+        history.push(ChatMessage::user(content));
+        trim_history(&mut history, self.sessions.memory_limit());
+        drop(history);
+        self.sessions.mark_dirty();
+    }
+
+    pub(crate) async fn history_snapshot(&self, session: &Session) -> Vec<ChatMessage> {
+        session.history.lock().await.clone()
+    }
+
+    async fn record_assistant_reply(
+        &self,
+        session: &Session,
+        reply: String,
+        message_sequence: Option<u64>,
+    ) {
+        if reply.trim().is_empty() {
+            return;
+        }
+        let mut history = session.history.lock().await;
+        let message = ChatMessage::assistant(reply);
+        let insert_at = message_sequence.and_then(|sequence| {
+            history
+                .iter()
+                .rposition(|message| {
+                    structured_message_sequence(&message.content) == Some(sequence)
+                })
+                .map(|index| index + 1)
+        });
+        if let Some(index) = insert_at {
+            history.insert(index, message);
+        } else {
+            history.push(message);
+        }
+        trim_history(&mut history, self.sessions.memory_limit());
+        drop(history);
+        self.sessions.mark_dirty();
+    }
+
+    pub(crate) async fn record_control_reply(
+        &self,
+        session: &Session,
+        reply: String,
+        message_sequence: u64,
+    ) {
+        self.record_assistant_reply(session, reply, Some(message_sequence))
+            .await;
+    }
+
+    pub(crate) async fn process_recorded_message(
+        &self,
+        session: &Session,
+        content: &str,
+        history_snapshot: Vec<ChatMessage>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<String> {
+        self.process_message_inner(session, content, false, Some(history_snapshot), cancel)
+            .await
+    }
+
+    pub(crate) async fn send_control_reply(
+        &self,
+        session: &Session,
+        group_id: Option<&str>,
+        content: &str,
+    ) -> std::result::Result<(), String> {
+        let (name, arguments) = match group_id {
+            Some(group_id) => (
+                "send_group_msg",
+                serde_json::json!({ "group_id": group_id, "content": content }),
+            ),
+            None => (
+                "send_private_msg",
+                serde_json::json!({
+                    "user_id": session.session_key.user_id,
+                    "content": content
+                }),
+            ),
+        };
+        let call = ToolCall {
+            id: format!("control-{}", uuid::Uuid::new_v4()),
+            name: name.into(),
+            arguments: arguments.to_string(),
+        };
+        let result = self.run_tool(&session.id, &call).await;
+        if result.trim_start().starts_with("error:") {
+            Err(result)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn is_turn_cancelled(error: &anyhow::Error) -> bool {
+        error.to_string() == TURN_CANCELLED
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_inbound_turn_count(&self) -> usize {
+        self.active_inbound_turns.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_inbound_branch_count(&self) -> usize {
+        self.active_inbound_turns
+            .iter()
+            .filter(|turn| turn.branch)
+            .count()
+    }
+
     pub async fn active_model(&self) -> String {
         let model = self.active_model.read().await.clone();
         if model.is_empty() {
@@ -332,13 +666,46 @@ impl Agent {
 
     /// Process one user message through the agent loop and return the reply.
     pub async fn process_message(&self, session: &Session, content: &str) -> Result<String> {
-        // Serialise turns for this session so concurrent messages don't interleave history.
+        // Serialise ordinary turns. QQ ingress can reserve this lock without
+        // waiting and route concurrent messages through temporary branches.
         let _turn = session.turn_lock.lock().await;
+        self.process_message_inner(
+            session,
+            content,
+            true,
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    }
+
+    async fn process_message_inner(
+        &self,
+        session: &Session,
+        content: &str,
+        record_input: bool,
+        history_snapshot: Option<Vec<ChatMessage>>,
+        turn_cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<String> {
+        let queued_at = std::time::Instant::now();
+        let turn_started_at = chrono::Utc::now();
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let message_sequence = structured_message_sequence(content);
         let session_id = session.id.clone();
+        tracing::info!(
+            turn_id = %turn_id,
+            message_sequence = message_sequence.unwrap_or_default(),
+            session = %session_id,
+            started_at = %turn_started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            queue_wait_ms = queued_at.elapsed().as_millis() as u64,
+            "agent turn started"
+        );
         self.emit(BackendEvent::AgentThinking {
             session_id: session_id.clone(),
         });
 
+        let delivery_plan = DeliveryPlan::from_input(content);
+        let shared_context = self.config.read().await.shared_context;
         let mut system_prompt = self.build_system_prompt(content).await;
         // Distinguish input origin by content markers, NOT by the session's
         // platform. A QQ session can receive backend/TUI input (no hook), and
@@ -346,11 +713,46 @@ impl Agent {
         let is_qq_hook = content.contains("<qq_message_hook>");
         let is_timer = content.contains("<timer_event>");
         let is_qq_session = session.session_key.platform.eq_ignore_ascii_case("qq");
+        system_prompt.push_str(
+            "\n\n# Background orchestration\n\
+             Keep the interactive conversation responsive. Use run_subagent only \
+             for short bounded reasoning that can finish within the current turn. \
+             For long, multi-step, or tool-heavy work, call spawn_background_task \
+             and immediately tell the requester that it is running. When one request \
+             needs independent work for several backend, QQ private, or QQ group \
+             targets, call spawn_parallel_task. Never wait or poll in the foreground \
+             after a background task was accepted; completion returns as an ordered \
+             background_task_event. Use list_background_tasks only when status is \
+             requested and cancel_background_task only on an explicit cancellation.",
+        );
         if is_qq_hook {
             system_prompt.push_str(
                 "\n\n# QQ transport boundary\n\
                  This input is an external QQ message (<qq_message_hook>). \
                  Read sender and group data from the structured hook payload.\n\
+                 Inputs wrapped in <backend_message_hook> are local backend/TUI \
+                 messages. Structured inputs include message_sequence and \
+                 received_at_ms; preserve that causal order when reasoning.\n\
+                 Inputs wrapped in <timer_event> are scheduled backend tasks, \
+                 not new QQ messages. Inputs wrapped in <background_task_event> \
+                 are ordered background results. Integrate every successful \
+                 branch and deliver it exactly once to the target declared in \
+                 that branch using send_backend_message, send_private_msg, or \
+                 send_group_msg. Never substitute normal assistant output for a \
+                 declared delivery. Unwrapped inputs are also backend \
+                 instructions, not QQ chat messages.\n\
+                 To send anything visible on QQ, you MUST call send_private_msg \
+                 or send_group_msg with the explicit target ID. Never treat your \
+                 normal assistant output as a QQ reply; it is backend-only.\n\
+                 Every <qq_message_hook> input MUST be answered exactly once via \
+                 a send tool: send_private_msg for private chats (user_id from \
+                 payload.sender.user_id), send_group_msg for groups (group_id \
+                 from payload.channel.group_id). Read the target ID from the \
+                 hook payload — never invent one. Your normal assistant output \
+                 is backend-only and invisible to the QQ user; to send anything \
+                 visible on QQ you MUST call send_private_msg or send_group_msg. \
+                 Do not claim you replied before the send tool returns success.",
+            );
                  Every <qq_message_hook> input MUST be answered exactly once via \
                  a send tool: send_private_msg for private chats (user_id from \
                  payload.sender.user_id), send_group_msg for groups (group_id \
@@ -376,30 +778,34 @@ impl Agent {
                  or send_group_msg unless the user explicitly asks you to send a \
                  message to a QQ user or group.",
             );
+            system_prompt.push_str(
+                "\nEach turn owns only its final QQ hook, identified by message_sequence. Other unanswered hooks may run concurrently in isolated branches. Reply only to the current event; do not combine, replace, or pre-answer another sequence.",
+            );
         }
 
-        // Append user message to session history (bounded).
-        {
-            let mut history = session.history.lock().await;
-            history.push(ChatMessage::user(content));
-            let limit = self.sessions.memory_limit();
-            let len = history.len();
-            if len > limit {
-                history.drain(..len - limit);
-            }
+        if record_input {
+            self.record_incoming_message(session, content).await;
         }
         let mut messages = vec![ChatMessage::system(system_prompt)];
-        {
+        if let Some(history_snapshot) = history_snapshot {
+            messages.extend(history_snapshot);
+        } else {
             let history = session.history.lock().await;
             messages.extend(history.iter().cloned());
         }
 
         let mut tools = (*self.tools.definitions().await).clone();
-        tools.extend(orchestration::tool_definitions());
+        let self_update_enabled = self.config.read().await.self_update.enabled;
+        tools.extend(orchestration::tool_definitions(self_update_enabled));
         // max_tool_iterations == 0 still allows one direct reply (without tools).
         let max_iterations = self.config.read().await.max_tool_iterations.max(1);
+        let mut delivered_targets = std::collections::HashSet::new();
+        let mut delivery_reminders = 0usize;
 
         for _ in 0..max_iterations {
+            if turn_cancel.is_cancelled() {
+                return Err(anyhow!(TURN_CANCELLED));
+            }
             let model = self.active_model().await;
             self.emit(BackendEvent::LlmRequest {
                 session_id: session_id.clone(),
@@ -412,9 +818,20 @@ impl Agent {
                 temperature: None,
                 max_tokens: None,
             };
-            let response = {
-                let provider = self.provider.read().await;
-                provider.chat(&request).await?
+            let provider = self.provider.read().await.clone();
+            let response = tokio::select! {
+                response = provider.chat(&request) => response.map_err(|error| {
+                    tracing::warn!(
+                        turn_id = %turn_id,
+                        message_sequence = message_sequence.unwrap_or_default(),
+                        session = %session_id,
+                        %error,
+                        elapsed_ms = queued_at.elapsed().as_millis() as u64,
+                        "agent turn model request failed"
+                    );
+                    error
+                })?,
+                _ = turn_cancel.cancelled() => return Err(anyhow!(TURN_CANCELLED)),
             };
             self.emit(BackendEvent::LlmResponse {
                 session_id: session_id.clone(),
@@ -425,17 +842,43 @@ impl Agent {
 
             if response.tool_calls.is_empty() {
                 let reply = response.content.unwrap_or_default();
-                if !reply.trim().is_empty() {
-                    session
-                        .history
-                        .lock()
-                        .await
-                        .push(ChatMessage::assistant(reply.clone()));
+                let pending_deliveries = delivery_plan
+                    .as_ref()
+                    .map(|plan| plan.pending(&delivered_targets))
+                    .unwrap_or_default();
+                if !pending_deliveries.is_empty() {
+                    if delivery_reminders >= 2 {
+                        return Err(anyhow!(
+                            "required deliveries were not completed after two corrections: {}",
+                            pending_deliveries
+                                .iter()
+                                .map(|target| target.key())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    if !reply.trim().is_empty() {
+                        messages.push(ChatMessage::assistant(reply));
+                    }
+                    messages.push(ChatMessage::user(DeliveryPlan::delivery_reminder(
+                        &pending_deliveries,
+                    )));
+                    delivery_reminders += 1;
+                    continue;
                 }
-                self.sessions.mark_dirty();
+                self.record_assistant_reply(session, reply.clone(), message_sequence)
+                    .await;
                 self.emit(BackendEvent::AgentCompleted {
                     session_id: session_id.clone(),
                 });
+                tracing::info!(
+                    turn_id = %turn_id,
+                    message_sequence = message_sequence.unwrap_or_default(),
+                    session = %session_id,
+                    completed_at = %chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                    elapsed_ms = queued_at.elapsed().as_millis() as u64,
+                    "agent turn completed"
+                );
                 return Ok(reply);
             }
 
@@ -445,11 +888,68 @@ impl Agent {
                 &response.content,
             ));
             for call in &response.tool_calls {
-                let result = self.run_tool(&session_id, call).await;
+                let delivery_key = match validate_delivery_call(
+                    delivery_plan.as_ref(),
+                    &delivered_targets,
+                    call,
+                ) {
+                    Ok(delivery_key) => delivery_key,
+                    Err(error) => {
+                        let result = format!("error: {error}");
+                        self.emit(BackendEvent::ToolCall {
+                            session_id: session_id.clone(),
+                            tool_name: call.name.clone(),
+                            arguments: call.arguments.clone(),
+                        });
+                        self.emit(BackendEvent::ToolResult {
+                            session_id: session_id.clone(),
+                            tool_name: call.name.clone(),
+                            result: result.clone(),
+                        });
+                        messages.push(ChatMessage::tool(result, &call.id));
+                        continue;
+                    }
+                };
+                let tool_started = std::time::Instant::now();
+                tracing::info!(
+                    turn_id = %turn_id,
+                    message_sequence = message_sequence.unwrap_or_default(),
+                    session = %session_id,
+                    tool_call_id = %call.id,
+                    tool = %call.name,
+                    "agent tool call started"
+                );
+                let result = tokio::select! {
+                    result = self.run_tool(&session_id, call) => result,
+                    _ = turn_cancel.cancelled() => return Err(anyhow!(TURN_CANCELLED)),
+                };
+                tracing::info!(
+                    turn_id = %turn_id,
+                    message_sequence = message_sequence.unwrap_or_default(),
+                    session = %session_id,
+                    tool_call_id = %call.id,
+                    tool = %call.name,
+                    success = !result.trim_start().starts_with("error:"),
+                    elapsed_ms = tool_started.elapsed().as_millis() as u64,
+                    "agent tool call completed"
+                );
+                if let Some(delivery_key) =
+                    delivery_key.filter(|_| !result.trim_start().starts_with("error:"))
+                {
+                    delivered_targets.insert(delivery_key);
+                }
                 messages.push(ChatMessage::tool(result, &call.id));
             }
         }
 
+        tracing::warn!(
+            turn_id = %turn_id,
+            message_sequence = message_sequence.unwrap_or_default(),
+            session = %session_id,
+            elapsed_ms = queued_at.elapsed().as_millis() as u64,
+            max_iterations,
+            "agent turn exhausted tool iterations"
+        );
         Err(anyhow!(
             "reached max tool iterations ({}) without a final reply",
             max_iterations
@@ -468,6 +968,15 @@ impl Agent {
             "list_timers" => Ok(self.timer_scheduler.list(session_id).await),
             "cancel_timer" => self.timer_scheduler.cancel(session_id, args).await,
             "run_subagent" => self.run_subagent(session_id, args).await,
+            "spawn_background_task" => self.spawn_background_task(session_id, args, false).await,
+            "spawn_parallel_task" => self.spawn_background_task(session_id, args, true).await,
+            "list_background_tasks" => Ok(self.background_tasks.list(session_id).await),
+            "cancel_background_task" => self.background_tasks.cancel(session_id, args).await,
+            "send_backend_message" => self.send_backend_message(args),
+            "framework_update" => {
+                let config = self.config.read().await.self_update.clone();
+                orchestration::framework_update(&config, session_id, args).await
+            }
             _ => self
                 .tools
                 .execute(&call.name, args)
@@ -481,6 +990,72 @@ impl Agent {
             result: result.clone(),
         });
         result
+    }
+
+    async fn spawn_background_task(
+        &self,
+        session_id: &str,
+        arguments: serde_json::Value,
+        parallel: bool,
+    ) -> Result<String, String> {
+        let work = if parallel {
+            orchestration::parse_parallel_task_args(arguments, session_id)?
+        } else {
+            orchestration::parse_background_task_args(arguments, session_id)?
+        };
+        let objective = work.objective.clone();
+        let branch_count = work.branches.len();
+        let history_snapshot = match self.sessions.get(session_id) {
+            Some(session) => session.history.lock().await.clone(),
+            None => return Err("current session no longer exists".into()),
+        };
+        let runtime = orchestration::BackgroundRuntime {
+            provider: self.provider.read().await.clone(),
+            tools: Arc::clone(&self.tools),
+            model: self.active_model().await,
+            max_tool_iterations: self.config.read().await.max_tool_iterations,
+            history_snapshot,
+        };
+        let receipt = self
+            .background_tasks
+            .spawn(session_id, work, runtime)
+            .await?;
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&receipt) {
+            self.emit(BackendEvent::BackgroundTaskStarted {
+                session_id: session_id.to_string(),
+                task_id: value["task_id"].as_str().unwrap_or("unknown").to_string(),
+                sequence: value["sequence"].as_u64().unwrap_or_default(),
+                branch_count,
+                objective,
+                created_at_ms: chrono::DateTime::parse_from_rfc3339(
+                    value["created_at"].as_str().unwrap_or(""),
+                )
+                .map(|time| time.timestamp_millis())
+                .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis()),
+            });
+        }
+        Ok(receipt)
+    }
+
+    fn send_backend_message(&self, arguments: serde_json::Value) -> Result<String, String> {
+        let session_id = arguments["session_id"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "send_backend_message requires session_id".to_string())?;
+        let content = arguments["content"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "send_backend_message requires non-empty content".to_string())?;
+        self.emit(BackendEvent::AgentOutput {
+            session_id: session_id.to_string(),
+            content: content.to_string(),
+        });
+        Ok(serde_json::json!({
+            "status": "delivered",
+            "session_id": session_id,
+            "delivered_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        })
+        .to_string())
     }
 
     async fn run_subagent(
@@ -807,6 +1382,174 @@ impl Agent {
         }
         tracing::info!(path = %store.path().display(), "agent config persisted");
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OutgoingTarget {
+    Direct { user_id: String },
+    Group { group_id: String },
+    Backend { session_id: String },
+}
+
+impl OutgoingTarget {
+    fn from_qq_hook(content: &str) -> Option<Self> {
+        let payload = content
+            .trim()
+            .strip_prefix("<qq_message_hook>")?
+            .strip_suffix("</qq_message_hook>")?
+            .trim();
+        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+        match value.pointer("/channel/type")?.as_str()? {
+            "private" => Some(Self::Direct {
+                user_id: json_id(value.pointer("/sender/user_id")?)?,
+            }),
+            "group" => Some(Self::Group {
+                group_id: json_id(value.pointer("/channel/group_id")?)?,
+            }),
+            _ => None,
+        }
+    }
+
+    fn tool_name(&self) -> &'static str {
+        match self {
+            Self::Direct { .. } => "send_private_msg",
+            Self::Group { .. } => "send_group_msg",
+            Self::Backend { .. } => "send_backend_message",
+        }
+    }
+
+    fn expected_id(&self) -> (&'static str, &str) {
+        match self {
+            Self::Direct { user_id } => ("user_id", user_id),
+            Self::Group { group_id } => ("group_id", group_id),
+            Self::Backend { session_id } => ("session_id", session_id),
+        }
+    }
+
+    fn key(&self) -> String {
+        let (id_name, id) = self.expected_id();
+        format!("{}:{id_name}={id}", self.tool_name())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DeliveryPlan {
+    targets: Vec<OutgoingTarget>,
+}
+
+impl DeliveryPlan {
+    fn from_input(content: &str) -> Option<Self> {
+        if let Some(target) = OutgoingTarget::from_qq_hook(content) {
+            return Some(Self {
+                targets: vec![target],
+            });
+        }
+        let payload = content
+            .trim()
+            .strip_prefix("<background_task_event>")?
+            .strip_suffix("</background_task_event>")?
+            .trim();
+        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+        let mut targets = Vec::new();
+        for delivery in value["deliveries"].as_array()? {
+            let target = &delivery["target"];
+            let parsed = match target["kind"].as_str()? {
+                "backend" => OutgoingTarget::Backend {
+                    session_id: json_id(&target["session_id"])?,
+                },
+                "qq_private" => OutgoingTarget::Direct {
+                    user_id: json_id(&target["user_id"])?,
+                },
+                "qq_group" => OutgoingTarget::Group {
+                    group_id: json_id(&target["group_id"])?,
+                },
+                _ => return None,
+            };
+            if !targets.contains(&parsed) {
+                targets.push(parsed);
+            }
+        }
+        (!targets.is_empty()).then_some(Self { targets })
+    }
+
+    fn pending<'a>(
+        &'a self,
+        delivered: &std::collections::HashSet<String>,
+    ) -> Vec<&'a OutgoingTarget> {
+        self.targets
+            .iter()
+            .filter(|target| !delivered.contains(&target.key()))
+            .collect()
+    }
+
+    fn delivery_reminder(targets: &[&OutgoingTarget]) -> String {
+        let required = targets
+            .iter()
+            .map(|target| {
+                let (id_name, id) = target.expected_id();
+                format!("{} with {id_name}={id}", target.tool_name())
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "<backend_delivery_correction>The previous response did not complete all declared deliveries. Call these tools now, exactly once per target: {required}. Use the corresponding branch result as content. Do not return another direct answer before every tool succeeds.</backend_delivery_correction>"
+        )
+    }
+}
+
+fn json_id(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| value.as_i64().map(|id| id.to_string()))
+        .filter(|id| !id.is_empty())
+}
+
+fn trim_history(history: &mut Vec<ChatMessage>, limit: usize) {
+    if history.len() > limit {
+        history.drain(..history.len() - limit);
+    }
+}
+
+pub(crate) fn structured_message_sequence(content: &str) -> Option<u64> {
+    let start = content.find('{')?;
+    let end = content.rfind('}')?;
+    serde_json::from_str::<serde_json::Value>(&content[start..=end]).ok()?["message_sequence"]
+        .as_u64()
+}
+
+fn validate_delivery_call(
+    plan: Option<&DeliveryPlan>,
+    delivered: &std::collections::HashSet<String>,
+    call: &ToolCall,
+) -> std::result::Result<Option<String>, String> {
+    if !matches!(
+        call.name.as_str(),
+        "send_private_msg" | "send_group_msg" | "send_backend_message"
+    ) {
+        return Ok(None);
+    }
+    let Some(plan) = plan else {
+        return Ok(None);
+    };
+    let args: serde_json::Value = serde_json::from_str(&call.arguments)
+        .map_err(|error| format!("invalid delivery arguments: {error}"))?;
+    let target = plan
+        .targets
+        .iter()
+        .find(|target| {
+            if call.name != target.tool_name() {
+                return false;
+            }
+            let (id_name, expected) = target.expected_id();
+            json_id(&args[id_name]).as_deref() == Some(expected)
+        })
+        .ok_or_else(|| format!("delivery target is not declared for {}", call.name))?;
+    let key = target.key();
+    if delivered.contains(&key) {
+        return Err(format!("duplicate delivery blocked: {key}"));
+    }
+    Ok(Some(key))
 }
 
 fn assistant_with_tool_calls(calls: &[ToolCall], content: &Option<String>) -> ChatMessage {
@@ -1158,6 +1901,135 @@ pub mod tests {
             .unwrap();
         assert_eq!(reply, "final answer");
         assert_eq!(provider.call_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn qq_hook_retries_backend_only_reply_until_send_tool_is_called() {
+        let script = vec![
+            ChatResponse {
+                content: Some("backend only".into()),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+            ChatResponse {
+                content: None,
+                tool_calls: vec![ToolCall {
+                    id: "send_1".into(),
+                    name: "send_private_msg".into(),
+                    arguments: r#"{"user_id":123456,"content":"收到"}"#.into(),
+                }],
+                usage: Usage::default(),
+            },
+            ChatResponse {
+                content: Some("delivered".into()),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+        ];
+        let provider = Arc::new(ScriptedProvider::new(script));
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(MockTool {
+            name: "send_private_msg",
+            result: "private message sent".into(),
+        }));
+        let agent = Agent::new(
+            provider.clone(),
+            AgentConfig::default(),
+            SkillRegistry::new(),
+            tools,
+            Arc::new(AdapterRegistry::new()),
+        );
+        let key = SessionKey {
+            platform: "qq".into(),
+            scope: "dm".into(),
+            scope_id: String::new(),
+            user_id: "123456".into(),
+        };
+        let session = agent.sessions.get_or_create(&key, "tester".into(), None);
+        let hook = r#"<qq_message_hook>
+{"channel":{"type":"private"},"sender":{"user_id":"123456"},"content":"你好"}
+</qq_message_hook>"#;
+
+        let reply = agent.process_message(&session, hook).await.unwrap();
+
+        assert_eq!(reply, "delivered");
+        assert_eq!(provider.call_count(), 3);
+        let requests = provider.requests.lock().await;
+        assert!(requests[1].messages.iter().any(|message| {
+            message.content.contains("<backend_delivery_correction>")
+                && message.content.contains("user_id=123456")
+        }));
+        let history = session.history.lock().await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].content, "delivered");
+    }
+
+    #[test]
+    fn qq_delivery_validation_blocks_wrong_target_and_duplicate_send() {
+        let plan = DeliveryPlan {
+            targets: vec![OutgoingTarget::Direct {
+                user_id: "123456".into(),
+            }],
+        };
+        let mut delivered = std::collections::HashSet::new();
+        let wrong = ToolCall {
+            id: "1".into(),
+            name: "send_private_msg".into(),
+            arguments: r#"{"user_id":999,"content":"x"}"#.into(),
+        };
+        assert!(validate_delivery_call(Some(&plan), &delivered, &wrong)
+            .unwrap_err()
+            .contains("not declared"));
+
+        let correct = ToolCall {
+            id: "2".into(),
+            name: "send_private_msg".into(),
+            arguments: r#"{"user_id":123456,"content":"x"}"#.into(),
+        };
+        let key = validate_delivery_call(Some(&plan), &delivered, &correct)
+            .unwrap()
+            .unwrap();
+        delivered.insert(key);
+        assert!(validate_delivery_call(Some(&plan), &delivered, &correct)
+            .unwrap_err()
+            .contains("duplicate delivery"));
+    }
+
+    #[test]
+    fn background_delivery_plan_tracks_backend_private_and_group_targets() {
+        let input = r#"<background_task_event>{
+            "deliveries": [
+                {"target":{"kind":"backend","session_id":"local:tui::local_user"}},
+                {"target":{"kind":"qq_private","user_id":"100"}},
+                {"target":{"kind":"qq_group","group_id":"200"}}
+            ]
+        }</background_task_event>"#;
+        let plan = DeliveryPlan::from_input(input).unwrap();
+        let mut delivered = std::collections::HashSet::new();
+        let calls = [
+            ToolCall {
+                id: "backend".into(),
+                name: "send_backend_message".into(),
+                arguments: r#"{"session_id":"local:tui::local_user","content":"a"}"#.into(),
+            },
+            ToolCall {
+                id: "private".into(),
+                name: "send_private_msg".into(),
+                arguments: r#"{"user_id":100,"content":"b"}"#.into(),
+            },
+            ToolCall {
+                id: "group".into(),
+                name: "send_group_msg".into(),
+                arguments: r#"{"group_id":"200","content":"c"}"#.into(),
+            },
+        ];
+        for call in &calls {
+            let key = validate_delivery_call(Some(&plan), &delivered, call)
+                .unwrap()
+                .unwrap();
+            delivered.insert(key);
+        }
+        assert!(plan.pending(&delivered).is_empty());
     }
 
     #[tokio::test]

@@ -4,8 +4,10 @@
 
 | Document | Content |
 |---|---|
+| [install.md](install.md) | One-click user installation, systemd Core service, controlled self-update |
 | [tui/design.md](tui/design.md) | TUI layout, components, state machine, slash commands, form overlay |
 | [config/persistence.md](config/persistence.md) | ConfigStore, agent & gate persistence, atomic writes, sessions |
+| [agent/background-tasks.md](agent/background-tasks.md) | Detached tasks, parallel branches, ordered integration, delivery targets |
 | [adapter/qq/gating.md](adapter/qq/gating.md) | QQ message gating pipeline (5-layer), runtime mutability |
 | [testing.md](testing.md) | Test strategy: unit / proptest / integration / concurrency layers |
 
@@ -30,6 +32,8 @@ EchoAgentPanel/
 │   │   └── echo-tui/          # Terminal UI
 │   └── echo/                  # Binary entry point
 ├── doc/develop/               # This documentation
+├── packaging/systemd/         # User service templates
+├── scripts/                   # Installer and controlled updater
 ├── tools/                     # Utility scripts
 ├── napcat/                    # NapCat Docker config
 ├── docker-compose.yml         # NapCat container
@@ -65,6 +69,8 @@ EchoAgentPanel/
 5. **API config**: /api → FormOverlay::Selecting → e → FormOverlay::Editing → Ctrl+S → persist_config
 6. **Adapter lifecycle**: QqAdapter::start() → bind port → spawn server task → accept connections → QqHandler
 7. **Skill hot reload**: periodic scan → discover SKILL.md → preserve enabled state → replace registry → clear prompt cache
+8. **Self-update**: authorized session → fixed framework_update tool → update user service → fast-forward/build → atomic replace → Core restart
+9. **Background task**: context snapshot → detached branches → completion buffer → creation-order integration → explicit target delivery
 
 ### Build & Run
 

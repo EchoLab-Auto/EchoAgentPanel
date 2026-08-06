@@ -25,6 +25,7 @@ impl Component for HelpPopup {
             "Shift+Enter        换行",
             "/cmd               输入框命令菜单 (/help /api /switch ...)",
             "Ctrl+P             命令面板（命令 / 会话列表）",
+            "Ctrl+B             查看分支 / Subagent 状态",
             "Ctrl+X 然后 o      切换会话",
             "Ctrl+X 然后 s      配置 API (provider/model/key)",
             "Ctrl+C (两次)       退出程序（第一次提示确认）",

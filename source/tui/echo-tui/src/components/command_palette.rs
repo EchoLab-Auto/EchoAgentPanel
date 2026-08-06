@@ -54,11 +54,7 @@ impl CommandPalette {
             .iter()
             .map(|s| {
                 let active = state.active_session_id.as_deref() == Some(s.id.as_str());
-                let name = if s.group_name.is_some() {
-                    s.nickname.clone()
-                } else {
-                    format!("💬 {}", s.nickname)
-                };
+                let name = session_display_name(s);
                 let marker = if active { "● " } else { "○ " };
                 let phase = session_phase_label(state, &s.id);
                 let preview: String = s.last_message.chars().take(24).collect();
@@ -81,11 +77,7 @@ impl CommandPalette {
             .iter()
             .map(|s| {
                 let active = state.active_session_id.as_deref() == Some(s.id.as_str());
-                let name = if s.group_name.is_some() {
-                    s.nickname.clone()
-                } else {
-                    format!("💬 {}", s.nickname)
-                };
+                let name = session_display_name(s);
                 let marker = if active { "● " } else { "○ " };
                 let phase = state
                     .agent_activities
@@ -122,6 +114,19 @@ impl CommandPalette {
                 ]))
             })
             .collect()
+    }
+}
+
+fn session_display_name(session: &echo_agent::SessionInfo) -> String {
+    match (session.platform.as_str(), session.scope.as_str()) {
+        ("local", _) => "[后台] 本地会话".into(),
+        ("qq", "group") => format!(
+            "[QQ 群] {} · {}",
+            session.group_name.as_deref().unwrap_or("未知群"),
+            session.nickname
+        ),
+        ("qq", _) => format!("[QQ 私聊] {} ({})", session.nickname, session.user_id),
+        (platform, scope) => format!("[{platform}/{scope}] {}", session.nickname),
     }
 }
 
@@ -283,8 +288,8 @@ mod tests {
             labels[1]
         );
         assert!(labels[1].contains("alice"));
-        // DM sessions get a 💬 prefix; group sessions show plain nickname.
-        assert!(labels[1].contains("💬"));
+        assert!(labels[0].contains("[QQ 群]"));
+        assert!(labels[1].contains("[QQ 私聊]"));
     }
 
     #[test]
