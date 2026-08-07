@@ -91,8 +91,10 @@ impl App {
 
         // Pin the default chat to the local TUI session before the Core sends
         // remote QQ session snapshots. Remote sessions remain background until
-        // the user explicitly selects one from the session switcher.
+        // the user explicitly selects one from the session switcher. The global
+        // trunk timeline is always present and pinned to the top of the list.
         self.state.ensure_primary_session();
+        self.state.ensure_trunk_session();
         self.backend.send(BackendCommand::RequestState);
         tracing::debug!("TUI 主循环启动");
 

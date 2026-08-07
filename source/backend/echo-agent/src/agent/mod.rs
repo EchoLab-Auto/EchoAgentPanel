@@ -286,6 +286,7 @@ impl Agent {
                                 branch_agent.emit(BackendEvent::AgentOutput {
                                     session_id: session.id.clone(),
                                     content,
+                                    branch_id: None,
                                 });
                             }
                             Ok(_) => {}
@@ -1213,6 +1214,7 @@ impl Agent {
         self.emit(BackendEvent::AgentOutput {
             session_id: session_id.to_string(),
             content: content.to_string(),
+            branch_id: None,
         });
         Ok(serde_json::json!({
             "status": "delivered",

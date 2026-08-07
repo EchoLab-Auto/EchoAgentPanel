@@ -12,7 +12,7 @@
 //! {"type":"command","command":{"SendMessage":{"session_id":"...","content":"..."}}}
 //!
 //! // Core → Panel
-//! {"type":"event","event":{"AgentOutput":{"session_id":"...","content":"..."}}}
+//! {"type":"event","event":{"AgentOutput":{"session_id":"...","content":"...","branch_id":null}}}
 //! ```
 
 use tokio::sync::{mpsc, Mutex};
@@ -216,22 +216,47 @@ mod tests {
         let ev = BackendEvent::AgentOutput {
             session_id: "user_0".into(),
             content: "回复内容".into(),
+            branch_id: Some("branch-1".into()),
         };
         let text = serialize_event(&ev);
         assert!(text.contains("\"type\":\"event\""));
+        assert!(text.contains("branch_id"));
         let msg = deserialize_message(&text).unwrap();
         match msg {
             WsMessage::Event(e) => match e {
                 BackendEvent::AgentOutput {
                     session_id,
                     content,
+                    branch_id,
                 } => {
                     assert_eq!(session_id, "user_0");
                     assert_eq!(content, "回复内容");
+                    assert_eq!(branch_id.as_deref(), Some("branch-1"));
                 }
                 other => panic!("wrong event variant: {other:?}"),
             },
             other => panic!("wrong message type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_agent_output_without_branch_id_still_decodes() {
+        // Old Core versions serialised AgentOutput without the branch_id field.
+        // The field is #[serde(default)], so old payloads must decode to None.
+        let text =
+            r#"{"type":"event","payload":{"AgentOutput":{"session_id":"s1","content":"hi"}}}"#;
+        let msg = deserialize_message(text).expect("legacy payload must decode");
+        match msg {
+            WsMessage::Event(BackendEvent::AgentOutput {
+                session_id,
+                content,
+                branch_id,
+            }) => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(content, "hi");
+                assert_eq!(branch_id, None);
+            }
+            other => panic!("wrong event: {other:?}"),
         }
     }
 
@@ -309,7 +334,7 @@ mod tests {
                 assert_eq!(session.nickname, "alice");
                 assert_eq!(session.group_name.as_deref(), Some("测试群"));
             }
-            other => panic!("wrong variant: {other:?}"),
+            other => panic!("wrong event: {other:?}"),
         }
     }
 
@@ -328,6 +353,7 @@ mod tests {
             .emit(BackendEvent::AgentOutput {
                 session_id: "s1".into(),
                 content: "hi".into(),
+                branch_id: None,
             })
             .await;
         let mut rx = ev_rx;
@@ -348,6 +374,7 @@ mod tests {
             .emit(BackendEvent::AgentOutput {
                 session_id: "s".into(),
                 content: "x".into(),
+                branch_id: None,
             })
             .await;
         assert!(rx1.try_recv().is_ok(), "subscriber 1 gets the event");
@@ -368,6 +395,7 @@ mod tests {
                 .emit(BackendEvent::AgentOutput {
                     session_id: "s".into(),
                     content: format!("m{i}"),
+                    branch_id: None,
                 })
                 .await;
         }

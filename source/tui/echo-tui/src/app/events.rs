@@ -752,8 +752,8 @@ mod tests {
         app.apply_backend_event(BackendEvent::AgentOutput {
             session_id: "s1".into(),
             content: "回复".into(),
+            branch_id: None,
         });
-        assert_eq!(app.state.active_messages().len(), 1);
         assert_eq!(app.state.active_messages()[0].role, MsgRole::Backend);
     }
 

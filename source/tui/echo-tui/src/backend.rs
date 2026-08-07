@@ -160,6 +160,7 @@ mod tests {
         handle.emit(BackendEvent::AgentOutput {
             session_id: "s1".into(),
             content: "hi".into(),
+            branch_id: None,
         });
         handle.emit(BackendEvent::LlmRequest {
             session_id: "s1".into(),
@@ -182,6 +183,7 @@ mod tests {
         handle.emit(BackendEvent::AgentOutput {
             session_id: "s".into(),
             content: "x".into(),
+            branch_id: None,
         });
         let mut out = vec![BackendEvent::LlmRequest {
             session_id: "pre".into(),

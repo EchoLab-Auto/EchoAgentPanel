@@ -43,12 +43,11 @@ impl CommandPalette {
 }
 
 impl CommandPalette {
-    /// 会话列表标签（按最近活跃排序，当前会话标 ●）。纯函数，测试专用。
+    /// 会话列表标签（按最近活跃排序，trunk 置顶，当前会话标 ●）。纯函数，测试专用。
     #[cfg(test)]
     fn session_labels(&self, state: &AppState) -> Vec<String> {
-        let mut sessions = state.sessions.clone();
-        sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-        sessions
+        state
+            .sorted_sessions()
             .iter()
             .map(|s| {
                 let active = state.active_session_id.as_deref() == Some(s.id.as_str());
@@ -66,12 +65,10 @@ impl CommandPalette {
             .collect()
     }
 
-    /// 会话列表项（按最近活跃排序，当前会话标 ●）。
     fn session_items<'a>(&self, state: &'a AppState) -> Vec<ListItem<'a>> {
         let theme = state.theme;
-        let mut sessions = state.sessions.clone();
-        sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-        sessions
+        state
+            .sorted_sessions()
             .iter()
             .map(|s| {
                 let active = state.active_session_id.as_deref() == Some(s.id.as_str());
@@ -116,6 +113,9 @@ impl CommandPalette {
 }
 
 fn session_display_name(session: &echo_agent::SessionInfo) -> String {
+    if session.id == crate::state::TRUNK_SESSION_ID {
+        return "[Trunk] 全局时间线".into();
+    }
     match (session.platform.as_str(), session.scope.as_str()) {
         ("local", _) => "[后台] 本地会话".into(),
         ("qq", "group") => format!(

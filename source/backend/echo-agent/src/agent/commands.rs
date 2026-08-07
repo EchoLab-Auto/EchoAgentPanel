@@ -170,6 +170,7 @@ impl Agent {
                         self.emit(BackendEvent::AgentOutput {
                             session_id: sid,
                             content: reply,
+                            branch_id: None,
                         });
                     }
                     Err(e) => {

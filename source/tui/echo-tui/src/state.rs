@@ -16,6 +16,12 @@ use crate::util;
 
 const MAX_ORCHESTRATION_HISTORY: usize = 128;
 pub const PRIMARY_SESSION_ID: &str = "local:tui::local_user";
+/// The global trunk timeline. Every conversation message from all sources
+/// (QQ private, QQ group, TUI, timers, background tasks) is mirrored here in
+/// one ordered stream. It is pinned to the top of the session list.
+pub const TRUNK_SESSION_ID: &str = "trunk";
+/// Cap on trunk timeline entries so a long-running panel stays bounded.
+const TRUNK_MAX_MESSAGES: usize = 1024;
 
 // ── Message types ──────────────────────────────────────────────────────────
 
@@ -282,6 +288,20 @@ impl OrchestrationActivity {
             .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
         Duration::from_millis(end.saturating_sub(self.created_at_ms).max(0) as u64)
     }
+}
+
+/// A condensed view of one still-active temporary branch for the trunk
+/// overview (task inspector header / status bar).
+#[derive(Debug, Clone)]
+pub struct ActiveBranchSummary {
+    pub kind: OrchestrationKind,
+    /// Short stable label (#sequence, S<n>, or the first 8 chars of the id).
+    pub label: String,
+    /// Delivery target or source label (e.g. "QQ 私聊 100", "源会话").
+    pub target: String,
+    pub status: OrchestrationStatus,
+    pub created_at_ms: i64,
+    pub objective: String,
 }
 
 #[derive(Debug, Clone)]
@@ -551,6 +571,28 @@ impl AppState {
             });
         }
         self.active_session_id = Some(PRIMARY_SESSION_ID.into());
+    }
+
+    /// Ensure the global trunk timeline session exists. It is a virtual
+    /// session (not a real platform identity) pinned to the top of the
+    /// session list; every source's messages are mirrored into it.
+    pub fn ensure_trunk_session(&mut self) {
+        if !self
+            .sessions
+            .iter()
+            .any(|session| session.id == TRUNK_SESSION_ID)
+        {
+            self.sessions.push(SessionInfo {
+                id: TRUNK_SESSION_ID.into(),
+                platform: "local".into(),
+                scope: "trunk".into(),
+                user_id: "trunk".into(),
+                nickname: "全局 Trunk".into(),
+                group_name: None,
+                last_active: 0,
+                last_message: String::new(),
+            });
+        }
     }
 
     pub fn active_messages(&self) -> &[DisplayMessage] {
@@ -1008,13 +1050,27 @@ impl AppState {
     }
 
     pub fn push_message(&mut self, session_id: &str, msg: DisplayMessage) {
+        let is_active = self.active_session_id.as_deref() == Some(session_id);
         self.messages
             .entry(session_id.to_string())
             .or_default()
-            .push(msg);
-        if self.active_session_id.as_deref() == Some(session_id) {
+            .push(msg.clone());
+        if is_active {
             self.chat_scroll = 0;
             self.chat_flash_until = Some(std::time::Instant::now() + Duration::from_millis(700));
+        }
+        // Mirror into the global trunk timeline so the Trunk view shows every
+        // source's conversation in one ordered stream. The trunk itself is not
+        // mirrored (that would duplicate its own entries).
+        if session_id != TRUNK_SESSION_ID {
+            let trunk = self
+                .messages
+                .entry(TRUNK_SESSION_ID.to_string())
+                .or_default();
+            trunk.push(msg);
+            if trunk.len() > TRUNK_MAX_MESSAGES {
+                trunk.drain(..trunk.len() - TRUNK_MAX_MESSAGES);
+            }
         }
     }
 
@@ -1287,11 +1343,76 @@ impl AppState {
         self.menu_msg_idx = -1;
     }
 
-    /// All sessions sorted by last_active descending.
+    /// All sessions sorted by last_active descending; the global trunk
+    /// timeline is always pinned to the top.
     pub fn sorted_sessions(&self) -> Vec<SessionInfo> {
         let mut sessions = self.sessions.clone();
         sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+        if let Some(index) = sessions.iter().position(|s| s.id == TRUNK_SESSION_ID) {
+            let trunk = sessions.remove(index);
+            sessions.insert(0, trunk);
+        }
         sessions
+    }
+
+    /// Number of messages currently held in the global trunk timeline.
+    pub fn trunk_message_count(&self) -> usize {
+        self.messages.get(TRUNK_SESSION_ID).map_or(0, Vec::len)
+    }
+
+    /// Condensed list of still-active temporary branches for the trunk
+    /// overview. Reply branches and subagents are one entry; background and
+    /// parallel tasks list every still-running sub-branch.
+    pub fn active_branches(&self) -> Vec<ActiveBranchSummary> {
+        let mut out = Vec::new();
+        for task in &self.orchestration_tasks {
+            if !task.status.is_active() {
+                continue;
+            }
+            match task.kind {
+                OrchestrationKind::ReplyBranch | OrchestrationKind::Subagent => {
+                    out.push(ActiveBranchSummary {
+                        kind: task.kind,
+                        label: task_short_label(task),
+                        target: task
+                            .branches
+                            .first()
+                            .map(|branch| branch.target.clone())
+                            .unwrap_or_default(),
+                        status: task.status,
+                        created_at_ms: task.created_at_ms,
+                        objective: task.objective.clone(),
+                    });
+                }
+                OrchestrationKind::Background | OrchestrationKind::Parallel => {
+                    for branch in task
+                        .branches
+                        .iter()
+                        .filter(|branch| branch.status == BranchStatus::Running)
+                    {
+                        out.push(ActiveBranchSummary {
+                            kind: task.kind,
+                            label: branch.branch_id.clone(),
+                            target: branch.target.clone(),
+                            status: task.status,
+                            created_at_ms: task.created_at_ms,
+                            objective: task.objective.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+fn task_short_label(task: &OrchestrationActivity) -> String {
+    if let Some(sequence) = task.sequence {
+        format!("#{sequence}")
+    } else if let Some(sequence) = task.id.strip_prefix("subagent-") {
+        format!("S{sequence}")
+    } else {
+        task.id.get(..8).unwrap_or(&task.id).to_string()
     }
 }
 
@@ -1545,6 +1666,56 @@ mod tests {
         assert_eq!(sorted[0].id, "new");
         assert_eq!(sorted[1].id, "mid");
         assert_eq!(sorted[2].id, "old");
+    }
+
+    #[test]
+    fn trunk_session_is_pinned_to_the_top_of_the_list() {
+        let mut st = state();
+        st.ensure_trunk_session();
+        st.sessions.push(session("qq:dm::1", 300));
+        st.sessions.push(session("qq:dm::2", 200));
+        let sorted = st.sorted_sessions();
+        assert_eq!(sorted[0].id, TRUNK_SESSION_ID, "trunk always pinned on top");
+        assert_eq!(sorted[1].id, "qq:dm::1");
+    }
+
+    #[test]
+    fn push_message_mirrors_into_the_trunk_timeline() {
+        let mut st = state();
+        st.ensure_trunk_session();
+        st.push_message("qq:dm::1", DisplayMessage::plain(MsgRole::User, "hello", 0));
+        st.push_message("qq:dm::1", DisplayMessage::plain(MsgRole::Backend, "hi", 0));
+        assert_eq!(st.trunk_message_count(), 2);
+        // The trunk itself does not self-mirror.
+        assert_eq!(st.trunk_message_count(), 2);
+        // A message pushed directly to the trunk is counted once, not mirrored again.
+        st.push_message(
+            TRUNK_SESSION_ID,
+            DisplayMessage::plain(MsgRole::System, "x", 0),
+        );
+        assert_eq!(st.trunk_message_count(), 3);
+    }
+
+    #[test]
+    fn active_branches_lists_running_reply_and_parallel_branches() {
+        let mut st = state();
+        st.start_reply_branch("s1", "reply-1", 1, "t", "QQ 私聊 100", 1_700_000_000_000);
+        st.start_background_task("s1", "task-1", 2, 2, "o", 1_700_000_000_000);
+        let branches = st.active_branches();
+        // reply branch (1) + 2 running parallel sub-branches.
+        assert_eq!(branches.len(), 3);
+        assert!(
+            branches
+                .iter()
+                .any(|b| b.kind == OrchestrationKind::ReplyBranch),
+            "reply branch present"
+        );
+        assert!(
+            branches
+                .iter()
+                .any(|b| b.kind == OrchestrationKind::Parallel),
+            "parallel branches present"
+        );
     }
 
     #[test]

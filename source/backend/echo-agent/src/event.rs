@@ -163,9 +163,14 @@ pub enum BackendEvent {
     },
     /// Agent generated backend output. This is never sent to a platform
     /// automatically; platform delivery requires an explicit tool call.
+    /// `branch_id` links the output to the temporary snapshot branch that
+    /// produced it (QQ reply branches, backend/timer turns). It is `None`
+    /// for detached emissions such as `send_backend_message` deliveries.
     AgentOutput {
         session_id: String,
         content: String,
+        #[serde(default)]
+        branch_id: Option<String>,
     },
     /// The agent turn finished, including turns whose backend output is empty.
     AgentCompleted {

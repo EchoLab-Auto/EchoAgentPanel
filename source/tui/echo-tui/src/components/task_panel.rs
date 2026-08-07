@@ -8,6 +8,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
 };
 use ratatui::Frame;
+use std::time::Duration;
 
 use super::status_bar::format_duration;
 use super::{Component, ComponentResult};
@@ -19,6 +20,7 @@ pub struct TaskStatusBar;
 
 impl TaskStatusBar {
     fn summary_text(&self, state: &AppState, width: u16) -> String {
+        let trunk_count = state.trunk_message_count();
         let active_count = state.active_orchestration_count();
         let latest = state
             .orchestration_tasks
@@ -27,7 +29,10 @@ impl TaskStatusBar {
             .find(|task| task.status.is_active())
             .or_else(|| state.orchestration_tasks.last());
         let Some(task) = latest else {
-            return fit_width("◇ 分支 / Subagent · 暂无任务", width as usize);
+            return fit_width(
+                &format!("◇ Trunk {trunk_count} 条 · 分支 / Subagent · 暂无任务"),
+                width as usize,
+            );
         };
         let marker = if task.status == OrchestrationStatus::Running {
             SPINNER[(state.anim_tick % SPINNER.len() as u64) as usize]
@@ -51,7 +56,7 @@ impl TaskStatusBar {
         };
         fit_width(
             &format!(
-                "{marker} {} {identity} · {}{branch_progress} · {}{concurrent}  分支列表 ▣",
+                "{marker} {} {identity} · {}{branch_progress} · {}{concurrent}  Trunk {trunk_count} 条 · 分支列表 ▣",
                 task.kind.label(),
                 task.status.label(),
                 format_duration(task.elapsed())
@@ -119,7 +124,7 @@ impl Component for TaskInspector {
         let inner = outer.inner(popup);
         f.render_widget(outer, popup);
 
-        if state.orchestration_tasks.is_empty() {
+        if state.orchestration_tasks.is_empty() && state.trunk_message_count() == 0 {
             f.render_widget(
                 Paragraph::new("暂无分支或 Subagent 记录").style(Style::default().fg(theme.faint)),
                 inner,
@@ -127,16 +132,29 @@ impl Component for TaskInspector {
             return;
         }
 
-        let regions = if inner.width >= 72 {
+        // Trunk overview: message count + live branch list.
+        let overview_height = trunk_overview_height(state);
+        let areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(overview_height), Constraint::Min(0)])
+            .split(inner);
+        let overview = areas[0];
+        let rest = areas[1];
+        render_trunk_overview(f, overview, state);
+        if rest.height < 4 {
+            return;
+        }
+
+        let regions = if rest.width >= 72 {
             Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(34), Constraint::Min(30)])
-                .split(inner)
+                .split(rest)
         } else {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Percentage(38), Constraint::Min(4)])
-                .split(inner)
+                .split(rest)
         };
         render_task_list(f, regions[0], state);
         render_task_detail(f, regions[1], state);
@@ -191,6 +209,59 @@ impl Component for TaskInspector {
             _ => ComponentResult::Pass,
         }
     }
+}
+
+/// Height of the trunk overview block: header + up to 3 live branch lines.
+fn trunk_overview_height(state: &AppState) -> u16 {
+    let branches = state.active_branches();
+    1 + branches.len().min(3) as u16
+}
+
+fn render_trunk_overview(f: &mut Frame, area: Rect, state: &AppState) {
+    if area.is_empty() {
+        return;
+    }
+    let theme = state.theme;
+    let branches = state.active_branches();
+    let mut lines = vec![Line::from(vec![
+        Span::styled(" Trunk ", Style::default().fg(theme.title).bold()),
+        Span::styled(
+            format!("· {} 条消息", state.trunk_message_count()),
+            Style::default().fg(theme.dim),
+        ),
+        Span::styled(
+            format!(" · {} 个活跃分支", branches.len()),
+            Style::default().fg(theme.subtitle),
+        ),
+    ])];
+    let now = chrono::Utc::now().timestamp_millis();
+    for branch in branches.iter().take(3) {
+        let marker = if branch.status == OrchestrationStatus::Running {
+            SPINNER[(state.anim_tick % SPINNER.len() as u64) as usize]
+        } else {
+            '◐'
+        };
+        let elapsed = Duration::from_millis(now.saturating_sub(branch.created_at_ms).max(0) as u64);
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {marker} "), Style::default().fg(theme.accent)),
+            Span::styled(
+                format!("{} → {}", branch.kind.label(), branch.target),
+                Style::default().fg(theme.fg),
+            ),
+            Span::styled(
+                format!(
+                    " · {} · {}",
+                    branch.status.label(),
+                    format_duration(elapsed)
+                ),
+                Style::default().fg(theme.dim),
+            ),
+        ]));
+    }
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(theme.overlay_bg)),
+        area,
+    );
 }
 
 fn render_task_list(f: &mut Frame, area: Rect, state: &AppState) {
@@ -441,6 +512,29 @@ mod tests {
         let text = bar.summary_text(&state, 40);
         assert!(text.contains("暂无"));
         assert!(crate::util::str_visual_width(&text) <= 40);
+    }
+
+    #[test]
+    fn idle_bar_reports_the_trunk_message_count() {
+        let bar = TaskStatusBar;
+        let mut state = state();
+        state.ensure_trunk_session();
+        state.push_message(
+            "qq:dm::1",
+            crate::state::DisplayMessage::plain(crate::state::MsgRole::User, "hi", 0),
+        );
+        let text = bar.summary_text(&state, 60);
+        assert!(text.contains("Trunk 1 条"), "got: {text}");
+        assert!(text.contains("暂无任务"));
+    }
+
+    #[test]
+    fn trunk_overview_height_scales_with_branches() {
+        let empty = state();
+        assert_eq!(trunk_overview_height(&empty), 1);
+        let mut busy = state();
+        busy.start_reply_branch("s1", "r1", 1, "t", "QQ 私聊 1", 1_700_000_000_000);
+        assert_eq!(trunk_overview_height(&busy), 2);
     }
 
     #[test]

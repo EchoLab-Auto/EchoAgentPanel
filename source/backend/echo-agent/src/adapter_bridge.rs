@@ -201,6 +201,7 @@ impl InboundMessageHook for AgentMessageHook {
                         agent.emit(BackendEvent::AgentOutput {
                             session_id: session_id.clone(),
                             content: output,
+                            branch_id: Some(branch_id.clone()),
                         });
                     }
                     tracing::info!(
