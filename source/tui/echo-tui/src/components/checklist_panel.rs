@@ -67,8 +67,7 @@ impl Component for ChecklistPanel {
                 match key.code {
                     KeyCode::Esc => state.show_checklist_panel = false,
                     KeyCode::Up | KeyCode::Char('k') => {
-                        state.checklist_selection =
-                            state.checklist_selection.saturating_sub(1);
+                        state.checklist_selection = state.checklist_selection.saturating_sub(1);
                         state.checklist_scroll = 0;
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -129,17 +128,13 @@ fn render_list(f: &mut Frame, area: Rect, state: &AppState) {
                     } else {
                         "▫"
                     },
-                    Style::default()
-                        .fg(if entry.done == entry.total && entry.total > 0 {
-                            theme.success
-                        } else {
-                            theme.accent
-                        }),
+                    Style::default().fg(if entry.done == entry.total && entry.total > 0 {
+                        theme.success
+                    } else {
+                        theme.accent
+                    }),
                 ),
-                Span::styled(
-                    format!(" {}  ", entry.name),
-                    Style::default().fg(theme.fg),
-                ),
+                Span::styled(format!(" {}  ", entry.name), Style::default().fg(theme.fg)),
                 Span::styled(progress, Style::default().fg(theme.dim)),
             ]))
         })
@@ -156,10 +151,7 @@ fn render_list(f: &mut Frame, area: Rect, state: &AppState) {
             Block::default()
                 .borders(Borders::RIGHT)
                 .border_style(Style::default().fg(theme.border))
-                .title(Span::styled(
-                    " 清单 ",
-                    Style::default().fg(theme.subtitle),
-                )),
+                .title(Span::styled(" 清单 ", Style::default().fg(theme.subtitle))),
         );
     let mut list_state = ListState::default().with_selected(Some(
         state
@@ -189,10 +181,7 @@ fn render_detail(f: &mut Frame, area: Rect, state: &AppState) {
                 format!("{mark} "),
                 Style::default().fg(if item.done { theme.success } else { theme.dim }),
             ),
-            Span::styled(
-                format!("{}. ", index + 1),
-                Style::default().fg(theme.faint),
-            ),
+            Span::styled(format!("{}. ", index + 1), Style::default().fg(theme.faint)),
             Span::styled(
                 item.text.clone(),
                 Style::default().fg(if item.done { theme.dim } else { theme.fg }),
@@ -213,11 +202,7 @@ fn header_line(entry: &ChecklistEntry, state: &AppState) -> Line<'static> {
     let progress = if entry.total == 0 {
         "空".to_string()
     } else {
-        format!(
-            "{} / {} 完成",
-            entry.done,
-            entry.total
-        )
+        format!("{} / {} 完成", entry.done, entry.total)
     };
     Line::from(vec![
         Span::styled(
@@ -257,7 +242,7 @@ fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
 mod tests {
     use super::*;
     use crate::keybindings::Keybindings;
-    use crate::state::{ChecklistItemEntry, ChecklistEntry};
+    use crate::state::{ChecklistEntry, ChecklistItemEntry};
     use crate::theme::Theme;
 
     fn state() -> AppState {
@@ -332,14 +317,11 @@ mod tests {
     #[test]
     fn escape_closes_panel() {
         let mut st = seeded();
-        let mut st = seeded();
+        st.show_checklist_panel = true;
         st.show_checklist_panel = true;
         let mut panel = ChecklistPanel;
         let ev = key(KeyCode::Esc, KeyEventKind::Press);
-        assert_eq!(
-            panel.handle_event(&ev, &mut st),
-            ComponentResult::Consumed
-        );
+        assert_eq!(panel.handle_event(&ev, &mut st), ComponentResult::Consumed);
         assert!(!st.show_checklist_panel);
     }
 

@@ -166,6 +166,11 @@ impl App {
                     started_at_ms,
                 );
             }
+            BackendEvent::ReplyBranchContent {
+                branch_id, content, ..
+            } => {
+                self.state.attach_reply_branch_content(&branch_id, &content);
+            }
             BackendEvent::ReplyBranchCompleted {
                 session_id,
                 branch_id,
@@ -485,9 +490,11 @@ impl App {
                 })),
             });
         }
-        self.state.chat_scroll = 0;
-        self.state.chat_flash_until =
-            Some(std::time::Instant::now() + std::time::Duration::from_millis(700));
+        if self.state.active_session_id.as_deref() == Some(session_id) {
+            self.state.chat_scroll = 0;
+            self.state.chat_flash_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(700));
+        }
         if let Some(session) = self
             .state
             .sessions
@@ -871,6 +878,22 @@ mod tests {
         assert_eq!(task.kind, crate::state::OrchestrationKind::ReplyBranch);
         assert_eq!(task.status, crate::state::OrchestrationStatus::Running);
         assert_eq!(task.branches[0].target, "QQ 私聊 100");
+
+        app.apply_backend_event(BackendEvent::ReplyBranchContent {
+            session_id: "s1".into(),
+            branch_id: "reply-1".into(),
+            content: "我正在继续处理这项请求。".into(),
+        });
+        assert_eq!(
+            app.state.orchestration_tasks[0].branches[0]
+                .result
+                .as_deref(),
+            Some("我正在继续处理这项请求。")
+        );
+        assert!(
+            !app.state.messages.contains_key("s1"),
+            "temporary reply content must stay out of the main transcript"
+        );
 
         app.apply_backend_event(BackendEvent::ReplyBranchCompleted {
             session_id: "s1".into(),

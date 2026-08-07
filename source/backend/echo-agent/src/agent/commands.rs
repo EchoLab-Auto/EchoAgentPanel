@@ -85,7 +85,7 @@ impl Agent {
             }
             BackendCommand::RequestState => {
                 self.emit_api_config().await;
-                for s in self.sessions.all() {
+                for s in self.trunk.all() {
                     let last = s
                         .history
                         .lock()
@@ -114,30 +114,13 @@ impl Agent {
                     });
                 }
             }
-            BackendCommand::ClearSession { session_id } => {
-                if self.sessions.shared_context_enabled() {
-                    self.cancel_all_inbound_turns();
-                } else {
-                    self.cancel_inbound_turns(&session_id, true);
-                }
-                if self.sessions.clear(&session_id).await {
-                    self.emit(BackendEvent::Error {
-                        session_id: Some(session_id),
-                        message: if self.sessions.shared_context_enabled() {
-                            "shared context cleared".into()
-                        } else {
-                            "session cleared".into()
-                        },
-                    });
-                }
-            }
             BackendCommand::SendMessage {
                 session_id,
                 content,
             } => {
                 // Parse or fall back to local TUI session key.
                 let key = SessionKey::parse(&session_id).unwrap_or_else(SessionKey::local_tui);
-                let session = self.sessions.get_or_create(&key, "local user".into(), None);
+                let session = self.trunk.get_or_create(&key, "local user".into(), None);
                 let sid = session.id.clone();
                 let received_at_ms = chrono::Utc::now().timestamp_millis();
                 let message_sequence = self.next_message_sequence();

@@ -173,8 +173,8 @@ async fn run_core(args: Args, cfg: CoreConfig) -> Result<()> {
         }
     }
     info!(
-        shared_context = agent_config.shared_context,
-        "agent context policy configured"
+        memory_limit = agent_config.memory_limit,
+        "agent context policy: single global trunk (shared_context is deprecated and ignored)"
     );
 
     // Create the agent.

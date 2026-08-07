@@ -17,7 +17,6 @@ pub mod qq;
 pub enum SlashAction {
     Help,
     ConfigureApi,
-    ClearSession,
     RequestState,
     SwitchSession,
     Quit,
@@ -53,7 +52,6 @@ pub const SLASH_COMMANDS: &[(&str, &str, SlashAction)] = &[
     ("api model ", "设置 LLM model", SlashAction::ApiSetModel),
     ("api url ", "设置 API base URL", SlashAction::ApiSetUrl),
     ("api new ", "新建 API profile", SlashAction::ApiNewProfile),
-    ("clear", "清空当前会话", SlashAction::ClearSession),
     ("switch", "切换会话", SlashAction::SwitchSession),
     ("resume", "回到之前的会话", SlashAction::ResumeSession),
     ("sessions", "刷新会话列表", SlashAction::RequestState),
@@ -76,7 +74,6 @@ pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, te
     match action {
         Help => help::run(state),
         ConfigureApi => api::config(state, backend),
-        ClearSession => basic::clear(state, backend),
         RequestState => {
             backend.send(BackendCommand::RequestState);
         }

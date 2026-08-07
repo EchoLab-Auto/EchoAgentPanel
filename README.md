@@ -174,8 +174,7 @@ Core 与 Panel 可部署在不同机器：Core 的 `[core] management_address` �
 |---|---|
 | `/help` | 显示按键帮助 |
 | `/api` | 交互式 API 配置 |
-| `/clear` | 清空当前会话 |
-| `/resume` | 恢复历史会话 |
+| `/resume` | 恢复历史会话（来源标签列表） |
 | `/adapters` | 查看适配器状态 |
 | `/qq login` | QQ 扫码登录 |
 | `/qq setting` | QQ 设置（门控模式 + 白名单/黑名单管理） |
@@ -264,8 +263,8 @@ system_prompt = "请你使用中文"
 max_tool_iterations = 1024
 memory_limit = 40
 # true 时 TUI、QQ 私聊和 QQ 群共享同一份 Agent 记忆；多用户部署请谨慎开启
+# 已废弃：Agent 始终使用全局单 trunk 记忆，此字段仅保留 TOML 兼容性，运行时忽略
 shared_context = false
-skills_dir = "skills"
 ```
 
 Core 会每秒检查一次 `skills_dir`。新增、修改或删除任意递归目录下的
@@ -293,10 +292,27 @@ Agent 仍须显式调用 QQ 发送工具。定时器目前仅保存在内存中�
 非消息工具，但不能直接发送 QQ 或后台消息；完成结果进入有序整合队列，由主 Agent
 按声明目标显式投递。即使后创建的任务先完成，也不会越过先创建的任务写入共享历史。
 普通对话轮次也统一在最多 8 路的临时快照分支中执行，主会话锁只负责输入登记和结果
+普通对话轮次也统一在最多 8 路的临时快照分支中执行，trunk 锁只负责输入登记和结果
 合并。QQ 分支 20 秒内尚未成功回复且仍在运行时，由辅助 LLM 根据对话快照生成自然的
 进度回应；正常回复或分支结束会取消该回应，不使用固定模板兜底。
+
+### 会话模型：全局 Trunk + 临时分支
+
+Agent 已抛弃"每用户独立会话"的上下文模型，改为 **单 trunk + 临时分支**：
+
+- **Trunk（主干）**：全平台共享的唯一条对话历史（受 `memory_limit` 约束），
+  持久化为 `echo-sessions.json`（version 3）。TUI、QQ 私聊、QQ 群、
+  timer 与后台任务都读写同一份 trunk。
+- **来源标签（Identity）**：TUI 会话列表里的"会话"只是来源标签
+  （平台/用户/群、昵称、最近活跃），不再拥有各自的上下文；切换会话只改变
+  "发给谁/查看谁"的路由，不改变 Agent 记忆。
+- **分支（Branch）**：每条入站消息都从 trunk 的即时快照 fork 出一个只读分支，
+  Agent 在分支上完成整轮（LLM + 工具）；分支结束后按 message_sequence
+  以 append-only 顺序把回复合并回 trunk，并发分支互不阻塞。
+- 因此不再提供 `/clear` 等按会话清空命令；trunk 只能被新消息推进。
+  旧版 v1（每会话数组）与 v2（shared_context 对象）持久化文件会自动迁移。
+
 详细设计见 [后台任务与并行分支](doc/develop/agent/background-tasks.md)。
-`framework_update` 默认关闭，仅一键安装器会启用；本地 TUI 和配置的 QQ 管理员
 可调用，执行更新还要求显式确认。
 
 Panel 中通过 `/api`、`/qq setting` 等命令修改的配置，会经 Core 的

@@ -1,4 +1,13 @@
-//! Per-user conversation sessions with platform-aware keys.
+//! Global conversation trunk with per-source identities.
+//!
+//! The agent keeps exactly ONE conversation context — the trunk. Every
+//! inbound message forks a temporary branch from a point-in-time snapshot
+//! of the trunk; when the branch finishes, its result is merged back in
+//! append-only order (see [`crate::agent::Agent::process_message`]).
+//!
+//! `Session` is now a lightweight identity (origin label) bound to the
+//! trunk: it records who said what and where, but owns no conversation
+//! history of its own.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -76,9 +85,11 @@ impl SessionKey {
     }
 }
 
-/// A conversation session scoped to one platform user/channel.
+/// A source identity bound to the global conversation trunk.
 ///
-/// Cloneable: clones share the same history and activity clock.
+/// All sessions share the same trunk history and turn lock; a session only
+/// carries provenance metadata (platform user/channel, nickname, activity).
+/// Cloneable: clones share the same trunk and activity clock.
 #[derive(Debug, Clone)]
 pub struct Session {
     pub id: String,
@@ -86,24 +97,14 @@ pub struct Session {
     pub nickname: String,
     pub group_name: Option<String>,
     last_active: Arc<AtomicI64>,
-    /// Conversation history (bounded by `memory_limit`).
+    /// The global trunk history (shared by every session, bounded by `memory_limit`).
     pub history: Arc<Mutex<Vec<ChatMessage>>>,
-    /// Serialise snapshot creation and result merges; branch execution never holds this lock.
+    /// Serialises trunk snapshot creation and result merges; branch execution never holds this lock.
     pub turn_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Session {
-    pub fn new(key: &SessionKey, nickname: String, group_name: Option<String>) -> Self {
-        Self::with_context(
-            key,
-            nickname,
-            group_name,
-            Arc::new(Mutex::new(Vec::new())),
-            Arc::new(tokio::sync::Mutex::new(())),
-        )
-    }
-
-    fn with_context(
+    fn with_trunk(
         key: &SessionKey,
         nickname: String,
         group_name: Option<String>,
@@ -145,25 +146,23 @@ impl Session {
     }
 }
 
-/// Registry of all active sessions, keyed by session ID string.
-pub struct SessionManager {
-    sessions: Arc<DashMap<String, Session>>,
+/// Registry of source identities plus the single global conversation trunk.
+pub struct TrunkStore {
+    identities: Arc<DashMap<String, Session>>,
     memory_limit: usize,
-    shared_context: bool,
-    shared_history: Arc<Mutex<Vec<ChatMessage>>>,
-    shared_turn_lock: Arc<tokio::sync::Mutex<()>>,
+    trunk_history: Arc<Mutex<Vec<ChatMessage>>>,
+    trunk_turn_lock: Arc<tokio::sync::Mutex<()>>,
     persist_path: std::sync::Mutex<Option<std::path::PathBuf>>,
     dirty: std::sync::atomic::AtomicBool,
 }
 
-impl Clone for SessionManager {
+impl Clone for TrunkStore {
     fn clone(&self) -> Self {
         Self {
-            sessions: Arc::clone(&self.sessions),
+            identities: Arc::clone(&self.identities),
             memory_limit: self.memory_limit,
-            shared_context: self.shared_context,
-            shared_history: Arc::clone(&self.shared_history),
-            shared_turn_lock: Arc::clone(&self.shared_turn_lock),
+            trunk_history: Arc::clone(&self.trunk_history),
+            trunk_turn_lock: Arc::clone(&self.trunk_turn_lock),
             persist_path: std::sync::Mutex::new(
                 self.persist_path.lock().expect("poisoned").clone(),
             ),
@@ -174,29 +173,30 @@ impl Clone for SessionManager {
     }
 }
 
-impl std::fmt::Debug for SessionManager {
+impl std::fmt::Debug for TrunkStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionManager")
-            .field("len", &self.len())
+        f.debug_struct("TrunkStore")
+            .field("identities", &self.len())
+            .field("trunk_len", &self.trunk_len())
             .finish()
     }
 }
 
-/// Session idle TTL before eviction (24 hours, in milliseconds).
-const SESSION_IDLE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+/// Identity idle TTL before eviction (24 hours, in milliseconds). Only the
+/// source label is evicted; the trunk history is never touched.
+const IDENTITY_IDLE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
-impl SessionManager {
+/// Persistence format version. v3 = single global trunk + identity labels.
+const PERSIST_VERSION: u32 = 3;
+
+impl TrunkStore {
+    /// Create a store owning the single global conversation trunk.
     pub fn new(memory_limit: usize) -> Self {
-        Self::with_shared_context(memory_limit, false)
-    }
-
-    pub fn with_shared_context(memory_limit: usize, shared_context: bool) -> Self {
         Self {
-            sessions: Arc::new(DashMap::new()),
+            identities: Arc::new(DashMap::new()),
             memory_limit,
-            shared_context,
-            shared_history: Arc::new(Mutex::new(Vec::new())),
-            shared_turn_lock: Arc::new(tokio::sync::Mutex::new(())),
+            trunk_history: Arc::new(Mutex::new(Vec::new())),
+            trunk_turn_lock: Arc::new(tokio::sync::Mutex::new(())),
             persist_path: std::sync::Mutex::new(None),
             dirty: std::sync::atomic::AtomicBool::new(false),
         }
@@ -275,65 +275,56 @@ impl SessionManager {
         self.deserialize(&data)
     }
 
-    /// Serialize all sessions. Returns `None` on failure so the caller can
-    /// skip the write instead of silently replacing the file with garbage.
+    /// Serialize the trunk and identity labels. Returns `None` on failure so
+    /// the caller can skip the write instead of silently replacing the file
+    /// with garbage.
     fn serialize(&self) -> Option<String> {
-        if self.shared_context {
-            let history = self.shared_history.try_lock().ok()?;
-            let sessions = self.all().iter().map(session_metadata).collect::<Vec<_>>();
-            return serde_json::to_string_pretty(&serde_json::json!({
-                "version": 2,
-                "shared_context": true,
-                "shared_history": serialize_messages(&history),
-                "sessions": sessions,
-            }))
-            .map_err(|error| {
-                tracing::error!(%error, "session serialization failed, skipping save");
-                error
-            })
-            .ok();
-        }
-
-        let sessions: Vec<serde_json::Value> = self
-            .all()
-            .iter()
-            .filter_map(|s| {
-                let history = s.history.try_lock().ok()?;
-                let mut value = session_metadata(s);
-                value["history"] = serde_json::Value::Array(serialize_messages(&history));
-                Some(value)
-            })
-            .collect();
-        match serde_json::to_string_pretty(&sessions) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                tracing::error!(error = %e, "session serialization failed, skipping save");
-                None
-            }
-        }
+        let history = self.trunk_history.try_lock().ok()?;
+        let identities = self.all().iter().map(identity_metadata).collect::<Vec<_>>();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": PERSIST_VERSION,
+            "trunk_history": serialize_messages(&history),
+            "identities": identities,
+        }))
+        .map_err(|error| {
+            tracing::error!(%error, "trunk serialization failed, skipping save");
+            error
+        })
+        .ok()
     }
 
+    /// Restore a persisted file. Accepts v1 (per-session array), v2 (shared
+    /// context object) and v3 (single trunk) formats; older formats migrate
+    /// into the single trunk. Returns the number of restored identities.
     fn deserialize(&self, data: &str) -> usize {
         let Ok(root) = serde_json::from_str::<serde_json::Value>(data) else {
             return 0;
         };
-        let (sessions, persisted_shared_history) = match &root {
+        let (identity_values, persisted_trunk) = match &root {
             serde_json::Value::Array(sessions) => (sessions.as_slice(), None),
             serde_json::Value::Object(_) => {
-                let Some(sessions) = root["sessions"].as_array() else {
+                let Some(sessions) = root["identities"]
+                    .as_array()
+                    .or_else(|| root["sessions"].as_array())
+                else {
                     return 0;
                 };
-                (sessions.as_slice(), root["shared_history"].as_array())
+                (
+                    sessions.as_slice(),
+                    root["trunk_history"]
+                        .as_array()
+                        .or_else(|| root["shared_history"].as_array()),
+                )
             }
             _ => return 0,
         };
         let mut count = 0;
         let mut legacy_histories = Vec::new();
-        for s in sessions {
+        for s in identity_values {
             let Some(_id) = s["id"].as_str() else {
                 continue;
             };
-            let key = crate::session::SessionKey {
+            let key = SessionKey {
                 platform: s["platform"].as_str().unwrap_or("local").into(),
                 scope: s["scope"].as_str().unwrap_or("tui").into(),
                 scope_id: s["scope_id"].as_str().unwrap_or("").into(),
@@ -345,13 +336,7 @@ impl SessionManager {
             if let Some(last_active) = s["last_active"].as_i64() {
                 session.last_active.store(last_active, Ordering::Relaxed);
             }
-            if !self.shared_context {
-                let history = persisted_shared_history.or_else(|| s["history"].as_array());
-                let msgs = history.map_or_else(Vec::new, |history| deserialize_messages(history));
-                if let Ok(mut hist) = session.history.try_lock() {
-                    *hist = msgs;
-                }
-            } else if persisted_shared_history.is_none() {
+            if persisted_trunk.is_none() {
                 if let Some(history) = s["history"].as_array() {
                     legacy_histories.push((
                         s["last_active"].as_i64().unwrap_or_default(),
@@ -362,30 +347,30 @@ impl SessionManager {
             count += 1;
         }
 
-        if self.shared_context {
-            let mut history = persisted_shared_history
-                .map(|history| deserialize_messages(history))
-                .unwrap_or_else(|| merge_legacy_histories(legacy_histories));
-            if history.len() > self.memory_limit {
-                history.drain(..history.len() - self.memory_limit);
-            }
-            if let Ok(mut shared) = self.shared_history.try_lock() {
-                *shared = history;
-            }
+        let mut history = persisted_trunk
+            .map(|history| deserialize_messages(history))
+            .unwrap_or_else(|| merge_legacy_histories(legacy_histories));
+        if history.len() > self.memory_limit {
+            history.drain(..history.len() - self.memory_limit);
+        }
+        if let Ok(mut trunk) = self.trunk_history.try_lock() {
+            *trunk = history;
         }
         count
     }
 
-    /// Evict sessions idle longer than TTL. Called periodically from a background task.
+    /// Evict identity labels idle longer than TTL. Called periodically from a
+    /// background task; only the source label is dropped, the trunk survives.
     pub fn evict_idle(&self) {
         let now = chrono::Utc::now().timestamp_millis();
-        self.sessions
-            .retain(|_, s| now - s.last_active() * 1000 < SESSION_IDLE_TTL_MS);
+        self.identities
+            .retain(|_, s| now - s.last_active() * 1000 < IDENTITY_IDLE_TTL_MS);
     }
 
-    /// Get or create a session for the given key.
+    /// Get or create an identity label for the given key. Every identity is
+    /// bound to the same global trunk.
     ///
-    /// Uses entry API so concurrent callers for the same key see only one session.
+    /// Uses entry API so concurrent callers for the same key see only one identity.
     pub fn get_or_create(
         &self,
         key: &SessionKey,
@@ -393,23 +378,19 @@ impl SessionManager {
         group_name: Option<String>,
     ) -> Session {
         let session_id = key.to_session_id();
-        match self.sessions.entry(session_id) {
+        match self.identities.entry(session_id) {
             dashmap::mapref::entry::Entry::Occupied(e) => {
                 e.get().touch();
                 e.get().clone()
             }
             dashmap::mapref::entry::Entry::Vacant(v) => {
-                let session = if self.shared_context {
-                    Session::with_context(
-                        key,
-                        nickname,
-                        group_name,
-                        Arc::clone(&self.shared_history),
-                        Arc::clone(&self.shared_turn_lock),
-                    )
-                } else {
-                    Session::new(key, nickname, group_name)
-                };
+                let session = Session::with_trunk(
+                    key,
+                    nickname,
+                    group_name,
+                    Arc::clone(&self.trunk_history),
+                    Arc::clone(&self.trunk_turn_lock),
+                );
                 v.insert(session.clone());
                 session
             }
@@ -417,43 +398,32 @@ impl SessionManager {
     }
 
     pub fn get(&self, session_id: &str) -> Option<Session> {
-        self.sessions.get(session_id).map(|s| s.clone())
-    }
-
-    pub async fn clear(&self, session_id: &str) -> bool {
-        match self.sessions.get(session_id) {
-            Some(s) => {
-                let _turn = s.value().turn_lock.lock().await;
-                s.value().history.lock().await.clear();
-                s.value().touch();
-                true
-            }
-            None => false,
-        }
+        self.identities.get(session_id).map(|s| s.clone())
     }
 
     pub fn all(&self) -> Vec<Session> {
-        self.sessions.iter().map(|e| e.value().clone()).collect()
+        self.identities.iter().map(|e| e.value().clone()).collect()
     }
 
     pub fn len(&self) -> usize {
-        self.sessions.len()
+        self.identities.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.sessions.is_empty()
+        self.identities.is_empty()
     }
 
     pub fn memory_limit(&self) -> usize {
         self.memory_limit
     }
 
-    pub fn shared_context_enabled(&self) -> bool {
-        self.shared_context
+    /// Number of messages currently in the trunk.
+    pub fn trunk_len(&self) -> usize {
+        self.trunk_history.try_lock().map(|h| h.len()).unwrap_or(0)
     }
 }
 
-fn session_metadata(session: &Session) -> serde_json::Value {
+fn identity_metadata(session: &Session) -> serde_json::Value {
     serde_json::json!({
         "id": session.id,
         "platform": session.session_key.platform,
@@ -591,24 +561,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_manager_get_or_create() {
-        let mgr = SessionManager::new(10);
+    async fn trunk_get_or_create_deduplicates_identities() {
+        let store = TrunkStore::new(10);
         let key = SessionKey::parse("qq:dm::111").unwrap();
-        let s = mgr.get_or_create(&key, "alice".into(), None);
+        let s = store.get_or_create(&key, "alice".into(), None);
         assert_eq!(s.id, "qq:dm::111");
-        assert_eq!(mgr.len(), 1);
+        assert_eq!(store.len(), 1);
 
-        // Same key returns existing session.
-        let s2 = mgr.get_or_create(&key, "bob".into(), None);
-        assert_eq!(mgr.len(), 1);
+        // Same key returns existing identity.
+        let s2 = store.get_or_create(&key, "bob".into(), None);
+        assert_eq!(store.len(), 1);
         assert_eq!(s2.nickname, "alice"); // original nickname preserved
     }
 
     #[tokio::test]
-    async fn shared_context_reuses_history_and_turn_lock_across_platforms() {
-        let mgr = SessionManager::with_shared_context(10, true);
-        let local = mgr.get_or_create(&SessionKey::local_tui(), "local".into(), None);
-        let qq = mgr.get_or_create(
+    async fn all_identities_share_one_trunk_history_and_turn_lock() {
+        let store = TrunkStore::new(10);
+        let local = store.get_or_create(&SessionKey::local_tui(), "local".into(), None);
+        let qq = store.get_or_create(
             &SessionKey::parse("qq:dm::123").unwrap(),
             "alice".into(),
             None,
@@ -619,31 +589,14 @@ mod tests {
         assert!(Arc::ptr_eq(&local.history, &qq.history));
         assert!(Arc::ptr_eq(&local.turn_lock, &qq.turn_lock));
         assert_eq!(qq.history.lock().await[0].content, "shared");
-        assert!(mgr.clear(&qq.id).await);
-        assert!(local.history.lock().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn isolated_context_keeps_platform_histories_separate() {
-        let mgr = SessionManager::new(10);
-        let local = mgr.get_or_create(&SessionKey::local_tui(), "local".into(), None);
-        let qq = mgr.get_or_create(
-            &SessionKey::parse("qq:dm::123").unwrap(),
-            "alice".into(),
-            None,
-        );
-
-        local.history.lock().await.push(ChatMessage::user("local"));
-
-        assert!(!Arc::ptr_eq(&local.history, &qq.history));
-        assert!(qq.history.lock().await.is_empty());
+        assert_eq!(store.trunk_len(), 1, "trunk holds the single history");
     }
 
     #[tokio::test]
     async fn session_info_has_platform_fields() {
-        let mgr = SessionManager::new(5);
+        let store = TrunkStore::new(5);
         let key = SessionKey::parse("qq:group:789:456").unwrap();
-        let s = mgr.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
+        let s = store.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
         let info = s.info("last msg".into());
         assert_eq!(info.platform, "qq");
         assert_eq!(info.scope, "group");
@@ -655,18 +608,18 @@ mod tests {
     // ── Persistence ─────────────────────────────────────────────────────────
 
     fn temp_sessions_path(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("echo-sessions-{name}-{}.json", std::process::id()))
+        std::env::temp_dir().join(format!("echo-trunk-{name}-{}.json", std::process::id()))
     }
 
     #[tokio::test]
-    async fn save_and_load_roundtrip_restores_sessions() {
+    async fn save_and_load_roundtrip_restores_trunk_and_identities() {
         let path = temp_sessions_path("roundtrip");
         let _ = std::fs::remove_file(&path);
 
-        let mgr = SessionManager::new(10);
-        mgr.set_persist_path(&path);
+        let store = TrunkStore::new(10);
+        store.set_persist_path(&path);
         let key = SessionKey::parse("qq:group:789:456").unwrap();
-        let s = mgr.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
+        let s = store.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
         s.history
             .lock()
             .await
@@ -675,16 +628,26 @@ mod tests {
             .lock()
             .await
             .push(crate::llm::ChatMessage::assistant("回复"));
-        mgr.mark_dirty();
-        mgr.save_now().await;
-        assert!(path.exists(), "sessions file written");
+        store.mark_dirty();
+        store.save_now().await;
+        assert!(path.exists(), "trunk file written");
 
-        // A fresh manager restores everything.
-        let mgr2 = SessionManager::new(10);
-        mgr2.set_persist_path(&path);
-        let restored = mgr2.load_from_file().await;
-        assert_eq!(restored, 1, "one session restored");
-        let s2 = mgr2.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
+        let root: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(root["version"], 3);
+        assert_eq!(root["trunk_history"].as_array().unwrap().len(), 2);
+        assert!(root["identities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|identity| identity.get("history").is_none()));
+
+        // A fresh store restores everything.
+        let store2 = TrunkStore::new(10);
+        store2.set_persist_path(&path);
+        let restored = store2.load_from_file().await;
+        assert_eq!(restored, 1, "one identity restored");
+        let s2 = store2.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
         let hist = s2.history.lock().await.clone();
         assert_eq!(hist.len(), 2);
         assert_eq!(hist[0].content, "你好");
@@ -694,32 +657,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shared_context_persists_history_once_and_restores_it() {
+    async fn persisted_history_is_shared_across_restored_identities() {
         let path = temp_sessions_path("shared-roundtrip");
         let _ = std::fs::remove_file(&path);
-        let mgr = SessionManager::with_shared_context(10, true);
-        mgr.set_persist_path(&path);
-        let local = mgr.get_or_create(&SessionKey::local_tui(), "local".into(), None);
+        let store = TrunkStore::new(10);
+        store.set_persist_path(&path);
+        let local = store.get_or_create(&SessionKey::local_tui(), "local".into(), None);
         let qq_key = SessionKey::parse("qq:dm::123").unwrap();
-        let _qq = mgr.get_or_create(&qq_key, "alice".into(), None);
+        let _qq = store.get_or_create(&qq_key, "alice".into(), None);
         local.history.lock().await.extend([
             ChatMessage::user("from tui"),
             ChatMessage::assistant("shared reply"),
         ]);
-        mgr.mark_dirty();
-        mgr.save_now().await;
+        store.mark_dirty();
+        store.save_now().await;
 
-        let root: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(root["version"], 2);
-        assert_eq!(root["shared_history"].as_array().unwrap().len(), 2);
-        assert!(root["sessions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|session| session.get("history").is_none()));
-
-        let restored = SessionManager::with_shared_context(10, true);
+        let restored = TrunkStore::new(10);
         restored.set_persist_path(&path);
         assert_eq!(restored.load_from_file().await, 2);
         let local = restored.get("local:tui::local_user").unwrap();
@@ -730,9 +683,9 @@ mod tests {
     }
 
     #[test]
-    fn shared_context_migrates_distinct_legacy_histories() {
-        let mgr = SessionManager::with_shared_context(10, true);
-        let restored = mgr.deserialize(
+    fn v1_array_migrates_distinct_histories_into_one_trunk() {
+        let store = TrunkStore::new(10);
+        let restored = store.deserialize(
             r#"[
                 {"id":"local:tui::local_user","platform":"local","scope":"tui","scope_id":"","user_id":"local_user","nickname":"local","last_active":1,"history":[{"role":"user","content":"local"}]},
                 {"id":"qq:dm::123","platform":"qq","scope":"dm","scope_id":"","user_id":"123","nickname":"alice","last_active":2,"history":[{"role":"user","content":"qq"}]}
@@ -740,17 +693,39 @@ mod tests {
         );
 
         assert_eq!(restored, 2);
-        let history = mgr.shared_history.try_lock().unwrap();
+        let history = store.trunk_history.try_lock().unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "local");
         assert_eq!(history[1].content, "qq");
     }
 
+    #[test]
+    fn v2_shared_object_migrates_into_trunk() {
+        let store = TrunkStore::new(10);
+        let restored = store.deserialize(
+            r#"{
+                "version": 2,
+                "shared_context": true,
+                "shared_history": [{"role":"user","content":"shared"}],
+                "sessions": [
+                    {"id":"local:tui::local_user","platform":"local","scope":"tui","scope_id":"","user_id":"local_user","nickname":"local","last_active":1},
+                    {"id":"qq:dm::123","platform":"qq","scope":"dm","scope_id":"","user_id":"123","nickname":"alice","last_active":2}
+                ]
+            }"#,
+        );
+
+        assert_eq!(restored, 2);
+        let history = store.trunk_history.try_lock().unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].content, "shared");
+        assert_eq!(store.len(), 2, "both identities restored");
+    }
+
     #[tokio::test]
     async fn load_from_missing_file_returns_zero() {
-        let mgr = SessionManager::new(10);
-        mgr.set_persist_path(temp_sessions_path("missing"));
-        assert_eq!(mgr.load_from_file().await, 0);
+        let store = TrunkStore::new(10);
+        store.set_persist_path(temp_sessions_path("missing"));
+        assert_eq!(store.load_from_file().await, 0);
     }
 
     #[tokio::test]
@@ -765,63 +740,68 @@ mod tests {
             ]"#,
         )
         .unwrap();
-        let mgr = SessionManager::new(10);
-        mgr.set_persist_path(&path);
-        let restored = mgr.load_from_file().await;
+        let store = TrunkStore::new(10);
+        store.set_persist_path(&path);
+        let restored = store.load_from_file().await;
         // Entries with an id are restored leniently (missing fields fall back
         // to defaults); non-object entries are skipped.
         assert_eq!(restored, 2);
         // The partially-populated entry falls back to defaults for the
         // missing fields only (scope_id/user_id → empty/0).
-        let fallback = mgr.get("qq:dm::0").expect("lenient default session");
+        let fallback = store.get("qq:dm::0").expect("lenient default identity");
         assert_eq!(fallback.session_key.scope_id, "");
         assert_eq!(fallback.session_key.user_id, "0");
         let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn concurrent_get_or_create_yields_single_instance() {
-        let mgr = SessionManager::new(10);
+    async fn concurrent_get_or_create_yields_single_identity() {
+        let store = TrunkStore::new(10);
         let key = SessionKey::parse("qq:dm::999").unwrap();
         let key2 = key.clone();
 
         // 32 concurrent callers racing on the same key.
         let mut handles = Vec::new();
         for _ in 0..32 {
-            let mgr = mgr.clone();
+            let store = store.clone();
             let key = key.clone();
             handles.push(tokio::spawn(async move {
-                mgr.get_or_create(&key, "alice".into(), None)
+                store.get_or_create(&key, "alice".into(), None)
             }));
         }
         for h in handles {
             let _ = h.await.unwrap();
         }
-        assert_eq!(mgr.len(), 1, "single session for concurrent callers");
+        assert_eq!(store.len(), 1, "single identity for concurrent callers");
         let _ = key2;
     }
 
     #[test]
-    fn evict_idle_removes_stale_but_keeps_recent() {
-        let mgr = SessionManager::new(10);
+    fn evict_idle_drops_stale_identity_but_keeps_trunk() {
+        let store = TrunkStore::new(10);
         let key = SessionKey::parse("qq:dm::111").unwrap();
-        let stale = mgr.get_or_create(&key, "alice".into(), None);
+        let stale = store.get_or_create(&key, "alice".into(), None);
+        stale
+            .history
+            .blocking_lock()
+            .push(ChatMessage::user("kept"));
         // Force last_active far in the past (2× TTL).
-        let past = chrono::Utc::now().timestamp() - (SESSION_IDLE_TTL_MS / 1000) * 2;
+        let past = chrono::Utc::now().timestamp() - (IDENTITY_IDLE_TTL_MS / 1000) * 2;
         stale
             .last_active
             .store(past, std::sync::atomic::Ordering::Relaxed);
 
         let key2 = SessionKey::parse("qq:dm::222").unwrap();
-        let recent = mgr.get_or_create(&key2, "bob".into(), None);
+        let recent = store.get_or_create(&key2, "bob".into(), None);
         recent.touch(); // now
 
-        assert_eq!(mgr.len(), 2);
-        mgr.evict_idle();
-        assert_eq!(mgr.len(), 1);
+        assert_eq!(store.len(), 2);
+        store.evict_idle();
+        assert_eq!(store.len(), 1);
         assert!(
-            mgr.get(&key2.to_session_id()).is_some(),
-            "recent session survives"
+            store.get(&key2.to_session_id()).is_some(),
+            "recent identity survives"
         );
+        assert_eq!(store.trunk_len(), 1, "trunk history survives eviction");
     }
 }

@@ -19,7 +19,6 @@ use crate::state::{AgentPhase, AppState, PaletteMode};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteAction {
     ConfigureApi,
-    ClearSession,
     RequestState,
     SwitchSession,
     ToggleHelp,
@@ -28,7 +27,6 @@ pub enum PaletteAction {
 
 const ACTIONS: &[(PaletteAction, &str)] = &[
     (PaletteAction::ConfigureApi, "配置 API (provider/model/key)"),
-    (PaletteAction::ClearSession, "清空当前会话"),
     (PaletteAction::SwitchSession, "切换会话"),
     (PaletteAction::RequestState, "刷新会话列表"),
     (PaletteAction::ToggleHelp, "按键帮助"),
@@ -267,9 +265,9 @@ mod tests {
     }
 
     #[test]
-    fn actions_returns_all_six() {
+    fn actions_returns_all_five() {
         let palette = CommandPalette;
-        assert_eq!(palette.actions().len(), 6);
+        assert_eq!(palette.actions().len(), 5);
         assert!(palette.actions().contains(&PaletteAction::Quit));
         assert!(palette.actions().contains(&PaletteAction::ConfigureApi));
     }
@@ -307,7 +305,7 @@ mod tests {
     #[test]
     fn down_navigates_with_wraparound() {
         let mut st = state_with_sessions();
-        st.palette_mode = PaletteMode::Commands; // 6 actions
+        st.palette_mode = PaletteMode::Commands; // 5 actions
         let mut palette = CommandPalette;
         let ev = key(KeyCode::Down, KeyEventKind::Press);
         assert_eq!(
@@ -316,7 +314,7 @@ mod tests {
         );
         assert_eq!(st.palette_selection, 1);
         // Wrap from last to first.
-        st.palette_selection = 5;
+        st.palette_selection = 4;
         assert_eq!(
             palette.handle_event(&ev, &mut st),
             ComponentResult::Consumed

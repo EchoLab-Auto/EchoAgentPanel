@@ -74,7 +74,9 @@ pub struct AgentConfig {
     pub skills_dir: String,
     /// Maximum conversation messages kept per session.
     pub memory_limit: usize,
-    /// Share one bounded conversation history across all platform sessions.
+    /// Deprecated: the agent now always keeps exactly ONE global conversation
+    /// trunk (source identities share it). Kept only for TOML compatibility;
+    /// the value is ignored at runtime.
     pub shared_context: bool,
     /// Privileged framework update policy.
     pub self_update: SelfUpdateConfig,

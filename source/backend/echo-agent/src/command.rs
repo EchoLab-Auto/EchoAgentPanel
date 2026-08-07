@@ -30,8 +30,6 @@ pub enum BackendCommand {
     /// Request a full state snapshot (responded with `BackendEvent::SessionUpdated`
     /// per session plus a fresh [`crate::BackendState`] via the bridge).
     RequestState,
-    /// Clear a session's conversation history.
-    ClearSession { session_id: String },
     /// Start an adapter by name.
     StartAdapter { name: String },
     /// Stop an adapter by name.

@@ -89,6 +89,10 @@ impl App {
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         let mut pending_events: Vec<BackendEvent> = Vec::new();
 
+        // Pin the default chat to the local TUI session before the Core sends
+        // remote QQ session snapshots. Remote sessions remain background until
+        // the user explicitly selects one from the session switcher.
+        self.state.ensure_primary_session();
         self.backend.send(BackendCommand::RequestState);
         tracing::debug!("TUI 主循环启动");
 
@@ -787,12 +791,6 @@ impl App {
         let action = actions[self.state.palette_selection.min(actions.len() - 1)];
         match action {
             PaletteAction::ConfigureApi => self.open_settings(),
-            PaletteAction::ClearSession => {
-                if let Some(id) = self.state.active_session_id.clone() {
-                    self.backend
-                        .send(BackendCommand::ClearSession { session_id: id });
-                }
-            }
             PaletteAction::RequestState => {
                 self.backend.send(BackendCommand::RequestState);
             }

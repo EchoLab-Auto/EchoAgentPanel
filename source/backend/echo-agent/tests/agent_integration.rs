@@ -191,35 +191,12 @@ async fn send_message_creates_session() {
         })
         .await;
 
-    let sessions = agent.sessions.all();
+    let sessions = agent.trunk.all();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].session_key.platform, "qq");
     assert_eq!(sessions[0].session_key.scope, "group");
     assert_eq!(sessions[0].session_key.scope_id, "999");
     assert_eq!(sessions[0].session_key.user_id, "456");
-}
-
-#[tokio::test]
-async fn clear_session_empties_history() {
-    let (agent, _provider) = test_agent("ok");
-    let key = SessionKey::parse("qq:dm::123").unwrap();
-    let session = agent.sessions.get_or_create(&key, "u".into(), None);
-    session
-        .history
-        .lock()
-        .await
-        .push(echo_agent::llm::ChatMessage::user("x"));
-
-    agent
-        .apply_command(BackendCommand::ClearSession {
-            session_id: "qq:dm::123".into(),
-        })
-        .await;
-
-    assert!(
-        session.history.lock().await.is_empty(),
-        "history cleared after ClearSession"
-    );
 }
 
 #[tokio::test]
@@ -349,7 +326,7 @@ async fn concurrent_messages_merge_by_request_sequence() {
         Arc::new(AdapterRegistry::new()),
     ));
     let key = SessionKey::parse("qq:dm::1").unwrap();
-    let session = agent.sessions.get_or_create(&key, "u".into(), None);
+    let session = agent.trunk.get_or_create(&key, "u".into(), None);
 
     // Start the first branch, then ensure the second enters while it is still
     // waiting. Structured inputs carry the production ordering anchor.
@@ -400,54 +377,6 @@ async fn concurrent_messages_merge_by_request_sequence() {
     );
     let _ = (r1, r2);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn clearing_a_session_cancels_branches_before_they_can_merge() {
-    let provider = Arc::new(SlowProvider {
-        delay_ms: 500,
-        replies: tokio::sync::Mutex::new(vec!["stale reply"]),
-        calls: AtomicUsize::new(0),
-    });
-    let agent = Arc::new(Agent::new(
-        provider.clone(),
-        AgentConfig::default(),
-        SkillRegistry::new(),
-        ToolRegistry::new(),
-        Arc::new(AdapterRegistry::new()),
-    ));
-    let session =
-        agent
-            .sessions
-            .get_or_create(&SessionKey::parse("qq:dm::1").unwrap(), "u".into(), None);
-    let branch = {
-        let agent = Arc::clone(&agent);
-        let session = session.clone();
-        tokio::spawn(async move {
-            agent
-                .process_message(
-                    &session,
-                    r#"<backend_message_hook>{"message_sequence":1,"content":"work"}</backend_message_hook>"#,
-                )
-                .await
-        })
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        while provider.calls.load(Ordering::SeqCst) < 1 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("branch should enter the provider");
-
-    agent
-        .apply_command(BackendCommand::ClearSession {
-            session_id: session.id.clone(),
-        })
-        .await;
-
-    assert!(branch.await.unwrap().is_err());
-    assert!(session.history.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -624,7 +553,7 @@ async fn qq_hook_input_enforces_transport_boundary() {
         Arc::new(AdapterRegistry::new()),
     ));
     let key = SessionKey::parse("qq:dm::123").unwrap();
-    let session = agent.sessions.get_or_create(&key, "u".into(), None);
+    let session = agent.trunk.get_or_create(&key, "u".into(), None);
     let hook = concat!(
         "<qq_message_hook>\n",
         "{\"event\":\"qq_message\",\"channel\":{\"type\":\"private\"},\"sender\":{\"user_id\":\"123\"},\"content\":\"hello\"}\n",
@@ -648,7 +577,7 @@ async fn qq_hook_input_enforces_transport_boundary() {
 async fn backend_input_in_qq_session_stays_in_backend() {
     let (agent, provider) = test_agent("ok");
     let key = SessionKey::parse("qq:dm::123").unwrap();
-    let session = agent.sessions.get_or_create(&key, "u".into(), None);
+    let session = agent.trunk.get_or_create(&key, "u".into(), None);
 
     // Backend/TUI input routed into a QQ session: no hook marker.
     agent.process_message(&session, "你好").await.unwrap();
@@ -668,7 +597,7 @@ async fn backend_input_in_qq_session_stays_in_backend() {
 async fn local_tui_input_has_no_qq_boundary() {
     let (agent, provider) = test_agent("ok");
     let key = SessionKey::local_tui();
-    let session = agent.sessions.get_or_create(&key, "u".into(), None);
+    let session = agent.trunk.get_or_create(&key, "u".into(), None);
 
     agent.process_message(&session, "你好").await.unwrap();
 

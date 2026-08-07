@@ -17,7 +17,7 @@ use crate::command::BackendCommand;
 use crate::config::{AgentConfig, ApiProfile};
 use crate::event::{AdapterStatus, BackendEvent};
 use crate::llm::{ChatMessage, ChatRequest, LlmProvider, ToolCall};
-use crate::session::{Session, SessionManager};
+use crate::session::{Session, TrunkStore};
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
 
@@ -46,7 +46,7 @@ pub struct Agent {
     config_store: tokio::sync::Mutex<Option<echo_adapter::ConfigStore>>,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<Mutex<SkillRegistry>>,
-    pub sessions: SessionManager,
+    pub trunk: TrunkStore,
     /// Platform adapters managed externally (registered by main / config).
     pub adapters: Arc<AdapterRegistry>,
     /// Tokio RwLock: `emit()` runs from async loops and must never block a
@@ -61,7 +61,7 @@ pub struct Agent {
     reply_branch_slots: tokio::sync::Semaphore,
     active_inbound_turns: DashMap<String, ActiveInboundTurn>,
     next_message_sequence: AtomicU64,
-    /// Cancels background tasks (session eviction / save) on shutdown.
+    /// Cancels background tasks (identity eviction / save) on shutdown.
     cancel: tokio_util::sync::CancellationToken,
 }
 
@@ -82,9 +82,11 @@ impl Agent {
         tools: ToolRegistry,
         adapters: Arc<AdapterRegistry>,
     ) -> Self {
-        let sessions =
-            SessionManager::with_shared_context(config.memory_limit, config.shared_context);
-        let eviction_sessions = sessions.clone();
+        // The agent owns exactly ONE conversation context: the trunk. Every
+        // inbound message forks a temporary branch from a trunk snapshot and
+        // merges back in append-only order (see `process_message`).
+        let trunk = TrunkStore::new(config.memory_limit);
+        let eviction_trunk = trunk.clone();
         let cancel = tokio_util::sync::CancellationToken::new();
         let eviction_cancel = cancel.clone();
         let timer_scheduler = orchestration::TimerScheduler::new(cancel.clone());
@@ -96,7 +98,7 @@ impl Agent {
             config_store: tokio::sync::Mutex::new(None),
             tools: Arc::new(tools),
             skills: Arc::new(Mutex::new(skills)),
-            sessions,
+            trunk,
             adapters,
             handle: tokio::sync::RwLock::new(None),
             system_prompt_cache: RwLock::new(None),
@@ -109,12 +111,13 @@ impl Agent {
             next_message_sequence: AtomicU64::new(1),
             cancel,
         };
-        // Spawn periodic session eviction (every 5 minutes).
+        // Spawn periodic identity eviction (every 5 minutes). Only stale
+        // source labels are dropped; the trunk history is never evicted.
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
             loop {
                 tokio::select! {
-                    _ = interval.tick() => eviction_sessions.evict_idle(),
+                    _ = interval.tick() => eviction_trunk.evict_idle(),
                     _ = eviction_cancel.cancelled() => break,
                 }
             }
@@ -126,7 +129,7 @@ impl Agent {
     pub async fn shutdown(&self) {
         self.cancel_all_inbound_turns();
         self.cancel.cancel();
-        self.sessions.save_now().await;
+        self.trunk.save_now().await;
     }
 
     /// Set the TOML config file that `[agent]` changes are persisted to.
@@ -141,7 +144,7 @@ impl Agent {
     /// at startup — uses try_lock since no concurrent access exists yet.
     pub fn set_config_store(&self, store: echo_adapter::ConfigStore) {
         let sessions_path = store.path().with_file_name("echo-sessions.json");
-        self.sessions.set_persist_path(sessions_path);
+        self.trunk.set_persist_path(sessions_path);
         if let Ok(mut slot) = self.config_store.try_lock() {
             *slot = Some(store);
         } else {
@@ -151,7 +154,7 @@ impl Agent {
 
     /// Load persisted sessions from disk.
     pub async fn load_sessions(&self) -> usize {
-        self.sessions.load_from_file().await
+        self.trunk.load_from_file().await
     }
 
     /// Spawn a periodic session save task.
@@ -162,7 +165,7 @@ impl Agent {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 tokio::select! {
-                    _ = interval.tick() => agent.sessions.maybe_save().await,
+                    _ = interval.tick() => agent.trunk.maybe_save().await,
                     _ = cancel.cancelled() => break,
                 }
             }
@@ -236,9 +239,10 @@ impl Agent {
                         tracing::warn!(timer_id = %event.id, session_id = %event.session_id, "timer session is invalid");
                         continue;
                     };
-                    let session = agent.sessions.get(&event.session_id).unwrap_or_else(|| {
-                        agent.sessions.get_or_create(&key, "timer".into(), None)
-                    });
+                    let session = agent
+                        .trunk
+                        .get(&event.session_id)
+                        .unwrap_or_else(|| agent.trunk.get_or_create(&key, "timer".into(), None));
                     let received_at_ms = chrono::Utc::now().timestamp_millis();
                     let message_sequence = agent.next_message_sequence();
                     let input = serde_json::json!({
@@ -342,13 +346,10 @@ impl Agent {
             );
             return;
         };
-        let session = self
-            .sessions
-            .get(&completion.session_id)
-            .unwrap_or_else(|| {
-                self.sessions
-                    .get_or_create(&key, "background task".into(), None)
-            });
+        let session = self.trunk.get(&completion.session_id).unwrap_or_else(|| {
+            self.trunk
+                .get_or_create(&key, "background task".into(), None)
+        });
         let received_at_ms = chrono::Utc::now().timestamp_millis();
         let message_sequence = self.next_message_sequence();
         let deliveries = completion
@@ -567,10 +568,10 @@ impl Agent {
         let _turn = session.turn_lock.lock().await;
         let mut history = session.history.lock().await;
         history.push(ChatMessage::user(content));
-        trim_history(&mut history, self.sessions.memory_limit());
+        trim_history(&mut history, self.trunk.memory_limit());
         let snapshot = history.clone();
         drop(history);
-        self.sessions.mark_dirty();
+        self.trunk.mark_dirty();
         snapshot
     }
 
@@ -586,10 +587,10 @@ impl Agent {
         let registration = self.register_inbound_turn(&session.id, message_sequence, true);
         let mut history = session.history.lock().await;
         history.push(ChatMessage::user(content));
-        trim_history(&mut history, self.sessions.memory_limit());
+        trim_history(&mut history, self.trunk.memory_limit());
         let snapshot = history.clone();
         drop(history);
-        self.sessions.mark_dirty();
+        self.trunk.mark_dirty();
         (registration, snapshot)
     }
 
@@ -622,9 +623,9 @@ impl Agent {
         } else {
             history.push(message);
         }
-        trim_history(&mut history, self.sessions.memory_limit());
+        trim_history(&mut history, self.trunk.memory_limit());
         drop(history);
-        self.sessions.mark_dirty();
+        self.trunk.mark_dirty();
         true
     }
 
@@ -1168,7 +1169,7 @@ impl Agent {
         };
         let objective = work.objective.clone();
         let branch_count = work.branches.len();
-        let history_snapshot = match self.sessions.get(session_id) {
+        let history_snapshot = match self.trunk.get(session_id) {
             Some(session) => session.history.lock().await.clone(),
             None => return Err("current session no longer exists".into()),
         };
@@ -1829,7 +1830,7 @@ pub mod tests {
         });
         let agent = test_agent(provider.clone());
         let key = SessionKey::local_tui();
-        let session = agent.sessions.get_or_create(&key, "user".into(), None);
+        let session = agent.trunk.get_or_create(&key, "user".into(), None);
         let reply = agent.process_message(&session, "hi").await.unwrap();
         assert_eq!(reply, "Hello!");
         assert_eq!(session.history.lock().await.len(), 2);
@@ -1848,7 +1849,7 @@ pub mod tests {
         });
         let agent = Arc::new(test_agent(provider));
         let session = agent
-            .sessions
+            .trunk
             .get_or_create(&SessionKey::local_tui(), "user".into(), None);
         let first = r#"<backend_message_hook>{"message_sequence":1,"content":"first"}</backend_message_hook>"#;
         let second = r#"<backend_message_hook>{"message_sequence":2,"content":"second"}</backend_message_hook>"#;
@@ -2146,7 +2147,7 @@ pub mod tests {
             Arc::new(AdapterRegistry::new()),
         );
         let key = SessionKey::local_tui();
-        let session = agent.sessions.get_or_create(&key, "user".into(), None);
+        let session = agent.trunk.get_or_create(&key, "user".into(), None);
         let reply = agent
             .process_message(&session, "use the tool")
             .await
@@ -2197,7 +2198,7 @@ pub mod tests {
             scope_id: String::new(),
             user_id: "123456".into(),
         };
-        let session = agent.sessions.get_or_create(&key, "tester".into(), None);
+        let session = agent.trunk.get_or_create(&key, "tester".into(), None);
         let hook = r#"<qq_message_hook>
 {"channel":{"type":"private"},"sender":{"user_id":"123456"},"content":"你好"}
 </qq_message_hook>"#;
@@ -2310,7 +2311,7 @@ pub mod tests {
             Arc::new(AdapterRegistry::new()),
         );
         let key = SessionKey::local_tui();
-        let session = agent.sessions.get_or_create(&key, "user".into(), None);
+        let session = agent.trunk.get_or_create(&key, "user".into(), None);
         let err = agent.process_message(&session, "loop").await.unwrap_err();
         assert!(err.to_string().contains("max tool iterations"));
     }
@@ -2334,7 +2335,7 @@ pub mod tests {
             Arc::new(AdapterRegistry::new()),
         );
         let key = SessionKey::local_tui();
-        let session = agent.sessions.get_or_create(&key, "user".into(), None);
+        let session = agent.trunk.get_or_create(&key, "user".into(), None);
         let reply = agent.process_message(&session, "hi").await.unwrap();
         assert_eq!(reply, "done");
     }
@@ -2369,7 +2370,7 @@ pub mod tests {
         let provider = Arc::new(ScriptedProvider::new(script));
         let agent = test_agent(provider.clone());
         let session = agent
-            .sessions
+            .trunk
             .get_or_create(&SessionKey::local_tui(), "user".into(), None);
 
         let reply = agent
@@ -2471,7 +2472,7 @@ pub mod tests {
         let agent = Arc::new(test_agent(provider.clone()));
         agent.start_orchestration_task();
         let session = agent
-            .sessions
+            .trunk
             .get_or_create(&SessionKey::local_tui(), "user".into(), None);
 
         let reply = agent

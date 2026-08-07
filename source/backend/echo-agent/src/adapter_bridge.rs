@@ -43,7 +43,7 @@ impl InboundMessageHook for AgentMessageHook {
         };
         let session =
             agent
-                .sessions
+                .trunk
                 .get_or_create(&key, msg.user_name.clone(), msg.group_name.clone());
         let session_id = session.id.clone();
         let received_at_ms = chrono::Utc::now().timestamp_millis();
@@ -153,6 +153,7 @@ impl InboundMessageHook for AgentMessageHook {
         spawn_contextual_wait_reply(
             Arc::clone(agent),
             session.clone(),
+            branch_id.clone(),
             group_id,
             history_snapshot.clone(),
             visible_reply_rx,
@@ -241,9 +242,11 @@ impl InboundMessageHook for AgentMessageHook {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_contextual_wait_reply(
     agent: Arc<Agent>,
     session: crate::session::Session,
+    branch_id: String,
     group_id: Option<String>,
     history_snapshot: Vec<crate::llm::ChatMessage>,
     mut visible_reply: tokio::sync::watch::Receiver<bool>,
@@ -268,9 +271,10 @@ fn spawn_contextual_wait_reply(
                     Ok(reply) => reply,
                     Err(error) => {
                         tracing::warn!(%error, session = %session.id, "QQ wait reply generation failed");
-                        agent.emit(BackendEvent::Error {
-                            session_id: Some(session.id.clone()),
-                            message: format!("QQ wait reply generation failed: {error}"),
+                        agent.emit(BackendEvent::ReplyBranchContent {
+                            session_id: session.id.clone(),
+                            branch_id,
+                            content: format!("临时回复生成失败：{error}"),
                         });
                         return;
                     }
@@ -283,9 +287,16 @@ fn spawn_contextual_wait_reply(
                     .await
                 {
                     tracing::warn!(%error, session = %session.id, "QQ wait reply failed");
-                    agent.emit(BackendEvent::Error {
-                        session_id: Some(session.id.clone()),
-                        message: format!("QQ wait reply failed: {error}"),
+                    agent.emit(BackendEvent::ReplyBranchContent {
+                        session_id: session.id.clone(),
+                        branch_id,
+                        content: format!("临时回复发送失败：{error}\n待发送内容：{reply}"),
+                    });
+                } else {
+                    agent.emit(BackendEvent::ReplyBranchContent {
+                        session_id: session.id.clone(),
+                        branch_id,
+                        content: reply,
                     });
                 }
             }
@@ -651,7 +662,7 @@ mod tests {
         assert_eq!(result, Ok(()));
         wait_until(|| {
             hook.agent
-                .sessions
+                .trunk
                 .all()
                 .first()
                 .and_then(|session| session.history.try_lock().ok())
@@ -660,7 +671,7 @@ mod tests {
         .await;
 
         // The session was created with the QQ scoping.
-        let sessions = hook.agent.sessions.all();
+        let sessions = hook.agent.trunk.all();
         assert_eq!(sessions.len(), 1);
         let session = &sessions[0];
         assert_eq!(session.session_key.platform, "qq");
@@ -683,7 +694,7 @@ mod tests {
         };
         let _ = hook.on_incoming_message(msg).await;
 
-        let sessions = hook.agent.sessions.all();
+        let sessions = hook.agent.trunk.all();
         let session = &sessions[0];
         assert_eq!(session.session_key.scope, "group");
         assert_eq!(session.session_key.scope_id, "999");
@@ -719,7 +730,7 @@ mod tests {
             tools,
             Arc::new(echo_adapter::registry::AdapterRegistry::new()),
         ));
-        let session = agent.sessions.get_or_create(
+        let session = agent.trunk.get_or_create(
             &SessionKey::parse("qq:dm::123456").unwrap(),
             "tester".into(),
             None,
@@ -731,6 +742,7 @@ mod tests {
         spawn_contextual_wait_reply(
             Arc::clone(&agent),
             session.clone(),
+            "branch-1".into(),
             None,
             snapshot.clone(),
             reply_rx,
@@ -752,6 +764,7 @@ mod tests {
         spawn_contextual_wait_reply(
             Arc::clone(&agent),
             session.clone(),
+            "branch-2".into(),
             None,
             snapshot.clone(),
             reply_rx,
@@ -767,6 +780,7 @@ mod tests {
         spawn_contextual_wait_reply(
             agent,
             session,
+            "branch-3".into(),
             None,
             snapshot,
             reply_rx,
@@ -781,7 +795,7 @@ mod tests {
     async fn successful_qq_delivery_marks_the_branch_as_replied() {
         let agent = mock_agent("done");
         let msg = dm_message("hello");
-        let session = agent.sessions.get_or_create(
+        let session = agent.trunk.get_or_create(
             &SessionKey::parse("qq:dm::123456").unwrap(),
             "tester".into(),
             None,
@@ -854,7 +868,7 @@ mod tests {
         wait_until(|| agent.active_inbound_turn_count() == 0).await;
         wait_until(|| sends.load(Ordering::SeqCst) == 1).await;
 
-        let session = agent.sessions.all().pop().unwrap();
+        let session = agent.trunk.all().pop().unwrap();
         let history = session.history.lock().await;
         let user_sequences = history
             .iter()

@@ -27,6 +27,6 @@ pub use command::BackendCommand;
 pub use config::{AgentConfig, SelfUpdateConfig};
 pub use event::{ApiProfileInfo, BackendEvent, BackendState, GroupInfo, SessionInfo};
 pub use llm::LlmProvider;
-pub use session::{Session, SessionKey, SessionManager};
+pub use session::{Session, SessionKey, TrunkStore};
 pub use skill::{Skill, SkillRegistry};
 pub use tool::{Tool, ToolRegistry};
