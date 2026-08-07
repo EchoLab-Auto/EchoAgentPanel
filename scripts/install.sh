@@ -100,7 +100,7 @@ EOF
     exit 0
 fi
 
-for command in cargo git install sed systemctl flock; do
+for command in cargo git install sed systemctl flock cp stat; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "error: required command not found: $command" >&2
         exit 1
@@ -140,11 +140,95 @@ else
 fi
 
 echo "==> Building release binary"
+core_was_active=0
+if systemctl --user is-active --quiet echo-agent-panel-core.service 2>/dev/null; then
+    core_was_active=1
+fi
+core_was_enabled=0
+if systemctl --user is-enabled --quiet echo-agent-panel-core.service 2>/dev/null; then
+    core_was_enabled=1
+fi
 cargo build --release --locked -p echo --manifest-path "$SOURCE_DIR/Cargo.toml"
-install -m 755 "$SOURCE_DIR/target/release/echo-agent-panel" \
-    "$LIBEXEC_DIR/echo-agent-panel-bin.new"
-mv -f "$LIBEXEC_DIR/echo-agent-panel-bin.new" "$LIBEXEC_DIR/echo-agent-panel-bin"
-install -m 755 "$PROJECT_ROOT/scripts/update.sh" "$LIBEXEC_DIR/update.sh"
+
+# Keep every file that can affect a running installation until the new service
+# has been reloaded and passes its health check. This makes re-running the
+# installer recoverable even when activation fails after a successful build.
+ROLLBACK_DIR="$STATE_DIR/install-rollback"
+install -d -m 700 "$ROLLBACK_DIR"
+for rollback_file in binary updater launcher core_unit update_unit core_config panel_config revision status; do
+    rm -f "$ROLLBACK_DIR/$rollback_file"
+done
+
+snapshot_file() {
+    local source=$1 destination=$2
+    if [[ -e "$source" ]]; then
+        cp -p -- "$source" "$destination"
+    fi
+}
+
+restore_file() {
+    local source=$1 backup=$2
+    if [[ -e "$backup" ]]; then
+        cp -p -- "$backup" "$source"
+    else
+        rm -f -- "$source"
+    fi
+}
+
+snapshot_file "$LIBEXEC_DIR/echo-agent-panel-bin" "$ROLLBACK_DIR/binary"
+snapshot_file "$LIBEXEC_DIR/update.sh" "$ROLLBACK_DIR/updater"
+snapshot_file "$BIN_DIR/echo-agent-panel" "$ROLLBACK_DIR/launcher"
+snapshot_file "$SYSTEMD_DIR/echo-agent-panel-core.service" "$ROLLBACK_DIR/core_unit"
+snapshot_file "$SYSTEMD_DIR/echo-agent-panel-update.service" "$ROLLBACK_DIR/update_unit"
+snapshot_file "$CORE_CONFIG" "$ROLLBACK_DIR/core_config"
+snapshot_file "$PANEL_CONFIG" "$ROLLBACK_DIR/panel_config"
+snapshot_file "$STATE_DIR/installed-revision" "$ROLLBACK_DIR/revision"
+snapshot_file "$STATUS_FILE" "$ROLLBACK_DIR/status"
+
+INSTALL_TRANSACTION=1
+INSTALL_PHASE=installing
+install_rollback() {
+    local code=$?
+    trap - ERR
+    set +e
+    if [[ "${INSTALL_TRANSACTION:-0}" == 1 ]]; then
+        restore_file "$LIBEXEC_DIR/echo-agent-panel-bin" "$ROLLBACK_DIR/binary"
+        restore_file "$LIBEXEC_DIR/update.sh" "$ROLLBACK_DIR/updater"
+        restore_file "$BIN_DIR/echo-agent-panel" "$ROLLBACK_DIR/launcher"
+        restore_file "$SYSTEMD_DIR/echo-agent-panel-core.service" "$ROLLBACK_DIR/core_unit"
+        restore_file "$SYSTEMD_DIR/echo-agent-panel-update.service" "$ROLLBACK_DIR/update_unit"
+        restore_file "$CORE_CONFIG" "$ROLLBACK_DIR/core_config"
+        restore_file "$PANEL_CONFIG" "$ROLLBACK_DIR/panel_config"
+        restore_file "$STATE_DIR/installed-revision" "$ROLLBACK_DIR/revision"
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        if [[ "${core_was_enabled:-0}" == 1 ]]; then
+            systemctl --user enable echo-agent-panel-core.service >/dev/null 2>&1 || true
+        else
+            systemctl --user disable echo-agent-panel-core.service >/dev/null 2>&1 || true
+        fi
+        if [[ "${core_was_active:-0}" == 1 ]]; then
+            systemctl --user restart echo-agent-panel-core.service >/dev/null 2>&1 || true
+        fi
+        local temporary="$STATUS_FILE.tmp"
+        {
+            printf 'state=rolled_back\n'
+            printf 'revision=%s\n' "$(cat "$STATE_DIR/installed-revision" 2>/dev/null || echo unknown)"
+            printf 'message=installation failed during %s; restored previous installation\n' "${INSTALL_PHASE:-unknown}"
+            printf 'updated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        } >"$temporary"
+        mv -f "$temporary" "$STATUS_FILE" || true
+        INSTALL_TRANSACTION=0
+    fi
+    exit "$code"
+}
+trap install_rollback ERR
+
+binary_temporary=$(mktemp "$LIBEXEC_DIR/echo-agent-panel-bin.new.XXXXXX")
+install -m 755 "$SOURCE_DIR/target/release/echo-agent-panel" "$binary_temporary"
+mv -f "$binary_temporary" "$LIBEXEC_DIR/echo-agent-panel-bin"
+updater_temporary=$(mktemp "$LIBEXEC_DIR/update.sh.new.XXXXXX")
+install -m 755 "$PROJECT_ROOT/scripts/update.sh" "$updater_temporary"
+mv -f "$updater_temporary" "$LIBEXEC_DIR/update.sh"
 
 if [[ ! -f "$CORE_CONFIG" ]]; then
     install -m 600 "$PROJECT_ROOT/config/echo-agent-core.toml" "$CORE_CONFIG"
@@ -173,7 +257,9 @@ if [[ ! -f "$PANEL_CONFIG" ]]; then
     install -m 600 "$PROJECT_ROOT/config/echo-agent-panel.toml" "$PANEL_CONFIG"
 fi
 
-cat >"$BIN_DIR/echo-agent-panel" <<EOF
+INSTALL_PHASE=launcher
+launcher_temporary=$(mktemp "$BIN_DIR/echo-agent-panel.new.XXXXXX")
+cat >"$launcher_temporary" <<EOF
 #!/usr/bin/env sh
 config="$PANEL_CONFIG"
 has_config=0
@@ -188,7 +274,8 @@ if [ "\$has_config" -eq 1 ]; then
 fi
 exec "$LIBEXEC_DIR/echo-agent-panel-bin" --config "\$config" "\$@"
 EOF
-chmod 755 "$BIN_DIR/echo-agent-panel"
+chmod 755 "$launcher_temporary"
+mv -f "$launcher_temporary" "$BIN_DIR/echo-agent-panel"
 
 SERVICE_PATH=$(printf '%s\n' \
     "$(dirname -- "$(command -v cargo)")" \
@@ -210,24 +297,57 @@ render_unit() {
     chmod 644 "$destination"
 }
 
+INSTALL_PHASE=units
 render_unit "$PROJECT_ROOT/packaging/systemd/echo-agent-panel-core.service.in" \
     "$SYSTEMD_DIR/echo-agent-panel-core.service"
 render_unit "$PROJECT_ROOT/packaging/systemd/echo-agent-panel-update.service.in" \
     "$SYSTEMD_DIR/echo-agent-panel-update.service"
 
+INSTALL_PHASE=state
 revision=$(git -C "$SOURCE_DIR" rev-parse HEAD)
-printf '%s\n' "$revision" >"$STATE_DIR/installed-revision"
-cat >"$STATUS_FILE" <<EOF
+revision_temporary=$(mktemp "$STATE_DIR/installed-revision.new.XXXXXX")
+printf '%s\n' "$revision" >"$revision_temporary"
+mv -f "$revision_temporary" "$STATE_DIR/installed-revision"
+status_temporary=$(mktemp "$STATUS_FILE.new.XXXXXX")
+cat >"$status_temporary" <<EOF
 state=installed
 revision=$revision
 message=installation completed
 EOF
+mv -f "$status_temporary" "$STATUS_FILE"
 
+INSTALL_PHASE=activating
 systemctl --user daemon-reload
 systemctl --user enable echo-agent-panel-core.service >/dev/null
 if ((START_SERVICE)); then
     systemctl --user restart echo-agent-panel-core.service
+    core_healthy=0
+    healthy_checks=0
+    for _ in {1..15}; do
+        sleep 1
+        if systemctl --user is-active --quiet echo-agent-panel-core.service; then
+            ((healthy_checks += 1))
+            if ((healthy_checks >= 3)); then
+                core_healthy=1
+                break
+            fi
+        else
+            healthy_checks=0
+        fi
+    done
+    if ((core_healthy == 0)); then
+        echo "error: Core did not become active after installation" >&2
+        false
+    fi
 fi
+
+INSTALL_TRANSACTION=0
+for rollback_file in "$ROLLBACK_DIR"/*; do
+    if [[ -e "$rollback_file" ]]; then
+        rm -f -- "$rollback_file"
+    fi
+done
+rmdir "$ROLLBACK_DIR" 2>/dev/null || true
 
 cat <<EOF
 

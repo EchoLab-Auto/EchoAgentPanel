@@ -30,6 +30,13 @@ Existing configuration files are preserved. Re-running the installer refreshes
 the binary, updater and service units. The installer enables self-update in an
 existing config without changing API credentials or other settings.
 
+Re-running the installer is transactional after the release build completes:
+the current binary, launcher, updater, configuration, units and revision state
+are snapshotted under `~/.local/state/echo-agent-panel/install-rollback/`.
+That snapshot is removed only after `daemon-reload` and the Core active-state
+health check succeed. If activation or a later install step fails, all changed
+files are restored and the previous Core is restarted when it was running.
+
 The Core user service is enabled under `default.target`. Whether it starts at
 machine boot before an interactive login depends on the host's user lingering
 policy. An administrator can enable that explicitly:
@@ -96,8 +103,9 @@ after a successful locked release build. A fetch or build failure therefore
 leaves the old Core binary installed and does not restart it. The next update
 attempt rebuilds the managed revision because the installed revision is tracked
 separately. When Core was running, the updater also retains the previous binary
-until the restarted service passes an active-state health check. A failed check
-restores the old binary and restarts it, recording `state=rolled_back`.
+until the restarted service passes a 15-second active-state health check. A
+failed check, updater refresh failure, or commit/state write failure restores
+the old binary and updater and restarts it, recording `state=rolled_back`.
 
 Inspect an update with:
 

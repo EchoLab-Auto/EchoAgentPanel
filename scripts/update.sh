@@ -56,6 +56,12 @@ STATE_DIR=$(dirname -- "$STATUS_FILE")
 REVISION_FILE="$STATE_DIR/installed-revision"
 LOCK_FILE="$STATE_DIR/update.lock"
 PHASE=initializing
+TARGET=unknown
+ROLLBACK_ACTIVE=0
+BIN_REPLACED=0
+UPDATER_REPLACED=0
+ROLLBACK_BINARY=""
+ROLLBACK_UPDATER=""
 
 write_status() {
     local state=$1 message=$2 revision=${3:-unknown}
@@ -72,7 +78,33 @@ write_status() {
 on_error() {
     local code=$?
     trap - ERR
-    write_status failed "update failed during $PHASE" "$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    set +e
+    if ((ROLLBACK_ACTIVE == 0)) && ((BIN_REPLACED || UPDATER_REPLACED)); then
+        ROLLBACK_ACTIVE=1
+        if [[ -n "$ROLLBACK_BINARY" && -x "$ROLLBACK_BINARY" ]]; then
+            mv -f "$ROLLBACK_BINARY" "$BINARY" || true
+        elif ((BIN_REPLACED)); then
+            rm -f "$BINARY" || true
+        fi
+        if [[ -n "$ROLLBACK_UPDATER" && -f "$ROLLBACK_UPDATER" ]]; then
+            mv -f "$ROLLBACK_UPDATER" "$(dirname -- "$BINARY")/update.sh" || true
+        elif ((UPDATER_REPLACED)); then
+            rm -f "$(dirname -- "$BINARY")/update.sh" || true
+        fi
+        if [[ -n "${installed:-}" ]]; then
+            revision_restore="${REVISION_FILE}.restore.$$"
+            printf '%s\n' "$installed" >"$revision_restore"
+            mv -f "$revision_restore" "$REVISION_FILE" || true
+        else
+            rm -f "$REVISION_FILE" || true
+        fi
+        if (( ${core_was_active:-0} )); then
+            systemctl --user restart echo-agent-panel-core.service >/dev/null 2>&1 || true
+        fi
+        write_status rolled_back "update failed during $PHASE; restored previous installation" "${installed:-unknown}" || true
+    else
+        write_status failed "update failed during $PHASE" "${TARGET:-unknown}" || true
+    fi
     exit "$code"
 }
 trap on_error ERR
@@ -102,13 +134,13 @@ fi
 installed=$(cat "$REVISION_FILE" 2>/dev/null || true)
 current=$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
 if [[ "$UPDATE_MODE" == local ]]; then
-    target="local:$current"
+    TARGET="local:$current"
     if ! git -C "$SOURCE_DIR" diff --quiet 2>/dev/null \
         || ! git -C "$SOURCE_DIR" diff --cached --quiet 2>/dev/null \
         || [[ -n "$(git -C "$SOURCE_DIR" ls-files --others --exclude-standard 2>/dev/null)" ]]; then
-        target+="+dirty"
+        TARGET+="+dirty"
     fi
-    write_status running "building local source tree" "$target"
+    write_status running "building local source tree" "$TARGET"
 else
     if [[ ! -d "$SOURCE_DIR/.git" ]]; then
         write_status failed "managed source checkout is missing"
@@ -128,21 +160,21 @@ else
     PHASE=fetching
     write_status running "fetching origin/$branch" "$current"
     git -C "$SOURCE_DIR" fetch --prune origin "$branch"
-    target=$(git -C "$SOURCE_DIR" rev-parse FETCH_HEAD)
-    if ! git -C "$SOURCE_DIR" merge-base --is-ancestor "$current" "$target"; then
+    TARGET=$(git -C "$SOURCE_DIR" rev-parse FETCH_HEAD)
+    if ! git -C "$SOURCE_DIR" merge-base --is-ancestor "$current" "$TARGET"; then
         write_status failed "origin/$branch is not a fast-forward" "$current"
         exit 1
     fi
-    git -C "$SOURCE_DIR" merge --ff-only "$target"
+    git -C "$SOURCE_DIR" merge --ff-only "$TARGET"
 
-    if [[ "$installed" == "$target" && -x "$BINARY" ]]; then
-        write_status current "already up to date" "$target"
+    if [[ "$installed" == "$TARGET" && -x "$BINARY" ]]; then
+        write_status current "already up to date" "$TARGET"
         exit 0
     fi
 fi
 
 PHASE=building
-write_status running "building revision $target" "$target"
+write_status running "building revision $TARGET" "$TARGET"
 cargo build --release --locked -p echo --manifest-path "$SOURCE_DIR/Cargo.toml"
 
 PHASE=installing
@@ -150,12 +182,14 @@ temporary=$(mktemp "${BINARY}.new.XXXXXX")
 trap 'rm -f "$temporary"' EXIT
 install -m 755 "$SOURCE_DIR/target/release/echo-agent-panel" "$temporary"
 rollback="${BINARY}.rollback"
-if [[ -x "$BINARY" && ! -x "$rollback" ]]; then
+ROLLBACK_BINARY="$rollback"
+if [[ -x "$BINARY" ]]; then
     rollback_temporary=$(mktemp "${rollback}.new.XXXXXX")
     install -m 755 "$BINARY" "$rollback_temporary"
     mv -f "$rollback_temporary" "$rollback"
 fi
 mv -f "$temporary" "$BINARY"
+BIN_REPLACED=1
 trap - EXIT
 
 if ((core_was_active)); then
@@ -163,39 +197,50 @@ if ((core_was_active)); then
     if ! systemctl --user restart echo-agent-panel-core.service; then
         restart_failed=1
     else
-        sleep 3
-        if systemctl --user is-active --quiet echo-agent-panel-core.service; then
-            restart_failed=0
-        else
-            restart_failed=1
-        fi
+        restart_failed=1
+        healthy_checks=0
+        for _ in {1..15}; do
+            sleep 1
+            if systemctl --user is-active --quiet echo-agent-panel-core.service; then
+                ((healthy_checks += 1))
+                if ((healthy_checks >= 3)); then
+                    restart_failed=0
+                    break
+                fi
+            else
+                healthy_checks=0
+            fi
+        done
     fi
     if ((restart_failed)); then
-        if [[ -x "$rollback" ]]; then
-            mv -f "$rollback" "$BINARY"
-            systemctl --user restart echo-agent-panel-core.service || true
-            write_status rolled_back "new Core failed health check; restored previous binary" "$installed"
-        else
-            write_status failed "new Core failed health check and no rollback binary exists" "$target"
-        fi
-        exit 1
+        false
     fi
 fi
 
 if [[ -f "$SOURCE_DIR/scripts/update.sh" ]]; then
+    PHASE=refreshing_updater
     updater="$(dirname -- "$BINARY")/update.sh"
     updater_temporary=$(mktemp "${updater}.new.XXXXXX")
-    if ! install -m 755 "$SOURCE_DIR/scripts/update.sh" "$updater_temporary" \
-        || ! mv -f "$updater_temporary" "$updater"; then
-        rm -f "$updater_temporary"
-        echo "warning: binary updated, but updater script refresh failed" >&2
+    if [[ -f "$updater" ]]; then
+        ROLLBACK_UPDATER="${updater}.rollback"
+        updater_rollback_temporary=$(mktemp "${ROLLBACK_UPDATER}.new.XXXXXX")
+        install -m 755 "$updater" "$updater_rollback_temporary"
+        mv -f "$updater_rollback_temporary" "$ROLLBACK_UPDATER"
     fi
+    install -m 755 "$SOURCE_DIR/scripts/update.sh" "$updater_temporary"
+    mv -f "$updater_temporary" "$updater"
+    UPDATER_REPLACED=1
 fi
 
-rm -f "$rollback"
-printf '%s\n' "$target" >"$REVISION_FILE"
+PHASE=committing
+revision_temporary=$(mktemp "${REVISION_FILE}.new.XXXXXX")
+printf '%s\n' "$TARGET" >"$revision_temporary"
+mv -f "$revision_temporary" "$REVISION_FILE"
 if [[ "$UPDATE_MODE" == local ]]; then
-    write_status updated "installed successfully from local source" "$target"
+    write_status updated "installed successfully from local source" "$TARGET"
 else
-    write_status updated "updated successfully" "$target"
+    write_status updated "updated successfully" "$TARGET"
 fi
+BIN_REPLACED=0
+UPDATER_REPLACED=0
+rm -f "$rollback" "$ROLLBACK_UPDATER" || true
