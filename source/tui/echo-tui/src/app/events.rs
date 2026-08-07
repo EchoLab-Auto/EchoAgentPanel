@@ -317,6 +317,10 @@ impl App {
                 }
                 activity.transition(AgentPhase::Thinking, None);
             }
+            BackendEvent::ChecklistUpdated { session_id, state } => {
+                self.state.apply_checklist_state(&state);
+                let _ = session_id;
+            }
             BackendEvent::AgentOutput {
                 session_id,
                 content,

@@ -147,6 +147,13 @@ pub enum BackendEvent {
         tool_name: String,
         result: String,
     },
+    /// A tool published a structured state snapshot for TUI visualization
+    /// (e.g. the checklist tool → checklist panel). `state` is tool-specific;
+    /// the checklist tool emits `{"lists": [{name, done, total, items}]}`.
+    ChecklistUpdated {
+        session_id: String,
+        state: serde_json::Value,
+    },
     /// Agent generated backend output. This is never sent to a platform
     /// automatically; platform delivery requires an explicit tool call.
     AgentOutput {

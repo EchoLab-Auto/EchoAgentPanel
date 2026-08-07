@@ -14,6 +14,8 @@ pub struct Keybindings {
     pub help: KeyChord,
     /// Open the detached branch / subagent inspector.
     pub task_inspector: KeyChord,
+    /// Open the checklist panel (leader+c).
+    pub checklist_panel: KeyChord,
     /// Scroll chat up / down.
     pub scroll_up: KeyChord,
     pub scroll_down: KeyChord,
@@ -50,6 +52,7 @@ impl Default for Keybindings {
             settings: KeyChord::plain(KeyCode::Char('s')),
             help: KeyChord::plain(KeyCode::Char('?')),
             task_inspector: KeyChord::ctrl(KeyCode::Char('b')),
+            checklist_panel: KeyChord::plain(KeyCode::Char('c')),
             scroll_up: KeyChord::plain(KeyCode::PageUp),
             scroll_down: KeyChord::plain(KeyCode::PageDown),
             scroll_top: KeyChord::ctrl(KeyCode::Char('g')),
@@ -75,6 +78,8 @@ mod tests {
         assert_eq!(kb.help.code, KeyCode::Char('?'));
         assert_eq!(kb.task_inspector.code, KeyCode::Char('b'));
         assert!(kb.task_inspector.modifiers.contains(KeyModifiers::CONTROL));
+        assert_eq!(kb.checklist_panel.code, KeyCode::Char('c'));
+        assert_eq!(kb.checklist_panel.modifiers, KeyModifiers::NONE);
     }
 
     #[test]

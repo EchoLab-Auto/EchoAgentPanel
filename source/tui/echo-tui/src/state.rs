@@ -372,6 +372,28 @@ pub struct QqFilterCache {
     pub denylist_groups: Vec<i64>,
 }
 
+// ── Checklist panel ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ChecklistItemEntry {
+    pub text: String,
+    pub done: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ChecklistEntry {
+    pub name: String,
+    pub items: Vec<ChecklistItemEntry>,
+    pub done: usize,
+    pub total: usize,
+}
+
+impl ChecklistEntry {
+    pub fn progress(&self) -> String {
+        format!("{}/{}", self.done, self.total)
+    }
+}
+
 // ── AppState ───────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -434,6 +456,11 @@ pub struct AppState {
     pub conv_text: Vec<String>,
     pub conv_area: ratatui::layout::Rect,
     pub conv_top: usize,
+    /// Checklist tool state snapshots (latest from each agent run).
+    pub checklists: Vec<ChecklistEntry>,
+    pub show_checklist_panel: bool,
+    pub checklist_selection: usize,
+    pub checklist_scroll: u16,
 }
 
 impl AppState {
@@ -490,6 +517,10 @@ impl AppState {
             conv_text: Vec::new(),
             conv_area: ratatui::layout::Rect::default(),
             conv_top: 0,
+            checklists: Vec::new(),
+            show_checklist_panel: false,
+            checklist_selection: 0,
+            checklist_scroll: 0,
         }
     }
 
@@ -1006,15 +1037,48 @@ impl AppState {
         }
         Some(idx)
     }
-
     pub fn no_modal(&self) -> bool {
         !self.show_palette
             && !self.show_help
             && !self.show_settings
             && !self.show_slash
             && !self.show_task_inspector
+            && !self.show_checklist_panel
     }
-
+    /// Replace checklist state from a `ChecklistUpdated` event snapshot.
+    pub fn apply_checklist_state(&mut self, state: &serde_json::Value) {
+        let Some(lists) = state["lists"].as_array() else {
+            return;
+        };
+        let parsed = lists
+            .iter()
+            .filter_map(|list| {
+                let name = list["name"].as_str()?.to_string();
+                let items = list["items"]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|item| {
+                        Some(ChecklistItemEntry {
+                            text: item["text"].as_str()?.to_string(),
+                            done: item["done"].as_bool().unwrap_or(false),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let done = items.iter().filter(|item| item.done).count();
+                Some(ChecklistEntry {
+                    name,
+                    total: items.len(),
+                    done,
+                    items,
+                })
+            })
+            .collect::<Vec<_>>();
+        self.checklists = parsed;
+        self.checklist_selection = self
+            .checklist_selection
+            .min(self.checklists.len().saturating_sub(1));
+        self.checklist_scroll = 0;
+    }
     pub fn col_from_screen(&self, mx: u16) -> usize {
         let inner_w = self.conv_area.width.max(1) as i64;
         let offset = (mx as i64) - (self.conv_area.x as i64);

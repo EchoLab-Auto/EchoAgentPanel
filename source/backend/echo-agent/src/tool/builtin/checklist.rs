@@ -29,6 +29,28 @@ impl ChecklistTool {
             lists: Mutex::new(HashMap::new()),
         }
     }
+
+    /// Structured state snapshot for the TUI checklist panel:
+    /// `{"lists": [{"name", "done", "total", "items": [{"text", "done"}]}]}`.
+    pub fn state_snapshot(&self) -> Option<Value> {
+        let lists = self.lists.lock().ok()?;
+        let lists = lists
+            .iter()
+            .map(|(name, items)| {
+                let done = items.iter().filter(|item| item.done).count();
+                json!({
+                    "name": name,
+                    "done": done,
+                    "total": items.len(),
+                    "items": items.iter().map(|item| json!({
+                        "text": item.text,
+                        "done": item.done,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>();
+        Some(json!({ "lists": lists }))
+    }
 }
 
 #[async_trait]
@@ -65,6 +87,10 @@ impl Tool for ChecklistTool {
             },
             "required": ["operation"]
         })
+    }
+
+    fn snapshot(&self) -> Option<Value> {
+        self.state_snapshot()
     }
 
     async fn execute(&self, arguments: Value) -> Result<String, ToolError> {

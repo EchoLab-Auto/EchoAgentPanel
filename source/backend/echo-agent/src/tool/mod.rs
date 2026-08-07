@@ -31,6 +31,12 @@ pub trait Tool: Send + Sync {
         json!({"type": "object", "properties": {}})
     }
     async fn execute(&self, arguments: Value) -> Result<String, ToolError>;
+    /// Optional structured state snapshot for UI visualization. Tools that
+    /// expose a state panel (e.g. checklist) override this; the agent emits
+    /// the returned value in a `ChecklistUpdated` event after each execution.
+    fn snapshot(&self) -> Option<Value> {
+        None
+    }
 }
 
 /// Registry of tools, keyed by name.
@@ -101,15 +107,20 @@ impl ToolRegistry {
         arc
     }
 
+    pub fn names(&self) -> Vec<String> {
+        self.tools.keys().cloned().collect()
+    }
+
+    /// Structured state snapshot of a registered tool, if it publishes one.
+    pub fn snapshot(&self, name: &str) -> Option<Value> {
+        self.tools.get(name).and_then(|tool| tool.snapshot())
+    }
+
     pub async fn execute(&self, name: &str, arguments: Value) -> Result<String, ToolError> {
         match self.tools.get(name) {
             Some(tool) => tool.execute(arguments).await,
             None => Err(ToolError::NotFound(name.to_string())),
         }
-    }
-
-    pub fn names(&self) -> Vec<String> {
-        self.tools.keys().cloned().collect()
     }
 
     pub fn len(&self) -> usize {

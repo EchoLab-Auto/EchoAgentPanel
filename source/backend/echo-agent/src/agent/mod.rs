@@ -1144,6 +1144,14 @@ impl Agent {
             tool_name: call.name.clone(),
             result: result.clone(),
         });
+        if call.name == "checklist" {
+            if let Some(state) = self.tools.snapshot(&call.name) {
+                self.emit(BackendEvent::ChecklistUpdated {
+                    session_id: session_id.to_string(),
+                    state,
+                });
+            }
+        }
         result
     }
 

@@ -16,6 +16,7 @@ use ratatui::{Frame, Terminal};
 use crate::backend::Backend;
 use crate::components::{
     chat_view::ChatView,
+    checklist_panel::ChecklistPanel,
     command_palette::PaletteAction,
     help_popup::HelpPopup,
     prompt_input::PromptInput,
@@ -44,6 +45,7 @@ pub struct App {
     help_popup: HelpPopup,
     task_status_bar: TaskStatusBar,
     task_inspector: TaskInspector,
+    checklist_panel: ChecklistPanel,
 }
 
 impl App {
@@ -59,6 +61,7 @@ impl App {
             help_popup: HelpPopup,
             task_status_bar: TaskStatusBar,
             task_inspector: TaskInspector,
+            checklist_panel: ChecklistPanel,
         }
     }
 
@@ -374,6 +377,10 @@ impl App {
                 self.open_settings();
             } else if chord == kb.help {
                 self.state.show_help = !self.state.show_help;
+            } else if chord == kb.checklist_panel {
+                self.state.show_checklist_panel = true;
+                self.state.checklist_selection = 0;
+                self.state.checklist_scroll = 0;
             }
             return;
         }
@@ -385,6 +392,18 @@ impl App {
                 self.state.show_task_inspector = false;
             } else {
                 let _ = self.task_inspector.handle_event(
+                    &Event::Input(crossterm::event::Event::Key(*key)),
+                    &mut self.state,
+                );
+            }
+            return;
+        }
+        if self.state.show_checklist_panel {
+            let chord = util::chord_of(key);
+            if chord == self.state.keybindings.checklist_panel {
+                self.state.show_checklist_panel = false;
+            } else {
+                let _ = self.checklist_panel.handle_event(
                     &Event::Input(crossterm::event::Event::Key(*key)),
                     &mut self.state,
                 );
@@ -882,6 +901,9 @@ impl App {
         }
         if self.state.show_task_inspector {
             self.task_inspector.render(f, area, &self.state);
+        }
+        if self.state.show_checklist_panel {
+            self.checklist_panel.render(f, area, &self.state);
         }
     }
 }

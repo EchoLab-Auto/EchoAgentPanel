@@ -1,6 +1,7 @@
 //! UI components. Each handles its own rendering and input.
 
 pub mod chat_view;
+pub mod checklist_panel;
 pub mod command_palette;
 pub mod form_overlay;
 pub mod help_popup;
