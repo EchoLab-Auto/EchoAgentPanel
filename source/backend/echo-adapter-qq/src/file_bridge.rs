@@ -6,7 +6,7 @@
 //! container). The agent itself runs on the host, so a plain local path like
 //! `/home/user/x/hello.py` is meaningless inside the container.
 //!
-//! This bridge resolves a local path into a `file` parameter NapCat can use,
+//! This bridge resolves a local path into `file` parameter(s) NapCat can use,
 //! trying strategies in order:
 //!
 //! 1. **Container path pass-through** — if the path already starts with the
@@ -14,10 +14,14 @@
 //! 2. **Docker copy** — if the Docker CLI is available, copy the file into the
 //!    NapCat container (`docker cp`) and return the in-container path.
 //! 3. **Local HTTP fallback** — start a tiny local HTTP file server bound on
-//!    `0.0.0.0` with a random per-file token, and return
-//!    `http://<napcat_host>:<port>/f/<token>`. NapCat downloads the file from
-//!    the host itself (the docker-compose setup maps `host.docker.internal`
-//!    to the host gateway), so no Docker permission is required.
+//!    `0.0.0.0` with a random per-file token, and return one or more
+//!    `http://<host>:<port>/f/<token>` URLs. NapCat downloads the file from
+//!    the host itself. Multiple candidate hosts are produced so the upload
+//!    caller can try each until one is reachable from inside the container:
+//!    the auto-detected docker bridge gateway (e.g. `172.17.0.1`), the
+//!    configured `napcat_host` (default `host.docker.internal`), and finally
+//!    loopback. This covers deployments where `host.docker.internal` is not
+//!    mapped in the container (a common docker-compose omission).
 //!
 //! Strategy 3 is the workhorse: it needs no Docker socket and no shared
 //! volume, and works for any deployment where NapCat can reach the host.
@@ -82,29 +86,47 @@ impl FileBridge {
         }
     }
 
-    /// Resolve a local path into a `file` parameter NapCat can read.
+    /// Resolve a local path into candidate `file` parameters NapCat can use,
+    /// ordered by preference. The upload caller tries each candidate until
+    /// NapCat accepts one.
     ///
     /// `file_name` is the display name used when copying into the container.
-    pub async fn resolve(&self, local_path: &str, file_name: &str) -> Result<String, String> {
-        // Strategy 1: already a NapCat-visible path → pass through.
+    pub async fn resolve_all(&self, local_path: &str, file_name: &str) -> Result<Vec<String>, String> {
         let path = Path::new(local_path);
+
+        // Strategy 1: already a NapCat-visible path → pass through.
         let is_container_path = local_path.starts_with(&self.container_data_dir)
             || local_path.starts_with("/app/napcat/")
             || local_path.starts_with("/napcat/");
         if is_container_path {
-            return Ok(local_path.to_string());
+            return Ok(vec![local_path.to_string()]);
         }
+
+        let mut candidates = Vec::new();
 
         // Strategy 2: docker cp into the NapCat container.
         if let Some(remote) = self.try_docker_cp(path, file_name).await {
             tracing::info!(%local_path, %remote, "file copied into NapCat container");
-            return Ok(remote);
+            candidates.push(remote);
         }
 
         // Strategy 3: local HTTP file server, NapCat pulls the URL itself.
-        let url = self.http_url(path).await?;
-        tracing::info!(%local_path, %url, "file served to NapCat over local HTTP");
-        Ok(url)
+        // Produce one candidate per plausible host so the caller can try them
+        // in order until one is reachable from inside the container.
+        candidates.extend(self.http_urls(path).await?);
+
+        if candidates.is_empty() {
+            return Err(format!("no strategy could resolve '{}'", local_path));
+        }
+        Ok(candidates)
+    }
+
+    /// Backwards-compatible single-shot resolution: returns the first
+    /// candidate (the most preferred one).
+    pub async fn resolve(&self, local_path: &str, file_name: &str) -> Result<String, String> {
+        self.resolve_all(local_path, file_name)
+            .await
+            .map(|mut c| c.remove(0))
     }
 
     // ---- strategy 2: docker cp ----
@@ -148,7 +170,10 @@ impl FileBridge {
 
     // ---- strategy 3: local HTTP server ----
 
-    async fn http_url(&self, local: &Path) -> Result<String, String> {
+    /// Register the file and produce one download URL per candidate host.
+    /// Hosts are ordered: docker bridge gateway (auto-detected), configured
+    /// `napcat_host`, then loopback. Duplicates are removed.
+    async fn http_urls(&self, local: &Path) -> Result<Vec<String>, String> {
         let local = local.canonicalize().map_err(|e| {
             format!("cannot resolve file '{}': {e}", local.display())
         })?;
@@ -158,15 +183,29 @@ impl FileBridge {
         let server = self.ensure_http_server().await?;
         let token = uuid::Uuid::new_v4().simple().to_string();
         server.files.insert(token.clone(), (local, Instant::now()));
-        let host = if self.napcat_host.is_empty()
-            || self.napcat_host == "127.0.0.1"
-            || self.napcat_host == "localhost"
-        {
-            "127.0.0.1"
-        } else {
-            self.napcat_host.as_str()
-        };
-        Ok(format!("http://{host}:{}/f/{token}", server.addr.port()))
+
+        let mut hosts: Vec<String> = Vec::new();
+        // 1. Docker bridge gateway — reachable from containers even when
+        //    `host.docker.internal` is not mapped (common docker-compose miss).
+        if let Some(gw) = detect_docker_gateway() {
+            hosts.push(gw);
+        }
+        // 2. Explicitly configured host (default host.docker.internal).
+        let configured = self.napcat_host.trim();
+        if !configured.is_empty() {
+            hosts.push(configured.to_string());
+        }
+        // 3. Loopback — correct when NapCat runs on the same host.
+        hosts.push("127.0.0.1".into());
+
+        let mut seen = std::collections::HashSet::new();
+        let mut urls = Vec::new();
+        for host in hosts {
+            if seen.insert(host.clone()) {
+                urls.push(format!("http://{host}:{}/f/{token}", server.addr.port()));
+            }
+        }
+        Ok(urls)
     }
 
     async fn ensure_http_server(&self) -> Result<Arc<HttpFileServer>, String> {
@@ -207,6 +246,34 @@ impl FileBridge {
         Ok(server)
     }
 }
+
+/// Best-effort detection of the docker0 bridge gateway IP (e.g. `172.17.0.1`)
+/// that containers can use to reach this host. Returns `None` when docker0 is
+/// absent (no Docker, non-Linux, or a non-default bridge name).
+fn detect_docker_gateway() -> Option<String> {
+    // `ip -4 -o addr show docker0` prints e.g.:
+    //   2: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0
+    let output = Command::new("ip")
+        .args(["-4", "-o", "addr", "show", "docker0"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?;
+    let ip = line
+        .split_whitespace()
+        .nth(3)? // "inet"
+        .split('/')
+        .next()?;
+    if ip.is_empty() || ip == "0.0.0.0" {
+        None
+    } else {
+        Some(ip.to_string())
+    }
+}
+
 
 // ---- HTTP handling ----
 
@@ -312,7 +379,6 @@ mod tests {
         assert_eq!(sanitize_file_name(".."), None);
         assert_eq!(sanitize_file_name("/"), None);
     }
-
     #[tokio::test]
     async fn http_fallback_serves_the_file_and_cleans_up() {
         // Docker is unavailable in CI, so strategy 3 kicks in.
@@ -326,36 +392,47 @@ mod tests {
             "napcat",
             "/app/napcat/data",
         );
-        let url = bridge
-            .resolve(path.to_str().unwrap(), "note.txt")
+        let urls = bridge
+            .resolve_all(path.to_str().unwrap(), "note.txt")
             .await
             .unwrap();
-        assert!(url.starts_with("http://127.0.0.1:"), "{url}");
+        assert!(!urls.is_empty(), "expected at least one candidate URL");
 
-        let port = url
+        // Loopback must always be among the candidates (NapCat on same host).
+        assert!(
+            urls.iter().any(|u| u.starts_with("http://127.0.0.1:")),
+            "loopback candidate missing: {urls:?}"
+        );
+
+        // Every candidate must serve the file (the caller tries them in order
+        // until one is reachable from inside the container).
+        for url in &urls {
+            let port = url
+                .split(':')
+                .nth(2)
+                .and_then(|p| p.split('/').next())
+                .and_then(|p| p.parse::<u16>().ok())
+                .expect("port in url");
+            assert!(port > 0, "port must be a real ephemeral port, got {port}");
+
+            let resp = reqwest::get(url).await.expect("fetch works");
+            assert_eq!(resp.status(), 200);
+            let body = resp.text().await.unwrap();
+            assert_eq!(body, "hello from bridge");
+        }
+
+        // Unknown tokens are rejected: the URL is protected by its random token.
+        let port = urls[0]
             .split(':')
             .nth(2)
             .and_then(|p| p.split('/').next())
             .and_then(|p| p.parse::<u16>().ok())
             .expect("port in url");
-        assert!(port > 0, "port must be a real ephemeral port, got {port}");
-
-        let resp = reqwest::get(&url).await.expect("fetch works");
-        assert_eq!(resp.status(), 200);
-        let resp = reqwest::get(&url).await.expect("fetch works");
-        assert_eq!(resp.status(), 200);
-        let body = resp.text().await.unwrap();
-        assert_eq!(body, "hello from bridge");
-
-        // The token stays valid within its TTL, so re-fetching works.
-        let again = reqwest::get(&url).await.unwrap();
-        assert_eq!(again.status(), 200);
-
-        // Unknown tokens are rejected: the URL is protected by its random token.
-        let unknown = format!("http://127.0.0.1:{}/f/does-not-exist", port);
+        let unknown = format!("http://127.0.0.1:{port}/f/does-not-exist");
         let miss = reqwest::get(unknown).await.unwrap();
         assert_eq!(miss.status(), 404);
     }
+
     #[test]
     fn file_bridge_rejects_missing_files() {
         let bridge = FileBridge::new(

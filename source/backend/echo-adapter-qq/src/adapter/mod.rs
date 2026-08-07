@@ -525,10 +525,10 @@ impl QqAdapter {
         file_path: &str,
         file_name: &str,
     ) -> Result<String, String> {
-        let remote = self
+        let candidates = self
             .inner
             .file_bridge
-            .resolve(file_path, file_name)
+            .resolve_all(file_path, file_name)
             .await?;
         let ctx = self
             .inner
@@ -537,15 +537,22 @@ impl QqAdapter {
             .map_err(|e| format!("lock poisoned: {e}"))?
             .clone()
             .ok_or("no QQ connection active")?;
-        let request = echo_core::action::actions::upload_group_file(group_id, &remote, file_name);
-        let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
-        if resp.is_ok() {
-            Ok(format!("file uploaded to group {group_id}"))
-        } else {
-            Err(resp
-                .error_message()
-                .unwrap_or_else(|| "upload failed".into()))
+
+        let mut last_error = None;
+        for remote in &candidates {
+            let request = echo_core::action::actions::upload_group_file(group_id, remote, file_name);
+            let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
+            if resp.is_ok() {
+                tracing::info!(%group_id, %remote, "group file uploaded");
+                return Ok(format!("file uploaded to group {group_id}"));
+            }
+            last_error = Some(
+                resp.error_message()
+                    .unwrap_or_else(|| "upload failed".into()),
+            );
+            tracing::debug!(%remote, error = last_error.as_deref().unwrap_or(""), "upload candidate failed; trying next");
         }
+        Err(last_error.unwrap_or_else(|| "upload failed".into()))
     }
 
     /// Upload a file to a private chat via the active QQ connection.
@@ -560,10 +567,10 @@ impl QqAdapter {
         file_path: &str,
         file_name: &str,
     ) -> Result<String, String> {
-        let remote = self
+        let candidates = self
             .inner
             .file_bridge
-            .resolve(file_path, file_name)
+            .resolve_all(file_path, file_name)
             .await?;
         let ctx = self
             .inner
@@ -572,16 +579,23 @@ impl QqAdapter {
             .map_err(|e| format!("lock poisoned: {e}"))?
             .clone()
             .ok_or("no QQ connection active")?;
-        let request =
-            echo_core::action::actions::upload_private_file(user_id, &remote, file_name);
-        let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
-        if resp.is_ok() {
-            Ok(format!("file uploaded to user {user_id}"))
-        } else {
-            Err(resp
-                .error_message()
-                .unwrap_or_else(|| "upload failed".into()))
+
+        let mut last_error = None;
+        for remote in &candidates {
+            let request =
+                echo_core::action::actions::upload_private_file(user_id, remote, file_name);
+            let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
+            if resp.is_ok() {
+                tracing::info!(%user_id, %remote, "private file uploaded");
+                return Ok(format!("file uploaded to user {user_id}"));
+            }
+            last_error = Some(
+                resp.error_message()
+                    .unwrap_or_else(|| "upload failed".into()),
+            );
+            tracing::debug!(%remote, error = last_error.as_deref().unwrap_or(""), "upload candidate failed; trying next");
         }
+        Err(last_error.unwrap_or_else(|| "upload failed".into()))
     }
 
     pub(crate) fn convert_message(event: &OneBotEvent) -> Option<IncomingMessage> {
