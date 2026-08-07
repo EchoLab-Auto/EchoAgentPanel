@@ -62,8 +62,54 @@ journalctl --user -u echo-agent-panel-core.service -f
 
 安装模式会启用受控的 `framework_update` tool。向本机 Panel 中的 Agent 明确提出
 更新请求，或由配置的 QQ 管理员提出请求后，Agent 可启动独立更新服务。更新器只做
-Git 快进、锁定构建和原子二进制替换，成功后才重启 Core。详细机制和路径见
-[安装与自更新文档](doc/develop/install.md)。
+Git 快进、锁定构建和原子二进制替换，成功后才重启 Core。
+详细机制和路径见 [安装与自更新文档](doc/develop/install.md)。
+
+### 更新（Update）
+
+安装模式下有三种更新方式，共用同一套受控流程：
+Git 快进 -> 锁定构建 -> 原子二进制替换 -> Core 健康检查重启。
+
+**1. 通过 Agent 更新（推荐）**
+
+向本机 Panel 或配置的 QQ 管理员提出更新请求，Agent 调用内置的
+`framework_update` 工具执行（需要显式确认）：
+
+```
+framework_update action=status   # 查看自更新服务状态
+framework_update action=apply confirm=true   # 触发更新
+```
+
+**2. 手动触发 systemd 更新服务**
+
+```bash
+systemctl --user start echo-agent-panel-update.service
+```
+
+**3. 本地开发模式（scripts/update.sh）**
+
+用当前源码树构建并安装，包含未提交的改动，不做 Git fetch/merge：
+
+```bash
+scripts/update.sh --local \
+  --source "$PWD" \
+  --binary "$HOME/.local/libexec/echo-agent-panel/echo-agent-panel-bin" \
+  --status "$HOME/.local/state/echo-agent-panel/update-status"
+```
+
+- `--local`：本地模式，始终重新构建；工作区有未提交改动时记录为
+  `local:<commit>+dirty`
+- 远程模式（默认）：要求受管仓库干净、非 detached HEAD、且为快进合并，
+  否则拒绝更新
+- 更新器持有非阻塞文件锁，拒绝并发运行
+
+查看更新结果与状态：
+
+```bash
+systemctl --user status echo-agent-panel-update.service
+journalctl --user -u echo-agent-panel-update.service
+cat ~/.local/state/echo-agent-panel/update-status   # state=updated / failed / rolled_back
+```
 
 以下步骤用于源码开发或手动部署。
 
