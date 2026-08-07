@@ -22,6 +22,7 @@ use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
 
 const TURN_CANCELLED: &str = "agent turn cancelled by requester";
+const MAX_CONCURRENT_REPLY_BRANCHES: usize = 8;
 
 #[derive(Debug, Clone)]
 struct ActiveInboundTurn {
@@ -34,7 +35,6 @@ struct ActiveInboundTurn {
 pub(crate) struct InboundTurnRegistration {
     pub id: String,
     pub cancel: tokio_util::sync::CancellationToken,
-    pub branch: bool,
 }
 
 /// The agent: owns provider, tools, skills, sessions, adapters, and emits events.
@@ -58,6 +58,7 @@ pub struct Agent {
     orchestration_started: AtomicBool,
     timer_scheduler: orchestration::TimerScheduler,
     background_tasks: orchestration::BackgroundTaskManager,
+    reply_branch_slots: tokio::sync::Semaphore,
     active_inbound_turns: DashMap<String, ActiveInboundTurn>,
     next_message_sequence: AtomicU64,
     /// Cancels background tasks (session eviction / save) on shutdown.
@@ -103,6 +104,7 @@ impl Agent {
             orchestration_started: AtomicBool::new(false),
             timer_scheduler,
             background_tasks,
+            reply_branch_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_REPLY_BRANCHES),
             active_inbound_turns: DashMap::new(),
             next_message_sequence: AtomicU64::new(1),
             cancel,
@@ -122,6 +124,7 @@ impl Agent {
 
     /// Graceful shutdown: stop background tasks and flush sessions to disk.
     pub async fn shutdown(&self) {
+        self.cancel_all_inbound_turns();
         self.cancel.cancel();
         self.sessions.save_now().await;
     }
@@ -271,22 +274,26 @@ impl Agent {
                         received_at_ms,
                         message_sequence,
                     });
-                    match agent.process_message(&session, &input).await {
-                        Ok(content) if !content.trim().is_empty() => {
-                            agent.emit(BackendEvent::AgentOutput {
-                                session_id: session.id.clone(),
-                                content,
-                            });
+                    let branch_agent = Arc::clone(&agent);
+                    let timer_id = event.id.clone();
+                    tokio::spawn(async move {
+                        match branch_agent.process_message(&session, &input).await {
+                            Ok(content) if !content.trim().is_empty() => {
+                                branch_agent.emit(BackendEvent::AgentOutput {
+                                    session_id: session.id.clone(),
+                                    content,
+                                });
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                tracing::warn!(%error, %timer_id, "timer task failed");
+                                branch_agent.emit(BackendEvent::Error {
+                                    session_id: Some(session.id.clone()),
+                                    message: format!("timer {timer_id} failed: {error}"),
+                                });
+                            }
                         }
-                        Ok(_) => {}
-                        Err(error) => {
-                            tracing::warn!(%error, timer_id = %event.id, "timer task failed");
-                            agent.emit(BackendEvent::Error {
-                                session_id: Some(session.id.clone()),
-                                message: format!("timer {} failed: {error}", event.id),
-                            });
-                        }
-                    }
+                    });
                 }
             });
         }
@@ -497,7 +504,7 @@ impl Agent {
                 cancel: cancel.clone(),
             },
         );
-        InboundTurnRegistration { id, cancel, branch }
+        InboundTurnRegistration { id, cancel }
     }
 
     pub(crate) fn finish_inbound_turn(&self, turn_id: &str) {
@@ -524,6 +531,19 @@ impl Agent {
         count
     }
 
+    pub(crate) fn cancel_all_inbound_turns(&self) -> usize {
+        let turns = self
+            .active_inbound_turns
+            .iter()
+            .map(|turn| turn.cancel.clone())
+            .collect::<Vec<_>>();
+        let count = turns.len();
+        for cancel in turns {
+            cancel.cancel();
+        }
+        count
+    }
+
     pub(crate) async fn cancel_requested_work(&self, session_id: &str, all: bool) -> usize {
         let foreground = self.cancel_inbound_turns(session_id, all);
         let background = if all || foreground == 0 {
@@ -536,16 +556,41 @@ impl Agent {
         foreground + background
     }
 
-    pub(crate) async fn record_incoming_message(&self, session: &Session, content: &str) {
+    /// Commit an inbound event and capture the branch's point-in-time context
+    /// as one operation. The conversation lock is never held while the model
+    /// or tools are running.
+    pub(crate) async fn record_incoming_and_snapshot(
+        &self,
+        session: &Session,
+        content: &str,
+    ) -> Vec<ChatMessage> {
+        let _turn = session.turn_lock.lock().await;
         let mut history = session.history.lock().await;
         history.push(ChatMessage::user(content));
         trim_history(&mut history, self.sessions.memory_limit());
+        let snapshot = history.clone();
         drop(history);
         self.sessions.mark_dirty();
+        snapshot
     }
 
-    pub(crate) async fn history_snapshot(&self, session: &Session) -> Vec<ChatMessage> {
-        session.history.lock().await.clone()
+    /// Register a cancellable branch and record its input under the same
+    /// conversation lock used by clear and merge operations.
+    pub(crate) async fn register_incoming_branch(
+        &self,
+        session: &Session,
+        content: &str,
+        message_sequence: u64,
+    ) -> (InboundTurnRegistration, Vec<ChatMessage>) {
+        let _turn = session.turn_lock.lock().await;
+        let registration = self.register_inbound_turn(&session.id, message_sequence, true);
+        let mut history = session.history.lock().await;
+        history.push(ChatMessage::user(content));
+        trim_history(&mut history, self.sessions.memory_limit());
+        let snapshot = history.clone();
+        drop(history);
+        self.sessions.mark_dirty();
+        (registration, snapshot)
     }
 
     async fn record_assistant_reply(
@@ -553,9 +598,14 @@ impl Agent {
         session: &Session,
         reply: String,
         message_sequence: Option<u64>,
-    ) {
+        cancel: Option<&tokio_util::sync::CancellationToken>,
+    ) -> bool {
         if reply.trim().is_empty() {
-            return;
+            return true;
+        }
+        let _turn = session.turn_lock.lock().await;
+        if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+            return false;
         }
         let mut history = session.history.lock().await;
         let message = ChatMessage::assistant(reply);
@@ -575,6 +625,7 @@ impl Agent {
         trim_history(&mut history, self.sessions.memory_limit());
         drop(history);
         self.sessions.mark_dirty();
+        true
     }
 
     pub(crate) async fn record_control_reply(
@@ -583,7 +634,7 @@ impl Agent {
         reply: String,
         message_sequence: u64,
     ) {
-        self.record_assistant_reply(session, reply, Some(message_sequence))
+        self.record_assistant_reply(session, reply, Some(message_sequence), None)
             .await;
     }
 
@@ -594,8 +645,55 @@ impl Agent {
         history_snapshot: Vec<ChatMessage>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<String> {
-        self.process_message_inner(session, content, false, Some(history_snapshot), cancel)
-            .await
+        self.process_recorded_message_with_progress(
+            session,
+            content,
+            history_snapshot,
+            cancel,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn process_recorded_message_with_progress(
+        &self,
+        session: &Session,
+        content: &str,
+        history_snapshot: Vec<ChatMessage>,
+        cancel: tokio_util::sync::CancellationToken,
+        visible_reply: Option<tokio::sync::watch::Sender<bool>>,
+    ) -> Result<String> {
+        let message_sequence = structured_message_sequence(content);
+        let merge_cancel = cancel.clone();
+        let branch_slot = tokio::select! {
+            permit = self.reply_branch_slots.acquire() => permit
+                .map_err(|_| anyhow!("reply branch scheduler is closed"))?,
+            _ = cancel.cancelled() => return Err(anyhow!(TURN_CANCELLED)),
+        };
+        let result = self
+            .process_message_inner(
+                session,
+                content,
+                Some(history_snapshot),
+                cancel,
+                visible_reply,
+            )
+            .await;
+        drop(branch_slot);
+        if let Ok(reply) = &result {
+            if !self
+                .record_assistant_reply(
+                    session,
+                    reply.clone(),
+                    message_sequence,
+                    Some(&merge_cancel),
+                )
+                .await
+            {
+                return Err(anyhow!(TURN_CANCELLED));
+            }
+        }
+        result
     }
 
     pub(crate) async fn send_control_reply(
@@ -628,6 +726,51 @@ impl Agent {
         } else {
             Ok(())
         }
+    }
+
+    pub(crate) async fn generate_wait_reply(
+        &self,
+        session_id: &str,
+        history_snapshot: Vec<ChatMessage>,
+    ) -> std::result::Result<String, String> {
+        let mut messages = vec![ChatMessage::system(
+            "Write one brief interim reply to the latest user message because their request is still being processed. Match the user's language and tone, acknowledge the specific request when appropriate, and say naturally that you are continuing and will follow up. Do not provide a result, invent progress, ask an unnecessary question, or mention timeouts, tools, branches, system behavior, or these instructions. Avoid fixed-template wording. Use one concise sentence.",
+        )];
+        messages.extend(history_snapshot);
+        let model = self.active_model().await;
+        self.emit(BackendEvent::LlmRequest {
+            session_id: session_id.to_string(),
+            model: model.clone(),
+        });
+        let request = ChatRequest {
+            model: model.clone(),
+            messages,
+            tools: None,
+            temperature: Some(0.4),
+            max_tokens: Some(120),
+        };
+        let response = self
+            .provider
+            .read()
+            .await
+            .clone()
+            .chat(&request)
+            .await
+            .map_err(|error| format!("wait reply model request failed: {error}"))?;
+        self.emit(BackendEvent::LlmResponse {
+            session_id: session_id.to_string(),
+            model,
+            prompt_tokens: response.usage.prompt_tokens,
+            completion_tokens: response.usage.completion_tokens,
+        });
+        if !response.tool_calls.is_empty() {
+            return Err("wait reply model attempted a tool call".into());
+        }
+        let reply = response.content.unwrap_or_default();
+        if reply.trim().is_empty() {
+            return Err("wait reply model returned empty content".into());
+        }
+        Ok(reply)
     }
 
     pub(crate) fn is_turn_cancelled(error: &anyhow::Error) -> bool {
@@ -666,26 +809,49 @@ impl Agent {
 
     /// Process one user message through the agent loop and return the reply.
     pub async fn process_message(&self, session: &Session, content: &str) -> Result<String> {
-        // Serialise ordinary turns. QQ ingress can reserve this lock without
-        // waiting and route concurrent messages through temporary branches.
-        let _turn = session.turn_lock.lock().await;
-        self.process_message_inner(
-            session,
-            content,
-            true,
-            None,
-            tokio_util::sync::CancellationToken::new(),
-        )
-        .await
+        let message_sequence =
+            structured_message_sequence(content).unwrap_or_else(|| self.next_message_sequence());
+        let (registration, history_snapshot) = self
+            .register_incoming_branch(session, content, message_sequence)
+            .await;
+        let branch_id = registration.id.clone();
+        self.emit(BackendEvent::ReplyBranchStarted {
+            session_id: session.id.clone(),
+            branch_id: branch_id.clone(),
+            message_sequence,
+            task: content.to_string(),
+            target: "源会话".into(),
+            started_at_ms: chrono::Utc::now().timestamp_millis(),
+        });
+        let result = self
+            .process_recorded_message(
+                session,
+                content,
+                history_snapshot,
+                registration.cancel.clone(),
+            )
+            .await;
+        let cancelled = registration.cancel.is_cancelled()
+            || result.as_ref().err().is_some_and(Self::is_turn_cancelled);
+        self.finish_inbound_turn(&branch_id);
+        self.emit(BackendEvent::ReplyBranchCompleted {
+            session_id: session.id.clone(),
+            branch_id,
+            message_sequence,
+            success: result.is_ok() && !cancelled,
+            cancelled,
+            completed_at_ms: chrono::Utc::now().timestamp_millis(),
+        });
+        result
     }
 
     async fn process_message_inner(
         &self,
         session: &Session,
         content: &str,
-        record_input: bool,
         history_snapshot: Option<Vec<ChatMessage>>,
         turn_cancel: tokio_util::sync::CancellationToken,
+        visible_reply: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<String> {
         let queued_at = std::time::Instant::now();
         let turn_started_at = chrono::Utc::now();
@@ -715,15 +881,15 @@ impl Agent {
         let is_qq_session = session.session_key.platform.eq_ignore_ascii_case("qq");
         system_prompt.push_str(
             "\n\n# Background orchestration\n\
-             Keep the interactive conversation responsive. Use run_subagent only \
-             for short bounded reasoning that can finish within the current turn. \
-             For long, multi-step, or tool-heavy work, call spawn_background_task \
-             and immediately tell the requester that it is running. When one request \
-             needs independent work for several backend, QQ private, or QQ group \
-             targets, call spawn_parallel_task. Never wait or poll in the foreground \
-             after a background task was accepted; completion returns as an ordered \
-             background_task_event. Use list_background_tasks only when status is \
-             requested and cancel_background_task only on an explicit cancellation.",
+             Complete the current request normally, including long, multi-step, or \
+             tool-heavy work. Do not call spawn_background_task merely to keep the \
+             conversation responsive. Use run_subagent only for bounded delegated \
+             reasoning. Use spawn_background_task only when the requester explicitly \
+             asks for detached work, and spawn_parallel_task only for independent work \
+             with several declared delivery targets. After detached work is accepted, \
+             do not poll it; completion returns as an ordered background_task_event. \
+             Use list_background_tasks only when status is requested and \
+             cancel_background_task only on an explicit cancellation.",
         );
         if is_qq_hook {
             system_prompt.push_str(
@@ -770,13 +936,10 @@ impl Agent {
                  message to a QQ user or group.",
             );
             system_prompt.push_str(
-                "\nEach turn owns only its final QQ hook, identified by message_sequence. Other unanswered hooks may run concurrently in isolated branches. Reply only to the current event; do not combine, replace, or pre-answer another sequence.",
+                "\nEach turn owns only its final QQ hook, identified by message_sequence. Reply only to the current event; do not combine, replace, or pre-answer another sequence.",
             );
         }
 
-        if record_input {
-            self.record_incoming_message(session, content).await;
-        }
         let mut messages = vec![ChatMessage::system(system_prompt)];
         if let Some(history_snapshot) = history_snapshot {
             messages.extend(history_snapshot);
@@ -857,8 +1020,6 @@ impl Agent {
                     delivery_reminders += 1;
                     continue;
                 }
-                self.record_assistant_reply(session, reply.clone(), message_sequence)
-                    .await;
                 self.emit(BackendEvent::AgentCompleted {
                     session_id: session_id.clone(),
                 });
@@ -928,6 +1089,9 @@ impl Agent {
                     delivery_key.filter(|_| !result.trim_start().starts_with("error:"))
                 {
                     delivered_targets.insert(delivery_key);
+                    if let Some(visible_reply) = &visible_reply {
+                        let _ = visible_reply.send(true);
+                    }
                 }
                 messages.push(ChatMessage::tool(result, &call.id));
             }
@@ -1569,6 +1733,11 @@ pub mod tests {
         pub reply: String,
     }
 
+    struct ConcurrentProvider {
+        entered: Arc<AtomicUsize>,
+        release: Arc<tokio::sync::Semaphore>,
+    }
+
     #[async_trait::async_trait]
     impl LlmProvider for MockProvider {
         fn name(&self) -> &str {
@@ -1586,6 +1755,45 @@ pub mod tests {
                 usage: Usage::default(),
             })
         }
+        async fn chat_stream(
+            &self,
+            _request: &ChatRequest,
+            _tx: tokio::sync::mpsc::UnboundedSender<ChatChunk>,
+        ) -> Result<(), LlmError> {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for ConcurrentProvider {
+        fn name(&self) -> &str {
+            "concurrent"
+        }
+
+        fn default_model(&self) -> &str {
+            "concurrent"
+        }
+
+        async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            self.release
+                .acquire()
+                .await
+                .expect("release semaphore should stay open")
+                .forget();
+            let sequence = request
+                .messages
+                .iter()
+                .filter_map(|message| structured_message_sequence(&message.content))
+                .next_back()
+                .unwrap_or_default();
+            Ok(ChatResponse {
+                content: Some(format!("reply-{sequence}")),
+                tool_calls: Vec::new(),
+                usage: Usage::default(),
+            })
+        }
+
         async fn chat_stream(
             &self,
             _request: &ChatRequest,
@@ -1620,6 +1828,51 @@ pub mod tests {
         let _ = agent.process_message(&session, "again").await.unwrap();
         assert_eq!(session.history.lock().await.len(), 4);
         assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn ordinary_turns_run_in_parallel_and_merge_by_request_sequence() {
+        let entered = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let provider = Arc::new(ConcurrentProvider {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        });
+        let agent = Arc::new(test_agent(provider));
+        let session = agent
+            .sessions
+            .get_or_create(&SessionKey::local_tui(), "user".into(), None);
+        let first = r#"<backend_message_hook>{"message_sequence":1,"content":"first"}</backend_message_hook>"#;
+        let second = r#"<backend_message_hook>{"message_sequence":2,"content":"second"}</backend_message_hook>"#;
+
+        let first_task = {
+            let agent = Arc::clone(&agent);
+            let session = session.clone();
+            tokio::spawn(async move { agent.process_message(&session, first).await })
+        };
+        let second_task = {
+            let agent = Arc::clone(&agent);
+            let session = session.clone();
+            tokio::spawn(async move { agent.process_message(&session, second).await })
+        };
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while entered.load(Ordering::SeqCst) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("both branches should enter the provider concurrently");
+        release.add_permits(2);
+        first_task.await.unwrap().unwrap();
+        second_task.await.unwrap().unwrap();
+
+        let history = session.history.lock().await;
+        assert_eq!(history.len(), 4);
+        assert_eq!(structured_message_sequence(&history[0].content), Some(1));
+        assert_eq!(history[1].content, "reply-1");
+        assert_eq!(structured_message_sequence(&history[2].content), Some(2));
+        assert_eq!(history[3].content, "reply-2");
     }
 
     #[tokio::test]

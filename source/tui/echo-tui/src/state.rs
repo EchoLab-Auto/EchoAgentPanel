@@ -852,6 +852,14 @@ impl AppState {
         }
     }
 
+    pub fn has_running_reply_branches(&self, session_id: &str) -> bool {
+        self.orchestration_tasks.iter().any(|task| {
+            task.session_id == session_id
+                && task.kind == OrchestrationKind::ReplyBranch
+                && task.status == OrchestrationStatus::Running
+        })
+    }
+
     pub fn complete_subagent(&mut self, session_id: &str, success: bool) {
         let Some(task) = self.orchestration_tasks.iter_mut().rev().find(|task| {
             task.session_id == session_id

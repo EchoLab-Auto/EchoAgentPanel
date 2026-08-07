@@ -299,7 +299,7 @@ async fn delete_api_removes_profile() {
     );
 }
 
-/// A provider that delays before replying, to expose turn interleaving.
+/// A provider that delays before replying, to expose branch concurrency.
 struct SlowProvider {
     delay_ms: u64,
     replies: tokio::sync::Mutex<Vec<&'static str>>,
@@ -335,7 +335,7 @@ impl LlmProvider for SlowProvider {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn concurrent_messages_are_serialized_per_session() {
+async fn concurrent_messages_merge_by_request_sequence() {
     let provider = Arc::new(SlowProvider {
         delay_ms: 50,
         replies: tokio::sync::Mutex::new(vec!["second", "first"]),
@@ -351,17 +351,39 @@ async fn concurrent_messages_are_serialized_per_session() {
     let key = SessionKey::parse("qq:dm::1").unwrap();
     let session = agent.sessions.get_or_create(&key, "u".into(), None);
 
-    // Fire two messages concurrently against the same session.
+    // Start the first branch, then ensure the second enters while it is still
+    // waiting. Structured inputs carry the production ordering anchor.
     let a1 = agent.clone();
     let s1 = session.clone();
-    let t1 = tokio::spawn(async move { a1.process_message(&s1, "msg1").await.unwrap() });
+    let t1 = tokio::spawn(async move {
+        a1.process_message(
+            &s1,
+            r#"<backend_message_hook>{"message_sequence":1,"content":"msg1"}</backend_message_hook>"#,
+        )
+        .await
+        .unwrap()
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while provider.calls.load(Ordering::SeqCst) < 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first branch should enter the provider");
     let a2 = agent.clone();
     let s2 = session.clone();
-    let t2 = tokio::spawn(async move { a2.process_message(&s2, "msg2").await.unwrap() });
+    let t2 = tokio::spawn(async move {
+        a2.process_message(
+            &s2,
+            r#"<backend_message_hook>{"message_sequence":2,"content":"msg2"}</backend_message_hook>"#,
+        )
+        .await
+        .unwrap()
+    });
 
     let (r1, r2) = tokio::join!(t1, t2);
-    // History must contain both user messages and both replies in a
-    // consistent, non-interleaved order: user, reply, user, reply.
+    // Both requests are committed before either branch completes, then each
+    // reply is merged directly after its own request.
     let hist = session.history.lock().await.clone();
     let roles: Vec<&str> = hist
         .iter()
@@ -374,10 +396,58 @@ async fn concurrent_messages_are_serialized_per_session() {
     assert_eq!(
         roles,
         vec!["user", "assistant", "user", "assistant"],
-        "turns must not interleave: {roles:?}"
+        "branch results must merge by request sequence: {roles:?}"
     );
     let _ = (r1, r2);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn clearing_a_session_cancels_branches_before_they_can_merge() {
+    let provider = Arc::new(SlowProvider {
+        delay_ms: 500,
+        replies: tokio::sync::Mutex::new(vec!["stale reply"]),
+        calls: AtomicUsize::new(0),
+    });
+    let agent = Arc::new(Agent::new(
+        provider.clone(),
+        AgentConfig::default(),
+        SkillRegistry::new(),
+        ToolRegistry::new(),
+        Arc::new(AdapterRegistry::new()),
+    ));
+    let session =
+        agent
+            .sessions
+            .get_or_create(&SessionKey::parse("qq:dm::1").unwrap(), "u".into(), None);
+    let branch = {
+        let agent = Arc::clone(&agent);
+        let session = session.clone();
+        tokio::spawn(async move {
+            agent
+                .process_message(
+                    &session,
+                    r#"<backend_message_hook>{"message_sequence":1,"content":"work"}</backend_message_hook>"#,
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while provider.calls.load(Ordering::SeqCst) < 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("branch should enter the provider");
+
+    agent
+        .apply_command(BackendCommand::ClearSession {
+            session_id: session.id.clone(),
+        })
+        .await;
+
+    assert!(branch.await.unwrap().is_err());
+    assert!(session.history.lock().await.is_empty());
 }
 
 #[tokio::test]

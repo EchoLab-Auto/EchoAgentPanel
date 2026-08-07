@@ -90,8 +90,7 @@ pub enum BackendEvent {
         session_id: String,
         success: bool,
     },
-    /// A QQ message was routed through a temporary reply branch because the
-    /// shared foreground conversation was already occupied.
+    /// A QQ message was routed through an isolated temporary reply branch.
     ReplyBranchStarted {
         session_id: String,
         branch_id: String,
@@ -100,7 +99,7 @@ pub enum BackendEvent {
         target: String,
         started_at_ms: i64,
     },
-    /// A temporary QQ reply branch finished or was cancelled.
+    /// A temporary reply branch finished or was cancelled.
     ReplyBranchCompleted {
         session_id: String,
         branch_id: String,

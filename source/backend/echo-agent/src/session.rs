@@ -88,7 +88,7 @@ pub struct Session {
     last_active: Arc<AtomicI64>,
     /// Conversation history (bounded by `memory_limit`).
     pub history: Arc<Mutex<Vec<ChatMessage>>>,
-    /// Serialise turns for this session to avoid interleaved history / out-of-order replies.
+    /// Serialise snapshot creation and result merges; branch execution never holds this lock.
     pub turn_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -423,6 +423,7 @@ impl SessionManager {
     pub async fn clear(&self, session_id: &str) -> bool {
         match self.sessions.get(session_id) {
             Some(s) => {
+                let _turn = s.value().turn_lock.lock().await;
                 s.value().history.lock().await.clear();
                 s.value().touch();
                 true

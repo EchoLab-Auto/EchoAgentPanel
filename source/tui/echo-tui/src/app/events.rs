@@ -167,6 +167,7 @@ impl App {
                 );
             }
             BackendEvent::ReplyBranchCompleted {
+                session_id,
                 branch_id,
                 success,
                 cancelled,
@@ -175,6 +176,11 @@ impl App {
             } => {
                 self.state
                     .complete_reply_branch(&branch_id, success, cancelled, completed_at_ms);
+                if !self.state.has_running_reply_branches(&session_id) {
+                    self.state
+                        .activity_mut(&session_id)
+                        .transition(AgentPhase::Completed, None);
+                }
             }
             BackendEvent::BackgroundTaskStarted {
                 session_id,
@@ -330,9 +336,11 @@ impl App {
                 self.push_to(session_id, MsgRole::Backend, content, ts);
             }
             BackendEvent::AgentCompleted { session_id } => {
-                self.state
-                    .activity_mut(&session_id)
-                    .transition(AgentPhase::Completed, None);
+                if !self.state.has_running_reply_branches(&session_id) {
+                    self.state
+                        .activity_mut(&session_id)
+                        .transition(AgentPhase::Completed, None);
+                }
             }
             BackendEvent::SessionUpdated { session } => {
                 self.upsert_session(session);
@@ -871,6 +879,51 @@ mod tests {
         assert_eq!(
             app.state.orchestration_tasks[0].status,
             crate::state::OrchestrationStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn session_stays_busy_until_its_last_reply_branch_finishes() {
+        let mut app = app();
+        for (branch_id, sequence) in [("reply-1", 1), ("reply-2", 2)] {
+            app.apply_backend_event(BackendEvent::ReplyBranchStarted {
+                session_id: "s1".into(),
+                branch_id: branch_id.into(),
+                message_sequence: sequence,
+                task: format!("task-{sequence}"),
+                target: "源会话".into(),
+                started_at_ms: 1_700_000_000_000,
+            });
+        }
+        app.apply_backend_event(BackendEvent::AgentThinking {
+            session_id: "s1".into(),
+        });
+        app.apply_backend_event(BackendEvent::AgentCompleted {
+            session_id: "s1".into(),
+        });
+        assert!(app.state.agent_activities["s1"].phase.is_busy());
+
+        app.apply_backend_event(BackendEvent::ReplyBranchCompleted {
+            session_id: "s1".into(),
+            branch_id: "reply-1".into(),
+            message_sequence: 1,
+            success: true,
+            cancelled: false,
+            completed_at_ms: 1_700_000_001_000,
+        });
+        assert!(app.state.agent_activities["s1"].phase.is_busy());
+
+        app.apply_backend_event(BackendEvent::ReplyBranchCompleted {
+            session_id: "s1".into(),
+            branch_id: "reply-2".into(),
+            message_sequence: 2,
+            success: true,
+            cancelled: false,
+            completed_at_ms: 1_700_000_002_000,
+        });
+        assert_eq!(
+            app.state.agent_activities["s1"].phase,
+            AgentPhase::Completed
         );
     }
 

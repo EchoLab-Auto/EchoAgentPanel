@@ -115,6 +115,11 @@ impl Agent {
                 }
             }
             BackendCommand::ClearSession { session_id } => {
+                if self.sessions.shared_context_enabled() {
+                    self.cancel_all_inbound_turns();
+                } else {
+                    self.cancel_inbound_turns(&session_id, true);
+                }
                 if self.sessions.clear(&session_id).await {
                     self.emit(BackendEvent::Error {
                         session_id: Some(session_id),

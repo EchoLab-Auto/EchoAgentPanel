@@ -224,7 +224,14 @@ async fn run_core(args: Args, cfg: CoreConfig) -> Result<()> {
         loop {
             interval.tick().await;
             while let Some(cmd) = pump_agent.try_recv_command() {
-                pump_agent.apply_command(cmd).await;
+                if matches!(&cmd, echo_agent::BackendCommand::SendMessage { .. }) {
+                    let branch_agent = Arc::clone(&pump_agent);
+                    tokio::spawn(async move {
+                        branch_agent.apply_command(cmd).await;
+                    });
+                } else {
+                    pump_agent.apply_command(cmd).await;
+                }
             }
         }
     });

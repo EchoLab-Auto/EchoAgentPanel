@@ -14,6 +14,8 @@ use crate::agent::Agent;
 use crate::event::BackendEvent;
 use crate::session::SessionKey;
 
+const QQ_WAIT_REPLY_AFTER: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Wraps an `Arc<Agent>` behind the adapter-facing inbound hook.
 pub struct AgentMessageHook {
     agent: Arc<Agent>,
@@ -78,12 +80,13 @@ impl InboundMessageHook for AgentMessageHook {
         });
 
         let hook_input = format_hook_input(&msg, message_sequence, received_at_ms);
-        agent.record_incoming_message(&session, &hook_input).await;
-        let history_snapshot = agent.history_snapshot(&session).await;
 
         // Cancellation is a transport-level control command. Handle it before
         // reserving a conversation turn so it can interrupt work immediately.
         if let Some(cancel_all) = recall_command_scope(&msg.content) {
+            agent
+                .record_incoming_and_snapshot(&session, &hook_input)
+                .await;
             let cancelled = agent.cancel_requested_work(&session_id, cancel_all).await;
             tracing::info!(
                 session = %session_id,
@@ -121,65 +124,76 @@ impl InboundMessageHook for AgentMessageHook {
             return Ok(());
         }
 
-        // Reserve the shared foreground lock without waiting. If another turn
-        // owns it, this message gets an isolated temporary reply branch.
-        let foreground_guard = session.turn_lock.clone().try_lock_owned().ok();
-        let branch = foreground_guard.is_none();
-        let registration = agent.register_inbound_turn(&session_id, message_sequence, branch);
+        // Every inbound conversation turn runs as an isolated snapshot branch.
+        // The shared conversation is touched again only when the result merges.
+        let branch = true;
+        let (registration, history_snapshot) = agent
+            .register_incoming_branch(&session, &hook_input, message_sequence)
+            .await;
         let branch_id = registration.id.clone();
-        if branch {
-            tracing::info!(
-                session = %session_id,
-                message_sequence,
-                branch_id = %branch_id,
-                started_at_ms = chrono::Utc::now().timestamp_millis(),
-                "foreground occupied; temporary QQ reply branch started"
-            );
-            agent.emit(BackendEvent::ReplyBranchStarted {
-                session_id: session_id.clone(),
-                branch_id: branch_id.clone(),
-                message_sequence,
-                task: msg.content.clone(),
-                target: reply_target(&msg),
-                started_at_ms: chrono::Utc::now().timestamp_millis(),
-            });
-        }
+        tracing::info!(
+            session = %session_id,
+            message_sequence,
+            branch_id = %branch_id,
+            started_at_ms = chrono::Utc::now().timestamp_millis(),
+            "temporary QQ reply branch started"
+        );
+        agent.emit(BackendEvent::ReplyBranchStarted {
+            session_id: session_id.clone(),
+            branch_id: branch_id.clone(),
+            message_sequence,
+            task: msg.content.clone(),
+            target: reply_target(&msg),
+            started_at_ms: chrono::Utc::now().timestamp_millis(),
+        });
+
+        let (visible_reply_tx, visible_reply_rx) = tokio::sync::watch::channel(false);
+        let branch_completed = tokio_util::sync::CancellationToken::new();
+        let group_id = msg.channel.group_id().map(str::to_string);
+        spawn_contextual_wait_reply(
+            Arc::clone(agent),
+            session.clone(),
+            group_id,
+            history_snapshot.clone(),
+            visible_reply_rx,
+            branch_completed.clone(),
+            QQ_WAIT_REPLY_AFTER,
+        );
 
         let agent = Arc::clone(agent);
         tokio::spawn(async move {
-            let _foreground_guard = foreground_guard;
             let turn_cancel = registration.cancel.clone();
             let result = agent
-                .process_recorded_message(
+                .process_recorded_message_with_progress(
                     &session,
                     &hook_input,
                     history_snapshot,
                     turn_cancel.clone(),
+                    Some(visible_reply_tx),
                 )
                 .await;
+            branch_completed.cancel();
             let cancelled = turn_cancel.is_cancelled()
                 || result.as_ref().err().is_some_and(Agent::is_turn_cancelled);
             agent.finish_inbound_turn(&branch_id);
 
-            if registration.branch {
-                tracing::info!(
-                    session = %session_id,
-                    message_sequence,
-                    branch_id = %branch_id,
-                    success = result.is_ok() && !cancelled,
-                    cancelled,
-                    completed_at_ms = chrono::Utc::now().timestamp_millis(),
-                    "temporary QQ reply branch finished"
-                );
-                agent.emit(BackendEvent::ReplyBranchCompleted {
-                    session_id: session_id.clone(),
-                    branch_id: branch_id.clone(),
-                    message_sequence,
-                    success: result.is_ok() && !cancelled,
-                    cancelled,
-                    completed_at_ms: chrono::Utc::now().timestamp_millis(),
-                });
-            }
+            tracing::info!(
+                session = %session_id,
+                message_sequence,
+                branch_id = %branch_id,
+                success = result.is_ok() && !cancelled,
+                cancelled,
+                completed_at_ms = chrono::Utc::now().timestamp_millis(),
+                "temporary QQ reply branch finished"
+            );
+            agent.emit(BackendEvent::ReplyBranchCompleted {
+                session_id: session_id.clone(),
+                branch_id: branch_id.clone(),
+                message_sequence,
+                success: result.is_ok() && !cancelled,
+                cancelled,
+                completed_at_ms: chrono::Utc::now().timestamp_millis(),
+            });
             match result {
                 Ok(output) => {
                     if !output.trim().is_empty() {
@@ -225,6 +239,62 @@ impl InboundMessageHook for AgentMessageHook {
             self_id,
         });
     }
+}
+
+fn spawn_contextual_wait_reply(
+    agent: Arc<Agent>,
+    session: crate::session::Session,
+    group_id: Option<String>,
+    history_snapshot: Vec<crate::llm::ChatMessage>,
+    mut visible_reply: tokio::sync::watch::Receiver<bool>,
+    branch_completed: tokio_util::sync::CancellationToken,
+    delay: std::time::Duration,
+) {
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {
+                if branch_completed.is_cancelled() || *visible_reply.borrow() {
+                    return;
+                }
+                let generated = tokio::select! {
+                    result = agent.generate_wait_reply(&session.id, history_snapshot) => result,
+                    changed = visible_reply.changed() => {
+                        let _ = changed;
+                        return;
+                    }
+                    _ = branch_completed.cancelled() => return,
+                };
+                let reply = match generated {
+                    Ok(reply) => reply,
+                    Err(error) => {
+                        tracing::warn!(%error, session = %session.id, "QQ wait reply generation failed");
+                        agent.emit(BackendEvent::Error {
+                            session_id: Some(session.id.clone()),
+                            message: format!("QQ wait reply generation failed: {error}"),
+                        });
+                        return;
+                    }
+                };
+                if branch_completed.is_cancelled() || *visible_reply.borrow() {
+                    return;
+                }
+                if let Err(error) = agent
+                    .send_control_reply(&session, group_id.as_deref(), &reply)
+                    .await
+                {
+                    tracing::warn!(%error, session = %session.id, "QQ wait reply failed");
+                    agent.emit(BackendEvent::Error {
+                        session_id: Some(session.id.clone()),
+                        message: format!("QQ wait reply failed: {error}"),
+                    });
+                }
+            }
+            changed = visible_reply.changed() => {
+                let _ = changed;
+            }
+            _ = branch_completed.cancelled() => {}
+        }
+    });
 }
 
 /// Encode an adapter event as a clearly marked, structured hook input.
@@ -323,7 +393,7 @@ fn recall_command_scope(content: &str) -> Option<bool> {
 mod tests {
     use super::*;
     use crate::llm::{
-        ChatChunk, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, Usage,
+        ChatChunk, ChatMessage, ChatRequest, ChatResponse, LlmError, LlmProvider, ToolCall, Usage,
     };
     use crate::tool::{Tool, ToolError};
     use echo_adapter::types::{ChannelType, IncomingMessage};
@@ -446,6 +516,72 @@ mod tests {
         calls: Arc<AtomicUsize>,
     }
 
+    struct WaitReplyProvider {
+        calls: Arc<AtomicUsize>,
+        reply: String,
+    }
+
+    #[async_trait]
+    impl LlmProvider for WaitReplyProvider {
+        fn name(&self) -> &str {
+            "wait-reply-test"
+        }
+
+        fn default_model(&self) -> &str {
+            "wait-reply-test"
+        }
+
+        async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert!(request.tools.is_none());
+            assert!(request.messages[0]
+                .content
+                .contains("Avoid fixed-template wording"));
+            Ok(ChatResponse {
+                content: Some(self.reply.clone()),
+                tool_calls: Vec::new(),
+                usage: Usage::default(),
+            })
+        }
+
+        async fn chat_stream(
+            &self,
+            _request: &ChatRequest,
+            _tx: tokio::sync::mpsc::UnboundedSender<ChatChunk>,
+        ) -> Result<(), LlmError> {
+            Ok(())
+        }
+    }
+
+    struct RecordingSendTool {
+        contents: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl Tool for RecordingSendTool {
+        fn name(&self) -> &str {
+            "send_private_msg"
+        }
+
+        fn description(&self) -> &str {
+            "record test sends"
+        }
+
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        async fn execute(&self, arguments: serde_json::Value) -> Result<String, ToolError> {
+            self.contents.lock().expect("recorded sends poisoned").push(
+                arguments["content"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            Ok("message sent".into())
+        }
+    }
+
     #[async_trait]
     impl Tool for CountingSendTool {
         fn name(&self) -> &str {
@@ -564,6 +700,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn contextual_wait_reply_is_generated_once_and_suppressed_when_obsolete() {
+        assert_eq!(QQ_WAIT_REPLY_AFTER, std::time::Duration::from_secs(20));
+        let model_calls = Arc::new(AtomicUsize::new(0));
+        let sent_contents = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let provider = Arc::new(WaitReplyProvider {
+            calls: Arc::clone(&model_calls),
+            reply: "我正在核对你提到的配置差异，整理好就回复你。".into(),
+        });
+        let mut tools = crate::tool::ToolRegistry::new();
+        tools.register(Arc::new(RecordingSendTool {
+            contents: Arc::clone(&sent_contents),
+        }));
+        let agent = Arc::new(Agent::new(
+            provider,
+            crate::config::AgentConfig::default(),
+            crate::skill::SkillRegistry::new(),
+            tools,
+            Arc::new(echo_adapter::registry::AdapterRegistry::new()),
+        ));
+        let session = agent.sessions.get_or_create(
+            &SessionKey::parse("qq:dm::123456").unwrap(),
+            "tester".into(),
+            None,
+        );
+
+        let (_reply_tx, reply_rx) = tokio::sync::watch::channel(false);
+        let completed = tokio_util::sync::CancellationToken::new();
+        let snapshot = vec![ChatMessage::user("帮我核对这两份配置的差异")];
+        spawn_contextual_wait_reply(
+            Arc::clone(&agent),
+            session.clone(),
+            None,
+            snapshot.clone(),
+            reply_rx,
+            completed,
+            std::time::Duration::from_millis(10),
+        );
+        wait_until(|| sent_contents.lock().expect("recorded sends poisoned").len() == 1).await;
+        assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            sent_contents
+                .lock()
+                .expect("recorded sends poisoned")
+                .as_slice(),
+            ["我正在核对你提到的配置差异，整理好就回复你。"]
+        );
+
+        let (reply_tx, reply_rx) = tokio::sync::watch::channel(false);
+        reply_tx.send(true).unwrap();
+        spawn_contextual_wait_reply(
+            Arc::clone(&agent),
+            session.clone(),
+            None,
+            snapshot.clone(),
+            reply_rx,
+            tokio_util::sync::CancellationToken::new(),
+            std::time::Duration::from_millis(10),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+
+        let (_reply_tx, reply_rx) = tokio::sync::watch::channel(false);
+        let completed = tokio_util::sync::CancellationToken::new();
+        completed.cancel();
+        spawn_contextual_wait_reply(
+            agent,
+            session,
+            None,
+            snapshot,
+            reply_rx,
+            completed,
+            std::time::Duration::from_millis(10),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn successful_qq_delivery_marks_the_branch_as_replied() {
+        let agent = mock_agent("done");
+        let msg = dm_message("hello");
+        let session = agent.sessions.get_or_create(
+            &SessionKey::parse("qq:dm::123456").unwrap(),
+            "tester".into(),
+            None,
+        );
+        let hook_input = format_hook_input(&msg, 1, chrono::Utc::now().timestamp_millis());
+        let snapshot = agent
+            .record_incoming_and_snapshot(&session, &hook_input)
+            .await;
+        let (reply_tx, reply_rx) = tokio::sync::watch::channel(false);
+
+        agent
+            .process_recorded_message_with_progress(
+                &session,
+                &hook_input,
+                snapshot,
+                tokio_util::sync::CancellationToken::new(),
+                Some(reply_tx),
+            )
+            .await
+            .unwrap();
+
+        assert!(*reply_rx.borrow());
+    }
+
+    #[tokio::test]
     async fn occupied_conversation_branches_and_recall_cancels_running_turns() {
         let entered = Arc::new(AtomicUsize::new(0));
         let sends = Arc::new(AtomicUsize::new(0));
@@ -597,7 +840,7 @@ mod tests {
             .unwrap();
         wait_until(|| entered.load(Ordering::SeqCst) >= 2).await;
         assert_eq!(agent.active_inbound_turn_count(), 2);
-        assert_eq!(agent.active_inbound_branch_count(), 1);
+        assert_eq!(agent.active_inbound_branch_count(), 2);
         let snapshots = seen_sequences
             .lock()
             .expect("seen sequences poisoned")
