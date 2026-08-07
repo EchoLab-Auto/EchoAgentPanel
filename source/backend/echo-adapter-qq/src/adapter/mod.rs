@@ -540,7 +540,8 @@ impl QqAdapter {
 
         let mut last_error = None;
         for remote in &candidates {
-            let request = echo_core::action::actions::upload_group_file(group_id, remote, file_name);
+            let request =
+                echo_core::action::actions::upload_group_file(group_id, remote, file_name);
             let resp = ctx.send_api(request).await.map_err(|e| e.to_string())?;
             if resp.is_ok() {
                 tracing::info!(%group_id, %remote, "group file uploaded");

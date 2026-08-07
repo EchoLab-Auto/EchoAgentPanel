@@ -51,7 +51,7 @@ impl TaskStatusBar {
         };
         fit_width(
             &format!(
-                "{marker} {} {identity} · {}{branch_progress} · {}{concurrent}  ▣",
+                "{marker} {} {identity} · {}{branch_progress} · {}{concurrent}  分支列表 ▣",
                 task.kind.label(),
                 task.status.label(),
                 format_duration(task.elapsed())
@@ -321,7 +321,14 @@ fn render_task_detail(f: &mut Frame, area: Rect, state: &AppState) {
         }
         if let Some(result) = &branch.result {
             lines.push(Line::from(vec![
-                Span::styled("   结果  ", Style::default().fg(theme.faint)),
+                Span::styled(
+                    if task.kind == crate::state::OrchestrationKind::ReplyBranch {
+                        "   临时回复  "
+                    } else {
+                        "   结果  "
+                    },
+                    Style::default().fg(theme.faint),
+                ),
                 Span::styled(result.clone(), Style::default().fg(theme.subtitle)),
             ]));
         }
@@ -464,5 +471,6 @@ mod tests {
         let text = bar.summary_text(&state, 100);
         assert!(text.contains("并行 #3"));
         assert!(text.contains("分支 0/1"));
+        assert!(text.contains("分支列表"));
     }
 }

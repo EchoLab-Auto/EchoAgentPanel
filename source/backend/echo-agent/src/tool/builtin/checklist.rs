@@ -147,7 +147,9 @@ impl Tool for ChecklistTool {
                     .ok_or_else(|| ToolError::InvalidArguments("index 必须为正整数".into()))?;
                 let len = list.len();
                 let entry = list.get_mut(pos).ok_or_else(|| {
-                    ToolError::InvalidArguments(format!("清单 '{name}' 没有第 {idx} 项（共 {len} 项）"))
+                    ToolError::InvalidArguments(format!(
+                        "清单 '{name}' 没有第 {idx} 项（共 {len} 项）"
+                    ))
                 })?;
                 entry.done = operation == "check";
                 Ok(render(&name, list))
@@ -192,7 +194,11 @@ fn render(name: &str, list: &[ChecklistItem]) -> String {
         let mark = if item.done { "[x]" } else { "[ ]" };
         lines.push(format!("  {mark} {}. {}", i + 1, item.text));
     }
-    format!("清单 '{name}'（{done}/{} 完成）:\n{}", list.len(), lines.join("\n"))
+    format!(
+        "清单 '{name}'（{done}/{} 完成）:\n{}",
+        list.len(),
+        lines.join("\n")
+    )
 }
 
 #[cfg(test)]
@@ -297,15 +303,9 @@ mod tests {
         t.execute(json!({"operation": "add", "item": "a"}))
             .await
             .unwrap();
-        let out = t
-            .execute(json!({"operation": "reset"}))
-            .await
-            .unwrap();
+        let out = t.execute(json!({"operation": "reset"})).await.unwrap();
         assert!(out.contains("已清空"), "got: {out}");
-        let out = t
-            .execute(json!({"operation": "list"}))
-            .await
-            .unwrap();
+        let out = t.execute(json!({"operation": "list"})).await.unwrap();
         assert!(out.contains("为空"), "got: {out}");
     }
 }

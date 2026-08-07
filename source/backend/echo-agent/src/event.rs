@@ -99,6 +99,13 @@ pub enum BackendEvent {
         target: String,
         started_at_ms: i64,
     },
+    /// Content generated for a temporary QQ wait reply. It stays in the
+    /// branch inspector and is never appended to the main chat transcript.
+    ReplyBranchContent {
+        session_id: String,
+        branch_id: String,
+        content: String,
+    },
     /// A temporary reply branch finished or was cancelled.
     ReplyBranchCompleted {
         session_id: String,

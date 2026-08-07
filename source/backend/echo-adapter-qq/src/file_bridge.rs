@@ -91,7 +91,11 @@ impl FileBridge {
     /// NapCat accepts one.
     ///
     /// `file_name` is the display name used when copying into the container.
-    pub async fn resolve_all(&self, local_path: &str, file_name: &str) -> Result<Vec<String>, String> {
+    pub async fn resolve_all(
+        &self,
+        local_path: &str,
+        file_name: &str,
+    ) -> Result<Vec<String>, String> {
         let path = Path::new(local_path);
 
         // Strategy 1: already a NapCat-visible path → pass through.
@@ -174,9 +178,9 @@ impl FileBridge {
     /// Hosts are ordered: docker bridge gateway (auto-detected), configured
     /// `napcat_host`, then loopback. Duplicates are removed.
     async fn http_urls(&self, local: &Path) -> Result<Vec<String>, String> {
-        let local = local.canonicalize().map_err(|e| {
-            format!("cannot resolve file '{}': {e}", local.display())
-        })?;
+        let local = local
+            .canonicalize()
+            .map_err(|e| format!("cannot resolve file '{}': {e}", local.display()))?;
         if !local.is_file() {
             return Err(format!("'{}' is not a regular file", local.display()));
         }
@@ -274,7 +278,6 @@ fn detect_docker_gateway() -> Option<String> {
     }
 }
 
-
 // ---- HTTP handling ----
 
 async fn handle_client(
@@ -314,11 +317,7 @@ async fn handle_client(
     }
 }
 
-async fn write_response(
-    socket: &mut TcpStream,
-    status: u16,
-    body: &[u8],
-) -> std::io::Result<()> {
+async fn write_response(socket: &mut TcpStream, status: u16, body: &[u8]) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         404 => "Not Found",
@@ -345,7 +344,10 @@ fn cleanup_expired(files: &DashMap<String, (PathBuf, Instant)>) {
 
 /// Reduce an arbitrary display name to a safe file name for the container.
 fn sanitize_file_name(file_name: &str) -> Option<String> {
-    let base = Path::new(file_name).file_name()?.to_string_lossy().into_owned();
+    let base = Path::new(file_name)
+        .file_name()?
+        .to_string_lossy()
+        .into_owned();
     if base.is_empty() || base == "." || base == ".." {
         None
     } else {

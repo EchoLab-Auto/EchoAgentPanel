@@ -15,6 +15,7 @@ use crate::theme::Theme;
 use crate::util;
 
 const MAX_ORCHESTRATION_HISTORY: usize = 128;
+pub const PRIMARY_SESSION_ID: &str = "local:tui::local_user";
 
 // ── Message types ──────────────────────────────────────────────────────────
 
@@ -529,6 +530,29 @@ impl AppState {
         self.sessions.iter().find(|s| s.id == id)
     }
 
+    /// Establish the TUI's local primary conversation before remote sessions
+    /// arrive. Incoming QQ sessions then remain background sessions until the
+    /// user explicitly switches to them.
+    pub fn ensure_primary_session(&mut self) {
+        if !self
+            .sessions
+            .iter()
+            .any(|session| session.id == PRIMARY_SESSION_ID)
+        {
+            self.sessions.push(SessionInfo {
+                id: PRIMARY_SESSION_ID.into(),
+                platform: "local".into(),
+                scope: "tui".into(),
+                user_id: "local_user".into(),
+                nickname: "EchoAgent".into(),
+                group_name: None,
+                last_active: 0,
+                last_message: String::new(),
+            });
+        }
+        self.active_session_id = Some(PRIMARY_SESSION_ID.into());
+    }
+
     pub fn active_messages(&self) -> &[DisplayMessage] {
         match &self.active_session_id {
             Some(id) => self.messages.get(id).map(|v| v.as_slice()).unwrap_or(&[]),
@@ -883,6 +907,20 @@ impl AppState {
         }
     }
 
+    pub fn attach_reply_branch_content(&mut self, branch_id: &str, content: &str) {
+        let Some(task) = self
+            .orchestration_tasks
+            .iter_mut()
+            .find(|task| task.id == branch_id && task.kind == OrchestrationKind::ReplyBranch)
+        else {
+            return;
+        };
+        if let Some(branch) = task.branches.first_mut() {
+            branch.result = Some(bounded(content, 4_000));
+        }
+        task.updated_at = std::time::Instant::now();
+    }
+
     pub fn has_running_reply_branches(&self, session_id: &str) -> bool {
         self.orchestration_tasks.iter().any(|task| {
             task.session_id == session_id
@@ -974,8 +1012,10 @@ impl AppState {
             .entry(session_id.to_string())
             .or_default()
             .push(msg);
-        self.chat_scroll = 0;
-        self.chat_flash_until = Some(std::time::Instant::now() + Duration::from_millis(700));
+        if self.active_session_id.as_deref() == Some(session_id) {
+            self.chat_scroll = 0;
+            self.chat_flash_until = Some(std::time::Instant::now() + Duration::from_millis(700));
+        }
     }
 
     /// Push or update the interactive form as a chat message.
@@ -1335,6 +1375,15 @@ mod tests {
     }
 
     #[test]
+    fn primary_session_is_pinned_before_remote_sessions_arrive() {
+        let mut st = state();
+        st.ensure_primary_session();
+        st.sessions.push(session("qq:dm::100", 10));
+        assert_eq!(st.active_session_id.as_deref(), Some(PRIMARY_SESSION_ID));
+        assert_eq!(st.active_session().unwrap().platform, "local");
+    }
+
+    #[test]
     fn completed_activity_freezes_total_elapsed_time() {
         let mut activity = AgentActivity::new();
         activity.turn_started_at = std::time::Instant::now() - Duration::from_secs(2);
@@ -1354,6 +1403,21 @@ mod tests {
         assert!(st.chat_flash_until.is_some());
         assert_eq!(st.active_messages().len(), 1);
         assert_eq!(st.active_messages()[0].content, "hi");
+    }
+
+    #[test]
+    fn background_message_does_not_move_the_primary_chat() {
+        let mut st = state();
+        st.ensure_primary_session();
+        st.chat_scroll = 12;
+        st.chat_flash_until = None;
+        st.push_message(
+            "qq:dm::100",
+            DisplayMessage::plain(MsgRole::User, "background", 0),
+        );
+        assert_eq!(st.chat_scroll, 12);
+        assert!(st.chat_flash_until.is_none());
+        assert!(st.active_messages().is_empty());
     }
 
     #[test]
