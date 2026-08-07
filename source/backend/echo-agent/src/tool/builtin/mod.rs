@@ -2,6 +2,7 @@
 
 pub mod adapter;
 pub mod calculator;
+pub mod checklist;
 pub mod coding;
 pub mod websearch;
 
@@ -13,6 +14,7 @@ pub fn register_all(
 ) {
     registry.register(std::sync::Arc::new(calculator::CalculatorTool));
     registry.register(std::sync::Arc::new(websearch::WebSearchTool));
+    registry.register(std::sync::Arc::new(checklist::ChecklistTool::new()));
     adapter::register_adapter_tools(registry, adapters);
     coding::register_coding_tools(registry, workspace);
 }
