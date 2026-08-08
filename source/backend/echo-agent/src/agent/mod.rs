@@ -85,7 +85,7 @@ impl Agent {
         // The agent owns exactly ONE conversation context: the trunk. Every
         // inbound message forks a temporary branch from a trunk snapshot and
         // merges back in append-only order (see `process_message`).
-        let trunk = TrunkStore::new(config.memory_limit);
+        let trunk = TrunkStore::new(config.effective_memory_limit_tokens());
         let eviction_trunk = trunk.clone();
         let cancel = tokio_util::sync::CancellationToken::new();
         let eviction_cancel = cancel.clone();
@@ -569,7 +569,7 @@ impl Agent {
         let _turn = session.turn_lock.lock().await;
         let mut history = session.history.lock().await;
         history.push(ChatMessage::user(content));
-        trim_history(&mut history, self.trunk.memory_limit());
+        trim_history(&mut history, self.trunk.memory_limit_tokens());
         let snapshot = history.clone();
         drop(history);
         self.trunk.mark_dirty();
@@ -588,7 +588,7 @@ impl Agent {
         let registration = self.register_inbound_turn(&session.id, message_sequence, true);
         let mut history = session.history.lock().await;
         history.push(ChatMessage::user(content));
-        trim_history(&mut history, self.trunk.memory_limit());
+        trim_history(&mut history, self.trunk.memory_limit_tokens());
         let snapshot = history.clone();
         drop(history);
         self.trunk.mark_dirty();
@@ -624,7 +624,7 @@ impl Agent {
         } else {
             history.push(message);
         }
-        trim_history(&mut history, self.trunk.memory_limit());
+        trim_history(&mut history, self.trunk.memory_limit_tokens());
         drop(history);
         self.trunk.mark_dirty();
         true
@@ -1671,10 +1671,10 @@ fn json_id(value: &serde_json::Value) -> Option<String> {
         .filter(|id| !id.is_empty())
 }
 
-fn trim_history(history: &mut Vec<ChatMessage>, limit: usize) {
-    if history.len() > limit {
-        history.drain(..history.len() - limit);
-    }
+/// Trim a history by the token budget, keeping at least the newest message.
+/// Delegates to [`crate::session::trim_by_tokens`].
+fn trim_history(history: &mut Vec<ChatMessage>, token_limit: usize) {
+    crate::session::trim_by_tokens(history, token_limit);
 }
 
 pub(crate) fn structured_message_sequence(content: &str) -> Option<u64> {

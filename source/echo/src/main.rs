@@ -173,8 +173,8 @@ async fn run_core(args: Args, cfg: CoreConfig) -> Result<()> {
         }
     }
     info!(
-        memory_limit = agent_config.memory_limit,
-        "agent context policy: single global trunk"
+        memory_limit_tokens = agent_config.effective_memory_limit_tokens(),
+        "agent context policy: single global trunk (token-budget trimmed)"
     );
 
     // Create the agent.

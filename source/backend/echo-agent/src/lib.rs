@@ -25,7 +25,9 @@ pub use agent::Agent;
 pub use bridge::{create_bridge, BackendBridge, BackendHandle, FanoutHandle};
 pub use command::BackendCommand;
 pub use config::{AgentConfig, SelfUpdateConfig};
-pub use event::{ApiProfileInfo, BackendEvent, BackendState, GroupInfo, SessionInfo};
+pub use event::{
+    ApiProfileInfo, BackendEvent, BackendState, ContextMessageInfo, GroupInfo, SessionInfo,
+};
 pub use llm::LlmProvider;
 pub use session::{Session, SessionKey, TrunkStore};
 pub use skill::{Skill, SkillRegistry};

@@ -9,6 +9,7 @@ use echo_agent::BackendCommand;
 pub mod adapter;
 pub mod api;
 pub mod basic;
+pub mod context;
 pub mod help;
 pub mod qq;
 
@@ -31,6 +32,7 @@ pub enum SlashAction {
     ApiSetModel,
     ApiSetUrl,
     ApiNewProfile,
+    Context,
 }
 
 /// Command table: (name, description, action).
@@ -59,6 +61,7 @@ pub const SLASH_COMMANDS: &[(&str, &str, SlashAction)] = &[
         SlashAction::QqSetting,
     ),
     ("quit", "退出程序", SlashAction::Quit),
+    ("context", "查看已填充的上下文", SlashAction::Context),
 ];
 
 pub use SlashAction::*;
@@ -85,6 +88,7 @@ pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, te
         ApiSetModel => api::model(state, backend, &text),
         ApiSetUrl => api::url(state, backend, &text),
         ApiNewProfile => api::new_profile(state, backend, &text),
+        Context => context::run(state, backend),
         Quit => {
             state.running = false;
         }

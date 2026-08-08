@@ -3,7 +3,7 @@
 //! Split out of `mod.rs` so the large `match` over `BackendEvent` lives in
 //! its own file.
 
-use echo_agent::{BackendEvent, SessionInfo};
+use echo_agent::{BackendEvent, ContextMessageInfo, SessionInfo};
 
 use crate::app::App;
 use crate::state::{
@@ -326,6 +326,20 @@ impl App {
                 self.state.apply_checklist_state(&state);
                 let _ = session_id;
             }
+            BackendEvent::ContextSnapshot {
+                messages,
+                total_tokens,
+                limit_tokens,
+            } => {
+                let rendered = render_context_snapshot(&messages, total_tokens, limit_tokens);
+                let ts = chrono::Utc::now().timestamp();
+                self.push_to(
+                    crate::state::TRUNK_SESSION_ID.to_string(),
+                    MsgRole::System,
+                    rendered,
+                    ts,
+                );
+            }
             BackendEvent::AgentOutput {
                 session_id,
                 content,
@@ -601,6 +615,38 @@ fn truncate(value: &str, max_chars: usize) -> String {
 
 fn short_id(value: &str) -> &str {
     value.get(..8).unwrap_or(value)
+}
+
+/// Render a `/context` snapshot as a chat message.
+fn render_context_snapshot(
+    messages: &[ContextMessageInfo],
+    total_tokens: usize,
+    limit_tokens: usize,
+) -> String {
+    let percent = if limit_tokens > 0 {
+        (total_tokens.saturating_mul(100) / limit_tokens).min(100)
+    } else {
+        0
+    };
+    let mut lines = vec![format!(
+        "── 上下文 · 全局 Trunk ──  {total_tokens} / {limit_tokens} tokens ({percent}%) · {} 条",
+        messages.len()
+    )];
+    for (index, message) in messages.iter().enumerate() {
+        let seq = message
+            .sequence
+            .map(|sequence| format!(" #{sequence}"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "{:>3}. {:<9} {:>5} tok{}  {}",
+            index + 1,
+            message.role,
+            message.tokens,
+            seq,
+            truncate(&one_line(&message.content), 48)
+        ));
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -1074,5 +1120,57 @@ mod tests {
     fn timer_event_is_presented_as_a_backend_task() {
         let content = r#"<timer_event>{"task":"发送提醒"}</timer_event>"#;
         assert_eq!(summarize_timer_event(content), "定时任务触发 · 发送提醒");
+    }
+
+    #[test]
+    fn context_snapshot_renders_token_usage_and_messages() {
+        let mut app = app();
+        app.apply_backend_event(BackendEvent::ContextSnapshot {
+            messages: vec![
+                ContextMessageInfo {
+                    role: "user".into(),
+                    content: "你好".into(),
+                    tokens: 6,
+                    sequence: Some(1),
+                },
+                ContextMessageInfo {
+                    role: "assistant".into(),
+                    content: "你好，有什么可以帮你？".into(),
+                    tokens: 14,
+                    sequence: None,
+                },
+            ],
+            total_tokens: 20,
+            limit_tokens: 8000,
+        });
+        let text: String = app
+            .state
+            .active_messages()
+            .iter()
+            .map(|m| m.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("20 / 8000 tokens (0%)"));
+        assert!(text.contains("2 条"));
+        assert!(text.contains("user"));
+        assert!(text.contains("assistant"));
+        assert!(text.contains("#1"), "sequence shown for the user message");
+    }
+
+    #[test]
+    fn context_snapshot_render_function_truncates_long_content() {
+        let rendered = render_context_snapshot(
+            &[ContextMessageInfo {
+                role: "tool".into(),
+                content: "x".repeat(500),
+                tokens: 170,
+                sequence: None,
+            }],
+            170,
+            200,
+        );
+        assert!(rendered.contains("85%"), "percent shown");
+        assert!(rendered.contains("170 tok"));
+        assert!(rendered.contains("…"), "long content truncated");
     }
 }

@@ -32,6 +32,19 @@ pub struct SessionInfo {
     pub last_message: String,
 }
 
+/// One message inside the trunk context snapshot (`/context`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextMessageInfo {
+    /// "user" | "assistant" | "tool" | "system".
+    pub role: String,
+    /// Full message content.
+    pub content: String,
+    /// Estimated token count of this message.
+    pub tokens: usize,
+    /// Structured message_sequence embedded in the content, if any.
+    pub sequence: Option<u64>,
+}
+
 /// Events flowing from the backend to the TUI.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BackendEvent {
@@ -179,6 +192,15 @@ pub enum BackendEvent {
     /// A session was created or updated.
     SessionUpdated {
         session: SessionInfo,
+    },
+    /// The current trunk context snapshot (`/context` command response).
+    ContextSnapshot {
+        /// Every message currently in the trunk (oldest first).
+        messages: Vec<ContextMessageInfo>,
+        /// Estimated total tokens of the trunk.
+        total_tokens: usize,
+        /// Effective token budget for the trunk.
+        limit_tokens: usize,
     },
     /// API configuration changed (for TUI settings form).
     ApiConfigUpdated {

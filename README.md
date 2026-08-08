@@ -177,6 +177,7 @@ TUI 只显示一个全局时间线对话框，汇总本地、QQ 私聊和 QQ 群
 | `/adapters` | 查看适配器状态 |
 | `/qq login` | QQ 扫码登录 |
 | `/qq setting` | QQ 设置（门控模式 + 白名单/黑名单管理） |
+| `/context` | 查看已填充的上下文（token 占用与逐条明细） |
 | `/quit` | 退出程序 |
 
 ### QQ 门控管理 (`/qq setting`)
@@ -260,7 +261,10 @@ base_url = "https://api.deepseek.com/anthropic"
 api_key = ""
 system_prompt = "请你使用中文"
 max_tool_iterations = 1024
-memory_limit = 40
+# 上下文 token 预算：trunk 按 token 裁剪（保守估算：CJK 1 字符≈1 token，
+# 其余 ≈3 字符/token，每条消息另计 4 token 结构开销）。
+# 未设置时回退到旧 memory_limit（消息数）×200 换算，默认 40 条 ≈ 8000 tokens。
+memory_limit_tokens = 8000
 ```
 
 Core 会每秒检查一次 `skills_dir`。新增、修改或删除任意递归目录下的
@@ -296,9 +300,11 @@ Agent 仍须显式调用 QQ 发送工具。定时器目前仅保存在内存中�
 
 Agent 已抛弃"每用户独立会话"的上下文模型，改为 **单 trunk + 临时分支**：
 
-- **Trunk（主干）**：全平台共享的唯一条对话历史（受 `memory_limit` 约束），
-  持久化为 `echo-sessions.json`（version 3）。TUI、QQ 私聊、QQ 群、
-  timer 与后台任务都读写同一份 trunk。
+- **Trunk（主干）**：全平台共享的唯一条对话历史（受 `memory_limit_tokens`
+  token 预算约束，超出从最旧消息开始丢弃），持久化为 `echo-sessions.json`
+  （version 3）。TUI、QQ 私聊、QQ 群、timer 与后台任务都读写同一份 trunk。
+  在 TUI 输入 `/context` 可查看当前已填充的上下文（已用/预算 token、消息数
+  与逐条角色、token 与内容预览）。
 - **来源标签（Identity）**：平台、用户、群、昵称等来源信息只用于标注消息、
   投递和授权，不拥有各自的上下文，也不会在 TUI 中形成可切换的对话框。
 - **分支（Branch）**：每条入站消息都从 trunk 的即时快照 fork 出一个只读分支，

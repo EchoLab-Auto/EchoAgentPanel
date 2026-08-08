@@ -114,6 +114,30 @@ impl Agent {
                     });
                 }
             }
+            BackendCommand::RequestContext => {
+                let history = self.trunk.snapshot().await;
+                let total_tokens = crate::llm::estimate_history_tokens(&history);
+                let messages = history
+                    .iter()
+                    .map(|message| crate::event::ContextMessageInfo {
+                        role: match message.role {
+                            crate::llm::ChatRole::System => "system",
+                            crate::llm::ChatRole::User => "user",
+                            crate::llm::ChatRole::Assistant => "assistant",
+                            crate::llm::ChatRole::Tool => "tool",
+                        }
+                        .into(),
+                        content: message.content.clone(),
+                        tokens: crate::llm::estimate_message_tokens(message),
+                        sequence: crate::agent::structured_message_sequence(&message.content),
+                    })
+                    .collect();
+                self.emit(BackendEvent::ContextSnapshot {
+                    messages,
+                    total_tokens,
+                    limit_tokens: self.trunk.memory_limit_tokens(),
+                });
+            }
             BackendCommand::SendMessage {
                 session_id,
                 content,

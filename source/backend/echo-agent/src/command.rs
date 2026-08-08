@@ -30,6 +30,8 @@ pub enum BackendCommand {
     /// Request a full state snapshot (responded with `BackendEvent::SessionUpdated`
     /// per session plus a fresh [`crate::BackendState`] via the bridge).
     RequestState,
+    /// Request a snapshot of the current trunk context (`BackendEvent::ContextSnapshot`).
+    RequestContext,
     /// Start an adapter by name.
     StartAdapter { name: String },
     /// Stop an adapter by name.

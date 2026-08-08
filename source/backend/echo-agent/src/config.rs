@@ -72,8 +72,14 @@ pub struct AgentConfig {
     pub max_tool_iterations: usize,
     /// Directory containing `SKILL.md` definitions.
     pub skills_dir: String,
-    /// Maximum conversation messages kept in the global trunk.
+    /// DEPRECATED — legacy message-count limit (kept for config compatibility).
+    /// Runtime trimming now uses [`memory_limit_tokens`]; this field is only a
+    /// fallback source when `memory_limit_tokens` is not set.
     pub memory_limit: usize,
+    /// Token budget for the global conversation trunk (the context fed to the
+    /// LLM). `None` falls back to the legacy `memory_limit` × 200 conversion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_limit_tokens: Option<usize>,
     /// Privileged framework update policy.
     pub self_update: SelfUpdateConfig,
 }
@@ -92,6 +98,7 @@ impl Default for AgentConfig {
             max_tool_iterations: 5,
             skills_dir: "skills".into(),
             memory_limit: 40,
+            memory_limit_tokens: None,
             self_update: SelfUpdateConfig::default(),
         }
     }
@@ -161,6 +168,19 @@ impl AgentConfig {
             "ollama" => "http://localhost:11434".into(),
             _ => "https://api.openai.com/v1".into(),
         }
+    }
+
+    /// Resolve the effective token budget for trunk trimming.
+    ///
+    /// - Explicit `memory_limit_tokens` wins (minimum 200 tokens).
+    /// - Otherwise the legacy `memory_limit` (message count) is converted at
+    ///   200 tokens per message, matching the old default of 40 messages ≈
+    ///   8,000 tokens.
+    pub fn effective_memory_limit_tokens(&self) -> usize {
+        if let Some(tokens) = self.memory_limit_tokens {
+            return tokens.max(200);
+        }
+        self.memory_limit.saturating_mul(200).max(200)
     }
 }
 
@@ -301,5 +321,51 @@ mod tests {
         let config: AgentConfig = toml::from_str("shared_context = true").unwrap();
         let serialized = toml::to_string(&config).unwrap();
         assert!(!serialized.contains("shared_context"));
+    }
+
+    #[test]
+    fn effective_tokens_fallback_converts_legacy_message_limit() {
+        let default = AgentConfig::default();
+        assert_eq!(default.effective_memory_limit_tokens(), 40 * 200);
+        let legacy = AgentConfig {
+            memory_limit: 20,
+            ..Default::default()
+        };
+        assert_eq!(legacy.effective_memory_limit_tokens(), 20 * 200);
+    }
+
+    #[test]
+    fn effective_tokens_prefers_explicit_budget() {
+        let cfg = AgentConfig {
+            memory_limit: 10,
+            memory_limit_tokens: Some(12_000),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_memory_limit_tokens(), 12_000);
+    }
+
+    #[test]
+    fn effective_tokens_floor_is_200() {
+        let cfg = AgentConfig {
+            memory_limit: 0,
+            memory_limit_tokens: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_memory_limit_tokens(), 200);
+    }
+
+    #[test]
+    fn memory_limit_tokens_roundtrips_through_toml() {
+        let cfg = AgentConfig {
+            memory_limit_tokens: Some(10_000),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&cfg).unwrap();
+        assert!(toml_str.contains("memory_limit_tokens = 10000"));
+        let parsed: AgentConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.memory_limit_tokens, Some(10_000));
+        // None is not serialized at all.
+        let none_str = toml::to_string(&AgentConfig::default()).unwrap();
+        assert!(!none_str.contains("memory_limit_tokens"));
     }
 }

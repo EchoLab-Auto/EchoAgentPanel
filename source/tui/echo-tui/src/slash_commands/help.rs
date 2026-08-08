@@ -22,6 +22,7 @@ pub fn run(state: &mut AppState) {
         "  /adapter start  启动适配器",
         "  /adapter stop   停止适配器",
         "  /qq login     QQ 扫码登录",
+        "  /context      查看已填充的上下文 (token 占用)",
         "  /quit         退出",
     ]
     .join("\n");

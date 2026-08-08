@@ -16,7 +16,7 @@ use dashmap::DashMap;
 use tokio::sync::Mutex;
 
 use crate::event::SessionInfo;
-use crate::llm::ChatMessage;
+use crate::llm::{estimate_history_tokens, estimate_message_tokens, ChatMessage};
 
 /// Structured session identity, replacing the old `user_{qq_number}` format.
 ///
@@ -97,7 +97,8 @@ pub struct Session {
     pub nickname: String,
     pub group_name: Option<String>,
     last_active: Arc<AtomicI64>,
-    /// The global trunk history (shared by every session, bounded by `memory_limit`).
+    /// The global trunk history (shared by every session, bounded by the
+    /// token budget `memory_limit_tokens`).
     pub history: Arc<Mutex<Vec<ChatMessage>>>,
     /// Serialises trunk snapshot creation and result merges; branch execution never holds this lock.
     pub turn_lock: Arc<tokio::sync::Mutex<()>>,
@@ -149,7 +150,7 @@ impl Session {
 /// Registry of source identities plus the single global conversation trunk.
 pub struct TrunkStore {
     identities: Arc<DashMap<String, Session>>,
-    memory_limit: usize,
+    memory_limit_tokens: usize,
     trunk_history: Arc<Mutex<Vec<ChatMessage>>>,
     trunk_turn_lock: Arc<tokio::sync::Mutex<()>>,
     persist_path: std::sync::Mutex<Option<std::path::PathBuf>>,
@@ -160,7 +161,7 @@ impl Clone for TrunkStore {
     fn clone(&self) -> Self {
         Self {
             identities: Arc::clone(&self.identities),
-            memory_limit: self.memory_limit,
+            memory_limit_tokens: self.memory_limit_tokens,
             trunk_history: Arc::clone(&self.trunk_history),
             trunk_turn_lock: Arc::clone(&self.trunk_turn_lock),
             persist_path: std::sync::Mutex::new(
@@ -191,10 +192,10 @@ const PERSIST_VERSION: u32 = 3;
 
 impl TrunkStore {
     /// Create a store owning the single global conversation trunk.
-    pub fn new(memory_limit: usize) -> Self {
+    pub fn new(memory_limit_tokens: usize) -> Self {
         Self {
             identities: Arc::new(DashMap::new()),
-            memory_limit,
+            memory_limit_tokens,
             trunk_history: Arc::new(Mutex::new(Vec::new())),
             trunk_turn_lock: Arc::new(tokio::sync::Mutex::new(())),
             persist_path: std::sync::Mutex::new(None),
@@ -350,9 +351,7 @@ impl TrunkStore {
         let mut history = persisted_trunk
             .map(|history| deserialize_messages(history))
             .unwrap_or_else(|| merge_legacy_histories(legacy_histories));
-        if history.len() > self.memory_limit {
-            history.drain(..history.len() - self.memory_limit);
-        }
+        trim_by_tokens(&mut history, self.memory_limit_tokens);
         if let Ok(mut trunk) = self.trunk_history.try_lock() {
             *trunk = history;
         }
@@ -413,13 +412,40 @@ impl TrunkStore {
         self.identities.is_empty()
     }
 
-    pub fn memory_limit(&self) -> usize {
-        self.memory_limit
+    pub fn memory_limit_tokens(&self) -> usize {
+        self.memory_limit_tokens
     }
 
     /// Number of messages currently in the trunk.
     pub fn trunk_len(&self) -> usize {
         self.trunk_history.try_lock().map(|h| h.len()).unwrap_or(0)
+    }
+
+    /// Estimated tokens currently held in the trunk.
+    pub fn trunk_tokens(&self) -> usize {
+        self.trunk_history
+            .try_lock()
+            .map(|h| estimate_history_tokens(&h))
+            .unwrap_or(0)
+    }
+
+    /// Clone the current trunk history (point-in-time snapshot).
+    pub async fn snapshot(&self) -> Vec<ChatMessage> {
+        self.trunk_history.lock().await.clone()
+    }
+}
+
+/// Trim a history by the token budget: drop messages from the head until the
+/// total fits. Always keeps the newest message so the latest input survives.
+pub fn trim_by_tokens(history: &mut Vec<ChatMessage>, token_limit: usize) {
+    let mut total: usize = estimate_history_tokens(history);
+    let mut head = 0usize;
+    while history.len() - head > 1 && total > token_limit {
+        total = total.saturating_sub(estimate_message_tokens(&history[head]));
+        head += 1;
+    }
+    if head > 0 {
+        history.drain(..head);
     }
 }
 
@@ -562,7 +588,7 @@ mod tests {
 
     #[tokio::test]
     async fn trunk_get_or_create_deduplicates_identities() {
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         let key = SessionKey::parse("qq:dm::111").unwrap();
         let s = store.get_or_create(&key, "alice".into(), None);
         assert_eq!(s.id, "qq:dm::111");
@@ -576,7 +602,7 @@ mod tests {
 
     #[tokio::test]
     async fn all_identities_share_one_trunk_history_and_turn_lock() {
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         let local = store.get_or_create(&SessionKey::local_tui(), "local".into(), None);
         let qq = store.get_or_create(
             &SessionKey::parse("qq:dm::123").unwrap(),
@@ -594,7 +620,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_info_has_platform_fields() {
-        let store = TrunkStore::new(5);
+        let store = TrunkStore::new(1000);
         let key = SessionKey::parse("qq:group:789:456").unwrap();
         let s = store.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
         let info = s.info("last msg".into());
@@ -616,7 +642,7 @@ mod tests {
         let path = temp_sessions_path("roundtrip");
         let _ = std::fs::remove_file(&path);
 
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         store.set_persist_path(&path);
         let key = SessionKey::parse("qq:group:789:456").unwrap();
         let s = store.get_or_create(&key, "bob".into(), Some("TestGroup".into()));
@@ -643,7 +669,7 @@ mod tests {
             .all(|identity| identity.get("history").is_none()));
 
         // A fresh store restores everything.
-        let store2 = TrunkStore::new(10);
+        let store2 = TrunkStore::new(1000);
         store2.set_persist_path(&path);
         let restored = store2.load_from_file().await;
         assert_eq!(restored, 1, "one identity restored");
@@ -660,7 +686,7 @@ mod tests {
     async fn persisted_history_is_shared_across_restored_identities() {
         let path = temp_sessions_path("shared-roundtrip");
         let _ = std::fs::remove_file(&path);
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         store.set_persist_path(&path);
         let local = store.get_or_create(&SessionKey::local_tui(), "local".into(), None);
         let qq_key = SessionKey::parse("qq:dm::123").unwrap();
@@ -672,7 +698,7 @@ mod tests {
         store.mark_dirty();
         store.save_now().await;
 
-        let restored = TrunkStore::new(10);
+        let restored = TrunkStore::new(1000);
         restored.set_persist_path(&path);
         assert_eq!(restored.load_from_file().await, 2);
         let local = restored.get("local:tui::local_user").unwrap();
@@ -684,7 +710,7 @@ mod tests {
 
     #[test]
     fn v1_array_migrates_distinct_histories_into_one_trunk() {
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         let restored = store.deserialize(
             r#"[
                 {"id":"local:tui::local_user","platform":"local","scope":"tui","scope_id":"","user_id":"local_user","nickname":"local","last_active":1,"history":[{"role":"user","content":"local"}]},
@@ -701,7 +727,7 @@ mod tests {
 
     #[test]
     fn v2_shared_object_migrates_into_trunk() {
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         let restored = store.deserialize(
             r#"{
                 "version": 2,
@@ -723,7 +749,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_from_missing_file_returns_zero() {
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         store.set_persist_path(temp_sessions_path("missing"));
         assert_eq!(store.load_from_file().await, 0);
     }
@@ -740,7 +766,7 @@ mod tests {
             ]"#,
         )
         .unwrap();
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         store.set_persist_path(&path);
         let restored = store.load_from_file().await;
         // Entries with an id are restored leniently (missing fields fall back
@@ -756,7 +782,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_get_or_create_yields_single_identity() {
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         let key = SessionKey::parse("qq:dm::999").unwrap();
         let key2 = key.clone();
 
@@ -778,7 +804,7 @@ mod tests {
 
     #[test]
     fn evict_idle_drops_stale_identity_but_keeps_trunk() {
-        let store = TrunkStore::new(10);
+        let store = TrunkStore::new(1000);
         let key = SessionKey::parse("qq:dm::111").unwrap();
         let stale = store.get_or_create(&key, "alice".into(), None);
         stale
