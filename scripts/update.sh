@@ -62,6 +62,8 @@ BIN_REPLACED=0
 UPDATER_REPLACED=0
 ROLLBACK_BINARY=""
 ROLLBACK_UPDATER=""
+temporary=""
+FINALIZED=0
 
 write_status() {
     local state=$1 message=$2 revision=${3:-unknown}
@@ -70,68 +72,117 @@ write_status() {
         printf 'state=%s\n' "$state"
         printf 'revision=%s\n' "$revision"
         printf 'message=%s\n' "$message"
+        printf 'pid=%s\n' "$$"
         printf 'updated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } >"$temporary"
     mv -f "$temporary" "$STATUS_FILE"
 }
 
+# Restore the previous binary / updater / revision and restart Core if it was
+# active before this update. Best-effort: every step tolerates failure.
+rollback_installation() {
+    if [[ -n "$ROLLBACK_BINARY" && -x "$ROLLBACK_BINARY" ]]; then
+        mv -f "$ROLLBACK_BINARY" "$BINARY" || true
+    elif ((BIN_REPLACED)); then
+        rm -f "$BINARY" || true
+    fi
+    if [[ -n "$ROLLBACK_UPDATER" && -f "$ROLLBACK_UPDATER" ]]; then
+        mv -f "$ROLLBACK_UPDATER" "$(dirname -- "$BINARY")/update.sh" || true
+    elif ((UPDATER_REPLACED)); then
+        rm -f "$(dirname -- "$BINARY")/update.sh" || true
+    fi
+    if [[ -n "${installed:-}" ]]; then
+        revision_restore="${REVISION_FILE}.restore.$$"
+        printf '%s\n' "$installed" >"$revision_restore"
+        mv -f "$revision_restore" "$REVISION_FILE" || true
+    else
+        rm -f "$REVISION_FILE" || true
+    fi
+    if (( ${core_was_active:-0} )); then
+        systemctl --user restart echo-agent-panel-core.service >/dev/null 2>&1 || true
+    fi
+}
+
+# Record a definitive failure state: roll back when a binary/updater was
+# already replaced, otherwise just mark the run as failed. Idempotent.
+finalize_failure() {
+    local code=$1 reason=$2
+    if ((FINALIZED == 1)); then
+        return
+    fi
+    FINALIZED=1
+    trap - ERR EXIT
+    set +e
+    if ((BIN_REPLACED || UPDATER_REPLACED)); then
+        ROLLBACK_ACTIVE=1
+        rollback_installation
+        write_status rolled_back "$reason; restored previous installation" "${installed:-unknown}" || true
+    else
+        write_status failed "$reason" "${TARGET:-unknown}" || true
+    fi
+}
+
 on_error() {
     local code=$?
-    trap - ERR
-    set +e
-    if ((ROLLBACK_ACTIVE == 0)) && ((BIN_REPLACED || UPDATER_REPLACED)); then
-        ROLLBACK_ACTIVE=1
-        if [[ -n "$ROLLBACK_BINARY" && -x "$ROLLBACK_BINARY" ]]; then
-            mv -f "$ROLLBACK_BINARY" "$BINARY" || true
-        elif ((BIN_REPLACED)); then
-            rm -f "$BINARY" || true
-        fi
-        if [[ -n "$ROLLBACK_UPDATER" && -f "$ROLLBACK_UPDATER" ]]; then
-            mv -f "$ROLLBACK_UPDATER" "$(dirname -- "$BINARY")/update.sh" || true
-        elif ((UPDATER_REPLACED)); then
-            rm -f "$(dirname -- "$BINARY")/update.sh" || true
-        fi
-        if [[ -n "${installed:-}" ]]; then
-            revision_restore="${REVISION_FILE}.restore.$$"
-            printf '%s\n' "$installed" >"$revision_restore"
-            mv -f "$revision_restore" "$REVISION_FILE" || true
-        else
-            rm -f "$REVISION_FILE" || true
-        fi
-        if (( ${core_was_active:-0} )); then
-            systemctl --user restart echo-agent-panel-core.service >/dev/null 2>&1 || true
-        fi
-        write_status rolled_back "update failed during $PHASE; restored previous installation" "${installed:-unknown}" || true
-    else
-        write_status failed "update failed during $PHASE" "${TARGET:-unknown}" || true
-    fi
+    finalize_failure "$code" "update failed during $PHASE"
     exit "$code"
 }
 trap on_error ERR
+
+# EXIT trap: always leave a terminal state. Covers signals (SIGTERM from
+# systemd timeouts, Ctrl+C, killed tool sessions) and any path that bypassed
+# the ERR trap, so the status file can never stay stuck at "running" while
+# systemd reports a failure.
+on_exit() {
+    local code=$?
+    trap - EXIT ERR
+    if [[ -n "$temporary" ]]; then
+        rm -f "$temporary" 2>/dev/null || true
+    fi
+    if ((FINALIZED == 0)) && ((code != 0)); then
+        set +e
+        if ((BIN_REPLACED || UPDATER_REPLACED)); then
+            ROLLBACK_ACTIVE=1
+            rollback_installation
+            write_status rolled_back "update interrupted (exit $code) during $PHASE; restored previous installation" "${installed:-unknown}" || true
+        else
+            write_status failed "update interrupted (exit $code) during $PHASE" "${TARGET:-unknown}" || true
+        fi
+    fi
+}
+trap on_exit EXIT
 
 install -d -m 755 "$STATE_DIR" "$(dirname -- "$BINARY")"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
     write_status busy "another update is already running"
+    FINALIZED=1
     exit 0
+fi
+
+# Holding the lock means no other update is running, so a leftover "running"
+# state belongs to an interrupted attempt. Record it before continuing.
+if [[ -f "$STATUS_FILE" ]] && grep -q '^state=running' "$STATUS_FILE" 2>/dev/null; then
+    write_status interrupted "previous update was interrupted; starting a new attempt" "$(cat "$REVISION_FILE" 2>/dev/null || true)"
+fi
+installed=$(cat "$REVISION_FILE" 2>/dev/null || true)
+core_was_active=0
+if systemctl --user is-active --quiet echo-agent-panel-core.service 2>/dev/null; then
+    core_was_active=1
 fi
 
 for command in cargo git install systemctl; do
     command -v "$command" >/dev/null 2>&1 || {
         write_status failed "required command not found: $command"
+        FINALIZED=1
         exit 1
     }
 done
 if [[ ! -f "$SOURCE_DIR/Cargo.toml" ]]; then
     write_status failed "source Cargo.toml is missing"
+    FINALIZED=1
     exit 1
 fi
-
-core_was_active=0
-if systemctl --user is-active --quiet echo-agent-panel-core.service 2>/dev/null; then
-    core_was_active=1
-fi
-installed=$(cat "$REVISION_FILE" 2>/dev/null || true)
 current=$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
 if [[ "$UPDATE_MODE" == local ]]; then
     TARGET="local:$current"
@@ -144,16 +195,19 @@ if [[ "$UPDATE_MODE" == local ]]; then
 else
     if [[ ! -d "$SOURCE_DIR/.git" ]]; then
         write_status failed "managed source checkout is missing"
+        FINALIZED=1
         exit 1
     fi
     if ! git -C "$SOURCE_DIR" diff --quiet || ! git -C "$SOURCE_DIR" diff --cached --quiet; then
         write_status failed "managed source has tracked local changes; refusing to overwrite"
+        FINALIZED=1
         exit 1
     fi
 
     branch=$(git -C "$SOURCE_DIR" branch --show-current)
     if [[ -z "$branch" ]]; then
         write_status failed "managed source is on a detached HEAD"
+        FINALIZED=1
         exit 1
     fi
 
@@ -163,12 +217,14 @@ else
     TARGET=$(git -C "$SOURCE_DIR" rev-parse FETCH_HEAD)
     if ! git -C "$SOURCE_DIR" merge-base --is-ancestor "$current" "$TARGET"; then
         write_status failed "origin/$branch is not a fast-forward" "$current"
+        FINALIZED=1
         exit 1
     fi
     git -C "$SOURCE_DIR" merge --ff-only "$TARGET"
 
     if [[ "$installed" == "$TARGET" && -x "$BINARY" ]]; then
         write_status current "already up to date" "$TARGET"
+        FINALIZED=1
         exit 0
     fi
 fi
@@ -179,7 +235,6 @@ cargo build --release --locked -p echo --manifest-path "$SOURCE_DIR/Cargo.toml"
 
 PHASE=installing
 temporary=$(mktemp "${BINARY}.new.XXXXXX")
-trap 'rm -f "$temporary"' EXIT
 install -m 755 "$SOURCE_DIR/target/release/echo-agent-panel" "$temporary"
 rollback="${BINARY}.rollback"
 ROLLBACK_BINARY="$rollback"
@@ -190,7 +245,7 @@ if [[ -x "$BINARY" ]]; then
 fi
 mv -f "$temporary" "$BINARY"
 BIN_REPLACED=1
-trap - EXIT
+temporary=""
 
 if ((core_was_active)); then
     PHASE=restarting
@@ -241,6 +296,7 @@ if [[ "$UPDATE_MODE" == local ]]; then
 else
     write_status updated "updated successfully" "$TARGET"
 fi
+FINALIZED=1
 BIN_REPLACED=0
 UPDATER_REPLACED=0
 rm -f "$rollback" "$ROLLBACK_UPDATER" || true

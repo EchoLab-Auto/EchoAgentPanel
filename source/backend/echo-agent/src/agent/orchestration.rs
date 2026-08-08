@@ -1162,9 +1162,22 @@ async fn framework_update_status() -> Result<String, String> {
         .ok()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .unwrap_or_else(|| "state=never_run".into());
+    // A failed service must not coexist with a stale non-terminal status file
+    // (e.g. left at "running" by an interrupted run). Flag the contradiction so
+    // callers can distinguish a real failure from a stuck status file.
+    let service_failed =
+        service.contains("ActiveState=failed") || service.contains("SubState=failed");
+    let status_terminal = status_file.lines().any(|line| {
+        line.starts_with("state=failed")
+            || line.starts_with("state=rolled_back")
+            || line.starts_with("state=updated")
+            || line.starts_with("state=current")
+            || line.starts_with("state=interrupted")
+    });
     Ok(json!({
         "service": service,
-        "update": status_file.trim()
+        "update": status_file.trim(),
+        "stale_status": service_failed && !status_terminal
     })
     .to_string())
 }
