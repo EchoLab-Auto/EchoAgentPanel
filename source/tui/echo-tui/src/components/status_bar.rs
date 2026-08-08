@@ -23,16 +23,7 @@ impl StatusBar {
     fn status_text(&self, state: &AppState, width: u16) -> (String, String) {
         let connection = connection_text(state);
         let mut context = connection;
-        if let Some(session) = state.active_session() {
-            let scope = if session.group_name.is_some() {
-                "群聊"
-            } else if session.platform == "local" {
-                "本地"
-            } else {
-                "私聊"
-            };
-            context.push_str(&format!("  |  {scope} · {}", session.nickname));
-        }
+        context.push_str("  |  全局时间线");
         if !state.status.model.is_empty() {
             context.push_str(&format!("  |  {}", state.status.model));
             if width >= 110 && !state.status.provider.is_empty() {
@@ -227,7 +218,6 @@ mod tests {
     fn clearly_names_every_runtime_phase() {
         let bar = StatusBar;
         let mut state = state();
-        state.active_session_id = Some("s1".into());
         let mut activity = AgentActivity::new();
         state.agent_activities.insert("s1".into(), activity.clone());
         assert!(bar.status_text(&state, 120).1.contains("思考"));
@@ -265,7 +255,6 @@ mod tests {
     #[test]
     fn runtime_reports_other_busy_sessions() {
         let mut state = state();
-        state.active_session_id = Some("s1".into());
         state
             .agent_activities
             .insert("s1".into(), AgentActivity::new());

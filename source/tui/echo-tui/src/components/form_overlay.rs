@@ -3,7 +3,6 @@
 //! Supports multiple form kinds via [`FormKind`]:
 //! - `ApiConfig`: API configuration (multi-field editing, Ctrl+S save)
 //! - `QqFilter`: QQ allowlist/denylist management (single QQ-number prompt)
-//! - `SessionSelect`: Session switching (Enter to switch, no editing)
 //!
 //! ## 操作
 //! - Selecting: ↑↓导航 Enter执行 e编辑 Esc退出 Ctrl+C退出
@@ -24,8 +23,6 @@ pub enum FormKind {
     ApiConfig,
     /// QQ allowlist/denylist form (single-field: QQ number).
     QqFilter,
-    /// Session selection form (Enter to switch, no editing).
-    SessionSelect,
 }
 
 /// 表单状态。
@@ -405,9 +402,6 @@ impl FormOverlay {
                     FormKind::QqFilter => {
                         lines.push("输入号码后 Enter确认  Esc取消".into());
                     }
-                    FormKind::SessionSelect => {
-                        lines.push("选择会话后 Enter切换  Esc取消".into());
-                    }
                 }
             }
             FormState::Selecting => {
@@ -456,7 +450,6 @@ impl FormOverlay {
                 let nav = match self.form_kind {
                     FormKind::ApiConfig => "↑↓选择  Home/End首尾  Enter切换  e编辑  Ctrl+C×2退出",
                     FormKind::QqFilter => "↑↓选择  Home/End首尾  Enter/e执行  Ctrl+C×2退出",
-                    FormKind::SessionSelect => "↑↓选择  Home/End首尾  Enter切换  Ctrl+C×2退出",
                 };
                 lines.push(nav.into());
             }

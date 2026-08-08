@@ -27,7 +27,7 @@ use crate::components::{
 };
 use crate::event::Event;
 use crate::keybindings::Keybindings;
-use crate::state::{AppState, ConversationMode, PaletteMode, ToastKind};
+use crate::state::{AppState, ConversationMode, ToastKind, PRIMARY_SESSION_ID};
 use crate::theme::Theme;
 use crate::util;
 
@@ -89,11 +89,8 @@ impl App {
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         let mut pending_events: Vec<BackendEvent> = Vec::new();
 
-        // Pin the default chat to the local TUI session before the Core sends
-        // remote QQ session snapshots. Remote sessions remain background until
-        // the user explicitly selects one from the session switcher. The global
-        // trunk timeline is always present and pinned to the top of the list.
-        self.state.ensure_primary_session();
+        // The TUI has one conversation view: the global trunk timeline.
+        // Source identities received from Core remain routing metadata only.
         self.state.ensure_trunk_session();
         self.backend.send(BackendCommand::RequestState);
         tracing::debug!("TUI 主循环启动");
@@ -228,13 +225,8 @@ impl App {
         }
 
         // Normal send.
-        let session_id = self
-            .state
-            .active_session_id
-            .clone()
-            .unwrap_or_else(|| "user_0".to_string());
         self.backend.send(BackendCommand::SendMessage {
-            session_id,
+            session_id: PRIMARY_SESSION_ID.into(),
             content,
         });
     }
@@ -377,9 +369,7 @@ impl App {
             self.state.leader_active = false;
             let kb = &self.state.keybindings;
             let chord = util::chord_of(key);
-            if chord == kb.session_switch {
-                self.open_palette(PaletteMode::Sessions);
-            } else if chord == kb.settings {
+            if chord == kb.settings {
                 self.open_settings();
             } else if chord == kb.help {
                 self.state.show_help = !self.state.show_help;
@@ -450,7 +440,7 @@ impl App {
         let kb = &self.state.keybindings;
         let chord = util::chord_of(key);
         if chord == kb.command_palette {
-            self.open_palette(PaletteMode::Commands);
+            self.open_palette();
             return;
         }
         if chord == kb.help {
@@ -720,25 +710,9 @@ impl App {
                                     self.state.form_overlay.enter_edit();
                                     self.state.mode = ConversationMode::Normal;
                                 }
-                                FormKind::SessionSelect if val.contains(':') => {
-                                    self.state.do_session_switch(&val);
-                                    self.state.load_session_messages(&val);
-                                    self.backend.send(BackendCommand::RequestState);
-                                    self.state.toast(
-                                        "已切换到该会话 — PgUp 查看历史消息",
-                                        ToastKind::Info,
-                                    );
-                                }
                                 FormKind::ApiConfig => {
-                                    if val.contains(':') {
-                                        self.state.do_session_switch(&val);
-                                        self.state.load_session_messages(&val);
-                                        self.backend.send(BackendCommand::RequestState);
-                                        self.state.toast("已切换到该会话", ToastKind::Info);
-                                    } else {
-                                        use crate::slash_commands::api;
-                                        api::handle_message(&mut self.state, &self.backend, &val);
-                                    }
+                                    use crate::slash_commands::api;
+                                    api::handle_message(&mut self.state, &self.backend, &val);
                                 }
                                 _ => {}
                             }
@@ -758,17 +732,8 @@ impl App {
         }
     }
 
-    pub fn open_palette(&mut self, mode: PaletteMode) {
-        self.state.palette_mode = mode;
+    pub fn open_palette(&mut self) {
         self.state.palette_selection = 0;
-        if mode == PaletteMode::Sessions {
-            let sessions = self.state.sorted_sessions();
-            if let Some(id) = &self.state.active_session_id {
-                if let Some(idx) = sessions.iter().position(|s| &s.id == id) {
-                    self.state.palette_selection = idx;
-                }
-            }
-        }
         self.state.show_palette = true;
     }
 
@@ -776,30 +741,10 @@ impl App {
         if key.code != KeyCode::Enter {
             return;
         }
-        if self.state.palette_mode == PaletteMode::Sessions {
-            let sessions = self.state.sorted_sessions();
-            let idx = self
-                .state
-                .palette_selection
-                .min(sessions.len().saturating_sub(1));
-            if let Some(s) = sessions.get(idx) {
-                self.state.active_session_id = Some(s.id.clone());
-                self.state.chat_scroll = 0;
-            }
-            self.state.show_palette = false;
-            return;
-        }
         let actions = self.command_palette.actions();
         let action = actions[self.state.palette_selection.min(actions.len() - 1)];
         match action {
             PaletteAction::ConfigureApi => self.open_settings(),
-            PaletteAction::RequestState => {
-                self.backend.send(BackendCommand::RequestState);
-            }
-            PaletteAction::SwitchSession => {
-                self.open_palette(PaletteMode::Sessions);
-                return;
-            }
             PaletteAction::ToggleHelp => self.state.show_help = true,
             PaletteAction::Quit => self.state.running = false,
         }
@@ -1535,13 +1480,11 @@ mod tests {
             Theme::dark(),
             Keybindings::default(),
         );
-        app.state.active_session_id = Some("qq:dm::123".into());
-
         app.handle_submit("你好".into());
         assert_eq!(
             handle.try_recv_command(),
             Some(BackendCommand::SendMessage {
-                session_id: "qq:dm::123".into(),
+                session_id: PRIMARY_SESSION_ID.into(),
                 content: "你好".into()
             })
         );

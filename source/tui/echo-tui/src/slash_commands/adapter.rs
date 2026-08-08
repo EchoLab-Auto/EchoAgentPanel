@@ -52,9 +52,8 @@ mod tests {
     use crate::theme::Theme;
 
     fn toast_text(st: &AppState) -> String {
-        let id = st.active_session_id.as_deref().unwrap();
         st.messages
-            .get(id)
+            .get(crate::state::TRUNK_SESSION_ID)
             .map(|msgs| msgs.iter().map(|m| m.content.clone()).collect())
             .unwrap_or_default()
     }

@@ -19,9 +19,6 @@ base_url = "https://api.deepseek.com/anthropic"
 api_key = ""
 max_tool_iterations = 1024
 memory_limit = 40
-# Share Agent memory across TUI, QQ private chats, and QQ groups. Keep disabled
-# in multi-user deployments unless cross-conversation context is intentional.
-shared_context = false
 skills_dir = "skills"                    # 递归发现 SKILL.md，运行时自动热重载
 system_prompt = "请你使用中文"
 

@@ -42,7 +42,7 @@ echo-tui 是 EchoAgentPanel 的终端用户界面。它实现了一个 opencode 
 
 | 分组 | 字段 | 职责 |
 |---|---|---|
-| 会话 | `sessions`, `active_session_id`, `messages` | 多会话管理和消息存储 |
+| 对话 | `sessions`, `messages` | 来源元数据和全局 Trunk 消息存储 |
 | 模态 | `show_palette`, `show_help`, `show_settings`, `show_slash` | 弹窗/菜单可见性 |
 | 快捷键 | `leader_active`, `quit_armed` | 快捷键状态和退出确认 |
 | 表单 | `form_overlay`, `mode`, `pending_action`, `menu_msg_idx` | 交互式表单状态机 |
@@ -168,7 +168,7 @@ conv_top 是当前可见的第一行索引
 ### 表单渲染
 
 表单不弹窗，而是作为聊天消息内嵌渲染：
-- `refresh_menu_msg()` → 将表单渲染文本写入当前会话最新一条系统消息
+- `refresh_menu_msg()` → 将表单渲染文本写入全局 Trunk 最新一条系统消息
 - 用户看到的是聊天区里的一条"特殊消息"，可以上下翻看历史同时操作表单
 
 ## 交互式表单 (FormOverlay)
@@ -190,7 +190,6 @@ Inactive ──activate()──→ Selecting ──enter_edit()──→ Editing
 |---|---|---|---|
 | ApiConfig | /api | Enter=选择/e=编辑字段 | 多字段表单 Ctrl+S 保存 |
 | QqFilter | /qq allowlist | Enter=切换群/e=输QQ号 | 单字段 QQ 号输入 |
-| SessionSelect | /resume | Enter=切换会话 | 无编辑 |
 
 > 📖 **详细交互设计**: 参见 [QQ Setting 交互设计文档](./qq-setting-interaction.md) 了解完整的 `/qq setting` 交互流程、状态管理和用户体验设计。
 

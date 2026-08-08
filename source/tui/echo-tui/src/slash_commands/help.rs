@@ -11,7 +11,6 @@ pub fn run(state: &mut AppState) {
         "  Enter        发送消息",
         "  Shift+Enter  换行",
         "  Ctrl+P       命令面板",
-        "  Ctrl+X o     切换会话",
         "  Ctrl+X s     配置 API",
         "  PgUp/PgDn    滚动聊天区",
         "  Ctrl+C ×2    退出",
@@ -19,8 +18,6 @@ pub fn run(state: &mut AppState) {
         "── 斜杠命令 ──",
         "  /api          配置 API",
         "  /help         显示帮助",
-        "  /clear        清空会话",
-        "  /switch       切换会话",
         "  /adapters     适配器状态",
         "  /adapter start  启动适配器",
         "  /adapter stop   停止适配器",
@@ -41,9 +38,10 @@ mod tests {
     fn help_toasts_command_reference() {
         let mut st = AppState::new(Theme::dark(), Keybindings::default());
         run(&mut st);
-        // Toast lands in the active session's message list.
-        let session_id = st.active_session_id.clone().expect("session created");
-        let messages = st.messages.get(&session_id).expect("messages stored");
+        let messages = st
+            .messages
+            .get(crate::state::TRUNK_SESSION_ID)
+            .expect("messages stored");
         let text: String = messages.iter().map(|m| m.content.clone()).collect();
         assert!(text.contains("/api"), "help lists /api");
         assert!(text.contains("/quit"));

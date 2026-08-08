@@ -130,10 +130,7 @@ impl Component for PromptInput {
         }
 
         let focused = true;
-        let title = match state.active_session() {
-            Some(s) => format!(" 消息输入 (发送给 {}) ", s.nickname),
-            None => " 消息输入 ".to_string(),
-        };
+        let title = " 消息输入 (全局时间线) ".to_string();
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(if focused {

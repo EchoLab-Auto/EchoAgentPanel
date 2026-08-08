@@ -17,17 +17,15 @@ pub struct HelpPopup;
 impl Component for HelpPopup {
     fn render(&self, f: &mut Frame, area: Rect, state: &AppState) {
         let theme = state.theme;
-        let kb = &state.keybindings;
         let rows: Vec<&str> = vec![
             "Tab                选中输入框（进入输入模式）",
             "Esc                取消输入框选中",
             "Enter              发送消息 / 面板中执行",
             "Shift+Enter        换行",
-            "/cmd               输入框命令菜单 (/help /api /switch ...)",
-            "Ctrl+P             命令面板（命令 / 会话列表）",
+            "/cmd               输入框命令菜单 (/help /api ...)",
+            "Ctrl+P             命令面板",
             "Ctrl+B             查看分支 / Subagent 状态",
             "Ctrl+X 然后 c      查看检查清单",
-            "Ctrl+X 然后 o      切换会话",
             "Ctrl+X 然后 s      配置 API (provider/model/key)",
             "Ctrl+C (两次)       退出程序（第一次提示确认）",
             "PgUp / PgDn        聊天区滚动",
@@ -56,7 +54,6 @@ impl Component for HelpPopup {
                     )),
             );
         f.render_widget(p, rect);
-        let _ = kb;
     }
 
     fn handle_event(&mut self, event: &Event, state: &mut AppState) -> ComponentResult {

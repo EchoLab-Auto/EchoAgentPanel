@@ -18,10 +18,23 @@ const MAX_ORCHESTRATION_HISTORY: usize = 128;
 pub const PRIMARY_SESSION_ID: &str = "local:tui::local_user";
 /// The global trunk timeline. Every conversation message from all sources
 /// (QQ private, QQ group, TUI, timers, background tasks) is mirrored here in
-/// one ordered stream. It is pinned to the top of the session list.
+/// one ordered stream. It is the TUI's only conversation view.
 pub const TRUNK_SESSION_ID: &str = "trunk";
 /// Cap on trunk timeline entries so a long-running panel stays bounded.
 const TRUNK_MAX_MESSAGES: usize = 1024;
+
+fn trunk_session_info() -> SessionInfo {
+    SessionInfo {
+        id: TRUNK_SESSION_ID.into(),
+        platform: "local".into(),
+        scope: "trunk".into(),
+        user_id: "trunk".into(),
+        nickname: "全局时间线".into(),
+        group_name: None,
+        last_active: 0,
+        last_message: String::new(),
+    }
+}
 
 // ── Message types ──────────────────────────────────────────────────────────
 
@@ -50,27 +63,6 @@ impl DisplayMessage {
             metadata: None,
         }
     }
-}
-
-fn history_display_content(content: &str) -> String {
-    let trimmed = content.trim();
-    let payload = [
-        ("qq_message_hook", "content"),
-        ("backend_message_hook", "content"),
-        ("timer_event", "task"),
-        ("background_task_event", "objective"),
-    ]
-    .into_iter()
-    .find_map(|(tag, field)| {
-        let body = trimmed
-            .strip_prefix(&format!("<{tag}>"))?
-            .strip_suffix(&format!("</{tag}>"))?
-            .trim();
-        serde_json::from_str::<serde_json::Value>(body).ok()?[field]
-            .as_str()
-            .map(str::to_string)
-    });
-    payload.unwrap_or_else(|| content.to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -367,12 +359,6 @@ impl StatusInfo {
 
 // ── Mode enums ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaletteMode {
-    Commands,
-    Sessions,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConversationMode {
     Normal,
@@ -421,11 +407,11 @@ pub struct AppState {
     pub running: bool,
     pub theme: Theme,
     pub keybindings: Keybindings,
-    pub active_session_id: Option<String>,
+    /// Source identities retained for provenance, routing and activity state.
+    /// They are not selectable conversation views.
     pub sessions: Vec<SessionInfo>,
     pub messages: HashMap<String, Vec<DisplayMessage>>,
     pub show_palette: bool,
-    pub palette_mode: PaletteMode,
     pub show_help: bool,
     pub show_settings: bool,
     pub settings: SettingsForm,
@@ -490,11 +476,9 @@ impl AppState {
             running: true,
             theme,
             keybindings,
-            active_session_id: None,
-            sessions: Vec::new(),
+            sessions: vec![trunk_session_info()],
             messages: HashMap::new(),
             show_palette: false,
-            palette_mode: PaletteMode::Commands,
             show_help: false,
             show_settings: false,
             settings: SettingsForm::default(),
@@ -545,67 +529,28 @@ impl AppState {
         }
     }
 
-    pub fn active_session(&self) -> Option<&SessionInfo> {
-        let id = self.active_session_id.as_deref()?;
-        self.sessions.iter().find(|s| s.id == id)
-    }
-
-    /// Establish the TUI's local primary conversation before remote sessions
-    /// arrive. Incoming QQ sessions then remain background sessions until the
-    /// user explicitly switches to them.
-    pub fn ensure_primary_session(&mut self) {
-        if !self
-            .sessions
-            .iter()
-            .any(|session| session.id == PRIMARY_SESSION_ID)
-        {
-            self.sessions.push(SessionInfo {
-                id: PRIMARY_SESSION_ID.into(),
-                platform: "local".into(),
-                scope: "tui".into(),
-                user_id: "local_user".into(),
-                nickname: "EchoAgent".into(),
-                group_name: None,
-                last_active: 0,
-                last_message: String::new(),
-            });
-        }
-        self.active_session_id = Some(PRIMARY_SESSION_ID.into());
-    }
-
-    /// Ensure the global trunk timeline session exists. It is a virtual
-    /// session (not a real platform identity) pinned to the top of the
-    /// session list; every source's messages are mirrored into it.
+    /// Ensure the TUI's sole virtual conversation view exists.
     pub fn ensure_trunk_session(&mut self) {
         if !self
             .sessions
             .iter()
             .any(|session| session.id == TRUNK_SESSION_ID)
         {
-            self.sessions.push(SessionInfo {
-                id: TRUNK_SESSION_ID.into(),
-                platform: "local".into(),
-                scope: "trunk".into(),
-                user_id: "trunk".into(),
-                nickname: "全局 Trunk".into(),
-                group_name: None,
-                last_active: 0,
-                last_message: String::new(),
-            });
+            self.sessions.push(trunk_session_info());
         }
     }
 
     pub fn active_messages(&self) -> &[DisplayMessage] {
-        match &self.active_session_id {
-            Some(id) => self.messages.get(id).map(|v| v.as_slice()).unwrap_or(&[]),
-            None => &[],
-        }
+        self.messages
+            .get(TRUNK_SESSION_ID)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn active_activity(&self) -> Option<&AgentActivity> {
-        self.active_session_id
-            .as_deref()
-            .and_then(|id| self.agent_activities.get(id))
+        self.agent_activities
+            .values()
+            .max_by_key(|activity| (activity.phase.is_busy(), activity.phase_started_at))
     }
 
     pub fn busy_session_count(&self) -> usize {
@@ -1049,29 +994,17 @@ impl AppState {
             .min(self.orchestration_tasks.len().saturating_sub(1));
     }
 
-    pub fn push_message(&mut self, session_id: &str, msg: DisplayMessage) {
-        let is_active = self.active_session_id.as_deref() == Some(session_id);
-        self.messages
-            .entry(session_id.to_string())
-            .or_default()
-            .push(msg.clone());
-        if is_active {
-            self.chat_scroll = 0;
-            self.chat_flash_until = Some(std::time::Instant::now() + Duration::from_millis(700));
+    pub fn push_message(&mut self, _session_id: &str, msg: DisplayMessage) {
+        let trunk = self
+            .messages
+            .entry(TRUNK_SESSION_ID.to_string())
+            .or_default();
+        trunk.push(msg);
+        if trunk.len() > TRUNK_MAX_MESSAGES {
+            trunk.drain(..trunk.len() - TRUNK_MAX_MESSAGES);
         }
-        // Mirror into the global trunk timeline so the Trunk view shows every
-        // source's conversation in one ordered stream. The trunk itself is not
-        // mirrored (that would duplicate its own entries).
-        if session_id != TRUNK_SESSION_ID {
-            let trunk = self
-                .messages
-                .entry(TRUNK_SESSION_ID.to_string())
-                .or_default();
-            trunk.push(msg);
-            if trunk.len() > TRUNK_MAX_MESSAGES {
-                trunk.drain(..trunk.len() - TRUNK_MAX_MESSAGES);
-            }
-        }
+        self.chat_scroll = 0;
+        self.chat_flash_until = Some(std::time::Instant::now() + Duration::from_millis(700));
     }
 
     /// Push or update the interactive form as a chat message.
@@ -1079,13 +1012,7 @@ impl AppState {
         if !self.form_overlay.is_active() {
             return;
         }
-        let sid = self
-            .active_session_id
-            .clone()
-            .unwrap_or_else(|| "local:tui::local_user".into());
-        if self.active_session_id.is_none() {
-            self.active_session_id = Some(sid.clone());
-        }
+        let sid = TRUNK_SESSION_ID.to_string();
         let text = self.form_overlay.render_text();
 
         if self.menu_msg_idx >= 0 {
@@ -1246,113 +1173,20 @@ impl AppState {
         self.clear_selection();
     }
 
-    /// Load session messages from the persistence file.
-    pub fn load_session_messages(&mut self, session_id: &str) {
-        use std::path::PathBuf;
-        let path = PathBuf::from("echo-sessions.json");
-        if !path.exists() {
-            let path = PathBuf::from("config/echo-sessions.json");
-            if !path.exists() {
-                return;
-            }
-            self.load_from_file(&path, session_id);
-        } else {
-            self.load_from_file(&path, session_id);
-        }
-    }
-
-    fn load_from_file(&mut self, path: &std::path::PathBuf, session_id: &str) {
-        let Ok(data) = std::fs::read_to_string(path) else {
-            return;
-        };
-        let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
-            return;
-        };
-        let Some((sessions, shared_history)) = (match &root {
-            serde_json::Value::Array(sessions) => Some((sessions, None)),
-            serde_json::Value::Object(_) => root["sessions"]
-                .as_array()
-                .map(|sessions| (sessions, root["shared_history"].as_array())),
-            _ => None,
-        }) else {
-            return;
-        };
-        for s in sessions {
-            let Some(id) = s["id"].as_str() else { continue };
-            if id != session_id {
-                continue;
-            }
-            let Some(history) = shared_history.or_else(|| s["history"].as_array()) else {
-                continue;
-            };
-            let msgs = self.messages.entry(session_id.to_string()).or_default();
-            msgs.clear();
-            for m in history {
-                let role = match m["role"].as_str().unwrap_or("user") {
-                    "user" => MsgRole::User,
-                    "assistant" => MsgRole::Backend,
-                    "tool" => MsgRole::Tool,
-                    _ => MsgRole::System,
-                };
-                let content = history_display_content(m["content"].as_str().unwrap_or(""));
-                msgs.push(DisplayMessage::plain(role, content, 0));
-            }
-            return;
-        }
-    }
-
     pub fn toast(&mut self, text: impl Into<String>, _kind: ToastKind) {
         let text: String = text.into();
         let text: String = text.chars().take(4096).collect();
-        let session_id = self
-            .active_session_id
-            .clone()
-            .unwrap_or_else(|| "local:tui::local_user".into());
-        if self.active_session_id.is_none() {
-            self.active_session_id = Some(session_id.clone());
-        }
-        if !self.sessions.iter().any(|s| s.id == session_id) {
-            self.sessions.push(SessionInfo {
-                id: session_id.clone(),
-                platform: "local".into(),
-                scope: "tui".into(),
-                user_id: "local_user".into(),
-                nickname: "EchoAgent".into(),
-                group_name: None,
-                last_active: chrono::Utc::now().timestamp(),
-                last_message: text.clone(),
-            });
-        }
+        self.ensure_trunk_session();
         self.push_message(
-            &session_id,
+            TRUNK_SESSION_ID,
             DisplayMessage::plain(MsgRole::System, text, chrono::Utc::now().timestamp()),
         );
-    }
-
-    /// Switch to a session by id — resets scroll and deactivates form.
-    pub fn do_session_switch(&mut self, session_id: &str) {
-        self.active_session_id = Some(session_id.to_string());
-        self.chat_scroll = 0;
-        self.form_overlay.deactivate();
-        self.menu_msg_idx = -1;
     }
 
     /// Exit any active config mode.
     pub fn exit_config_mode(&mut self) {
         self.mode = ConversationMode::Normal;
         self.menu_msg_idx = -1;
-    }
-
-    /// All sessions sorted by last_active descending; the global trunk
-    /// timeline is always pinned to the top.
-    pub fn sorted_sessions(&self) -> Vec<SessionInfo> {
-        let mut sessions = self.sessions.clone();
-        sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-        if let Some(index) = sessions.iter().position(|s| s.id == TRUNK_SESSION_ID) {
-            let trunk = sessions.remove(index);
-            sessions.insert(0, trunk);
-        }
-        sessions
     }
 
     /// Number of messages currently held in the global trunk timeline.
@@ -1489,19 +1323,18 @@ mod tests {
     }
 
     #[test]
-    fn active_messages_returns_empty_without_session() {
+    fn new_state_has_only_the_global_timeline_view() {
         let st = state();
         assert!(st.active_messages().is_empty());
-        assert!(st.active_session().is_none());
+        assert_eq!(st.sessions.len(), 1);
+        assert_eq!(st.sessions[0].id, TRUNK_SESSION_ID);
     }
 
     #[test]
-    fn primary_session_is_pinned_before_remote_sessions_arrive() {
+    fn source_identities_do_not_replace_the_global_timeline_view() {
         let mut st = state();
-        st.ensure_primary_session();
         st.sessions.push(session("qq:dm::100", 10));
-        assert_eq!(st.active_session_id.as_deref(), Some(PRIMARY_SESSION_ID));
-        assert_eq!(st.active_session().unwrap().platform, "local");
+        assert_eq!(st.sessions[0].id, TRUNK_SESSION_ID);
     }
 
     #[test]
@@ -1517,7 +1350,6 @@ mod tests {
     #[test]
     fn push_message_scrolls_to_bottom_and_flashes() {
         let mut st = state();
-        st.active_session_id = Some("s1".into());
         st.chat_scroll = 50;
         st.push_message("s1", DisplayMessage::plain(MsgRole::User, "hi", 0));
         assert_eq!(st.chat_scroll, 0, "new message snaps to bottom");
@@ -1527,29 +1359,17 @@ mod tests {
     }
 
     #[test]
-    fn background_message_does_not_move_the_primary_chat() {
+    fn source_message_is_visible_in_the_global_timeline() {
         let mut st = state();
-        st.ensure_primary_session();
         st.chat_scroll = 12;
         st.chat_flash_until = None;
         st.push_message(
             "qq:dm::100",
             DisplayMessage::plain(MsgRole::User, "background", 0),
         );
-        assert_eq!(st.chat_scroll, 12);
-        assert!(st.chat_flash_until.is_none());
-        assert!(st.active_messages().is_empty());
-    }
-
-    #[test]
-    fn active_session_finds_by_id() {
-        let mut st = state();
-        st.sessions.push(session("a", 1));
-        st.sessions.push(session("b", 2));
-        st.active_session_id = Some("b".into());
-        assert_eq!(st.active_session().unwrap().id, "b");
-        st.active_session_id = Some("missing".into());
-        assert!(st.active_session().is_none());
+        assert_eq!(st.chat_scroll, 0);
+        assert!(st.chat_flash_until.is_some());
+        assert_eq!(st.active_messages()[0].content, "background");
     }
 
     #[test]
@@ -1635,18 +1455,6 @@ mod tests {
     }
 
     #[test]
-    fn do_session_switch_resets_view_state() {
-        let mut st = state();
-        st.chat_scroll = 42;
-        st.menu_msg_idx = 3;
-        st.do_session_switch("s2");
-        assert_eq!(st.active_session_id.as_deref(), Some("s2"));
-        assert_eq!(st.chat_scroll, 0);
-        assert!(!st.form_overlay.is_active());
-        assert_eq!(st.menu_msg_idx, -1);
-    }
-
-    #[test]
     fn exit_config_mode_returns_to_normal() {
         let mut st = state();
         st.mode = ConversationMode::ApiConfig;
@@ -1657,38 +1465,13 @@ mod tests {
     }
 
     #[test]
-    fn sorted_sessions_orders_by_recency() {
-        let mut st = state();
-        st.sessions.push(session("old", 100));
-        st.sessions.push(session("new", 300));
-        st.sessions.push(session("mid", 200));
-        let sorted = st.sorted_sessions();
-        assert_eq!(sorted[0].id, "new");
-        assert_eq!(sorted[1].id, "mid");
-        assert_eq!(sorted[2].id, "old");
-    }
-
-    #[test]
-    fn trunk_session_is_pinned_to_the_top_of_the_list() {
-        let mut st = state();
-        st.ensure_trunk_session();
-        st.sessions.push(session("qq:dm::1", 300));
-        st.sessions.push(session("qq:dm::2", 200));
-        let sorted = st.sorted_sessions();
-        assert_eq!(sorted[0].id, TRUNK_SESSION_ID, "trunk always pinned on top");
-        assert_eq!(sorted[1].id, "qq:dm::1");
-    }
-
-    #[test]
-    fn push_message_mirrors_into_the_trunk_timeline() {
+    fn push_message_stores_only_the_trunk_timeline() {
         let mut st = state();
         st.ensure_trunk_session();
         st.push_message("qq:dm::1", DisplayMessage::plain(MsgRole::User, "hello", 0));
         st.push_message("qq:dm::1", DisplayMessage::plain(MsgRole::Backend, "hi", 0));
         assert_eq!(st.trunk_message_count(), 2);
-        // The trunk itself does not self-mirror.
-        assert_eq!(st.trunk_message_count(), 2);
-        // A message pushed directly to the trunk is counted once, not mirrored again.
+        assert!(!st.messages.contains_key("qq:dm::1"));
         st.push_message(
             TRUNK_SESSION_ID,
             DisplayMessage::plain(MsgRole::System, "x", 0),
@@ -1787,21 +1570,5 @@ mod tests {
         assert_eq!(task.kind, OrchestrationKind::Subagent);
         assert_eq!(task.status, OrchestrationStatus::Completed);
         assert_eq!(task.branches[0].result.as_deref(), Some("方案 A 更稳妥"));
-    }
-
-    #[test]
-    fn persisted_structured_hooks_render_their_human_content() {
-        assert_eq!(
-            history_display_content(
-                r#"<backend_message_hook>{"message_sequence":7,"content":"hello"}</backend_message_hook>"#
-            ),
-            "hello"
-        );
-        assert_eq!(
-            history_display_content(
-                r#"<background_task_event>{"objective":"prepare report"}</background_task_event>"#
-            ),
-            "prepare report"
-        );
     }
 }

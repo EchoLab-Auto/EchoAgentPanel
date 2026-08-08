@@ -8,7 +8,7 @@ use echo_agent::{BackendEvent, SessionInfo};
 use crate::app::App;
 use crate::state::{
     AgentPhase, DisplayMessage, InboundMessage, MessageMetadata, MsgRole, ToastKind, ToolMessage,
-    ToolMessageStatus,
+    ToolMessageStatus, TRUNK_SESSION_ID,
 };
 
 impl App {
@@ -456,45 +456,12 @@ impl App {
         let messages = self
             .state
             .messages
-            .entry(session_id.to_string())
+            .entry(TRUNK_SESSION_ID.to_string())
             .or_default();
-        if let Some(tool) = messages.iter_mut().rev().find_map(|message| {
-            let Some(MessageMetadata::Tool(tool)) = message.metadata.as_mut() else {
-                return None;
-            };
-            (tool.name == tool_name && tool.status == ToolMessageStatus::Running).then_some(tool)
-        }) {
-            tool.status = if failed {
-                ToolMessageStatus::Failed
-            } else {
-                ToolMessageStatus::Succeeded
-            };
-            tool.output = Some(summarize_result(result));
-            tool.elapsed = Some(tool.started_at.elapsed());
-        } else {
-            messages.push(DisplayMessage {
-                role: MsgRole::Tool,
-                content: tool_name.to_string(),
-                time: chrono::Utc::now().timestamp(),
-                metadata: Some(MessageMetadata::Tool(ToolMessage {
-                    name: tool_name.to_string(),
-                    input: String::new(),
-                    output: Some(summarize_result(result)),
-                    status: if failed {
-                        ToolMessageStatus::Failed
-                    } else {
-                        ToolMessageStatus::Succeeded
-                    },
-                    started_at: std::time::Instant::now(),
-                    elapsed: Some(std::time::Duration::ZERO),
-                })),
-            });
-        }
-        if self.state.active_session_id.as_deref() == Some(session_id) {
-            self.state.chat_scroll = 0;
-            self.state.chat_flash_until =
-                Some(std::time::Instant::now() + std::time::Duration::from_millis(700));
-        }
+        finish_tool_entry(messages, tool_name, result, failed);
+        self.state.chat_scroll = 0;
+        self.state.chat_flash_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(700));
         if let Some(session) = self
             .state
             .sessions
@@ -512,9 +479,46 @@ impl App {
         } else {
             self.state.sessions.push(session.clone());
         }
-        if self.state.active_session_id.is_none() {
-            self.state.active_session_id = Some(session.id);
-        }
+    }
+}
+
+fn finish_tool_entry(
+    messages: &mut Vec<DisplayMessage>,
+    tool_name: &str,
+    result: &str,
+    failed: bool,
+) {
+    if let Some(tool) = messages.iter_mut().rev().find_map(|message| {
+        let Some(MessageMetadata::Tool(tool)) = message.metadata.as_mut() else {
+            return None;
+        };
+        (tool.name == tool_name && tool.status == ToolMessageStatus::Running).then_some(tool)
+    }) {
+        tool.status = if failed {
+            ToolMessageStatus::Failed
+        } else {
+            ToolMessageStatus::Succeeded
+        };
+        tool.output = Some(summarize_result(result));
+        tool.elapsed = Some(tool.started_at.elapsed());
+    } else {
+        messages.push(DisplayMessage {
+            role: MsgRole::Tool,
+            content: tool_name.to_string(),
+            time: chrono::Utc::now().timestamp(),
+            metadata: Some(MessageMetadata::Tool(ToolMessage {
+                name: tool_name.to_string(),
+                input: String::new(),
+                output: Some(summarize_result(result)),
+                status: if failed {
+                    ToolMessageStatus::Failed
+                } else {
+                    ToolMessageStatus::Succeeded
+                },
+                started_at: std::time::Instant::now(),
+                elapsed: Some(std::time::Duration::ZERO),
+            })),
+        });
     }
 }
 
@@ -773,15 +777,27 @@ mod tests {
         app.apply_backend_event(BackendEvent::SessionUpdated {
             session: info.clone(),
         });
-        assert_eq!(app.state.sessions.len(), 1);
-        assert_eq!(app.state.active_session_id.as_deref(), Some("s1"));
+        assert_eq!(
+            app.state.sessions.len(),
+            2,
+            "trunk plus one source identity"
+        );
+        assert_eq!(app.state.sessions[0].id, crate::state::TRUNK_SESSION_ID);
 
         // Update the same session.
         let mut updated = info;
         updated.last_message = "new".into();
         app.apply_backend_event(BackendEvent::SessionUpdated { session: updated });
-        assert_eq!(app.state.sessions.len(), 1, "updated in place");
-        assert_eq!(app.state.sessions[0].last_message, "new");
+        assert_eq!(app.state.sessions.len(), 2, "updated in place");
+        assert_eq!(
+            app.state
+                .sessions
+                .iter()
+                .find(|session| session.id == "s1")
+                .unwrap()
+                .last_message,
+            "new"
+        );
     }
 
     #[test]
@@ -838,7 +854,6 @@ mod tests {
     #[test]
     fn subagent_events_have_a_distinct_phase() {
         let mut app = app();
-        app.state.active_session_id = Some("s1".into());
         app.apply_backend_event(BackendEvent::SubagentStarted {
             session_id: "s1".into(),
             task: "比较两个实现方案".into(),
@@ -957,7 +972,6 @@ mod tests {
     #[test]
     fn detached_background_task_does_not_keep_the_conversation_busy() {
         let mut app = app();
-        app.state.active_session_id = Some("s1".into());
         app.apply_backend_event(BackendEvent::BackgroundTaskStarted {
             session_id: "s1".into(),
             task_id: "12345678-abcd".into(),
@@ -977,7 +991,6 @@ mod tests {
     #[test]
     fn background_hook_updates_branches_without_leaking_raw_hook_to_chat() {
         let mut app = app();
-        app.state.active_session_id = Some("s1".into());
         app.apply_backend_event(BackendEvent::ToolCall {
             session_id: "s1".into(),
             tool_name: "spawn_parallel_task".into(),

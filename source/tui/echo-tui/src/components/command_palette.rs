@@ -1,9 +1,4 @@
-//! Command palette (Ctrl+P): dual-mode selectable list.
-//!
-//! - Commands 模式：固定动作列表（配置 API / 清空会话 / 切换会话 / 帮助 / 退出）
-//! - Sessions 模式：会话切换列表（按最近活跃排序，当前会话预选）
-//!
-//! 会话栏移除后，会话切换的唯一入口在这里（Ctrl+P → 切换会话，或 leader+o）。
+//! Command palette (Ctrl+P).
 
 use crossterm::event::{KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Rect};
@@ -14,21 +9,17 @@ use ratatui::Frame;
 
 use super::{Component, ComponentResult};
 use crate::event::Event;
-use crate::state::{AgentPhase, AppState, PaletteMode};
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteAction {
     ConfigureApi,
-    RequestState,
-    SwitchSession,
     ToggleHelp,
     Quit,
 }
 
 const ACTIONS: &[(PaletteAction, &str)] = &[
     (PaletteAction::ConfigureApi, "配置 API (provider/model/key)"),
-    (PaletteAction::SwitchSession, "切换会话"),
-    (PaletteAction::RequestState, "刷新会话列表"),
     (PaletteAction::ToggleHelp, "按键帮助"),
     (PaletteAction::Quit, "退出"),
 ];
@@ -42,131 +33,15 @@ impl CommandPalette {
     }
 }
 
-impl CommandPalette {
-    /// 会话列表标签（按最近活跃排序，trunk 置顶，当前会话标 ●）。纯函数，测试专用。
-    #[cfg(test)]
-    fn session_labels(&self, state: &AppState) -> Vec<String> {
-        state
-            .sorted_sessions()
-            .iter()
-            .map(|s| {
-                let active = state.active_session_id.as_deref() == Some(s.id.as_str());
-                let name = session_display_name(s);
-                let marker = if active { "● " } else { "○ " };
-                let phase = session_phase_label(state, &s.id);
-                let preview: String = s.last_message.chars().take(24).collect();
-                let preview_part = if preview.is_empty() {
-                    String::new()
-                } else {
-                    format!("  {preview}")
-                };
-                format!("{marker}{phase}{name}{preview_part}")
-            })
-            .collect()
-    }
-
-    fn session_items<'a>(&self, state: &'a AppState) -> Vec<ListItem<'a>> {
-        let theme = state.theme;
-        state
-            .sorted_sessions()
-            .iter()
-            .map(|s| {
-                let active = state.active_session_id.as_deref() == Some(s.id.as_str());
-                let name = session_display_name(s);
-                let marker = if active { "● " } else { "○ " };
-                let phase = state
-                    .agent_activities
-                    .get(&s.id)
-                    .map(|activity| activity.phase);
-                let phase_label = session_phase_label(state, &s.id);
-                let name_style = if active {
-                    Style::default().fg(theme.title).bold()
-                } else {
-                    Style::default().fg(theme.fg)
-                };
-                let preview: String = s.last_message.chars().take(24).collect();
-                ListItem::new(Line::from(vec![
-                    Span::styled(marker, name_style),
-                    Span::styled(
-                        phase_label,
-                        Style::default()
-                            .fg(match phase {
-                                Some(AgentPhase::Tool) => theme.tool_fg,
-                                Some(AgentPhase::Subagent) => theme.accent,
-                                Some(AgentPhase::Completed) => theme.success,
-                                Some(AgentPhase::Failed) => theme.error,
-                                Some(AgentPhase::Thinking) => theme.agent_fg,
-                                None => theme.faint,
-                            })
-                            .bold(),
-                    ),
-                    Span::styled(name, name_style),
-                    if preview.is_empty() {
-                        Span::styled("", theme.faint)
-                    } else {
-                        Span::styled(format!("  {preview}"), theme.dim)
-                    },
-                ]))
-            })
-            .collect()
-    }
-}
-
-fn session_display_name(session: &echo_agent::SessionInfo) -> String {
-    if session.id == crate::state::TRUNK_SESSION_ID {
-        return "[Trunk] 全局时间线".into();
-    }
-    match (session.platform.as_str(), session.scope.as_str()) {
-        ("local", _) => "[后台] 本地会话".into(),
-        ("qq", "group") => format!(
-            "[QQ 群] {} · {}",
-            session.group_name.as_deref().unwrap_or("未知群"),
-            session.nickname
-        ),
-        ("qq", _) => format!("[QQ 私聊] {} ({})", session.nickname, session.user_id),
-        (platform, scope) => format!("[{platform}/{scope}] {}", session.nickname),
-    }
-}
-
-fn session_phase_label(state: &AppState, session_id: &str) -> String {
-    match state
-        .agent_activities
-        .get(session_id)
-        .map(|activity| activity.phase)
-    {
-        Some(AgentPhase::Thinking) => "[思考] ",
-        Some(AgentPhase::Tool) => "[工具] ",
-        Some(AgentPhase::Subagent) => "[子任务] ",
-        Some(AgentPhase::Completed) => "[完成] ",
-        Some(AgentPhase::Failed) => "[失败] ",
-        None => "",
-    }
-    .into()
-}
-
 impl Component for CommandPalette {
     fn render(&self, f: &mut Frame, area: Rect, state: &AppState) {
         let theme = state.theme;
-        let (items, title, h) = match state.palette_mode {
-            PaletteMode::Commands => {
-                let items: Vec<ListItem> = ACTIONS
-                    .iter()
-                    .map(|(_, label)| ListItem::new(Line::from(*label)))
-                    .collect();
-                let h = ACTIONS.len() as u16 + 4;
-                (items, " 命令 ".to_string(), h)
-            }
-            PaletteMode::Sessions => {
-                let items = self.session_items(state);
-                if items.is_empty() {
-                    let empty = vec![ListItem::new(Line::from("暂无会话（收到消息后自动创建）"))];
-                    (empty, " 切换会话 ".to_string(), 5)
-                } else {
-                    let h = items.len() as u16 + 4;
-                    (items, " 切换会话 ".to_string(), h)
-                }
-            }
-        };
+        let items: Vec<ListItem> = ACTIONS
+            .iter()
+            .map(|(_, label)| ListItem::new(Line::from(*label)))
+            .collect();
+        let title = " 命令 ";
+        let h = ACTIONS.len() as u16 + 4;
         let w = 52u16.min(area.width.saturating_sub(4));
         let h = h.min(area.height.saturating_sub(2));
         let x = area.width.saturating_sub(w) / 2;
@@ -206,10 +81,7 @@ impl Component for CommandPalette {
         if key.kind != KeyEventKind::Press {
             return ComponentResult::Pass;
         }
-        let len = match state.palette_mode {
-            PaletteMode::Commands => ACTIONS.len(),
-            PaletteMode::Sessions => state.sessions.len().max(1),
-        };
+        let len = ACTIONS.len();
         match key.code {
             KeyCode::Esc => state.show_palette = false,
             KeyCode::Down | KeyCode::Char('j') => {
@@ -236,76 +108,21 @@ mod tests {
         Event::Input(crossterm::event::Event::Key(k))
     }
 
-    fn state_with_sessions() -> AppState {
-        let mut st = AppState::new(Theme::dark(), Keybindings::default());
-        st.sessions = vec![
-            echo_agent::SessionInfo {
-                id: "old".into(),
-                platform: "qq".into(),
-                nickname: "alice".into(),
-                scope: "dm".into(),
-                user_id: "123".into(),
-                group_name: None,
-                last_active: 100,
-                last_message: "hi".into(),
-            },
-            echo_agent::SessionInfo {
-                id: "new".into(),
-                platform: "qq".into(),
-                nickname: "bob".into(),
-                scope: "group".into(),
-                user_id: "456".into(),
-                group_name: Some("testers".into()),
-                last_active: 200,
-                last_message: String::new(),
-            },
-        ];
-        st.active_session_id = Some("old".into());
-        st
+    fn state() -> AppState {
+        AppState::new(Theme::dark(), Keybindings::default())
     }
 
     #[test]
-    fn actions_returns_all_five() {
+    fn actions_returns_commands_without_session_management() {
         let palette = CommandPalette;
-        assert_eq!(palette.actions().len(), 5);
+        assert_eq!(palette.actions().len(), 3);
         assert!(palette.actions().contains(&PaletteAction::Quit));
         assert!(palette.actions().contains(&PaletteAction::ConfigureApi));
     }
 
     #[test]
-    fn session_labels_sorted_by_recency_with_active_marker() {
-        let st = state_with_sessions();
-        let palette = CommandPalette;
-        let labels = palette.session_labels(&st);
-        assert_eq!(labels.len(), 2);
-        // Most recent first: bob (last_active 200) before alice (100).
-        assert!(labels[0].contains("bob"), "got: {}", labels[0]);
-        assert!(
-            labels[1].contains("●"),
-            "active session must be marked: {}",
-            labels[1]
-        );
-        assert!(labels[1].contains("alice"));
-        assert!(labels[0].contains("[QQ 群]"));
-        assert!(labels[1].contains("[QQ 私聊]"));
-    }
-
-    #[test]
-    fn session_labels_expose_background_activity() {
-        let mut state = state_with_sessions();
-        state.start_agent_activity("new");
-        state
-            .activity_mut("old")
-            .transition(AgentPhase::Subagent, Some("task".into()));
-        let labels = CommandPalette.session_labels(&state);
-        assert!(labels[0].contains("[思考]"));
-        assert!(labels[1].contains("[子任务]"));
-    }
-
-    #[test]
     fn down_navigates_with_wraparound() {
-        let mut st = state_with_sessions();
-        st.palette_mode = PaletteMode::Commands; // 5 actions
+        let mut st = state();
         let mut palette = CommandPalette;
         let ev = key(KeyCode::Down, KeyEventKind::Press);
         assert_eq!(
@@ -314,7 +131,7 @@ mod tests {
         );
         assert_eq!(st.palette_selection, 1);
         // Wrap from last to first.
-        st.palette_selection = 4;
+        st.palette_selection = 2;
         assert_eq!(
             palette.handle_event(&ev, &mut st),
             ComponentResult::Consumed
@@ -324,7 +141,7 @@ mod tests {
 
     #[test]
     fn up_never_underflows() {
-        let mut st = state_with_sessions();
+        let mut st = state();
         let mut palette = CommandPalette;
         let ev = key(KeyCode::Char('k'), KeyEventKind::Press);
         assert_eq!(
@@ -336,7 +153,7 @@ mod tests {
 
     #[test]
     fn escape_closes_palette() {
-        let mut st = state_with_sessions();
+        let mut st = state();
         st.show_palette = true;
         let mut palette = CommandPalette;
         let ev = key(KeyCode::Esc, KeyEventKind::Press);
@@ -349,7 +166,7 @@ mod tests {
 
     #[test]
     fn release_events_pass_through() {
-        let mut st = state_with_sessions();
+        let mut st = state();
         let mut palette = CommandPalette;
         let ev = key(KeyCode::Down, KeyEventKind::Release);
         assert_eq!(palette.handle_event(&ev, &mut st), ComponentResult::Pass);

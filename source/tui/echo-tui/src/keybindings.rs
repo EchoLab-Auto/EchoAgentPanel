@@ -6,8 +6,6 @@ use crossterm::event::{KeyCode, KeyModifiers};
 pub struct Keybindings {
     /// Toggle the command palette.
     pub command_palette: KeyChord,
-    /// Open the session switcher (leader+o).
-    pub session_switch: KeyChord,
     /// Open the API settings form (leader+s).
     pub settings: KeyChord,
     /// Show keybinding help ('?').
@@ -48,7 +46,6 @@ impl Default for Keybindings {
     fn default() -> Self {
         Self {
             command_palette: KeyChord::ctrl(KeyCode::Char('p')),
-            session_switch: KeyChord::plain(KeyCode::Char('o')),
             settings: KeyChord::plain(KeyCode::Char('s')),
             help: KeyChord::plain(KeyCode::Char('?')),
             task_inspector: KeyChord::ctrl(KeyCode::Char('b')),

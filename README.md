@@ -152,17 +152,17 @@ Core 与 Panel 可部署在不同机器：Core 的 `[core] management_address` �
 
 全屏模式，布局：`状态栏 | 聊天区 | 输入框`。
 
-顶部运行面板按当前会话显示 `就绪 / 思考 / 工具 / Subagent / 完成 / 失败`
-阶段、阶段耗时、本轮总耗时、工具与 Subagent 次数及 Token 用量。聊天区底部会在
-运行期间显示动态进度；工具调用的输入摘要、结果和耗时合并在同一条记录中，敏感
-参数会自动隐藏。切换会话列表也会标记各会话的后台运行阶段。
+TUI 只显示一个全局时间线对话框，汇总本地、QQ 私聊和 QQ 群消息。顶部运行面板
+显示最近活动分支的 `就绪 / 思考 / 工具 / Subagent / 完成 / 失败` 阶段、阶段耗时、
+本轮总耗时、工具与 Subagent 次数及 Token 用量。聊天区底部会在运行期间显示动态
+进度；工具调用的输入摘要、结果和耗时合并在同一条记录中，敏感参数会自动隐藏。
 
 | 按键 | 功能 |
 |---|---|
 | 直接输入 | 打字即可输入，无需先按 Tab |
 | `Enter` / `Shift+Enter` | 发送消息 / 换行 |
 | `Ctrl+P` | 命令面板 |
-| `Ctrl+X` 然后 `o` / `s` / `?` | 切换会话 / API 配置 / 按键帮助 |
+| `Ctrl+X` 然后 `s` / `?` | API 配置 / 按键帮助 |
 | `Ctrl+C`（连按两次） | 退出程序 |
 | `PgUp` / `PgDn` / `Home` / `End` | 聊天区滚动 |
 | 鼠标滚轮 | 聊天区滚动 |
@@ -174,7 +174,6 @@ Core 与 Panel 可部署在不同机器：Core 的 `[core] management_address` �
 |---|---|
 | `/help` | 显示按键帮助 |
 | `/api` | 交互式 API 配置 |
-| `/resume` | 恢复历史会话（来源标签列表） |
 | `/adapters` | 查看适配器状态 |
 | `/qq login` | QQ 扫码登录 |
 | `/qq setting` | QQ 设置（门控模式 + 白名单/黑名单管理） |
@@ -262,9 +261,6 @@ api_key = ""
 system_prompt = "请你使用中文"
 max_tool_iterations = 1024
 memory_limit = 40
-# true 时 TUI、QQ 私聊和 QQ 群共享同一份 Agent 记忆；多用户部署请谨慎开启
-# 已废弃：Agent 始终使用全局单 trunk 记忆，此字段仅保留 TOML 兼容性，运行时忽略
-shared_context = false
 ```
 
 Core 会每秒检查一次 `skills_dir`。新增、修改或删除任意递归目录下的
@@ -303,14 +299,13 @@ Agent 已抛弃"每用户独立会话"的上下文模型，改为 **单 trunk + 
 - **Trunk（主干）**：全平台共享的唯一条对话历史（受 `memory_limit` 约束），
   持久化为 `echo-sessions.json`（version 3）。TUI、QQ 私聊、QQ 群、
   timer 与后台任务都读写同一份 trunk。
-- **来源标签（Identity）**：TUI 会话列表里的"会话"只是来源标签
-  （平台/用户/群、昵称、最近活跃），不再拥有各自的上下文；切换会话只改变
-  "发给谁/查看谁"的路由，不改变 Agent 记忆。
+- **来源标签（Identity）**：平台、用户、群、昵称等来源信息只用于标注消息、
+  投递和授权，不拥有各自的上下文，也不会在 TUI 中形成可切换的对话框。
 - **分支（Branch）**：每条入站消息都从 trunk 的即时快照 fork 出一个只读分支，
   Agent 在分支上完成整轮（LLM + 工具）；分支结束后按 message_sequence
   以 append-only 顺序把回复合并回 trunk，并发分支互不阻塞。
 - 因此不再提供 `/clear` 等按会话清空命令；trunk 只能被新消息推进。
-  旧版 v1（每会话数组）与 v2（shared_context 对象）持久化文件会自动迁移。
+  旧版 v1（每会话数组）与 v2（共享历史对象）持久化文件会自动迁移。
 
 详细设计见 [后台任务与并行分支](doc/develop/agent/background-tasks.md)。
 可调用，执行更新还要求显式确认。

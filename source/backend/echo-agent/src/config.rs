@@ -72,12 +72,8 @@ pub struct AgentConfig {
     pub max_tool_iterations: usize,
     /// Directory containing `SKILL.md` definitions.
     pub skills_dir: String,
-    /// Maximum conversation messages kept per session.
+    /// Maximum conversation messages kept in the global trunk.
     pub memory_limit: usize,
-    /// Deprecated: the agent now always keeps exactly ONE global conversation
-    /// trunk (source identities share it). Kept only for TOML compatibility;
-    /// the value is ignored at runtime.
-    pub shared_context: bool,
     /// Privileged framework update policy.
     pub self_update: SelfUpdateConfig,
 }
@@ -96,7 +92,6 @@ impl Default for AgentConfig {
             max_tool_iterations: 5,
             skills_dir: "skills".into(),
             memory_limit: 40,
-            shared_context: false,
             self_update: SelfUpdateConfig::default(),
         }
     }
@@ -302,9 +297,9 @@ mod tests {
     }
 
     #[test]
-    fn shared_context_is_opt_in_and_deserializes() {
-        assert!(!AgentConfig::default().shared_context);
+    fn legacy_shared_context_is_ignored_and_not_serialized() {
         let config: AgentConfig = toml::from_str("shared_context = true").unwrap();
-        assert!(config.shared_context);
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(!serialized.contains("shared_context"));
     }
 }

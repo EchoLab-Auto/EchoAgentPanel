@@ -402,7 +402,6 @@ mod tests {
 
     fn test_state() -> AppState {
         let mut st = AppState::new(Theme::dark(), Keybindings::default());
-        st.active_session_id = Some("s1".into());
         st.push_message("s1", DisplayMessage::plain(MsgRole::User, "你好", 0));
         st
     }
@@ -446,7 +445,11 @@ mod tests {
     #[test]
     fn build_lines_wraps_cjk_by_terminal_column_width() {
         let mut state = test_state();
-        state.messages.get_mut("s1").unwrap()[0].content = "中文中文中文".into();
+        state
+            .messages
+            .get_mut(crate::state::TRUNK_SESSION_ID)
+            .unwrap()[0]
+            .content = "中文中文中文".into();
         let (_, texts) = ChatView.build_lines(&state, 8);
         let body: Vec<_> = texts
             .iter()

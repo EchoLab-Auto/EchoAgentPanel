@@ -3,7 +3,7 @@
 //! Each command category lives in its own sub-module.
 
 use crate::backend::Backend;
-use crate::state::{AppState, ToastKind};
+use crate::state::AppState;
 use echo_agent::BackendCommand;
 
 pub mod adapter;
@@ -17,8 +17,6 @@ pub mod qq;
 pub enum SlashAction {
     Help,
     ConfigureApi,
-    RequestState,
-    SwitchSession,
     Quit,
     AdapterStatus,
     AdapterStart,
@@ -33,7 +31,6 @@ pub enum SlashAction {
     ApiSetModel,
     ApiSetUrl,
     ApiNewProfile,
-    ResumeSession,
 }
 
 /// Command table: (name, description, action).
@@ -52,9 +49,6 @@ pub const SLASH_COMMANDS: &[(&str, &str, SlashAction)] = &[
     ("api model ", "设置 LLM model", SlashAction::ApiSetModel),
     ("api url ", "设置 API base URL", SlashAction::ApiSetUrl),
     ("api new ", "新建 API profile", SlashAction::ApiNewProfile),
-    ("switch", "切换会话", SlashAction::SwitchSession),
-    ("resume", "回到之前的会话", SlashAction::ResumeSession),
-    ("sessions", "刷新会话列表", SlashAction::RequestState),
     ("adapters", "查看适配器状态", SlashAction::AdapterStatus),
     ("adapter start", "启动所有适配器", SlashAction::AdapterStart),
     ("adapter stop", "停止所有适配器", SlashAction::AdapterStop),
@@ -74,11 +68,6 @@ pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, te
     match action {
         Help => help::run(state),
         ConfigureApi => api::config(state, backend),
-        RequestState => {
-            backend.send(BackendCommand::RequestState);
-        }
-        SwitchSession => { /* handled by open_palette in app */ }
-        ResumeSession => cmd_resume(state),
         AdapterStatus => adapter::status(state, backend),
         AdapterStart => {
             backend.send(BackendCommand::StartAllAdapters);
@@ -100,64 +89,4 @@ pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, te
             state.running = false;
         }
     }
-}
-
-// ── Resume ──
-
-fn cmd_resume(state: &mut AppState) {
-    let sessions = state.sessions.clone();
-    if sessions.is_empty() {
-        state.toast("没有历史会话。开始对话后会自动保存。", ToastKind::Info);
-        return;
-    }
-    let mut sorted = sessions;
-    sorted.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-
-    // Build form overlay items for interactive session selection.
-    use crate::components::form_overlay::{FormOverlay, SelectItem};
-    let mut items: Vec<SelectItem> = Vec::new();
-    let mut cur_idx = 0;
-    for (i, s) in sorted.iter().enumerate() {
-        let active = if Some(&s.id) == state.active_session_id.as_ref() {
-            "◀"
-        } else {
-            ""
-        };
-        let scope = match s.scope.as_str() {
-            "dm" => "💬私聊".to_string(),
-            "group" => format!("👥群:{}", s.group_name.as_deref().unwrap_or("?")),
-            "tui" => "🖥本地".to_string(),
-            _ => s.scope.clone(),
-        };
-        let time = chrono::DateTime::from_timestamp(s.last_active, 0)
-            .map(|d| {
-                d.with_timezone(&chrono::Local)
-                    .format("%m/%d %H:%M")
-                    .to_string()
-            })
-            .unwrap_or_default();
-        let preview: String = s.last_message.chars().take(40).collect();
-        let label = format!(
-            "{} [{}] {} ({})  {}  └ {}",
-            active, s.platform, s.nickname, scope, time, preview
-        );
-        items.push(SelectItem {
-            label,
-            value: s.id.clone(),
-        });
-        if Some(&s.id) == state.active_session_id.as_ref() {
-            cur_idx = i;
-        }
-    }
-
-    let mut fo = FormOverlay::default();
-    fo.activate(
-        "历史会话 (↑↓选择 Enter进入 Esc取消)",
-        items,
-        crate::components::form_overlay::FormKind::SessionSelect,
-    );
-    fo.select_idx = cur_idx;
-    state.form_overlay = fo;
-    state.menu_msg_idx = -1;
-    state.refresh_menu_msg();
 }
