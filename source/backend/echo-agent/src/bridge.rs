@@ -273,6 +273,7 @@ mod tests {
             },
             BackendEvent::AgentReasoning {
                 session_id: "s1".into(),
+                branch_id: "b1".into(),
                 content: "considering options".into(),
             },
             BackendEvent::ReplyBranchStarted {

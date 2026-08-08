@@ -15,8 +15,8 @@ use ratatui::Frame;
 use super::{Component, ComponentResult};
 use crate::event::Event;
 use crate::state::{
-    AgentPhase, AppState, InboundMessage, MessageMetadata, MsgRole, ToolMessage, ToolMessageStatus,
-    SPINNER,
+    AgentMessage, AgentPhase, AppState, InboundMessage, MessageMetadata, MsgRole, ToolMessage,
+    ToolMessageStatus, SPINNER,
 };
 
 #[derive(Debug, Default)]
@@ -155,7 +155,6 @@ fn render_message(
         }
         (MsgRole::User, _) => ("后台输入".into(), theme.user_fg),
         (MsgRole::Backend, _) => ("Agent 后台输出".into(), theme.agent_fg),
-        (MsgRole::Reasoning, _) => ("Agent 思考".into(), theme.subtitle),
         (MsgRole::Tool, _) => ("工具".into(), theme.tool_fg),
         (MsgRole::System, _) => ("系统".into(), theme.system_fg),
     };
@@ -210,35 +209,85 @@ fn render_message(
         Span::styled(time_str, Style::default().fg(theme.faint)),
     ]);
     let mut out = vec![header];
-    let body_style = if matches!(m.role, MsgRole::System | MsgRole::Reasoning) {
+    if let Some(MessageMetadata::Agent(agent)) = &m.metadata {
+        render_agent_reasoning(&mut out, agent, width, theme);
+    }
+    let body_style = if matches!(m.role, MsgRole::System) {
         theme.dim
     } else {
         theme.fg
     };
-    let wrap_width = width.saturating_sub(1) as usize;
-    if wrap_width > 0 {
-        for line in content.lines() {
-            let mut current = String::new();
-            let mut col = 0usize;
-            for ch in line.chars() {
-                let char_width = crate::util::str_visual_width(&ch.to_string());
-                if col + char_width > wrap_width && !current.is_empty() {
-                    out.push(Line::from(Span::styled(
-                        std::mem::take(&mut current),
-                        body_style,
-                    )));
-                    col = 0;
-                }
-                current.push(ch);
-                col += char_width;
-            }
-            out.push(Line::from(Span::styled(current, body_style)));
-        }
-    } else {
-        out.push(Line::from(Span::styled(content.to_string(), body_style)));
-    }
+    push_wrapped_lines(&mut out, content, width, "", theme.faint, body_style);
     out.push(Line::default());
     out
+}
+
+fn render_agent_reasoning(
+    out: &mut Vec<Line<'static>>,
+    agent: &AgentMessage,
+    width: u16,
+    theme: crate::theme::Theme,
+) {
+    if agent.reasoning.is_empty() {
+        return;
+    }
+    out.push(Line::from(vec![
+        Span::styled("  ╭─ ", Style::default().fg(theme.faint)),
+        Span::styled("Thinking", Style::default().fg(theme.subtitle).bold()),
+    ]));
+    for (index, reasoning) in agent.reasoning.iter().enumerate() {
+        if index > 0 {
+            out.push(Line::from(Span::styled(
+                "  │",
+                Style::default().fg(theme.faint),
+            )));
+        }
+        push_wrapped_lines(out, reasoning, width, "  │ ", theme.faint, theme.dim);
+    }
+    out.push(Line::from(Span::styled(
+        "  ╰─",
+        Style::default().fg(theme.faint),
+    )));
+    out.push(Line::default());
+}
+
+fn push_wrapped_lines(
+    out: &mut Vec<Line<'static>>,
+    content: &str,
+    width: u16,
+    prefix: &str,
+    prefix_color: ratatui::style::Color,
+    body_color: ratatui::style::Color,
+) {
+    let prefix_width = crate::util::str_visual_width(prefix);
+    let wrap_width = (width as usize).saturating_sub(prefix_width).max(1);
+    let source_lines: Vec<&str> = if content.is_empty() {
+        vec![""]
+    } else {
+        content.lines().collect()
+    };
+
+    for source in source_lines {
+        let mut chunks = Vec::new();
+        let mut current = String::new();
+        let mut col = 0usize;
+        for ch in source.chars() {
+            let char_width = crate::util::str_visual_width(&ch.to_string());
+            if col + char_width > wrap_width && !current.is_empty() {
+                chunks.push(std::mem::take(&mut current));
+                col = 0;
+            }
+            current.push(ch);
+            col += char_width;
+        }
+        chunks.push(current);
+        for chunk in chunks {
+            out.push(Line::from(vec![
+                Span::styled(prefix.to_string(), Style::default().fg(prefix_color)),
+                Span::styled(chunk, Style::default().fg(body_color)),
+            ]));
+        }
+    }
 }
 
 fn inbound_label(source: &InboundMessage) -> String {
@@ -533,6 +582,7 @@ mod tests {
                 group_name: Some("开发群".into()),
                 ..match private.metadata.clone().unwrap() {
                     MessageMetadata::Inbound(source) => source,
+                    MessageMetadata::Agent(_) => unreachable!(),
                     MessageMetadata::Tool(_) => unreachable!(),
                 }
             })),
@@ -573,6 +623,78 @@ mod tests {
         let (_, texts) = ChatView.build_lines(&state, 80);
         assert!(texts.iter().any(|text| text.contains("Agent 正在思考")));
         assert_eq!(state.active_messages().len(), 1);
+    }
+
+    #[test]
+    fn agent_reasoning_is_rendered_as_a_nested_block_before_the_reply() {
+        let message = DisplayMessage {
+            role: MsgRole::Backend,
+            content: "你好，Alix 在，有什么需要？".into(),
+            time: 0,
+            metadata: Some(MessageMetadata::Agent(AgentMessage {
+                reasoning: vec!["用户又发了一条\"你好\"。简单回应即可，保持简洁。".into()],
+            })),
+        };
+        let lines = render_message(&message, &message.content, 80, Theme::dark(), false, 0);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+
+        assert_eq!(
+            texts
+                .iter()
+                .filter(|text| text.contains("Agent 后台输出"))
+                .count(),
+            1
+        );
+        let thinking = texts
+            .iter()
+            .position(|text| text.contains("Thinking"))
+            .unwrap();
+        let reasoning = texts
+            .iter()
+            .position(|text| text.contains("用户又发了一条"))
+            .unwrap();
+        let reply = texts
+            .iter()
+            .position(|text| text.contains("Alix 在"))
+            .unwrap();
+        assert!(thinking < reasoning && reasoning < reply);
+        assert!(texts[reasoning].starts_with("  │ "));
+        assert!(!texts.iter().any(|text| text.contains("Agent 思考")));
+    }
+
+    #[test]
+    fn nested_reasoning_wraps_with_the_guide_at_narrow_widths() {
+        let message = DisplayMessage {
+            role: MsgRole::Backend,
+            content: "答复".into(),
+            time: 0,
+            metadata: Some(MessageMetadata::Agent(AgentMessage {
+                reasoning: vec!["中文中文中文中文".into()],
+            })),
+        };
+        let lines = render_message(&message, &message.content, 12, Theme::dark(), false, 0);
+        let reasoning_lines: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .filter(|text| text.starts_with("  │ "))
+            .collect();
+        assert!(reasoning_lines.len() >= 2);
+        assert!(reasoning_lines
+            .iter()
+            .all(|line| crate::util::str_visual_width(line) <= 12));
     }
 
     #[test]

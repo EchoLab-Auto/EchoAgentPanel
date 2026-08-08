@@ -485,13 +485,14 @@ impl Agent {
         }
     }
 
-    fn emit_reasoning(&self, session_id: &str, reasoning: &Option<String>) {
+    fn emit_reasoning(&self, session_id: &str, branch_id: &str, reasoning: &Option<String>) {
         if let Some(content) = reasoning
             .as_deref()
             .filter(|content| !content.trim().is_empty())
         {
             self.emit(BackendEvent::AgentReasoning {
                 session_id: session_id.to_string(),
+                branch_id: branch_id.to_string(),
                 content: content.to_string(),
             });
         }
@@ -658,6 +659,7 @@ impl Agent {
         content: &str,
         history_snapshot: Vec<ChatMessage>,
         cancel: tokio_util::sync::CancellationToken,
+        branch_id: &str,
     ) -> Result<String> {
         self.process_recorded_message_with_progress(
             session,
@@ -665,6 +667,7 @@ impl Agent {
             history_snapshot,
             cancel,
             None,
+            branch_id,
         )
         .await
     }
@@ -676,6 +679,7 @@ impl Agent {
         history_snapshot: Vec<ChatMessage>,
         cancel: tokio_util::sync::CancellationToken,
         visible_reply: Option<tokio::sync::watch::Sender<bool>>,
+        branch_id: &str,
     ) -> Result<String> {
         let message_sequence = structured_message_sequence(content);
         let merge_cancel = cancel.clone();
@@ -691,6 +695,7 @@ impl Agent {
                 Some(history_snapshot),
                 cancel,
                 visible_reply,
+                branch_id,
             )
             .await;
         drop(branch_slot);
@@ -734,7 +739,7 @@ impl Agent {
             name: name.into(),
             arguments: arguments.to_string(),
         };
-        let result = self.run_tool(&session.id, &call).await;
+        let result = self.run_tool(&session.id, "control-reply", &call).await;
         if result.trim_start().starts_with("error:") {
             Err(result)
         } else {
@@ -845,6 +850,7 @@ impl Agent {
                 content,
                 history_snapshot,
                 registration.cancel.clone(),
+                &branch_id,
             )
             .await;
         let cancelled = registration.cancel.is_cancelled()
@@ -868,6 +874,7 @@ impl Agent {
         history_snapshot: Option<Vec<ChatMessage>>,
         turn_cancel: tokio_util::sync::CancellationToken,
         visible_reply: Option<tokio::sync::watch::Sender<bool>>,
+        branch_id: &str,
     ) -> Result<String> {
         let queued_at = std::time::Instant::now();
         let turn_started_at = chrono::Utc::now();
@@ -889,7 +896,6 @@ impl Agent {
         let delivery_plan = DeliveryPlan::from_input(content);
         let mut system_prompt = self.build_system_prompt(content).await;
         // Distinguish input origin by content markers, NOT by the session's
-        // Distinguish input origin by content markers, NOT by the session's
         // platform. A QQ session can receive backend/TUI input (no hook), and
         // that must be answered in the backend — never pushed to QQ.
         let is_qq_hook = content.contains("<qq_message_hook>");
@@ -897,43 +903,33 @@ impl Agent {
         let is_qq_session = session.session_key.platform.eq_ignore_ascii_case("qq");
         system_prompt.push_str(
             "\n\n# Background orchestration\n\
-             Complete the current request normally, including long, multi-step, or \
-             tool-heavy work. Do not call spawn_background_task merely to keep the \
-             conversation responsive. Use run_subagent only for bounded delegated \
-             reasoning. Use spawn_background_task only when the requester explicitly \
-             asks for detached work, and spawn_parallel_task only for independent work \
-             with several declared delivery targets. After detached work is accepted, \
-             do not poll it; completion returns as an ordered background_task_event. \
-             Use list_background_tasks only when status is requested and \
+             Complete the current request normally; do not spawn detached work \
+             merely to keep the conversation responsive. Use run_subagent for \
+             bounded delegated reasoning. Use spawn_background_task only when \
+             the requester explicitly asks for detached work, and \
+             spawn_parallel_task only for independent work with declared \
+             delivery targets. After detached work is accepted, do not poll it; \
+             completion returns as an ordered background_task_event. Use \
+             list_background_tasks only when status is requested and \
              cancel_background_task only on an explicit cancellation.",
         );
         if is_qq_hook {
             system_prompt.push_str(
                 "\n\n# QQ transport boundary\n\
-                 This input is an external QQ message (<qq_message_hook>). \
-                 Read sender and group data from the structured hook payload.\n\
-                 Inputs wrapped in <backend_message_hook> are local backend/TUI \
-                 messages. Structured inputs include message_sequence and \
-                 received_at_ms; preserve that causal order when reasoning.\n\
-                 Inputs wrapped in <timer_event> are scheduled backend tasks, \
-                 not new QQ messages. Inputs wrapped in <background_task_event> \
-                 are ordered background results. Integrate every successful \
-                 branch and deliver it exactly once to the target declared in \
-                 that branch using send_backend_message, send_private_msg, or \
-                 send_group_msg. Never substitute normal assistant output for a \
-                 declared delivery. Unwrapped inputs are also backend \
-                 instructions, not QQ chat messages.\n\
-                 To send anything visible on QQ, you MUST call send_private_msg \
-                 or send_group_msg with the explicit target ID. Never treat your \
-                 normal assistant output as a QQ reply; it is backend-only.\n\
-                 Every <qq_message_hook> input MUST be answered exactly once via \
-                 a send tool: send_private_msg for private chats (user_id from \
+                 This input is an external QQ message (<qq_message_hook>); read \
+                 sender and group IDs from the structured hook payload.\n\
+                 Answer every <qq_message_hook> exactly once via a send tool: \
+                 send_private_msg for private chats (user_id from \
                  payload.sender.user_id), send_group_msg for groups (group_id \
-                 from payload.channel.group_id). Read the target ID from the \
-                 hook payload — never invent one. Your normal assistant output \
-                 is backend-only and invisible to the QQ user; to send anything \
-                 visible on QQ you MUST call send_private_msg or send_group_msg. \
-                 Do not claim you replied before the send tool returns success.",
+                 from payload.channel.group_id). Never invent a target ID, never \
+                 send twice, and never substitute normal assistant output for \
+                 the send — it is backend-only and invisible to the QQ user. Put \
+                 the whole reply (including any 'sent' wording) inside the \
+                 tool's content, and do not claim a reply before the send tool \
+                 returns success.\n\
+                 Inputs wrapped in <backend_message_hook>/<timer_event>/\
+                 <background_task_event> are backend events, not QQ chat: answer \
+                 them in the backend and deliver per their own rules.",
             );
         } else if is_timer {
             system_prompt.push_str(
@@ -1003,7 +999,7 @@ impl Agent {
                 })?,
                 _ = turn_cancel.cancelled() => return Err(anyhow!(TURN_CANCELLED)),
             };
-            self.emit_reasoning(&session_id, &response.reasoning_content);
+            self.emit_reasoning(&session_id, branch_id, &response.reasoning_content);
             self.emit(BackendEvent::LlmResponse {
                 session_id: session_id.clone(),
                 model,
@@ -1093,7 +1089,7 @@ impl Agent {
                     "agent tool call started"
                 );
                 let result = tokio::select! {
-                    result = self.run_tool(&session_id, call) => result,
+                    result = self.run_tool(&session_id, branch_id, call) => result,
                     _ = turn_cancel.cancelled() => return Err(anyhow!(TURN_CANCELLED)),
                 };
                 tracing::info!(
@@ -1132,7 +1128,7 @@ impl Agent {
         ))
     }
 
-    async fn run_tool(&self, session_id: &str, call: &ToolCall) -> String {
+    async fn run_tool(&self, session_id: &str, branch_id: &str, call: &ToolCall) -> String {
         self.emit(BackendEvent::ToolCall {
             session_id: session_id.to_string(),
             tool_name: call.name.clone(),
@@ -1143,7 +1139,7 @@ impl Agent {
             "schedule_timer" => self.timer_scheduler.schedule(session_id, args).await,
             "list_timers" => Ok(self.timer_scheduler.list(session_id).await),
             "cancel_timer" => self.timer_scheduler.cancel(session_id, args).await,
-            "run_subagent" => self.run_subagent(session_id, args).await,
+            "run_subagent" => self.run_subagent(session_id, branch_id, args).await,
             "spawn_background_task" => self.spawn_background_task(session_id, args, false).await,
             "spawn_parallel_task" => self.spawn_background_task(session_id, args, true).await,
             "list_background_tasks" => Ok(self.background_tasks.list(session_id).await),
@@ -1246,6 +1242,7 @@ impl Agent {
     async fn run_subagent(
         &self,
         session_id: &str,
+        branch_id: &str,
         arguments: serde_json::Value,
     ) -> Result<String, String> {
         let args = orchestration::parse_subagent_args(arguments)?;
@@ -1278,7 +1275,7 @@ impl Agent {
                 return Err(format!("subagent request failed: {error}"));
             }
         };
-        self.emit_reasoning(session_id, &response.reasoning_content);
+        self.emit_reasoning(session_id, branch_id, &response.reasoning_content);
         if !response.tool_calls.is_empty() {
             self.emit(BackendEvent::SubagentCompleted {
                 session_id: session_id.to_string(),
@@ -2522,7 +2519,9 @@ pub mod tests {
             })
             .to_string(),
         };
-        let scheduled = agent.run_tool("local:tui::one", &schedule).await;
+        let scheduled = agent
+            .run_tool("local:tui::one", "test-branch", &schedule)
+            .await;
         let timer_id = serde_json::from_str::<serde_json::Value>(&scheduled).unwrap()["timer_id"]
             .as_str()
             .unwrap()
@@ -2531,6 +2530,7 @@ pub mod tests {
         let listed = agent
             .run_tool(
                 "local:tui::one",
+                "test-branch",
                 &ToolCall {
                     id: "list_1".into(),
                     name: "list_timers".into(),
@@ -2545,9 +2545,13 @@ pub mod tests {
             name: "cancel_timer".into(),
             arguments: serde_json::json!({ "timer_id": timer_id }).to_string(),
         };
-        let rejected = agent.run_tool("local:tui::two", &cancel).await;
+        let rejected = agent
+            .run_tool("local:tui::two", "test-branch", &cancel)
+            .await;
         assert!(rejected.contains("not found in the current session"));
-        let cancelled = agent.run_tool("local:tui::one", &cancel).await;
+        let cancelled = agent
+            .run_tool("local:tui::one", "test-branch", &cancel)
+            .await;
         assert!(cancelled.contains("cancelled"));
         agent.shutdown().await;
     }

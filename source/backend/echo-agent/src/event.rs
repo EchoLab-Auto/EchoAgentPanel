@@ -96,6 +96,8 @@ pub enum BackendEvent {
     /// Model reasoning content returned before the visible answer.
     AgentReasoning {
         session_id: String,
+        /// Reply branch that owns this reasoning fragment.
+        branch_id: String,
         content: String,
     },
     /// An isolated subagent started processing a task for the parent agent.

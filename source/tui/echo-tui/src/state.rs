@@ -2,7 +2,7 @@
 //!
 //! Extracted from the old `app.rs` god file.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use echo_agent::{BackendCommand, SessionInfo};
@@ -42,7 +42,6 @@ fn trunk_session_info() -> SessionInfo {
 pub enum MsgRole {
     User,
     Backend,
-    Reasoning,
     Tool,
     System,
 }
@@ -68,8 +67,15 @@ impl DisplayMessage {
 
 #[derive(Debug, Clone)]
 pub enum MessageMetadata {
+    Agent(AgentMessage),
     Tool(ToolMessage),
     Inbound(InboundMessage),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMessage {
+    /// Reasoning fragments emitted while producing this reply, in arrival order.
+    pub reasoning: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -433,6 +439,10 @@ pub struct AppState {
     pub anim_tick: u64,
     /// Per-session execution lifecycle. Sessions can run concurrently.
     pub agent_activities: HashMap<String, AgentActivity>,
+    /// Reasoning is kept out of the timeline until its final reply arrives.
+    pending_agent_reasoning: HashMap<(String, String), Vec<String>>,
+    /// Successfully completed branches waiting for an untagged local output.
+    completed_agent_reasoning: HashMap<String, VecDeque<String>>,
     /// Detached branches and synchronous subagents, oldest first.
     pub orchestration_tasks: Vec<OrchestrationActivity>,
     pending_background_tasks: HashMap<String, PendingBackgroundTask>,
@@ -499,6 +509,8 @@ impl AppState {
             quit_armed_at: std::time::Instant::now(),
             anim_tick: 0,
             agent_activities: HashMap::new(),
+            pending_agent_reasoning: HashMap::new(),
+            completed_agent_reasoning: HashMap::new(),
             orchestration_tasks: Vec::new(),
             pending_background_tasks: HashMap::new(),
             next_subagent_sequence: 0,
@@ -564,6 +576,81 @@ impl AppState {
     pub fn start_agent_activity(&mut self, session_id: &str) {
         self.agent_activities
             .insert(session_id.to_string(), AgentActivity::new());
+    }
+
+    pub fn queue_agent_reasoning(&mut self, session_id: &str, branch_id: &str, content: String) {
+        let content = content.trim().to_string();
+        if content.is_empty() {
+            return;
+        }
+        self.pending_agent_reasoning
+            .entry((session_id.to_string(), branch_id.to_string()))
+            .or_default()
+            .push(content);
+    }
+
+    pub fn complete_agent_reasoning(&mut self, session_id: &str, branch_id: &str) {
+        let key = (session_id.to_string(), branch_id.to_string());
+        if !self
+            .pending_agent_reasoning
+            .get(&key)
+            .is_some_and(|reasoning| !reasoning.is_empty())
+        {
+            return;
+        }
+        let completed = self
+            .completed_agent_reasoning
+            .entry(session_id.to_string())
+            .or_default();
+        if !completed.iter().any(|id| id == branch_id) {
+            completed.push_back(branch_id.to_string());
+        }
+    }
+
+    pub fn take_agent_reasoning(
+        &mut self,
+        session_id: &str,
+        branch_id: Option<&str>,
+    ) -> Vec<String> {
+        if let Some(branch_id) = branch_id {
+            if let Some(completed) = self.completed_agent_reasoning.get_mut(session_id) {
+                completed.retain(|id| id != branch_id);
+            }
+            return self
+                .pending_agent_reasoning
+                .remove(&(session_id.to_string(), branch_id.to_string()))
+                .unwrap_or_default();
+        }
+
+        loop {
+            let Some(branch_id) = self
+                .completed_agent_reasoning
+                .get_mut(session_id)
+                .and_then(VecDeque::pop_front)
+            else {
+                return Vec::new();
+            };
+            if let Some(reasoning) = self
+                .pending_agent_reasoning
+                .remove(&(session_id.to_string(), branch_id))
+            {
+                return reasoning;
+            }
+        }
+    }
+
+    pub fn clear_agent_reasoning_branch(&mut self, session_id: &str, branch_id: &str) {
+        self.pending_agent_reasoning
+            .remove(&(session_id.to_string(), branch_id.to_string()));
+        if let Some(completed) = self.completed_agent_reasoning.get_mut(session_id) {
+            completed.retain(|id| id != branch_id);
+        }
+    }
+
+    pub fn clear_agent_reasoning(&mut self, session_id: &str) {
+        self.pending_agent_reasoning
+            .retain(|(pending_session, _), _| pending_session != session_id);
+        self.completed_agent_reasoning.remove(session_id);
     }
 
     pub fn activity_mut(&mut self, session_id: &str) -> &mut AgentActivity {

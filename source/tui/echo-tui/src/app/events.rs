@@ -127,10 +127,11 @@ impl App {
             }
             BackendEvent::AgentReasoning {
                 session_id,
+                branch_id,
                 content,
             } => {
-                let ts = chrono::Utc::now().timestamp();
-                self.push_to(session_id, MsgRole::Reasoning, content, ts);
+                self.state
+                    .queue_agent_reasoning(&session_id, &branch_id, content);
             }
             BackendEvent::SubagentStarted { session_id, task } => {
                 self.state.start_subagent(&session_id, &task);
@@ -186,6 +187,12 @@ impl App {
                 completed_at_ms,
                 ..
             } => {
+                if success && !cancelled {
+                    self.state.complete_agent_reasoning(&session_id, &branch_id);
+                } else {
+                    self.state
+                        .clear_agent_reasoning_branch(&session_id, &branch_id);
+                }
                 self.state
                     .complete_reply_branch(&branch_id, success, cancelled, completed_at_ms);
                 if !self.state.has_running_reply_branches(&session_id) {
@@ -350,7 +357,7 @@ impl App {
             BackendEvent::AgentOutput {
                 session_id,
                 content,
-                ..
+                branch_id,
             } => {
                 if self
                     .state
@@ -363,7 +370,21 @@ impl App {
                         .transition(AgentPhase::Completed, None);
                 }
                 let ts = chrono::Utc::now().timestamp();
-                self.push_to(session_id, MsgRole::Backend, content, ts);
+                let reasoning = self
+                    .state
+                    .take_agent_reasoning(&session_id, branch_id.as_deref());
+                let metadata = (!reasoning.is_empty()).then_some(MessageMetadata::Agent(
+                    crate::state::AgentMessage { reasoning },
+                ));
+                self.push_display_to(
+                    session_id,
+                    DisplayMessage {
+                        role: MsgRole::Backend,
+                        content,
+                        time: ts,
+                        metadata,
+                    },
+                );
             }
             BackendEvent::AgentCompleted { session_id } => {
                 if !self.state.has_running_reply_branches(&session_id) {
@@ -445,6 +466,7 @@ impl App {
                 message,
             } => {
                 if let Some(session_id) = session_id {
+                    self.state.clear_agent_reasoning(&session_id);
                     if self
                         .state
                         .agent_activities
@@ -796,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_output_marks_backend_role() {
+    fn agent_output_marks_backend_role_and_attaches_reasoning() {
         let mut app = app();
         app.apply_backend_event(BackendEvent::SessionUpdated {
             session: echo_agent::SessionInfo {
@@ -815,7 +837,9 @@ mod tests {
             content: "回复".into(),
             branch_id: None,
         });
-        assert_eq!(app.state.active_messages()[0].role, MsgRole::Backend);
+        let message = &app.state.active_messages()[0];
+        assert_eq!(message.role, MsgRole::Backend);
+        assert!(message.metadata.is_none());
     }
 
     #[test]
@@ -1119,15 +1143,72 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_event_is_appended_to_the_global_timeline() {
+    fn reasoning_event_is_attached_to_the_following_agent_output() {
         let mut app = app();
+        app.apply_backend_event(BackendEvent::AgentThinking {
+            session_id: "qq:dm::1".into(),
+        });
         app.apply_backend_event(BackendEvent::AgentReasoning {
             session_id: "qq:dm::1".into(),
+            branch_id: "branch-1".into(),
             content: "需要先确认上下文".into(),
         });
+        app.apply_backend_event(BackendEvent::AgentReasoning {
+            session_id: "qq:dm::1".into(),
+            branch_id: "branch-1".into(),
+            content: "然后给出简洁回答".into(),
+        });
+        assert!(app.state.active_messages().is_empty());
+
+        app.apply_backend_event(BackendEvent::ReplyBranchCompleted {
+            session_id: "qq:dm::1".into(),
+            branch_id: "branch-1".into(),
+            message_sequence: 1,
+            success: true,
+            cancelled: false,
+            completed_at_ms: 1_700_000_000_000,
+        });
+        app.apply_backend_event(BackendEvent::AgentOutput {
+            session_id: "qq:dm::1".into(),
+            content: "这是最终回答".into(),
+            branch_id: None,
+        });
         let message = app.state.active_messages().last().unwrap();
-        assert_eq!(message.role, MsgRole::Reasoning);
-        assert_eq!(message.content, "需要先确认上下文");
+        assert_eq!(message.role, MsgRole::Backend);
+        assert_eq!(message.content, "这是最终回答");
+        let Some(MessageMetadata::Agent(agent)) = &message.metadata else {
+            panic!("agent reasoning metadata missing");
+        };
+        assert_eq!(agent.reasoning, ["需要先确认上下文", "然后给出简洁回答"]);
+    }
+
+    #[test]
+    fn concurrent_branch_reasoning_is_not_crossed() {
+        let mut app = app();
+        for (branch_id, content) in [("branch-1", "第一条思考"), ("branch-2", "第二条思考")]
+        {
+            app.apply_backend_event(BackendEvent::AgentReasoning {
+                session_id: "s1".into(),
+                branch_id: branch_id.into(),
+                content: content.into(),
+            });
+        }
+        for (branch_id, content) in [("branch-2", "第二条回复"), ("branch-1", "第一条回复")]
+        {
+            app.apply_backend_event(BackendEvent::AgentOutput {
+                session_id: "s1".into(),
+                content: content.into(),
+                branch_id: Some(branch_id.into()),
+            });
+        }
+
+        let messages = app.state.active_messages();
+        for (message, expected) in messages.iter().zip(["第二条思考", "第一条思考"]) {
+            let Some(MessageMetadata::Agent(agent)) = &message.metadata else {
+                panic!("agent reasoning metadata missing");
+            };
+            assert_eq!(agent.reasoning, [expected]);
+        }
     }
 
     #[test]

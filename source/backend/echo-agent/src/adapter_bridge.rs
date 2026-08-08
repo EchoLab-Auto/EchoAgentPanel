@@ -171,6 +171,7 @@ impl InboundMessageHook for AgentMessageHook {
                     history_snapshot,
                     turn_cancel.clone(),
                     Some(visible_reply_tx),
+                    &branch_id,
                 )
                 .await;
             branch_completed.cancel();
@@ -817,6 +818,7 @@ mod tests {
                 snapshot,
                 tokio_util::sync::CancellationToken::new(),
                 Some(reply_tx),
+                "test-branch",
             )
             .await
             .unwrap();

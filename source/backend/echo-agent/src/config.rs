@@ -110,6 +110,8 @@ pub struct AgentConfig {
     pub provider: String,
     pub model: String,
     pub base_url: String,
+    /// Excluded from generic serialization. Agent persistence preserves the
+    /// on-disk value or writes an explicitly supplied replacement.
     #[serde(skip_serializing, default)]
     pub api_key: String,
     /// DeepSeek thinking mode (enabled by default).

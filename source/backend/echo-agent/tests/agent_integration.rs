@@ -577,8 +577,12 @@ async fn qq_hook_input_enforces_transport_boundary() {
         "QQ hook must get the transport boundary: {prompt}"
     );
     assert!(
-        prompt.contains("MUST be answered exactly once"),
+        prompt.contains("Answer every <qq_message_hook> exactly once"),
         "QQ hook must force a send tool reply: {prompt}"
+    );
+    assert!(
+        prompt.contains("never send twice"),
+        "QQ hook must forbid double sends: {prompt}"
     );
 }
 
