@@ -1141,7 +1141,7 @@ mod tests {
                 },
             ],
             total_tokens: 20,
-            limit_tokens: 8000,
+            limit_tokens: 800_000,
         });
         let text: String = app
             .state
@@ -1150,7 +1150,7 @@ mod tests {
             .map(|m| m.content.clone())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("20 / 8000 tokens (0%)"));
+        assert!(text.contains("20 / 800000 tokens (0%)"));
         assert!(text.contains("2 条"));
         assert!(text.contains("user"));
         assert!(text.contains("assistant"));

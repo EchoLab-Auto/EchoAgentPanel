@@ -52,6 +52,9 @@ impl ApiProfile {
     }
 }
 
+/// Default trunk token budget: 1M × 0.8 = 800,000 tokens.
+pub const DEFAULT_MEMORY_LIMIT_TOKENS: usize = 1_000_000 * 8 / 10;
+
 /// Configuration for the agent framework (the `[agent]` TOML section).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -72,12 +75,14 @@ pub struct AgentConfig {
     pub max_tool_iterations: usize,
     /// Directory containing `SKILL.md` definitions.
     pub skills_dir: String,
-    /// DEPRECATED — legacy message-count limit (kept for config compatibility).
-    /// Runtime trimming now uses [`memory_limit_tokens`]; this field is only a
-    /// fallback source when `memory_limit_tokens` is not set.
+    /// DEPRECATED — legacy message-count limit. Kept only for config
+    /// compatibility (deserialization); no longer participates in any
+    /// calculation. Use `memory_limit_tokens` instead.
     pub memory_limit: usize,
     /// Token budget for the global conversation trunk (the context fed to the
-    /// LLM). `None` falls back to the legacy `memory_limit` × 200 conversion.
+    /// Token budget for the global conversation trunk (the context fed to the
+    /// LLM). `None` falls back to [`DEFAULT_MEMORY_LIMIT_TOKENS`]
+    /// (1M × 0.8 = 800,000 tokens).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_limit_tokens: Option<usize>,
     /// Privileged framework update policy.
@@ -173,14 +178,14 @@ impl AgentConfig {
     /// Resolve the effective token budget for trunk trimming.
     ///
     /// - Explicit `memory_limit_tokens` wins (minimum 200 tokens).
-    /// - Otherwise the legacy `memory_limit` (message count) is converted at
-    ///   200 tokens per message, matching the old default of 40 messages ≈
-    ///   8,000 tokens.
+    /// - Otherwise the default budget is [`DEFAULT_MEMORY_LIMIT_TOKENS`]
+    ///   (1M × 0.8 = 800,000 tokens). The legacy `memory_limit`
+    ///   message-count field is deprecated and no longer participates.
     pub fn effective_memory_limit_tokens(&self) -> usize {
         if let Some(tokens) = self.memory_limit_tokens {
             return tokens.max(200);
         }
-        self.memory_limit.saturating_mul(200).max(200)
+        DEFAULT_MEMORY_LIMIT_TOKENS
     }
 }
 
@@ -324,24 +329,17 @@ mod tests {
     }
 
     #[test]
-    fn effective_tokens_fallback_converts_legacy_message_limit() {
+    fn effective_tokens_default_is_1m_times_0_8() {
+        assert_eq!(DEFAULT_MEMORY_LIMIT_TOKENS, 800_000);
+        assert_eq!(DEFAULT_MEMORY_LIMIT_TOKENS, 1_000_000 * 8 / 10);
         let default = AgentConfig::default();
-        assert_eq!(default.effective_memory_limit_tokens(), 40 * 200);
+        assert_eq!(default.effective_memory_limit_tokens(), 800_000);
+        // Legacy message-count field no longer participates in the calculation.
         let legacy = AgentConfig {
             memory_limit: 20,
             ..Default::default()
         };
-        assert_eq!(legacy.effective_memory_limit_tokens(), 20 * 200);
-    }
-
-    #[test]
-    fn effective_tokens_prefers_explicit_budget() {
-        let cfg = AgentConfig {
-            memory_limit: 10,
-            memory_limit_tokens: Some(12_000),
-            ..Default::default()
-        };
-        assert_eq!(cfg.effective_memory_limit_tokens(), 12_000);
+        assert_eq!(legacy.effective_memory_limit_tokens(), 800_000);
     }
 
     #[test]
