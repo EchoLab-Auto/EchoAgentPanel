@@ -259,12 +259,21 @@ provider = "deepseek"
 model = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com/anthropic"
 api_key = ""
+thinking = "enabled"                    # enabled / disabled，默认 enabled
+reasoning_effort = "max"                # low / high / max，默认 max
 system_prompt = "请你使用中文"
 max_tool_iterations = 1024
 # 上下文 token 预算：trunk 按 token 裁剪（保守估算：CJK 1 字符≈1 token，
 # 其余 ≈3 字符/token，每条消息另计 4 token 结构开销）。
 # 默认 1M × 0.8 = 800,000 tokens；旧字段 memory_limit（按消息条数）已废弃。
 memory_limit_tokens = 800000
+```
+
+DeepSeek 的 OpenAI 兼容端点会发送 `thinking.type` 与 `reasoning_effort`；
+`/anthropic` 兼容端点会发送 `thinking.type` 与 `output_config.effort`。
+工具调用期间，Core 会把模型返回的完整思考内容带回下一轮请求。TUI 将思考与
+最终答复分开显示在全局时间线中；可在 API 设置弹窗中切换，也可在 `/api`
+模式输入 `thinking enabled|disabled` 和 `effort low|high|max`。
 
 Core 会每秒检查一次 `skills_dir`。新增、修改或删除任意递归目录下的
 `SKILL.md` 后会自动重载，无需重启；运行时禁用的 skill 在重载后仍保持禁用。

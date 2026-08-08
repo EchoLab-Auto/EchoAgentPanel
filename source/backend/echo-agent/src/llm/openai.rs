@@ -19,6 +19,8 @@ pub struct OpenAiProvider {
     api_key: String,
     model: String,
     client: reqwest::Client,
+    thinking: Option<crate::config::ThinkingMode>,
+    reasoning_effort: crate::config::ReasoningEffort,
 }
 
 impl OpenAiProvider {
@@ -27,6 +29,8 @@ impl OpenAiProvider {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             model: model.to_string(),
+            thinking: None,
+            reasoning_effort: crate::config::ReasoningEffort::default(),
             // 超时保护：上游挂起时不能让 agent 任务无限阻塞
             client: match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -41,6 +45,16 @@ impl OpenAiProvider {
             },
         }
     }
+
+    pub fn with_reasoning(
+        mut self,
+        thinking: crate::config::ThinkingMode,
+        effort: crate::config::ReasoningEffort,
+    ) -> Self {
+        self.thinking = Some(thinking);
+        self.reasoning_effort = effort;
+        self
+    }
 }
 
 #[async_trait]
@@ -54,7 +68,8 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        let body = build_request_body(request, false);
+        let body =
+            build_request_body_with_reasoning(request, false, self.thinking, self.reasoning_effort);
         let resp = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
@@ -80,6 +95,7 @@ impl LlmProvider for OpenAiProvider {
         let msg = choice.message;
         Ok(ChatResponse {
             content: msg.content,
+            reasoning_content: msg.reasoning_content,
             tool_calls: msg
                 .tool_calls
                 .unwrap_or_default()
@@ -105,7 +121,8 @@ impl LlmProvider for OpenAiProvider {
         request: &ChatRequest,
         tx: mpsc::UnboundedSender<ChatChunk>,
     ) -> Result<(), LlmError> {
-        let body = build_request_body(request, true);
+        let body =
+            build_request_body_with_reasoning(request, true, self.thinking, self.reasoning_effort);
         let resp = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
@@ -137,6 +154,7 @@ impl LlmProvider for OpenAiProvider {
                         SseOutcome::Done => {
                             let _ = tx.send(ChatChunk {
                                 content_delta: None,
+                                reasoning_delta: None,
                                 tool_call_delta: None,
                             });
                             return Ok(());
@@ -156,6 +174,7 @@ impl LlmProvider for OpenAiProvider {
         }
         let _ = tx.send(ChatChunk {
             content_delta: None,
+            reasoning_delta: None,
             tool_call_delta: None,
         });
         Ok(())
@@ -210,6 +229,7 @@ fn parse_sse_event(event: &str) -> Vec<SseOutcome> {
             for tc in tcs.iter() {
                 outcomes.push(SseOutcome::Chunk(ChatChunk {
                     content_delta: None,
+                    reasoning_delta: None,
                     tool_call_delta: Some(ToolCallDelta {
                         index: tc.index.unwrap_or(0),
                         id: tc.id.clone(),
@@ -222,6 +242,14 @@ fn parse_sse_event(event: &str) -> Vec<SseOutcome> {
         if let Some(content) = &delta.content {
             outcomes.push(SseOutcome::Chunk(ChatChunk {
                 content_delta: Some(content.clone()),
+                reasoning_delta: None,
+                tool_call_delta: None,
+            }));
+        }
+        if let Some(reasoning) = &delta.reasoning_content {
+            outcomes.push(SseOutcome::Chunk(ChatChunk {
+                content_delta: None,
+                reasoning_delta: Some(reasoning.clone()),
                 tool_call_delta: None,
             }));
         }
@@ -229,7 +257,22 @@ fn parse_sse_event(event: &str) -> Vec<SseOutcome> {
     outcomes
 }
 
+#[cfg(test)]
 fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value {
+    build_request_body_with_reasoning(
+        request,
+        stream,
+        None,
+        crate::config::ReasoningEffort::default(),
+    )
+}
+
+fn build_request_body_with_reasoning(
+    request: &ChatRequest,
+    stream: bool,
+    thinking: Option<crate::config::ThinkingMode>,
+    reasoning_effort: crate::config::ReasoningEffort,
+) -> serde_json::Value {
     let messages: Vec<serde_json::Value> = request
         .messages
         .iter()
@@ -247,6 +290,9 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
                         "function": { "name": tc.name, "arguments": tc.arguments },
                     }))
                     .collect::<Vec<_>>());
+            }
+            if let Some(reasoning) = &m.reasoning_content {
+                v["reasoning_content"] = json!(reasoning);
             }
             if let Some(id) = &m.tool_call_id {
                 v["tool_call_id"] = json!(id);
@@ -274,6 +320,12 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
     }
     if let Some(mt) = request.max_tokens {
         body["max_tokens"] = json!(mt);
+    }
+    if let Some(mode) = thinking {
+        body["thinking"] = json!({"type": mode.as_str()});
+        if mode == crate::config::ThinkingMode::Enabled {
+            body["reasoning_effort"] = json!(reasoning_effort.as_str());
+        }
     }
     body
 }
@@ -303,6 +355,7 @@ struct Choice {
 #[derive(Deserialize)]
 struct MessageWire {
     content: Option<String>,
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<ToolCallWire>>,
 }
 
@@ -349,6 +402,7 @@ struct StreamChoice {
 #[derive(Deserialize)]
 struct DeltaWire {
     content: Option<String>,
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<StreamToolCallWire>>,
 }
 
@@ -398,6 +452,7 @@ mod tests {
                     ChatMessage {
                         role: crate::llm::ChatRole::Assistant,
                         content: "".into(),
+                        reasoning_content: None,
                         tool_calls: Some(vec![crate::llm::ToolCall {
                             id: "c1".into(),
                             name: "calc".into(),
@@ -426,6 +481,52 @@ mod tests {
         assert_eq!(tool["role"], "tool");
         assert_eq!(tool["tool_call_id"], "c1");
         assert_eq!(tool["content"], "2");
+    }
+
+    #[test]
+    fn deepseek_body_enables_max_reasoning_and_returns_it_in_tool_loop() {
+        let mut assistant =
+            ChatMessage::assistant_with_reasoning("", Some("需要先读取文件".into()));
+        assistant.tool_calls = Some(vec![crate::llm::ToolCall {
+            id: "c1".into(),
+            name: "read_file".into(),
+            arguments: "{}".into(),
+        }]);
+        let request = ChatRequest {
+            model: "deepseek-v4-flash".into(),
+            messages: vec![assistant, ChatMessage::tool("ok", "c1")],
+            tools: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        let body = build_request_body_with_reasoning(
+            &request,
+            false,
+            Some(crate::config::ThinkingMode::Enabled),
+            crate::config::ReasoningEffort::Max,
+        );
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["reasoning_effort"], "max");
+        assert_eq!(body["messages"][0]["reasoning_content"], "需要先读取文件");
+    }
+
+    #[test]
+    fn disabled_reasoning_omits_effort() {
+        let request = ChatRequest {
+            model: "deepseek-v4-flash".into(),
+            messages: vec![ChatMessage::user("hi")],
+            tools: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        let body = build_request_body_with_reasoning(
+            &request,
+            false,
+            Some(crate::config::ThinkingMode::Disabled),
+            crate::config::ReasoningEffort::Max,
+        );
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert!(body.get("reasoning_effort").is_none());
     }
 
     #[test]
@@ -497,6 +598,19 @@ mod tests {
             SseOutcome::Chunk(c) => {
                 assert_eq!(c.content_delta.as_deref(), Some("你好"));
                 assert!(c.tool_call_delta.is_none());
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_reasoning_delta_is_extracted() {
+        let outcomes =
+            parse_sse_event(r#"data: {"choices":[{"delta":{"reasoning_content":"分析中"}}]}"#);
+        match &outcomes[0] {
+            SseOutcome::Chunk(chunk) => {
+                assert_eq!(chunk.reasoning_delta.as_deref(), Some("分析中"));
+                assert!(chunk.content_delta.is_none());
             }
             other => panic!("expected Chunk, got {other:?}"),
         }

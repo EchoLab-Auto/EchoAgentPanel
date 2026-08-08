@@ -125,6 +125,13 @@ impl App {
                 activity.completion_tokens =
                     activity.completion_tokens.saturating_add(completion_tokens);
             }
+            BackendEvent::AgentReasoning {
+                session_id,
+                content,
+            } => {
+                let ts = chrono::Utc::now().timestamp();
+                self.push_to(session_id, MsgRole::Reasoning, content, ts);
+            }
             BackendEvent::SubagentStarted { session_id, task } => {
                 self.state.start_subagent(&session_id, &task);
                 self.state
@@ -373,6 +380,8 @@ impl App {
                 model,
                 base_url,
                 api_key_set,
+                thinking,
+                reasoning_effort,
                 system_prompt,
                 active_api,
                 profiles,
@@ -384,6 +393,8 @@ impl App {
                 self.state.settings.profiles = profiles;
                 self.state.settings.active_api = active_api.clone();
                 self.state.settings.api_key_set = api_key_set;
+                self.state.settings.thinking = thinking;
+                self.state.settings.reasoning_effort = reasoning_effort;
                 let _ = model;
             }
             BackendEvent::ApiProfilesUpdated {
@@ -1105,6 +1116,18 @@ mod tests {
             app.state.agent_activities["s1"].phase,
             AgentPhase::Completed
         );
+    }
+
+    #[test]
+    fn reasoning_event_is_appended_to_the_global_timeline() {
+        let mut app = app();
+        app.apply_backend_event(BackendEvent::AgentReasoning {
+            session_id: "qq:dm::1".into(),
+            content: "需要先确认上下文".into(),
+        });
+        let message = app.state.active_messages().last().unwrap();
+        assert_eq!(message.role, MsgRole::Reasoning);
+        assert_eq!(message.content, "需要先确认上下文");
     }
 
     #[test]

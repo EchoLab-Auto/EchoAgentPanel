@@ -93,6 +93,11 @@ pub enum BackendEvent {
         prompt_tokens: u32,
         completion_tokens: u32,
     },
+    /// Model reasoning content returned before the visible answer.
+    AgentReasoning {
+        session_id: String,
+        content: String,
+    },
     /// An isolated subagent started processing a task for the parent agent.
     SubagentStarted {
         session_id: String,
@@ -208,6 +213,10 @@ pub enum BackendEvent {
         model: String,
         base_url: String,
         api_key_set: bool,
+        #[serde(default)]
+        thinking: crate::config::ThinkingMode,
+        #[serde(default)]
+        reasoning_effort: crate::config::ReasoningEffort,
         system_prompt: String,
         /// Currently active profile name (empty = top-level default).
         active_api: String,
@@ -270,7 +279,13 @@ pub struct ApiProfileInfo {
     pub name: String,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub base_url: String,
     pub api_key_set: bool,
+    #[serde(default)]
+    pub thinking: crate::config::ThinkingMode,
+    #[serde(default)]
+    pub reasoning_effort: crate::config::ReasoningEffort,
 }
 
 /// Full state snapshot sent to the TUI on connect.

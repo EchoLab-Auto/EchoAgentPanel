@@ -27,6 +27,9 @@ pub enum ChatRole {
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: String,
+    /// Provider reasoning that must be returned verbatim during tool loops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     /// Required for `role == Tool`: the id of the tool call being answered.
@@ -39,6 +42,7 @@ impl ChatMessage {
         Self {
             role: ChatRole::System,
             content: content.into(),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         }
@@ -47,6 +51,7 @@ impl ChatMessage {
         Self {
             role: ChatRole::User,
             content: content.into(),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         }
@@ -55,6 +60,19 @@ impl ChatMessage {
         Self {
             role: ChatRole::Assistant,
             content: content.into(),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }
+    }
+    pub fn assistant_with_reasoning(
+        content: impl Into<String>,
+        reasoning_content: Option<String>,
+    ) -> Self {
+        Self {
+            role: ChatRole::Assistant,
+            content: content.into(),
+            reasoning_content,
             tool_calls: None,
             tool_call_id: None,
         }
@@ -63,6 +81,7 @@ impl ChatMessage {
         Self {
             role: ChatRole::Tool,
             content: content.into(),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
         }
@@ -101,6 +120,7 @@ pub struct ToolCallDelta {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatChunk {
     pub content_delta: Option<String>,
+    pub reasoning_delta: Option<String>,
     pub tool_call_delta: Option<ToolCallDelta>,
 }
 
@@ -115,6 +135,7 @@ pub struct Usage {
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: Option<String>,
+    pub reasoning_content: Option<String>,
     pub tool_calls: Vec<ToolCall>,
     pub usage: Usage,
 }
@@ -210,7 +231,13 @@ pub fn estimate_tokens(text: &str) -> usize {
 /// Estimate the tokens of one chat message, including the fixed per-message
 /// structural overhead (role label, separators) charged by the APIs.
 pub fn estimate_message_tokens(message: &ChatMessage) -> usize {
-    estimate_tokens(&message.content) + 4
+    estimate_tokens(&message.content)
+        + message
+            .reasoning_content
+            .as_deref()
+            .map(estimate_tokens)
+            .unwrap_or_default()
+        + 4
 }
 
 /// Estimate the total tokens of a history slice.
@@ -234,20 +261,26 @@ pub fn create_provider(cfg: &crate::config::AgentConfig) -> Result<Box<dyn LlmPr
         cfg.provider.as_str()
     };
     let anthropic_style = cfg.base_url.trim_end_matches('/').ends_with("/anthropic");
+    let deepseek_reasoning = (provider_kind == "deepseek"
+        || cfg.base_url.contains("api.deepseek.com"))
+    .then_some((cfg.thinking, cfg.reasoning_effort));
     match provider_kind {
         "openai" | "deepseek" if anthropic_style => {
             // DeepSeek 的 /anthropic 端点只实现 Messages API（POST /v1/messages）
-            Ok(Box::new(anthropic::AnthropicProvider::new(
-                &cfg.base_url,
-                &cfg.api_key,
-                &cfg.model,
-            )))
+            let mut provider =
+                anthropic::AnthropicProvider::new(&cfg.base_url, &cfg.api_key, &cfg.model);
+            if let Some((thinking, effort)) = deepseek_reasoning {
+                provider = provider.with_reasoning(thinking, effort);
+            }
+            Ok(Box::new(provider))
         }
-        "openai" | "deepseek" => Ok(Box::new(openai::OpenAiProvider::new(
-            &cfg.base_url,
-            &cfg.api_key,
-            &cfg.model,
-        ))),
+        "openai" | "deepseek" => {
+            let mut provider = openai::OpenAiProvider::new(&cfg.base_url, &cfg.api_key, &cfg.model);
+            if let Some((thinking, effort)) = deepseek_reasoning {
+                provider = provider.with_reasoning(thinking, effort);
+            }
+            Ok(Box::new(provider))
+        }
         "anthropic" | "claude" => Ok(Box::new(anthropic::AnthropicProvider::new(
             &cfg.base_url,
             &cfg.api_key,
@@ -362,6 +395,7 @@ mod tests {
             let msg = ChatMessage {
                 role,
                 content,
+                reasoning_content: None,
                 tool_calls,
                 tool_call_id: (role == ChatRole::Tool).then_some(tool_call_id),
             };

@@ -440,6 +440,7 @@ mod tests {
                 };
                 return Ok(ChatResponse {
                     content: None,
+                    reasoning_content: None,
                     tool_calls: vec![ToolCall {
                         id: "send".into(),
                         name: name.into(),
@@ -450,6 +451,7 @@ mod tests {
             }
             Ok(ChatResponse {
                 content: Some(self.reply.clone()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 usage: Usage::default(),
             })
@@ -551,6 +553,7 @@ mod tests {
                 .contains("Avoid fixed-template wording"));
             Ok(ChatResponse {
                 content: Some(self.reply.clone()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 usage: Usage::default(),
             })

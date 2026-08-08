@@ -40,6 +40,9 @@ pub struct SettingsForm {
     pub fields: Vec<String>,
     pub focus: usize,
     pub api_key_set: bool,
+    /// Effective top-level/profile reasoning settings received from backend.
+    pub thinking: echo_agent::ThinkingMode,
+    pub reasoning_effort: echo_agent::ReasoningEffort,
     /// 后端推送的 profile 列表。
     pub profiles: Vec<echo_agent::ApiProfileInfo>,
     /// 当前激活的 profile 名（空 = 顶层默认）。
@@ -56,6 +59,8 @@ impl Default for SettingsForm {
             fields: Vec::new(),
             focus: 0,
             api_key_set: false,
+            thinking: echo_agent::ThinkingMode::default(),
+            reasoning_effort: echo_agent::ReasoningEffort::default(),
             profiles: Vec::new(),
             active_api: String::new(),
             selection: 0,
@@ -81,6 +86,28 @@ impl SettingsForm {
         base_url: &str,
         api_key_set: bool,
     ) {
+        self.edit_profile_with_reasoning(
+            name,
+            provider,
+            model,
+            base_url,
+            api_key_set,
+            echo_agent::ThinkingMode::default(),
+            echo_agent::ReasoningEffort::default(),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn edit_profile_with_reasoning(
+        &mut self,
+        name: &str,
+        provider: &str,
+        model: &str,
+        base_url: &str,
+        api_key_set: bool,
+        thinking: echo_agent::ThinkingMode,
+        reasoning_effort: echo_agent::ReasoningEffort,
+    ) {
         self.mode = SettingsMode::EditProfile;
         self.focus = 0;
         if name.is_empty() {
@@ -91,6 +118,8 @@ impl SettingsForm {
                 model.into(),
                 base_url.into(),
                 String::new(),
+                thinking.as_str().into(),
+                reasoning_effort.as_str().into(),
             ];
         } else {
             self.name = name.to_string();
@@ -99,6 +128,8 @@ impl SettingsForm {
                 model.into(),
                 base_url.into(),
                 String::new(),
+                thinking.as_str().into(),
+                reasoning_effort.as_str().into(),
             ];
         }
         self.api_key_set = api_key_set;
@@ -114,10 +145,25 @@ impl SettingsForm {
     /// 字段标签（按模式）。
     pub fn field_names(&self) -> Vec<&'static str> {
         match self.mode {
-            SettingsMode::EditProfile if self.fields.len() == 5 => {
-                vec!["name", "provider", "model", "base_url", "api_key"]
+            SettingsMode::EditProfile if self.fields.len() == 7 => {
+                vec![
+                    "name",
+                    "provider",
+                    "model",
+                    "base_url",
+                    "api_key",
+                    "thinking",
+                    "reasoning_effort",
+                ]
             }
-            SettingsMode::EditProfile => vec!["provider", "model", "base_url", "api_key"],
+            SettingsMode::EditProfile => vec![
+                "provider",
+                "model",
+                "base_url",
+                "api_key",
+                "thinking",
+                "reasoning_effort",
+            ],
             SettingsMode::EditSystemPrompt => vec!["system_prompt"],
             SettingsMode::List => Vec::new(),
         }
@@ -137,7 +183,7 @@ impl SettingsForm {
     pub fn build_command(&self) -> BackendCommand {
         match self.mode {
             SettingsMode::EditProfile => {
-                let (name, rest) = if self.fields.len() == 5 {
+                let (name, rest) = if self.fields.len() == 7 {
                     (self.fields[0].clone(), self.fields[1..].to_vec())
                 } else {
                     (self.name.clone(), self.fields.clone())
@@ -148,6 +194,15 @@ impl SettingsForm {
                     model: rest[1].clone(),
                     base_url: rest[2].clone(),
                     api_key: rest[3].clone(),
+                    thinking: Some(match rest[4].as_str() {
+                        "disabled" => echo_agent::ThinkingMode::Disabled,
+                        _ => echo_agent::ThinkingMode::Enabled,
+                    }),
+                    reasoning_effort: Some(match rest[5].as_str() {
+                        "low" => echo_agent::ReasoningEffort::Low,
+                        "high" => echo_agent::ReasoningEffort::High,
+                        _ => echo_agent::ReasoningEffort::Max,
+                    }),
                 }
             }
             SettingsMode::EditSystemPrompt => BackendCommand::SetSystemPrompt {
@@ -180,7 +235,10 @@ mod tests {
             name: name.into(),
             provider: "deepseek".into(),
             model: "ds-v4".into(),
+            base_url: "https://api.deepseek.com".into(),
             api_key_set: true,
+            thinking: echo_agent::ThinkingMode::Enabled,
+            reasoning_effort: echo_agent::ReasoningEffort::Max,
         }
     }
 
@@ -189,10 +247,18 @@ mod tests {
         let mut f = SettingsForm::default();
         f.edit_profile("", "deepseek", "ds-v4", "http://x", false);
         assert_eq!(f.mode, SettingsMode::EditProfile);
-        assert_eq!(f.fields.len(), 5);
+        assert_eq!(f.fields.len(), 7);
         assert_eq!(
             f.field_names(),
-            vec!["name", "provider", "model", "base_url", "api_key"]
+            vec![
+                "name",
+                "provider",
+                "model",
+                "base_url",
+                "api_key",
+                "thinking",
+                "reasoning_effort"
+            ]
         );
         assert!(f.name.is_empty());
     }
@@ -201,11 +267,18 @@ mod tests {
     fn edit_profile_existing_omits_name_field() {
         let mut f = SettingsForm::default();
         f.edit_profile("p1", "openai", "gpt-4o", "http://y", true);
-        assert_eq!(f.fields.len(), 4);
+        assert_eq!(f.fields.len(), 6);
         assert_eq!(f.name, "p1");
         assert_eq!(
             f.field_names(),
-            vec!["provider", "model", "base_url", "api_key"]
+            vec![
+                "provider",
+                "model",
+                "base_url",
+                "api_key",
+                "thinking",
+                "reasoning_effort"
+            ]
         );
         assert!(f.api_key_set);
     }
@@ -223,8 +296,11 @@ mod tests {
     fn display_value_masks_api_key() {
         let mut f = SettingsForm::default();
         f.edit_profile("p1", "openai", "m", "", false);
-        // api_key is the last field.
-        let idx = f.fields.len() - 1;
+        let idx = f
+            .field_names()
+            .iter()
+            .position(|name| *name == "api_key")
+            .unwrap();
         f.fields[idx] = "sk-123".into();
         let masked = f.display_value(idx);
         assert!(!masked.contains("sk-123"));
@@ -243,6 +319,8 @@ mod tests {
             "ds-v4".into(),
             "http://x".into(),
             "sk".into(),
+            "enabled".into(),
+            "max".into(),
         ];
         match f.build_command() {
             BackendCommand::UpdateApiConfig {
@@ -251,12 +329,16 @@ mod tests {
                 model,
                 base_url,
                 api_key,
+                thinking,
+                reasoning_effort,
             } => {
                 assert_eq!(name, "newp");
                 assert_eq!(provider, "deepseek");
                 assert_eq!(model, "ds-v4");
                 assert_eq!(base_url, "http://x");
                 assert_eq!(api_key, "sk");
+                assert_eq!(thinking, Some(echo_agent::ThinkingMode::Enabled));
+                assert_eq!(reasoning_effort, Some(echo_agent::ReasoningEffort::Max));
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -392,6 +474,14 @@ impl SettingsPopup {
                 format!("  ({}/{})", p.provider, p.model),
                 if active { theme.accent } else { theme.dim },
             ));
+            spans.push(Span::styled(
+                format!(
+                    "  [{}/{}]",
+                    p.thinking.as_str(),
+                    p.reasoning_effort.as_str()
+                ),
+                theme.faint,
+            ));
             if !p.api_key_set {
                 spans.push(Span::styled("  [无 key]", theme.faint));
             }
@@ -454,19 +544,29 @@ impl SettingsPopup {
                 let selection = state.settings.selected_profile().cloned();
                 match selection {
                     Some(p) => {
-                        state.settings.edit_profile(
+                        state.settings.edit_profile_with_reasoning(
                             &p.name,
                             &p.provider,
                             &p.model,
-                            "",
+                            &p.base_url,
                             p.api_key_set,
+                            p.thinking,
+                            p.reasoning_effort,
                         );
                     }
                     None => {
                         // 顶层默认：也允许编辑（name 空 = 顶层）
-                        state
-                            .settings
-                            .edit_profile("", "", "", "", state.settings.api_key_set);
+                        let thinking = state.settings.thinking;
+                        let effort = state.settings.reasoning_effort;
+                        state.settings.edit_profile_with_reasoning(
+                            "",
+                            &state.status.provider.clone(),
+                            &state.status.model.clone(),
+                            &state.status.base_url.clone(),
+                            state.settings.api_key_set,
+                            thinking,
+                            effort,
+                        );
                     }
                 }
             }
@@ -502,7 +602,7 @@ impl SettingsPopup {
 
         f.render_widget(Clear, rect);
         let title = match form.mode {
-            SettingsMode::EditProfile if form.fields.len() == 5 => " 新建 API 配置 ",
+            SettingsMode::EditProfile if form.fields.len() == 7 => " 新建 API 配置 ",
             SettingsMode::EditProfile => " 编辑 API 配置 ",
             _ => " 系统提示词 ",
         };
@@ -535,6 +635,8 @@ impl SettingsPopup {
                 "model" => "如 gpt-4o-mini / deepseek-chat / qwen2.5".to_string(),
                 "base_url" => "留空用默认 (openai→api.openai.com/v1)".to_string(),
                 "api_key" => "留空保持不变".to_string(),
+                "thinking" => "enabled / disabled（←→ 或空格切换）".to_string(),
+                "reasoning_effort" => "low / high / max（←→ 或空格切换）".to_string(),
                 _ => "机器人人设与规则".to_string(),
             };
             let (label_style, value_style) = if focused {
@@ -562,9 +664,11 @@ impl SettingsPopup {
             .block(block);
         f.render_widget(p, rect);
 
-        let hint = Paragraph::new(Line::from("Tab/↑↓ 切换字段 · Enter 保存 · Esc 取消"))
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.faint));
+        let hint = Paragraph::new(Line::from(
+            "Tab/↑↓ 字段 · ←→/空格 选项 · Enter 保存 · Esc 取消",
+        ))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(theme.faint));
         f.render_widget(hint, Rect::new(x, y + h, w, 1));
     }
 
@@ -574,6 +678,12 @@ impl SettingsPopup {
         state: &mut AppState,
     ) -> ComponentResult {
         let n = state.settings.fields.len();
+        let focused_name = state
+            .settings
+            .field_names()
+            .get(state.settings.focus)
+            .copied();
+        let is_option = matches!(focused_name, Some("thinking" | "reasoning_effort"));
         match key.code {
             KeyCode::Esc => {
                 state.settings.to_list();
@@ -597,13 +707,40 @@ impl SettingsPopup {
                     state.settings.focus - 1
                 };
             }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if is_option => {
+                let value = &mut state.settings.fields[state.settings.focus];
+                *value = match focused_name {
+                    Some("thinking") => if value == "enabled" {
+                        "disabled"
+                    } else {
+                        "enabled"
+                    }
+                    .into(),
+                    Some("reasoning_effort") => match (value.as_str(), key.code) {
+                        ("low", KeyCode::Left) => "max".into(),
+                        ("high", KeyCode::Left) => "low".into(),
+                        ("max", KeyCode::Left) => "high".into(),
+                        ("low", _) => "high".into(),
+                        ("high", _) => "max".into(),
+                        _ => "low".into(),
+                    },
+                    _ => value.clone(),
+                };
+            }
             KeyCode::Backspace => {
-                state.settings.fields[state.settings.focus].pop();
+                if !is_option {
+                    state.settings.fields[state.settings.focus].pop();
+                }
             }
             KeyCode::Delete => {
-                state.settings.fields[state.settings.focus].clear();
+                if !is_option {
+                    state.settings.fields[state.settings.focus].clear();
+                }
             }
             KeyCode::Char(c) => {
+                if is_option {
+                    return ComponentResult::Consumed;
+                }
                 if c == ' ' || !key.modifiers.contains(KeyModifiers::CONTROL) {
                     state.settings.fields[state.settings.focus].push(c);
                     return ComponentResult::Consumed;

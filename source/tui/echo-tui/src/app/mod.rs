@@ -569,26 +569,31 @@ impl App {
                     }
                     KeyCode::Char('e') => {
                         if fo.form_kind == FormKind::ApiConfig {
-                            let label = fo
-                                .select_items
-                                .get(fo.select_idx)
-                                .map(|s| s.label.clone())
-                                .unwrap_or_default();
+                            let profile = self.state.settings.profiles.get(fo.select_idx).cloned();
                             let st = &self.state.status;
                             self.state.form_overlay.set_fields(vec![
                                 FormField {
                                     label: "Provider".into(),
-                                    value: st.provider.clone(),
+                                    value: profile
+                                        .as_ref()
+                                        .map(|p| p.provider.clone())
+                                        .unwrap_or_else(|| st.provider.clone()),
                                     kind: FieldKind::Text,
                                 },
                                 FormField {
                                     label: "Model".into(),
-                                    value: st.model.clone(),
+                                    value: profile
+                                        .as_ref()
+                                        .map(|p| p.model.clone())
+                                        .unwrap_or_else(|| st.model.clone()),
                                     kind: FieldKind::Text,
                                 },
                                 FormField {
                                     label: "BaseURL".into(),
-                                    value: st.base_url.clone(),
+                                    value: profile
+                                        .as_ref()
+                                        .map(|p| p.base_url.clone())
+                                        .unwrap_or_else(|| st.base_url.clone()),
                                     kind: FieldKind::Text,
                                 },
                                 FormField {
@@ -601,8 +606,27 @@ impl App {
                                     value: st.system_prompt.clone(),
                                     kind: FieldKind::Text,
                                 },
+                                FormField {
+                                    label: "Thinking".into(),
+                                    value: profile
+                                        .as_ref()
+                                        .map(|p| p.thinking.as_str())
+                                        .unwrap_or(self.state.settings.thinking.as_str())
+                                        .into(),
+                                    kind: FieldKind::Text,
+                                },
+                                FormField {
+                                    label: "Effort".into(),
+                                    value: profile
+                                        .as_ref()
+                                        .map(|p| p.reasoning_effort.as_str())
+                                        .unwrap_or(self.state.settings.reasoning_effort.as_str())
+                                        .into(),
+                                    kind: FieldKind::Text,
+                                },
                             ]);
-                            self.state.form_overlay.edit_label = label;
+                            self.state.form_overlay.edit_label =
+                                profile.map(|p| p.name).unwrap_or_default();
                             self.prompt_input.clear_input();
                             self.state.form_overlay.enter_edit();
                         }
@@ -965,7 +989,10 @@ mod tests {
                     name: format!("dup-{}", i % 3),
                     provider: "deepseek".into(),
                     model: "deepseek-v4-flash".into(),
+                    base_url: "https://api.deepseek.com/anthropic".into(),
                     api_key_set: true,
+                    thinking: echo_agent::ThinkingMode::Enabled,
+                    reasoning_effort: echo_agent::ReasoningEffort::Max,
                 });
         }
         app.state.show_settings = true;
@@ -1197,11 +1224,13 @@ mod tests {
             crate::components::form_overlay::FormState::Editing
         );
         let fields = &app.state.form_overlay.fields;
-        assert_eq!(fields.len(), 5);
+        assert_eq!(fields.len(), 7);
         assert_eq!(fields[0].value, "deepseek");
         assert_eq!(fields[1].value, "ds-v4");
         assert_eq!(fields[2].value, "http://x");
         assert_eq!(fields[4].value, "你好");
+        assert_eq!(fields[5].value, "enabled");
+        assert_eq!(fields[6].value, "max");
     }
 
     #[test]

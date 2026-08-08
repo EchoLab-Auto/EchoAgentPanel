@@ -16,6 +16,8 @@ pub struct AnthropicProvider {
     api_key: String,
     model: String,
     client: reqwest::Client,
+    thinking: Option<crate::config::ThinkingMode>,
+    reasoning_effort: crate::config::ReasoningEffort,
 }
 
 impl AnthropicProvider {
@@ -24,6 +26,8 @@ impl AnthropicProvider {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             model: model.to_string(),
+            thinking: None,
+            reasoning_effort: crate::config::ReasoningEffort::default(),
             client: match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .connect_timeout(std::time::Duration::from_secs(10))
@@ -39,6 +43,16 @@ impl AnthropicProvider {
             },
         }
     }
+
+    pub fn with_reasoning(
+        mut self,
+        thinking: crate::config::ThinkingMode,
+        effort: crate::config::ReasoningEffort,
+    ) -> Self {
+        self.thinking = Some(thinking);
+        self.reasoning_effort = effort;
+        self
+    }
 }
 
 #[async_trait]
@@ -52,7 +66,8 @@ impl LlmProvider for AnthropicProvider {
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        let body = build_request_body(request, false);
+        let body =
+            build_request_body_with_reasoning(request, false, self.thinking, self.reasoning_effort);
         let resp = self
             .client
             .post(format!("{}/v1/messages", self.base_url))
@@ -73,10 +88,12 @@ impl LlmProvider for AnthropicProvider {
         let parsed: MessagesResponse = serde_json::from_str(&text)
             .map_err(|e| LlmError::Parse(format!("{e} — body: {}", super::truncate(&text, 300))))?;
         let mut content = String::new();
+        let mut reasoning_content = String::new();
         let mut tool_calls = Vec::new();
         for block in parsed.content {
             match block {
                 ContentBlock::Text { text } => content.push_str(&text),
+                ContentBlock::Thinking { thinking } => reasoning_content.push_str(&thinking),
                 ContentBlock::ToolUse { id, name, input } => {
                     tool_calls.push(ToolCall {
                         id,
@@ -95,6 +112,11 @@ impl LlmProvider for AnthropicProvider {
             } else {
                 Some(content)
             },
+            reasoning_content: if reasoning_content.is_empty() {
+                None
+            } else {
+                Some(reasoning_content)
+            },
             tool_calls,
             usage: parsed
                 .usage
@@ -111,7 +133,8 @@ impl LlmProvider for AnthropicProvider {
         request: &ChatRequest,
         tx: mpsc::UnboundedSender<ChatChunk>,
     ) -> Result<(), LlmError> {
-        let body = build_request_body(request, true);
+        let body =
+            build_request_body_with_reasoning(request, true, self.thinking, self.reasoning_effort);
         let resp = self
             .client
             .post(format!("{}/v1/messages", self.base_url))
@@ -153,6 +176,7 @@ impl LlmProvider for AnthropicProvider {
         }
         let _ = tx.send(ChatChunk {
             content_delta: None,
+            reasoning_delta: None,
             tool_call_delta: None,
         });
         Ok(())
@@ -195,6 +219,7 @@ fn parse_anthropic_event(event: &str) -> Vec<AnthropicOutcome> {
         } => {
             outcomes.push(AnthropicOutcome::Chunk(ChatChunk {
                 content_delta: None,
+                reasoning_delta: None,
                 tool_call_delta: Some(ToolCallDelta {
                     index,
                     id: Some(id),
@@ -207,12 +232,21 @@ fn parse_anthropic_event(event: &str) -> Vec<AnthropicOutcome> {
             DeltaWire::TextDelta { text } => {
                 outcomes.push(AnthropicOutcome::Chunk(ChatChunk {
                     content_delta: Some(text),
+                    reasoning_delta: None,
+                    tool_call_delta: None,
+                }));
+            }
+            DeltaWire::ThinkingDelta { thinking } => {
+                outcomes.push(AnthropicOutcome::Chunk(ChatChunk {
+                    content_delta: None,
+                    reasoning_delta: Some(thinking),
                     tool_call_delta: None,
                 }));
             }
             DeltaWire::InputJsonDelta { partial_json } => {
                 outcomes.push(AnthropicOutcome::Chunk(ChatChunk {
                     content_delta: None,
+                    reasoning_delta: None,
                     tool_call_delta: Some(ToolCallDelta {
                         index,
                         id: None,
@@ -231,7 +265,22 @@ fn parse_anthropic_event(event: &str) -> Vec<AnthropicOutcome> {
     outcomes
 }
 
+#[cfg(test)]
 fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value {
+    build_request_body_with_reasoning(
+        request,
+        stream,
+        None,
+        crate::config::ReasoningEffort::default(),
+    )
+}
+
+fn build_request_body_with_reasoning(
+    request: &ChatRequest,
+    stream: bool,
+    thinking: Option<crate::config::ThinkingMode>,
+    reasoning_effort: crate::config::ReasoningEffort,
+) -> serde_json::Value {
     let system = request
         .messages
         .iter()
@@ -268,9 +317,12 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
                         // Match directly on tool_calls instead of a separate
                         // has_tools guard + unwrap, so an empty/None tool_calls
                         // can never panic here.
-                        match &m.tool_calls {
-                            Some(tcs) if !tcs.is_empty() => {
+                        match (&m.tool_calls, &m.reasoning_content) {
+                            (Some(tcs), reasoning) if !tcs.is_empty() || reasoning.is_some() => {
                                 let mut blocks: Vec<serde_json::Value> = Vec::new();
+                                if let Some(reasoning) = reasoning {
+                                    blocks.push(json!({"type": "thinking", "thinking": reasoning}));
+                                }
                                 if !m.content.is_empty() {
                                     blocks.push(json!({"type": "text", "text": m.content}));
                                 }
@@ -287,6 +339,13 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
                                     "content": blocks,
                                 })
                             }
+                            (None, Some(reasoning)) => json!({
+                                "role": "assistant",
+                                "content": [
+                                    {"type": "thinking", "thinking": reasoning},
+                                    {"type": "text", "text": m.content}
+                                ]
+                            }),
                             _ => json!({"role": "assistant", "content": m.content}),
                         }
                     }
@@ -317,6 +376,12 @@ fn build_request_body(request: &ChatRequest, stream: bool) -> serde_json::Value 
     }
     // Anthropic Messages API 要求 max_tokens 必填（DeepSeek /anthropic 同样）
     body["max_tokens"] = json!(request.max_tokens.unwrap_or(4096));
+    if let Some(mode) = thinking {
+        body["thinking"] = json!({"type": mode.as_str()});
+        if mode == crate::config::ThinkingMode::Enabled {
+            body["output_config"] = json!({"effort": reasoning_effort.as_str()});
+        }
+    }
     body
 }
 
@@ -334,6 +399,8 @@ struct MessagesResponse {
 enum ContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
     #[serde(rename = "tool_use")]
     ToolUse {
         id: String,
@@ -392,6 +459,9 @@ enum DeltaWire {
     TextDelta {
         text: String,
     },
+    ThinkingDelta {
+        thinking: String,
+    },
     InputJsonDelta {
         partial_json: String,
     },
@@ -421,10 +491,12 @@ mod tests {
         }"#;
         let parsed: super::MessagesResponse = serde_json::from_str(raw).unwrap();
         let mut content = String::new();
+        let mut reasoning = String::new();
         let mut tool_calls = Vec::new();
         for block in parsed.content {
             match block {
                 super::ContentBlock::Text { text } => content.push_str(&text),
+                super::ContentBlock::Thinking { thinking } => reasoning.push_str(&thinking),
                 super::ContentBlock::ToolUse { id, name, input } => {
                     tool_calls.push((id, name, input));
                 }
@@ -432,6 +504,7 @@ mod tests {
             }
         }
         assert_eq!(content, "你好，请问需要什么帮助？");
+        assert_eq!(reasoning, "用户只发了一个斜杠，应该询问需求");
         assert!(tool_calls.is_empty());
     }
 
@@ -453,6 +526,36 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_anthropic_body_enables_max_reasoning_and_replays_thinking() {
+        let mut assistant = ChatMessage::assistant_with_reasoning("", Some("先调用计算器".into()));
+        assistant.tool_calls = Some(vec![ToolCall {
+            id: "c1".into(),
+            name: "calculator".into(),
+            arguments: "{}".into(),
+        }]);
+        let request = ChatRequest {
+            model: "deepseek-v4-flash".into(),
+            messages: vec![assistant, ChatMessage::tool("2", "c1")],
+            tools: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        let body = build_request_body_with_reasoning(
+            &request,
+            false,
+            Some(crate::config::ThinkingMode::Enabled),
+            crate::config::ReasoningEffort::Max,
+        );
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["output_config"]["effort"], "max");
+        assert_eq!(body["messages"][0]["content"][0]["type"], "thinking");
+        assert_eq!(
+            body["messages"][0]["content"][0]["thinking"],
+            "先调用计算器"
+        );
+    }
+
+    #[test]
     fn tool_results_are_grouped_into_one_user_message() {
         let body = build_request_body(
             &ChatRequest {
@@ -464,6 +567,7 @@ mod tests {
                     ChatMessage {
                         role: crate::llm::ChatRole::Assistant,
                         content: "".into(),
+                        reasoning_content: None,
                         tool_calls: Some(vec![ToolCall {
                             id: "call_1".into(),
                             name: "calculator".into(),
@@ -503,6 +607,7 @@ mod tests {
                     ChatMessage {
                         role: crate::llm::ChatRole::Assistant,
                         content: "I'll check".into(),
+                        reasoning_content: None,
                         tool_calls: Some(vec![ToolCall {
                             id: "c1".into(),
                             name: "read_file".into(),
@@ -557,6 +662,7 @@ mod tests {
                     ChatMessage {
                         role: crate::llm::ChatRole::Assistant,
                         content: "".into(),
+                        reasoning_content: None,
                         tool_calls: Some(vec![ToolCall {
                             id: "c1".into(),
                             name: "t".into(),
@@ -587,6 +693,19 @@ mod tests {
             AnthropicOutcome::Chunk(c) => {
                 assert_eq!(c.content_delta.as_deref(), Some("你好"));
                 assert!(c.tool_call_delta.is_none());
+            }
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn anthropic_sse_thinking_delta() {
+        let event = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"分析中\"}}";
+        let outcomes = parse_anthropic_event(event);
+        match &outcomes[0] {
+            AnthropicOutcome::Chunk(chunk) => {
+                assert_eq!(chunk.reasoning_delta.as_deref(), Some("分析中"));
+                assert!(chunk.content_delta.is_none());
             }
             other => panic!("expected Chunk, got {other:?}"),
         }

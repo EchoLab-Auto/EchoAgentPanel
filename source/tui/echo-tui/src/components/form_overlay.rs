@@ -245,52 +245,27 @@ impl FormOverlay {
         let url = vals.get(2).cloned().unwrap_or_default();
         let key = vals.get(3).cloned().unwrap_or_default();
         let prompt = vals.get(4).cloned().unwrap_or_default();
-
-        let send = |name, prov, mdl, url, key| {
-            backend.send(BackendCommand::UpdateApiConfig {
-                name,
-                provider: prov,
-                model: mdl,
-                base_url: url,
-                api_key: key,
-            });
+        let thinking = match vals.get(5).map(String::as_str) {
+            Some("disabled") => Some(echo_agent::ThinkingMode::Disabled),
+            Some("enabled") => Some(echo_agent::ThinkingMode::Enabled),
+            _ => None,
         };
-        if !provider.is_empty() {
-            send(
-                String::new(),
-                provider,
-                String::new(),
-                String::new(),
-                String::new(),
-            );
-        }
-        if !model.is_empty() {
-            send(
-                String::new(),
-                String::new(),
-                model,
-                String::new(),
-                String::new(),
-            );
-        }
-        if !url.is_empty() {
-            send(
-                String::new(),
-                String::new(),
-                String::new(),
-                url,
-                String::new(),
-            );
-        }
-        if !key.is_empty() {
-            send(
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                key,
-            );
-        }
+        let reasoning_effort = match vals.get(6).map(String::as_str) {
+            Some("low") => Some(echo_agent::ReasoningEffort::Low),
+            Some("high") => Some(echo_agent::ReasoningEffort::High),
+            Some("max") => Some(echo_agent::ReasoningEffort::Max),
+            _ => None,
+        };
+
+        backend.send(BackendCommand::UpdateApiConfig {
+            name: self.edit_label.clone(),
+            provider,
+            model,
+            base_url: url,
+            api_key: key,
+            thinking,
+            reasoning_effort,
+        });
         if !prompt.is_empty() {
             backend.send(BackendCommand::SetSystemPrompt { prompt });
         }
@@ -712,20 +687,22 @@ mod tests {
         while let Ok(cmd) = handle.command_rx.try_lock().unwrap().try_recv() {
             commands.push(cmd);
         }
-        // provider + model + key + prompt = 4 commands (empty url skipped)
-        assert_eq!(commands.len(), 4);
+        // One atomic API update plus the separate system prompt update.
+        assert_eq!(commands.len(), 2);
         assert_eq!(
             commands[0],
             BackendCommand::UpdateApiConfig {
                 name: String::new(),
                 provider: "deepseek".into(),
-                model: String::new(),
+                model: "deepseek-v4-flash".into(),
                 base_url: String::new(),
-                api_key: String::new(),
+                api_key: "sk-123".into(),
+                thinking: None,
+                reasoning_effort: None,
             }
         );
         assert_eq!(
-            commands[3],
+            commands[1],
             BackendCommand::SetSystemPrompt {
                 prompt: "你好".into()
             }

@@ -20,6 +20,10 @@ pub enum BackendCommand {
         model: String,
         base_url: String,
         api_key: String,
+        #[serde(default)]
+        thinking: Option<crate::config::ThinkingMode>,
+        #[serde(default)]
+        reasoning_effort: Option<crate::config::ReasoningEffort>,
     },
     /// Switch to an API profile by name (empty = top-level default).
     SwitchApi { name: String },

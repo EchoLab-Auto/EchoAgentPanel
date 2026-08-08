@@ -406,9 +406,9 @@ mod tests {
             "loopback candidate missing: {urls:?}"
         );
 
-        // Every candidate must serve the file (the caller tries them in order
-        // until one is reachable from inside the container).
-        for url in &urls {
+        // Every HTTP candidate must serve the file. When Docker is available,
+        // resolve_all may also return a valid in-container path first.
+        for url in urls.iter().filter(|url| url.starts_with("http://")) {
             let port = url
                 .split(':')
                 .nth(2)
@@ -424,7 +424,11 @@ mod tests {
         }
 
         // Unknown tokens are rejected: the URL is protected by its random token.
-        let port = urls[0]
+        let loopback_url = urls
+            .iter()
+            .find(|url| url.starts_with("http://127.0.0.1:"))
+            .expect("loopback candidate");
+        let port = loopback_url
             .split(':')
             .nth(2)
             .and_then(|p| p.split('/').next())

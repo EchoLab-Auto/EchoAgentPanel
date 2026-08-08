@@ -24,7 +24,7 @@ pub use adapter_bridge::AgentMessageHook;
 pub use agent::Agent;
 pub use bridge::{create_bridge, BackendBridge, BackendHandle, FanoutHandle};
 pub use command::BackendCommand;
-pub use config::{AgentConfig, SelfUpdateConfig};
+pub use config::{AgentConfig, ReasoningEffort, SelfUpdateConfig, ThinkingMode};
 pub use event::{
     ApiProfileInfo, BackendEvent, BackendState, ContextMessageInfo, GroupInfo, SessionInfo,
 };

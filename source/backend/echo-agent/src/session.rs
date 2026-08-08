@@ -474,6 +474,7 @@ fn serialize_messages(history: &[ChatMessage]) -> Vec<serde_json::Value> {
                     crate::llm::ChatRole::Tool => "tool",
                 },
                 "content": message.content,
+                "reasoning_content": message.reasoning_content,
             })
         })
         .collect()
@@ -492,6 +493,7 @@ fn deserialize_messages(history: &[serde_json::Value]) -> Vec<ChatMessage> {
                     _ => return None,
                 },
                 content: message["content"].as_str()?.into(),
+                reasoning_content: message["reasoning_content"].as_str().map(str::to_string),
                 tool_calls: None,
                 tool_call_id: None,
             })

@@ -2,8 +2,47 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Whether model thinking/reasoning is enabled for DeepSeek-compatible APIs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingMode {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
+impl ThinkingMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+/// DeepSeek reasoning effort level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    Low,
+    High,
+    #[default]
+    Max,
+}
+
+impl ReasoningEffort {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::High => "high",
+            Self::Max => "max",
+        }
+    }
+}
+
 /// A named LLM API profile (multi-API storage, switchable from the TUI).
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ApiProfile {
     /// 配置名，如 "openai-main" / "deepseek"。
     pub name: String,
@@ -12,6 +51,12 @@ pub struct ApiProfile {
     pub base_url: String,
     #[serde(default)]
     pub api_key: String,
+    /// DeepSeek thinking mode. Defaults to enabled for old profiles.
+    #[serde(default)]
+    pub thinking: ThinkingMode,
+    /// DeepSeek reasoning effort. Defaults to max for old profiles.
+    #[serde(default)]
+    pub reasoning_effort: ReasoningEffort,
 }
 
 /// Policy for the privileged framework self-update tool.
@@ -48,6 +93,8 @@ impl ApiProfile {
             model: model.into(),
             base_url: String::new(),
             api_key: String::new(),
+            thinking: ThinkingMode::default(),
+            reasoning_effort: ReasoningEffort::default(),
         }
     }
 }
@@ -65,6 +112,10 @@ pub struct AgentConfig {
     pub base_url: String,
     #[serde(skip_serializing, default)]
     pub api_key: String,
+    /// DeepSeek thinking mode (enabled by default).
+    pub thinking: ThinkingMode,
+    /// DeepSeek reasoning effort (max by default).
+    pub reasoning_effort: ReasoningEffort,
     /// 多 API 配置列表。
     pub api_profiles: Vec<ApiProfile>,
     /// 当前激活的 profile 名；为空使用顶层字段。
@@ -79,7 +130,6 @@ pub struct AgentConfig {
     /// compatibility (deserialization); no longer participates in any
     /// calculation. Use `memory_limit_tokens` instead.
     pub memory_limit: usize,
-    /// Token budget for the global conversation trunk (the context fed to the
     /// Token budget for the global conversation trunk (the context fed to the
     /// LLM). `None` falls back to [`DEFAULT_MEMORY_LIMIT_TOKENS`]
     /// (1M × 0.8 = 800,000 tokens).
@@ -97,6 +147,8 @@ impl Default for AgentConfig {
             model: String::new(),
             base_url: String::new(),
             api_key: String::new(),
+            thinking: ThinkingMode::default(),
+            reasoning_effort: ReasoningEffort::default(),
             api_profiles: Vec::new(),
             active_api: String::new(),
             system_prompt: "You are a helpful assistant. Respond concisely and clearly.".into(),
@@ -135,6 +187,8 @@ impl AgentConfig {
         if !p.api_key.is_empty() {
             self.api_key = p.api_key;
         }
+        self.thinking = p.thinking;
+        self.reasoning_effort = p.reasoning_effort;
     }
 
     /// Resolve the effective API key: explicit config, then env var by provider.
@@ -204,6 +258,27 @@ mod tests {
     fn active_profile_returns_none_when_empty() {
         let cfg = AgentConfig::default();
         assert!(cfg.active_profile().is_none());
+        assert_eq!(cfg.thinking, ThinkingMode::Enabled);
+        assert_eq!(cfg.reasoning_effort, ReasoningEffort::Max);
+    }
+
+    #[test]
+    fn legacy_config_defaults_to_enabled_max_reasoning() {
+        let cfg: AgentConfig = toml::from_str(
+            r#"
+                provider = "deepseek"
+                model = "deepseek-v4-flash"
+                [[api_profiles]]
+                name = "legacy"
+                provider = "deepseek"
+                model = "deepseek-v4-flash"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.thinking, ThinkingMode::Enabled);
+        assert_eq!(cfg.reasoning_effort, ReasoningEffort::Max);
+        assert_eq!(cfg.api_profiles[0].thinking, ThinkingMode::Enabled);
+        assert_eq!(cfg.api_profiles[0].reasoning_effort, ReasoningEffort::Max);
     }
 
     #[test]
@@ -235,6 +310,8 @@ mod tests {
             model: "new-model".into(),
             base_url: String::new(), // empty — must not override
             api_key: "sk".into(),
+            thinking: ThinkingMode::Disabled,
+            reasoning_effort: ReasoningEffort::High,
         });
         cfg.active_api = "p".into();
         cfg.apply_active_profile();
@@ -242,6 +319,8 @@ mod tests {
         assert_eq!(cfg.model, "new-model");
         assert_eq!(cfg.base_url, ""); // untouched
         assert_eq!(cfg.api_key, "sk");
+        assert_eq!(cfg.thinking, ThinkingMode::Disabled);
+        assert_eq!(cfg.reasoning_effort, ReasoningEffort::High);
     }
 
     #[test]

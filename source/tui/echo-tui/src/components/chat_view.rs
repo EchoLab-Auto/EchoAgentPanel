@@ -155,6 +155,7 @@ fn render_message(
         }
         (MsgRole::User, _) => ("后台输入".into(), theme.user_fg),
         (MsgRole::Backend, _) => ("Agent 后台输出".into(), theme.agent_fg),
+        (MsgRole::Reasoning, _) => ("Agent 思考".into(), theme.subtitle),
         (MsgRole::Tool, _) => ("工具".into(), theme.tool_fg),
         (MsgRole::System, _) => ("系统".into(), theme.system_fg),
     };
@@ -209,7 +210,7 @@ fn render_message(
         Span::styled(time_str, Style::default().fg(theme.faint)),
     ]);
     let mut out = vec![header];
-    let body_style = if m.role == MsgRole::System {
+    let body_style = if matches!(m.role, MsgRole::System | MsgRole::Reasoning) {
         theme.dim
     } else {
         theme.fg

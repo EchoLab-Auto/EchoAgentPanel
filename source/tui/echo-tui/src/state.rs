@@ -42,6 +42,7 @@ fn trunk_session_info() -> SessionInfo {
 pub enum MsgRole {
     User,
     Backend,
+    Reasoning,
     Tool,
     System,
 }

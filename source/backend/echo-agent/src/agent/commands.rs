@@ -73,9 +73,19 @@ impl Agent {
                 model,
                 base_url,
                 api_key,
+                thinking,
+                reasoning_effort,
             } => {
-                self.update_api_config(name, provider, model, base_url, api_key)
-                    .await;
+                self.update_api_config(
+                    name,
+                    provider,
+                    model,
+                    base_url,
+                    api_key,
+                    thinking,
+                    reasoning_effort,
+                )
+                .await;
             }
             BackendCommand::SwitchApi { name } => {
                 self.switch_api(&name).await;

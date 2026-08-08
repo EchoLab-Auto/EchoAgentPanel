@@ -485,6 +485,18 @@ impl Agent {
         }
     }
 
+    fn emit_reasoning(&self, session_id: &str, reasoning: &Option<String>) {
+        if let Some(content) = reasoning
+            .as_deref()
+            .filter(|content| !content.trim().is_empty())
+        {
+            self.emit(BackendEvent::AgentReasoning {
+                session_id: session_id.to_string(),
+                content: content.to_string(),
+            });
+        }
+    }
+
     pub(crate) fn next_message_sequence(&self) -> u64 {
         self.next_message_sequence.fetch_add(1, Ordering::Relaxed)
     }
@@ -749,7 +761,9 @@ impl Agent {
             messages,
             tools: None,
             temperature: Some(0.4),
-            max_tokens: Some(120),
+            // Thinking tokens share the completion budget. Keep enough room
+            // for max-effort reasoning and the short visible wait reply.
+            max_tokens: Some(4096),
         };
         let response = self
             .provider
@@ -989,6 +1003,7 @@ impl Agent {
                 })?,
                 _ = turn_cancel.cancelled() => return Err(anyhow!(TURN_CANCELLED)),
             };
+            self.emit_reasoning(&session_id, &response.reasoning_content);
             self.emit(BackendEvent::LlmResponse {
                 session_id: session_id.clone(),
                 model,
@@ -1014,7 +1029,10 @@ impl Agent {
                         ));
                     }
                     if !reply.trim().is_empty() {
-                        messages.push(ChatMessage::assistant(reply));
+                        messages.push(ChatMessage::assistant_with_reasoning(
+                            reply,
+                            response.reasoning_content.clone(),
+                        ));
                     }
                     messages.push(ChatMessage::user(DeliveryPlan::delivery_reminder(
                         &pending_deliveries,
@@ -1040,6 +1058,7 @@ impl Agent {
             messages.push(assistant_with_tool_calls(
                 &response.tool_calls,
                 &response.content,
+                &response.reasoning_content,
             ));
             for call in &response.tool_calls {
                 let delivery_key = match validate_delivery_call(
@@ -1259,6 +1278,7 @@ impl Agent {
                 return Err(format!("subagent request failed: {error}"));
             }
         };
+        self.emit_reasoning(session_id, &response.reasoning_content);
         if !response.tool_calls.is_empty() {
             self.emit(BackendEvent::SubagentCompleted {
                 session_id: session_id.to_string(),
@@ -1353,7 +1373,10 @@ impl Agent {
                 name: p.name.clone(),
                 provider: p.provider.clone(),
                 model: p.model.clone(),
+                base_url: p.base_url.clone(),
                 api_key_set: !p.api_key.is_empty(),
+                thinking: p.thinking,
+                reasoning_effort: p.reasoning_effort,
             })
             .collect();
         self.emit(BackendEvent::ApiConfigUpdated {
@@ -1361,6 +1384,8 @@ impl Agent {
             model: self.active_model().await,
             base_url: resolved.effective_base_url(),
             api_key_set: key_set,
+            thinking: resolved.thinking,
+            reasoning_effort: resolved.reasoning_effort,
             system_prompt: cfg.system_prompt.clone(),
             active_api: cfg.active_api.clone(),
             profiles: profiles.clone(),
@@ -1394,6 +1419,7 @@ impl Agent {
 
     /// Save an API profile (or the top-level default when `name` is empty),
     /// activate it, rebuild the provider, and persist.
+    #[allow(clippy::too_many_arguments)]
     async fn update_api_config(
         &self,
         name: String,
@@ -1401,6 +1427,8 @@ impl Agent {
         model: String,
         base_url: String,
         api_key: String,
+        thinking: Option<crate::config::ThinkingMode>,
+        reasoning_effort: Option<crate::config::ReasoningEffort>,
     ) {
         let mut config = self.config.write().await;
         let keep_key = api_key.is_empty();
@@ -1417,6 +1445,12 @@ impl Agent {
             if !keep_key {
                 config.api_key = api_key.clone();
             }
+            if let Some(thinking) = thinking {
+                config.thinking = thinking;
+            }
+            if let Some(reasoning_effort) = reasoning_effort {
+                config.reasoning_effort = reasoning_effort;
+            }
             // Don't clear active_api — let explicit SwitchApi handle that.
         } else {
             let profile = match config.api_profiles.iter_mut().find(|p| p.name == name) {
@@ -1431,11 +1465,23 @@ impl Agent {
                     &mut config.api_profiles[idx]
                 }
             };
-            profile.provider = provider.clone();
-            profile.model = model.clone();
-            profile.base_url = base_url.clone();
+            if !provider.is_empty() {
+                profile.provider = provider.clone();
+            }
+            if !model.is_empty() {
+                profile.model = model.clone();
+            }
+            if !base_url.is_empty() {
+                profile.base_url = base_url.clone();
+            }
             if !keep_key {
                 profile.api_key = api_key.clone();
+            }
+            if let Some(thinking) = thinking {
+                profile.thinking = thinking;
+            }
+            if let Some(reasoning_effort) = reasoning_effort {
+                profile.reasoning_effort = reasoning_effort;
             }
             config.active_api = name.clone();
         }
@@ -1718,10 +1764,15 @@ fn validate_delivery_call(
     Ok(Some(key))
 }
 
-fn assistant_with_tool_calls(calls: &[ToolCall], content: &Option<String>) -> ChatMessage {
+fn assistant_with_tool_calls(
+    calls: &[ToolCall],
+    content: &Option<String>,
+    reasoning_content: &Option<String>,
+) -> ChatMessage {
     ChatMessage {
         role: crate::llm::ChatRole::Assistant,
         content: content.clone().unwrap_or_default(),
+        reasoning_content: reasoning_content.clone(),
         tool_calls: Some(calls.to_vec()),
         tool_call_id: None,
     }
@@ -1762,6 +1813,7 @@ pub mod tests {
             assert_eq!(request.messages[0].role, crate::llm::ChatRole::System);
             Ok(ChatResponse {
                 content: Some(self.reply.clone()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             })
@@ -1800,6 +1852,7 @@ pub mod tests {
                 .unwrap_or_default();
             Ok(ChatResponse {
                 content: Some(format!("reply-{sequence}")),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 usage: Usage::default(),
             })
@@ -1909,6 +1962,8 @@ pub mod tests {
                 model: "claude-x".into(),
                 base_url: "http://example.test".into(),
                 api_key: String::new(),
+                thinking: None,
+                reasoning_effort: None,
             })
             .await;
 
@@ -2115,6 +2170,7 @@ pub mod tests {
     fn tool_call(id: &str, name: &str) -> ChatResponse {
         ChatResponse {
             content: Some(format!("calling {name}")),
+            reasoning_content: None,
             tool_calls: vec![ToolCall {
                 id: id.into(),
                 name: name.into(),
@@ -2130,6 +2186,7 @@ pub mod tests {
             tool_call("call_1", "mock_tool"),
             ChatResponse {
                 content: Some("final answer".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
@@ -2159,15 +2216,62 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn tool_loop_replays_reasoning_content_on_the_next_request() {
+        let mut first = tool_call("call_1", "mock_tool");
+        first.reasoning_content = Some("先调用工具，再根据结果回答".into());
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            first,
+            ChatResponse {
+                content: Some("done".into()),
+                reasoning_content: Some("工具返回成功".into()),
+                tool_calls: Vec::new(),
+                usage: Usage::default(),
+            },
+        ]));
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(MockTool {
+            name: "mock_tool",
+            result: "ok".into(),
+        }));
+        let agent = Agent::new(
+            provider.clone(),
+            AgentConfig::default(),
+            SkillRegistry::new(),
+            tools,
+            Arc::new(AdapterRegistry::new()),
+        );
+        let session = agent
+            .trunk
+            .get_or_create(&SessionKey::local_tui(), "user".into(), None);
+
+        assert_eq!(
+            agent.process_message(&session, "run").await.unwrap(),
+            "done"
+        );
+        let requests = provider.requests.lock().await;
+        let replayed = requests[1]
+            .messages
+            .iter()
+            .find(|message| message.tool_calls.is_some())
+            .expect("assistant tool-call message");
+        assert_eq!(
+            replayed.reasoning_content.as_deref(),
+            Some("先调用工具，再根据结果回答")
+        );
+    }
+
+    #[tokio::test]
     async fn qq_hook_retries_backend_only_reply_until_send_tool_is_called() {
         let script = vec![
             ChatResponse {
                 content: Some("backend only".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
             ChatResponse {
                 content: None,
+                reasoning_content: None,
                 tool_calls: vec![ToolCall {
                     id: "send_1".into(),
                     name: "send_private_msg".into(),
@@ -2177,6 +2281,7 @@ pub mod tests {
             },
             ChatResponse {
                 content: Some("delivered".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
@@ -2324,6 +2429,7 @@ pub mod tests {
             tool_call("call_1", "missing_tool"),
             ChatResponse {
                 content: Some("done".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
@@ -2347,6 +2453,7 @@ pub mod tests {
         let script = vec![
             ChatResponse {
                 content: None,
+                reasoning_content: None,
                 tool_calls: vec![ToolCall {
                     id: "subagent_1".into(),
                     name: "run_subagent".into(),
@@ -2360,11 +2467,13 @@ pub mod tests {
             },
             ChatResponse {
                 content: Some("isolated result".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
             ChatResponse {
                 content: Some("parent final".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
@@ -2448,6 +2557,7 @@ pub mod tests {
         let script = vec![
             ChatResponse {
                 content: None,
+                reasoning_content: None,
                 tool_calls: vec![ToolCall {
                     id: "schedule_now".into(),
                     name: "schedule_timer".into(),
@@ -2461,11 +2571,13 @@ pub mod tests {
             },
             ChatResponse {
                 content: Some("timer scheduled".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
             ChatResponse {
                 content: Some("timer completed".into()),
+                reasoning_content: None,
                 tool_calls: vec![],
                 usage: Usage::default(),
             },

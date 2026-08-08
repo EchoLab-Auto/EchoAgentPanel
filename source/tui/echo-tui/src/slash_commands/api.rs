@@ -109,6 +109,8 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
                 model: model.to_string(),
                 base_url: String::new(),
                 api_key: String::new(),
+                thinking: None,
+                reasoning_effort: None,
             });
             true
         }
@@ -123,6 +125,8 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
                 model: String::new(),
                 base_url: String::new(),
                 api_key: String::new(),
+                thinking: None,
+                reasoning_effort: None,
             });
             true
         }
@@ -133,6 +137,8 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
                 model: val.to_string(),
                 base_url: String::new(),
                 api_key: String::new(),
+                thinking: None,
+                reasoning_effort: None,
             });
             true
         }
@@ -143,6 +149,8 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
                 model: String::new(),
                 base_url: val.to_string(),
                 api_key: String::new(),
+                thinking: None,
+                reasoning_effort: None,
             });
             true
         }
@@ -153,7 +161,52 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
                 model: String::new(),
                 base_url: String::new(),
                 api_key: val.to_string(),
+                thinking: None,
+                reasoning_effort: None,
             });
+            true
+        }
+        ["thinking", val] => {
+            let thinking = match *val {
+                "enabled" | "on" => Some(echo_agent::ThinkingMode::Enabled),
+                "disabled" | "off" => Some(echo_agent::ThinkingMode::Disabled),
+                _ => None,
+            };
+            if let Some(thinking) = thinking {
+                backend.send(BackendCommand::UpdateApiConfig {
+                    name: state.settings.active_api.clone(),
+                    provider: String::new(),
+                    model: String::new(),
+                    base_url: String::new(),
+                    api_key: String::new(),
+                    thinking: Some(thinking),
+                    reasoning_effort: None,
+                });
+            } else {
+                state.toast("用法: thinking <enabled|disabled>", ToastKind::Error);
+            }
+            true
+        }
+        ["effort", val] => {
+            let effort = match *val {
+                "low" => Some(echo_agent::ReasoningEffort::Low),
+                "high" => Some(echo_agent::ReasoningEffort::High),
+                "max" => Some(echo_agent::ReasoningEffort::Max),
+                _ => None,
+            };
+            if let Some(effort) = effort {
+                backend.send(BackendCommand::UpdateApiConfig {
+                    name: state.settings.active_api.clone(),
+                    provider: String::new(),
+                    model: String::new(),
+                    base_url: String::new(),
+                    api_key: String::new(),
+                    thinking: None,
+                    reasoning_effort: Some(effort),
+                });
+            } else {
+                state.toast("用法: effort <low|high|max>", ToastKind::Error);
+            }
             true
         }
         ["prompt", ..] | ["s", ..] => {
@@ -172,7 +225,7 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
             true
         }
         ["h"] | ["help"] | ["?"] => {
-            state.toast("↑↓选择 ←→切换区域 Enter确认 Esc退出\n数字切换profile 文本命令: switch/del/new/key/url/prompt q退出", ToastKind::Info);
+            state.toast("↑↓选择 ←→切换区域 Enter确认 Esc退出\n数字切换profile 文本命令: switch/del/new/key/url/thinking/effort/prompt q退出", ToastKind::Info);
             true
         }
         [""] => {
@@ -221,6 +274,8 @@ pub fn key(state: &mut AppState, backend: &Backend, text: &str) {
             model: String::new(),
             base_url: String::new(),
             api_key: k,
+            thinking: None,
+            reasoning_effort: None,
         });
     }
 }
@@ -232,6 +287,8 @@ pub fn provider(state: &mut AppState, backend: &Backend, text: &str) {
             model: String::new(),
             base_url: String::new(),
             api_key: String::new(),
+            thinking: None,
+            reasoning_effort: None,
         });
     }
 }
@@ -243,6 +300,8 @@ pub fn model(state: &mut AppState, backend: &Backend, text: &str) {
             model: v,
             base_url: String::new(),
             api_key: String::new(),
+            thinking: None,
+            reasoning_effort: None,
         });
     }
 }
@@ -254,6 +313,8 @@ pub fn url(state: &mut AppState, backend: &Backend, text: &str) {
             model: String::new(),
             base_url: v,
             api_key: String::new(),
+            thinking: None,
+            reasoning_effort: None,
         });
     }
 }
@@ -272,6 +333,8 @@ pub fn new_profile(state: &mut AppState, backend: &Backend, text: &str) {
             model: args[2].into(),
             base_url: String::new(),
             api_key: String::new(),
+            thinking: None,
+            reasoning_effort: None,
         });
     }
 }
@@ -332,6 +395,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reasoning_commands_update_the_active_profile() {
+        let (backend, handle) = test_backend();
+        let mut state = test_state();
+        state.settings.active_api = "deepseek".into();
+
+        assert!(handle_message(&mut state, &backend, "thinking disabled"));
+        match recv_command(&handle).await {
+            BackendCommand::UpdateApiConfig { name, thinking, .. } => {
+                assert_eq!(name, "deepseek");
+                assert_eq!(thinking, Some(echo_agent::ThinkingMode::Disabled));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        assert!(handle_message(&mut state, &backend, "effort max"));
+        match recv_command(&handle).await {
+            BackendCommand::UpdateApiConfig {
+                name,
+                reasoning_effort,
+                ..
+            } => {
+                assert_eq!(name, "deepseek");
+                assert_eq!(reasoning_effort, Some(echo_agent::ReasoningEffort::Max));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn quit_exits_api_config_mode() {
         let (backend, _handle) = test_backend();
         let mut state = test_state();
@@ -348,7 +440,10 @@ mod tests {
             name: "deepseek".into(),
             provider: "deepseek".into(),
             model: "deepseek-v4-flash".into(),
+            base_url: "https://api.deepseek.com".into(),
             api_key_set: false,
+            thinking: echo_agent::ThinkingMode::Enabled,
+            reasoning_effort: echo_agent::ReasoningEffort::Max,
         });
         assert!(handle_message(&mut state, &backend, "1"));
         assert_eq!(

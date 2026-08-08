@@ -17,6 +17,9 @@ model = "deepseek-v4-flash"
 # DeepSeek Anthropic 兼容端点
 base_url = "https://api.deepseek.com/anthropic"
 api_key = ""
+# DeepSeek 思考模式与推理强度；默认即为 enabled + max。
+thinking = "enabled"
+reasoning_effort = "max"
 max_tool_iterations = 1024
 # 上下文 token 预算（trunk 按 token 裁剪）：1M × 0.8 = 800,000。
 # 旧字段 memory_limit（按消息条数）已废弃，不再参与计算。

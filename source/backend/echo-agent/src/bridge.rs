@@ -271,6 +271,10 @@ mod tests {
                 session_id: "s1".into(),
                 success: true,
             },
+            BackendEvent::AgentReasoning {
+                session_id: "s1".into(),
+                content: "considering options".into(),
+            },
             BackendEvent::ReplyBranchStarted {
                 session_id: "s1".into(),
                 branch_id: "b1".into(),
@@ -302,6 +306,7 @@ mod tests {
             match decoded {
                 WsMessage::Event(BackendEvent::SubagentStarted { session_id, .. })
                 | WsMessage::Event(BackendEvent::SubagentCompleted { session_id, .. })
+                | WsMessage::Event(BackendEvent::AgentReasoning { session_id, .. })
                 | WsMessage::Event(BackendEvent::ReplyBranchStarted { session_id, .. })
                 | WsMessage::Event(BackendEvent::ReplyBranchContent { session_id, .. })
                 | WsMessage::Event(BackendEvent::ReplyBranchCompleted { session_id, .. })

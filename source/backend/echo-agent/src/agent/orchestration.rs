@@ -577,6 +577,7 @@ async fn run_background_branch(
             messages.push(super::assistant_with_tool_calls(
                 &response.tool_calls,
                 &response.content,
+                &response.reasoning_content,
             ));
             for call in response.tool_calls {
                 if !background_tool_allowed(&call.name) {
@@ -1350,6 +1351,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(200)).await;
             Ok(crate::llm::ChatResponse {
                 content: Some("done".into()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 usage: crate::llm::Usage::default(),
             })

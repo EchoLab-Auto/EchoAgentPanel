@@ -36,6 +36,7 @@ impl LlmProvider for StaticProvider {
         *self.last_system_prompt.lock().await = Some(system.content.clone());
         Ok(ChatResponse {
             content: Some(self.reply.into()),
+            reasoning_content: None,
             tool_calls: vec![],
             usage: Usage::default(),
         })
@@ -240,6 +241,8 @@ async fn switch_api_activates_profile() {
             model: "ds-v4".into(),
             base_url: "http://x".into(),
             api_key: String::new(),
+            thinking: None,
+            reasoning_effort: None,
         })
         .await;
     agent
@@ -262,6 +265,8 @@ async fn delete_api_removes_profile() {
             model: "m".into(),
             base_url: String::new(),
             api_key: String::new(),
+            thinking: None,
+            reasoning_effort: None,
         })
         .await;
     assert_eq!(agent.api_config().await.api_profiles.len(), 1);
@@ -298,6 +303,7 @@ impl LlmProvider for SlowProvider {
         let _ = request;
         Ok(ChatResponse {
             content: Some(reply.into()),
+            reasoning_content: None,
             tool_calls: vec![],
             usage: Usage::default(),
         })
@@ -521,11 +527,13 @@ async fn qq_hook_input_enforces_transport_boundary() {
     let script = vec![
         ChatResponse {
             content: Some("backend only".into()),
+            reasoning_content: None,
             tool_calls: vec![],
             usage: Usage::default(),
         },
         ChatResponse {
             content: None,
+            reasoning_content: None,
             tool_calls: vec![ToolCall {
                 id: "send_1".into(),
                 name: "send_private_msg".into(),
@@ -535,6 +543,7 @@ async fn qq_hook_input_enforces_transport_boundary() {
         },
         ChatResponse {
             content: Some("delivered".into()),
+            reasoning_content: None,
             tool_calls: vec![],
             usage: Usage::default(),
         },
