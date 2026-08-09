@@ -4,16 +4,18 @@ set -Eeuo pipefail
 SOURCE_DIR=""
 BINARY=""
 STATUS_FILE=""
-UPDATE_MODE=remote
+UPDATE_MODE=local
 
 usage() {
     cat <<'EOF'
-Usage: scripts/update.sh [--local] --source <dir> --binary <path> --status <path>
+Usage: scripts/update.sh [--local|--remote] --source <dir> --binary <path> --status <path>
 
 Modes:
-  remote (default)  Fetch and fast-forward the clean managed checkout.
-  --local           Build the current source tree exactly as it is, including
-                    uncommitted changes. No fetch or merge is performed.
+  local (default)  Build the current source tree exactly as it is, including
+                   uncommitted changes. No fetch or merge is performed. Use
+                   this when the checkout is already on the desired revision.
+  --remote         Fetch and fast-forward the clean managed checkout before
+                   building (previous default; requires network access).
 EOF
 }
 
@@ -33,6 +35,10 @@ while (($#)); do
             ;;
         --local)
             UPDATE_MODE=local
+            shift
+            ;;
+        --remote)
+            UPDATE_MODE=remote
             shift
             ;;
         -h|--help)

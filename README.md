@@ -65,10 +65,10 @@ journalctl --user -u echo-agent-panel-core.service -f
 Git 快进、锁定构建和原子二进制替换，成功后才重启 Core。
 详细机制和路径见 [安装与自更新文档](doc/develop/install.md)。
 
-### 更新（Update）
-
 安装模式下有三种更新方式，共用同一套受控流程：
-Git 快进 -> 锁定构建 -> 原子二进制替换 -> Core 健康检查重启。
+本地源码构建 -> 原子二进制替换 -> Core 健康检查重启。
+默认 **local 模式**（不访问网络，直接用当前源码树构建）；需要跟随远端时
+改用 `--remote`（Git 快进后再构建）。
 
 **1. 通过 Agent 更新（推荐）**
 
@@ -88,19 +88,19 @@ systemctl --user start echo-agent-panel-update.service
 
 **3. 本地开发模式（scripts/update.sh）**
 
-用当前源码树构建并安装，包含未提交的改动，不做 Git fetch/merge：
-
 ```bash
-scripts/update.sh --local \
+scripts/update.sh \
   --source "$PWD" \
   --binary "$HOME/.local/libexec/echo-agent-panel/echo-agent-panel-bin" \
   --status "$HOME/.local/state/echo-agent-panel/update-status"
 ```
 
-- `--local`：本地模式，始终重新构建；工作区有未提交改动时记录为
-  `local:<commit>+dirty`
-- 远程模式（默认）：要求受管仓库干净、非 detached HEAD、且为快进合并，
-  否则拒绝更新
+- 默认 **local 模式**：直接用当前源码树构建并安装，不做 Git fetch/merge，
+  包含未提交的改动（记录为 `local:<commit>+dirty`）。适合
+  "先 `git pull` 再更新"的场景，不依赖网络，避免 fetch 失败/超时导致的
+  更新中断
+- `--remote`：切回远程模式（要求受管仓库干净、非 detached HEAD、且为快进
+  合并，否则拒绝更新）
 - 更新器持有非阻塞文件锁，拒绝并发运行
 
 查看更新结果与状态：
