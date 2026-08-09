@@ -245,6 +245,66 @@ pub fn estimate_history_tokens(history: &[ChatMessage]) -> usize {
     history.iter().map(estimate_message_tokens).sum()
 }
 
+/// Truncate `text` so its estimated token count stays at or below `budget`.
+///
+/// Keeps the head of the text (structured inputs carry their sequence at the
+/// start) and appends a truncation marker. When the original already fits, the
+/// original is returned unchanged.
+pub fn truncate_text_to_tokens(text: &str, budget: usize) -> String {
+    const MARKER: &str = "\n…[内容过长已截断]";
+    if estimate_tokens(text) <= budget {
+        return text.to_string();
+    }
+    let marker_tokens = estimate_tokens(MARKER);
+    let available = budget.saturating_sub(marker_tokens).max(1);
+    let mut cost = 0usize;
+    let mut non_cjk = 0usize;
+    let mut cut = text.len();
+    for (index, ch) in text.char_indices() {
+        let inc = if is_cjk(ch) {
+            1
+        } else {
+            non_cjk += 1;
+            if non_cjk % 3 == 1 {
+                1
+            } else {
+                0
+            }
+        };
+        if cost + inc > available {
+            cut = index;
+            break;
+        }
+        cost += inc;
+    }
+    if cut == 0 {
+        // Nothing fits even without the marker — keep a single char.
+        return text
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+    }
+    format!("{}{}", &text[..cut], MARKER)
+}
+
+/// Truncate a single message to fit `budget` estimated tokens (content only).
+pub fn truncate_message_to_tokens(message: &mut ChatMessage, budget: usize) {
+    let current = estimate_message_tokens(message);
+    if current <= budget {
+        return;
+    }
+    // Content budget after accounting for the 4-token structural overhead and
+    // any reasoning content.
+    let reasoning_budget = message
+        .reasoning_content
+        .as_deref()
+        .map(estimate_tokens)
+        .unwrap_or(0);
+    let content_budget = budget.saturating_sub(4 + reasoning_budget).max(1);
+    message.content = truncate_text_to_tokens(&message.content, content_budget);
+}
+
 /// Build a provider from configuration.
 ///
 /// base_url 以 `/anthropic` 结尾时（如 DeepSeek 的 Anthropic 兼容端点

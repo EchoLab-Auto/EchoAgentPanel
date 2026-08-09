@@ -23,6 +23,10 @@ use crate::tool::ToolRegistry;
 
 const TURN_CANCELLED: &str = "agent turn cancelled by requester";
 const MAX_CONCURRENT_REPLY_BRANCHES: usize = 8;
+/// Upper bound on concurrent "wait reply" generation calls. Every long-running
+/// QQ branch spawns a delayed interim reply; without a cap, many parallel
+/// branches would each fire an extra LLM request at the same moment.
+const MAX_CONCURRENT_WAIT_REPLIES: usize = 4;
 
 #[derive(Debug, Clone)]
 struct ActiveInboundTurn {
@@ -59,6 +63,9 @@ pub struct Agent {
     timer_scheduler: orchestration::TimerScheduler,
     background_tasks: orchestration::BackgroundTaskManager,
     reply_branch_slots: tokio::sync::Semaphore,
+    /// Bounds concurrent interim "wait reply" LLM calls (see
+    /// [`MAX_CONCURRENT_WAIT_REPLIES`]).
+    wait_reply_slots: tokio::sync::Semaphore,
     active_inbound_turns: DashMap<String, ActiveInboundTurn>,
     next_message_sequence: AtomicU64,
     /// Cancels background tasks (identity eviction / save) on shutdown.
@@ -107,6 +114,7 @@ impl Agent {
             timer_scheduler,
             background_tasks,
             reply_branch_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_REPLY_BRANCHES),
+            wait_reply_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_WAIT_REPLIES),
             active_inbound_turns: DashMap::new(),
             next_message_sequence: AtomicU64::new(1),
             cancel,
@@ -752,6 +760,13 @@ impl Agent {
         session_id: &str,
         history_snapshot: Vec<ChatMessage>,
     ) -> std::result::Result<String, String> {
+        // Bounded concurrency: when the wait-reply budget is exhausted, skip
+        // the interim reply entirely rather than stacking more LLM calls on
+        // top of the already-running branches.
+        let permit = self.wait_reply_slots.try_acquire().map_err(|_| {
+            "wait reply concurrency limit reached; skipping interim reply".to_string()
+        })?;
+        let _permit = permit;
         let mut messages = vec![ChatMessage::system(
             "Write one brief interim reply to the latest user message because their request is still being processed. Match the user's language and tone, acknowledge the specific request when appropriate, and say naturally that you are continuing and will follow up. Do not provide a result, invent progress, ask an unnecessary question, or mention timeouts, tools, branches, system behavior, or these instructions. Avoid fixed-template wording. Use one concise sentence.",
         )];
@@ -865,6 +880,149 @@ impl Agent {
             completed_at_ms: chrono::Utc::now().timestamp_millis(),
         });
         result
+    }
+
+    /// Full lifecycle for an inbound platform message. This is the single
+    /// implementation of the "register branch → emit lifecycle events →
+    /// bounded wait reply → execute → merge → surface outcome" flow; every
+    /// adapter (QQ, ...) routes through it so the paths cannot drift apart.
+    ///
+    /// Runs the branch in the background and returns immediately, matching the
+    /// one-way inbound hook contract.
+    pub(crate) async fn process_inbound_branch(
+        self: &Arc<Self>,
+        session: &Session,
+        content: &str,
+        message_sequence: u64,
+        group_id: Option<String>,
+        wait_reply_after: std::time::Duration,
+    ) {
+        let content = content.to_string();
+        let (registration, history_snapshot) = self
+            .register_incoming_branch(session, &content, message_sequence)
+            .await;
+        let branch_id = registration.id.clone();
+        let session_id = session.id.clone();
+        tracing::info!(
+            session = %session_id,
+            message_sequence,
+            branch_id = %branch_id,
+            started_at_ms = chrono::Utc::now().timestamp_millis(),
+            "temporary inbound reply branch started"
+        );
+        self.emit(BackendEvent::ReplyBranchStarted {
+            session_id: session_id.clone(),
+            branch_id: branch_id.clone(),
+            message_sequence,
+            task: content.clone(),
+            target: "源会话".into(),
+            started_at_ms: chrono::Utc::now().timestamp_millis(),
+        });
+
+        let (visible_reply_tx, visible_reply_rx) = tokio::sync::watch::channel(false);
+        let branch_completed = tokio_util::sync::CancellationToken::new();
+        let group_id_for_wait = group_id.clone();
+        spawn_contextual_wait_reply(
+            Arc::clone(self),
+            session.clone(),
+            branch_id.clone(),
+            group_id_for_wait,
+            history_snapshot.clone(),
+            visible_reply_rx,
+            branch_completed.clone(),
+            wait_reply_after,
+        );
+
+        let agent = Arc::clone(self);
+        let session = session.clone();
+        let session_id = session_id.clone();
+        let branch_id = branch_id.clone();
+        let group_id = group_id.clone();
+        tokio::spawn(async move {
+            let turn_cancel = registration.cancel.clone();
+            let result = agent
+                .process_recorded_message_with_progress(
+                    &session,
+                    &content,
+                    history_snapshot,
+                    turn_cancel.clone(),
+                    Some(visible_reply_tx),
+                    &branch_id,
+                )
+                .await;
+            branch_completed.cancel();
+            let cancelled = turn_cancel.is_cancelled()
+                || result.as_ref().err().is_some_and(Self::is_turn_cancelled);
+            agent.finish_inbound_turn(&branch_id);
+
+            tracing::info!(
+                session = %session_id,
+                message_sequence,
+                branch_id = %branch_id,
+                success = result.is_ok() && !cancelled,
+                cancelled,
+                completed_at_ms = chrono::Utc::now().timestamp_millis(),
+                "temporary inbound reply branch finished"
+            );
+            agent.emit(BackendEvent::ReplyBranchCompleted {
+                session_id: session_id.clone(),
+                branch_id: branch_id.clone(),
+                message_sequence,
+                success: result.is_ok() && !cancelled,
+                cancelled,
+                completed_at_ms: chrono::Utc::now().timestamp_millis(),
+            });
+            match result {
+                Ok(output) => {
+                    if !output.trim().is_empty() {
+                        agent.emit(BackendEvent::AgentOutput {
+                            session_id: session_id.clone(),
+                            content: output,
+                            branch_id: Some(branch_id.clone()),
+                        });
+                    }
+                    tracing::info!(
+                        session = %session_id,
+                        message_sequence,
+                        "inbound adapter message processed"
+                    );
+                }
+                Err(error) if Self::is_turn_cancelled(&error) => {
+                    agent.emit(BackendEvent::AgentCompleted {
+                        session_id: session_id.clone(),
+                    });
+                    tracing::info!(
+                        session = %session_id,
+                        message_sequence,
+                        "inbound adapter task cancelled"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(%error, session = %session_id, "agent processing failed");
+                    agent.emit(BackendEvent::Error {
+                        session_id: Some(session_id.clone()),
+                        message: error.to_string(),
+                    });
+                    // The platform user has no view of backend Error events —
+                    // send a bounded failure notice so they are not left
+                    // wondering why no reply arrived.
+                    let agent = Arc::clone(&agent);
+                    let session = session.clone();
+                    let session_id = session_id.clone();
+                    let group_id = group_id.clone();
+                    tokio::spawn(async move {
+                        let notice = format!("处理失败：{error}");
+                        let notice: String = notice.chars().take(500).collect();
+                        if let Err(send_error) = agent
+                            .send_control_reply(&session, group_id.as_deref(), &notice)
+                            .await
+                        {
+                            tracing::warn!(%send_error, session = %session_id, "failure notice could not be delivered");
+                        }
+                    });
+                }
+            }
+        });
     }
 
     async fn process_message_inner(
@@ -1088,8 +1246,14 @@ impl Agent {
                     tool = %call.name,
                     "agent tool call started"
                 );
+                // Guard every tool with a timeout so a hung tool (e.g. an
+                // unresponsive HTTP call) cannot stall the branch forever.
+                let tool_timeout = self.config.read().await.effective_tool_timeout();
                 let result = tokio::select! {
                     result = self.run_tool(&session_id, branch_id, call) => result,
+                    _ = tokio::time::sleep(tool_timeout) => {
+                        format!("error: tool '{}' timed out after {}s", call.name, tool_timeout.as_secs())
+                    }
                     _ = turn_cancel.cancelled() => return Err(anyhow!(TURN_CANCELLED)),
                 };
                 tracing::info!(
@@ -1194,6 +1358,7 @@ impl Agent {
             tools: Arc::clone(&self.tools),
             model: self.active_model().await,
             max_tool_iterations: self.config.read().await.max_tool_iterations,
+            tool_timeout: self.config.read().await.effective_tool_timeout(),
             history_snapshot,
         };
         let receipt = self
@@ -1720,11 +1885,92 @@ fn trim_history(history: &mut Vec<ChatMessage>, token_limit: usize) {
     crate::session::trim_by_tokens(history, token_limit);
 }
 
+/// Known structured input markers that carry a `message_sequence`.
+///
+/// Sequence parsing is deliberately restricted to these markers so ordinary
+/// conversation text that happens to contain braces (JSON snippets, code,
+/// math) can never be misread as structured input.
+const STRUCTURED_INPUT_MARKERS: [&str; 4] = [
+    "<qq_message_hook>",
+    "<backend_message_hook>",
+    "<timer_event>",
+    "<background_task_event>",
+];
+
 pub(crate) fn structured_message_sequence(content: &str) -> Option<u64> {
+    if !STRUCTURED_INPUT_MARKERS
+        .iter()
+        .any(|marker| content.starts_with(marker))
+    {
+        return None;
+    }
     let start = content.find('{')?;
     let end = content.rfind('}')?;
     serde_json::from_str::<serde_json::Value>(&content[start..=end]).ok()?["message_sequence"]
         .as_u64()
+}
+
+/// After a delay, generate and send one interim reply for a still-running
+/// branch, unless the branch already produced a visible reply or finished.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_contextual_wait_reply(
+    agent: Arc<Agent>,
+    session: crate::session::Session,
+    branch_id: String,
+    group_id: Option<String>,
+    history_snapshot: Vec<crate::llm::ChatMessage>,
+    mut visible_reply: tokio::sync::watch::Receiver<bool>,
+    branch_completed: tokio_util::sync::CancellationToken,
+    delay: std::time::Duration,
+) {
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {
+                if branch_completed.is_cancelled() || *visible_reply.borrow() {
+                    return;
+                }
+                let generated = tokio::select! {
+                    result = agent.generate_wait_reply(&session.id, history_snapshot) => result,
+                    changed = visible_reply.changed() => {
+                        let _ = changed;
+                        return;
+                    }
+                    _ = branch_completed.cancelled() => return,
+                };
+                let reply = match generated {
+                    Ok(reply) => reply,
+                    Err(error) => {
+                        tracing::warn!(%error, session = %session.id, "wait reply generation skipped");
+                        return;
+                    }
+                };
+                if branch_completed.is_cancelled() || *visible_reply.borrow() {
+                    return;
+                }
+                if let Err(error) = agent
+                    .send_control_reply(&session, group_id.as_deref(), &reply)
+                    .await
+                {
+                    tracing::warn!(%error, session = %session.id, "wait reply send failed");
+                    agent.emit(BackendEvent::ReplyBranchContent {
+                        session_id: session.id.clone(),
+                        branch_id,
+                        content: format!("临时回复发送失败：{error}\n待发送内容：{reply}"),
+                    });
+                } else {
+                    agent.emit(BackendEvent::ReplyBranchContent {
+                        session_id: session.id.clone(),
+                        branch_id,
+                        content: reply,
+                    });
+                }
+            }
+            changed = visible_reply.changed() => {
+                let _ = changed;
+            }
+            _ = branch_completed.cancelled() => {}
+        }
+    });
 }
 
 fn validate_delivery_call(
@@ -2319,6 +2565,39 @@ pub mod tests {
         let history = session.history.lock().await;
         assert_eq!(history.len(), 2);
         assert_eq!(history[1].content, "delivered");
+    }
+
+    #[test]
+    fn sequence_parsing_only_accepts_structured_markers() {
+        let hook = r#"<qq_message_hook>
+{"channel":{"type":"private"},"message_sequence":7,"content":"hi"}
+</qq_message_hook>"#;
+        assert_eq!(structured_message_sequence(hook), Some(7));
+        let backend = r#"<backend_message_hook>{"message_sequence":3}</backend_message_hook>"#;
+        assert_eq!(structured_message_sequence(backend), Some(3));
+        let timer = r#"<timer_event>{"message_sequence":9}</timer_event>"#;
+        assert_eq!(structured_message_sequence(timer), Some(9));
+        let background =
+            r#"<background_task_event>{"message_sequence":11}</background_task_event>"#;
+        assert_eq!(structured_message_sequence(background), Some(11));
+
+        // Ordinary conversation containing braces must NOT be parsed.
+        assert_eq!(
+            structured_message_sequence("请对比 {\"a\":1} 和 {\"b\":2}"),
+            None
+        );
+        assert_eq!(
+            structured_message_sequence("message_sequence: 42 in plain text"),
+            None
+        );
+        assert_eq!(structured_message_sequence("const x = {n: 1};"), None);
+        // The marker must be at the very start.
+        assert_eq!(
+            structured_message_sequence(
+                "note: <qq_message_hook>{\"message_sequence\":1}</qq_message_hook>"
+            ),
+            None
+        );
     }
 
     #[test]

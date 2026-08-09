@@ -124,114 +124,18 @@ impl InboundMessageHook for AgentMessageHook {
             return Ok(());
         }
 
-        // Every inbound conversation turn runs as an isolated snapshot branch.
-        // The shared conversation is touched again only when the result merges.
-        let branch = true;
-        let (registration, history_snapshot) = agent
-            .register_incoming_branch(&session, &hook_input, message_sequence)
-            .await;
-        let branch_id = registration.id.clone();
-        tracing::info!(
-            session = %session_id,
-            message_sequence,
-            branch_id = %branch_id,
-            started_at_ms = chrono::Utc::now().timestamp_millis(),
-            "temporary QQ reply branch started"
-        );
-        agent.emit(BackendEvent::ReplyBranchStarted {
-            session_id: session_id.clone(),
-            branch_id: branch_id.clone(),
-            message_sequence,
-            task: msg.content.clone(),
-            target: reply_target(&msg),
-            started_at_ms: chrono::Utc::now().timestamp_millis(),
-        });
-
-        let (visible_reply_tx, visible_reply_rx) = tokio::sync::watch::channel(false);
-        let branch_completed = tokio_util::sync::CancellationToken::new();
+        // Every inbound conversation turn runs as an isolated snapshot branch
+        // through the agent's single lifecycle implementation.
         let group_id = msg.channel.group_id().map(str::to_string);
-        spawn_contextual_wait_reply(
-            Arc::clone(agent),
-            session.clone(),
-            branch_id.clone(),
-            group_id,
-            history_snapshot.clone(),
-            visible_reply_rx,
-            branch_completed.clone(),
-            QQ_WAIT_REPLY_AFTER,
-        );
-
-        let agent = Arc::clone(agent);
-        tokio::spawn(async move {
-            let turn_cancel = registration.cancel.clone();
-            let result = agent
-                .process_recorded_message_with_progress(
-                    &session,
-                    &hook_input,
-                    history_snapshot,
-                    turn_cancel.clone(),
-                    Some(visible_reply_tx),
-                    &branch_id,
-                )
-                .await;
-            branch_completed.cancel();
-            let cancelled = turn_cancel.is_cancelled()
-                || result.as_ref().err().is_some_and(Agent::is_turn_cancelled);
-            agent.finish_inbound_turn(&branch_id);
-
-            tracing::info!(
-                session = %session_id,
+        Arc::clone(agent)
+            .process_inbound_branch(
+                &session,
+                &hook_input,
                 message_sequence,
-                branch_id = %branch_id,
-                success = result.is_ok() && !cancelled,
-                cancelled,
-                completed_at_ms = chrono::Utc::now().timestamp_millis(),
-                "temporary QQ reply branch finished"
-            );
-            agent.emit(BackendEvent::ReplyBranchCompleted {
-                session_id: session_id.clone(),
-                branch_id: branch_id.clone(),
-                message_sequence,
-                success: result.is_ok() && !cancelled,
-                cancelled,
-                completed_at_ms: chrono::Utc::now().timestamp_millis(),
-            });
-            match result {
-                Ok(output) => {
-                    if !output.trim().is_empty() {
-                        agent.emit(BackendEvent::AgentOutput {
-                            session_id: session_id.clone(),
-                            content: output,
-                            branch_id: Some(branch_id.clone()),
-                        });
-                    }
-                    tracing::info!(
-                        session = %session_id,
-                        message_sequence,
-                        branch,
-                        "inbound adapter message processed"
-                    );
-                }
-                Err(error) if Agent::is_turn_cancelled(&error) => {
-                    agent.emit(BackendEvent::AgentCompleted {
-                        session_id: session_id.clone(),
-                    });
-                    tracing::info!(
-                        session = %session_id,
-                        message_sequence,
-                        branch,
-                        "inbound adapter task cancelled"
-                    );
-                }
-                Err(error) => {
-                    tracing::warn!(%error, session = %session_id, branch, "agent processing failed");
-                    agent.emit(BackendEvent::Error {
-                        session_id: Some(session_id),
-                        message: error.to_string(),
-                    });
-                }
-            }
-        });
+                group_id,
+                QQ_WAIT_REPLY_AFTER,
+            )
+            .await;
         Ok(())
     }
 
@@ -242,72 +146,6 @@ impl InboundMessageHook for AgentMessageHook {
             self_id,
         });
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spawn_contextual_wait_reply(
-    agent: Arc<Agent>,
-    session: crate::session::Session,
-    branch_id: String,
-    group_id: Option<String>,
-    history_snapshot: Vec<crate::llm::ChatMessage>,
-    mut visible_reply: tokio::sync::watch::Receiver<bool>,
-    branch_completed: tokio_util::sync::CancellationToken,
-    delay: std::time::Duration,
-) {
-    tokio::spawn(async move {
-        tokio::select! {
-            _ = tokio::time::sleep(delay) => {
-                if branch_completed.is_cancelled() || *visible_reply.borrow() {
-                    return;
-                }
-                let generated = tokio::select! {
-                    result = agent.generate_wait_reply(&session.id, history_snapshot) => result,
-                    changed = visible_reply.changed() => {
-                        let _ = changed;
-                        return;
-                    }
-                    _ = branch_completed.cancelled() => return,
-                };
-                let reply = match generated {
-                    Ok(reply) => reply,
-                    Err(error) => {
-                        tracing::warn!(%error, session = %session.id, "QQ wait reply generation failed");
-                        agent.emit(BackendEvent::ReplyBranchContent {
-                            session_id: session.id.clone(),
-                            branch_id,
-                            content: format!("临时回复生成失败：{error}"),
-                        });
-                        return;
-                    }
-                };
-                if branch_completed.is_cancelled() || *visible_reply.borrow() {
-                    return;
-                }
-                if let Err(error) = agent
-                    .send_control_reply(&session, group_id.as_deref(), &reply)
-                    .await
-                {
-                    tracing::warn!(%error, session = %session.id, "QQ wait reply failed");
-                    agent.emit(BackendEvent::ReplyBranchContent {
-                        session_id: session.id.clone(),
-                        branch_id,
-                        content: format!("临时回复发送失败：{error}\n待发送内容：{reply}"),
-                    });
-                } else {
-                    agent.emit(BackendEvent::ReplyBranchContent {
-                        session_id: session.id.clone(),
-                        branch_id,
-                        content: reply,
-                    });
-                }
-            }
-            changed = visible_reply.changed() => {
-                let _ = changed;
-            }
-            _ = branch_completed.cancelled() => {}
-        }
-    });
 }
 
 /// Encode an adapter event as a clearly marked, structured hook input.
@@ -347,13 +185,6 @@ fn format_hook_input(msg: &IncomingMessage, message_sequence: u64, received_at_m
     )
 }
 
-fn reply_target(msg: &IncomingMessage) -> String {
-    match &msg.channel {
-        ChannelType::Direct => format!("QQ 私聊 {}", msg.user_id),
-        ChannelType::Group { group_id } => format!("QQ 群 {group_id}"),
-    }
-}
-
 /// Returns `Some(true)` for "cancel all" and `Some(false)` for the newest task.
 fn recall_command_scope(content: &str) -> Option<bool> {
     let normalized = content
@@ -370,20 +201,12 @@ fn recall_command_scope(content: &str) -> Option<bool> {
         "终止全部任务",
         "cancelall",
         "/cancelall",
+        "/stopall",
     ];
     if cancel_all.contains(&normalized.as_str()) {
         return Some(true);
     }
     let cancel_one = [
-        "停",
-        "停止",
-        "取消",
-        "撤回",
-        "算了",
-        "不用了",
-        "别做了",
-        "不要继续了",
-        "不用继续了",
         "停止任务",
         "停止当前任务",
         "停下当前任务",
@@ -394,10 +217,9 @@ fn recall_command_scope(content: &str) -> Option<bool> {
         "撤回刚才的任务",
         "终止任务",
         "终止当前任务",
-        "stop",
-        "cancel",
-        "abort",
         "/cancel",
+        "/stop",
+        "/abort",
     ];
     cancel_one.contains(&normalized.as_str()).then_some(false)
 }
@@ -744,7 +566,7 @@ mod tests {
         let (_reply_tx, reply_rx) = tokio::sync::watch::channel(false);
         let completed = tokio_util::sync::CancellationToken::new();
         let snapshot = vec![ChatMessage::user("帮我核对这两份配置的差异")];
-        spawn_contextual_wait_reply(
+        crate::agent::spawn_contextual_wait_reply(
             Arc::clone(&agent),
             session.clone(),
             "branch-1".into(),
@@ -766,7 +588,7 @@ mod tests {
 
         let (reply_tx, reply_rx) = tokio::sync::watch::channel(false);
         reply_tx.send(true).unwrap();
-        spawn_contextual_wait_reply(
+        crate::agent::spawn_contextual_wait_reply(
             Arc::clone(&agent),
             session.clone(),
             "branch-2".into(),
@@ -782,7 +604,7 @@ mod tests {
         let (_reply_tx, reply_rx) = tokio::sync::watch::channel(false);
         let completed = tokio_util::sync::CancellationToken::new();
         completed.cancel();
-        spawn_contextual_wait_reply(
+        crate::agent::spawn_contextual_wait_reply(
             agent,
             session,
             "branch-3".into(),
@@ -893,5 +715,16 @@ mod tests {
         assert_eq!(recall_command_scope("取消全部任务"), Some(true));
         assert_eq!(recall_command_scope("取消任务应该如何实现？"), None);
         assert_eq!(recall_command_scope("不要取消，继续执行"), None);
+        // Bare words must NOT cancel — they are ordinary conversation.
+        assert_eq!(recall_command_scope("停"), None);
+        assert_eq!(recall_command_scope("取消"), None);
+        assert_eq!(recall_command_scope("stop"), None);
+        assert_eq!(recall_command_scope("cancel"), None);
+        assert_eq!(recall_command_scope("算了"), None);
+        assert_eq!(recall_command_scope("不用了"), None);
+        // Slash commands still work.
+        assert_eq!(recall_command_scope("/cancel"), Some(false));
+        assert_eq!(recall_command_scope("/stop"), Some(false));
+        assert_eq!(recall_command_scope("/stopall"), Some(true));
     }
 }

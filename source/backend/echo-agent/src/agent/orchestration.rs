@@ -262,6 +262,7 @@ pub(super) struct BackgroundRuntime {
     pub tools: Arc<ToolRegistry>,
     pub model: String,
     pub max_tool_iterations: usize,
+    pub tool_timeout: Duration,
     pub history_snapshot: Vec<ChatMessage>,
 }
 
@@ -497,6 +498,7 @@ async fn run_background_work(
                     model,
                     history,
                     max_iterations,
+                    runtime.tool_timeout,
                     branch_cancel,
                     process_cancel,
                 )
@@ -534,6 +536,7 @@ async fn run_background_branch(
     model: String,
     history: Vec<ChatMessage>,
     max_iterations: usize,
+    tool_timeout: Duration,
     cancel: CancellationToken,
     shutdown: CancellationToken,
 ) -> BackgroundBranchResult {
@@ -588,11 +591,14 @@ async fn run_background_branch(
                     continue;
                 }
                 let arguments = serde_json::from_str(&call.arguments).unwrap_or(Value::Null);
-                let output = tools
-                    .execute(&call.name, arguments)
-                    .await
-                    .map_err(|error| error.to_string())
-                    .unwrap_or_else(|error| format!("error: {error}"));
+                let output = tokio::select! {
+                    result = tools.execute(&call.name, arguments) => result
+                        .map_err(|error| error.to_string())
+                        .unwrap_or_else(|error| format!("error: {error}")),
+                    _ = tokio::time::sleep(tool_timeout) => {
+                        format!("error: tool '{}' timed out after {}s", call.name, tool_timeout.as_secs())
+                    }
+                };
                 messages.push(ChatMessage::tool(output, call.id));
             }
         }
@@ -1403,6 +1409,7 @@ mod tests {
                     tools: Arc::new(ToolRegistry::new()),
                     model: "slow".into(),
                     max_tool_iterations: 2,
+                    tool_timeout: Duration::from_secs(120),
                     history_snapshot: Vec::new(),
                 },
             )

@@ -437,6 +437,9 @@ impl TrunkStore {
 
 /// Trim a history by the token budget: drop messages from the head until the
 /// total fits. Always keeps the newest message so the latest input survives.
+///
+/// If even the newest message alone exceeds the budget, its content is
+/// truncated (head preserved) so the trunk can never exceed the budget.
 pub fn trim_by_tokens(history: &mut Vec<ChatMessage>, token_limit: usize) {
     let mut total: usize = estimate_history_tokens(history);
     let mut head = 0usize;
@@ -446,6 +449,12 @@ pub fn trim_by_tokens(history: &mut Vec<ChatMessage>, token_limit: usize) {
     }
     if head > 0 {
         history.drain(..head);
+    }
+    // The last remaining message may still exceed the budget on its own.
+    if let Some(last) = history.last_mut() {
+        if estimate_message_tokens(last) > token_limit {
+            crate::llm::truncate_message_to_tokens(last, token_limit);
+        }
     }
 }
 
@@ -802,6 +811,43 @@ mod tests {
         }
         assert_eq!(store.len(), 1, "single identity for concurrent callers");
         let _ = key2;
+    }
+
+    #[test]
+    fn oversized_newest_message_is_truncated_to_fit_the_budget() {
+        // 600 CJK chars ≈ 600 tokens, budget 100 → must be truncated.
+        let mut history = vec![ChatMessage::user("x".repeat(600))];
+        trim_by_tokens(&mut history, 100);
+        assert_eq!(history.len(), 1);
+        let tokens = crate::llm::estimate_message_tokens(&history[0]);
+        assert!(
+            tokens <= 100,
+            "truncated message must fit the budget, got {tokens} tokens"
+        );
+        assert!(
+            history[0].content.contains("内容过长已截断"),
+            "truncation marker expected"
+        );
+    }
+
+    #[test]
+    fn short_histories_are_never_trimmed() {
+        let mut history = vec![ChatMessage::user("你好"), ChatMessage::assistant("好的")];
+        trim_by_tokens(&mut history, 100);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].content, "你好");
+    }
+
+    #[test]
+    fn structured_hook_keeps_its_sequence_after_truncation() {
+        let hook = r#"<qq_message_hook>
+{"channel":{"type":"private"},"message_sequence":42,"content":"请分析这份超长文档"}</qq_message_hook>"#;
+        let mut history = vec![ChatMessage::user(hook)];
+        trim_by_tokens(&mut history, 60);
+        let remaining = &history[0].content;
+        // Sequence must survive the truncation (it lives at the head).
+        assert!(remaining.starts_with("<qq_message_hook>"));
+        assert!(remaining.contains("\"message_sequence\":42"));
     }
 
     #[test]

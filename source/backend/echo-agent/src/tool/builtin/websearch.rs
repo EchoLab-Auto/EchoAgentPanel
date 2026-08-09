@@ -50,6 +50,10 @@ impl Tool for WebSearchTool {
             .clamp(1, 10) as usize;
 
         let results = search_bing(query, max_results).await?;
+        // Filter junk (Bing navigation pages, duplicates, irrelevant entries),
+        // then cap to the requested count.
+        let mut results = filter_results(query, results);
+        results.truncate(max_results);
 
         if results.is_empty() {
             return Ok(format!("未搜索到关于“{query}”的结果。"));
@@ -118,7 +122,7 @@ fn parse_rss(body: &str, max_results: usize) -> Vec<SearchResult> {
     let desc_re = Regex::new(r"(?s)<description>(.*?)</description>").expect("desc regex");
 
     let mut results = Vec::new();
-    for cap in item_re.captures_iter(body).take(max_results) {
+    for cap in item_re.captures_iter(body).take(max_results * 2) {
         let block = &cap[1];
         let title = extract(block, &title_re);
         let url = extract(block, &link_re);
@@ -131,8 +135,104 @@ fn parse_rss(body: &str, max_results: usize) -> Vec<SearchResult> {
             url: decode_entities(&url),
             snippet: decode_entities(&clean_html(&snippet)),
         });
+        if results.len() >= max_results * 2 {
+            break;
+        }
     }
     results
+}
+
+/// Filter out junk results: Bing's own navigation pages, duplicates, and
+/// entries unrelated to the query (e.g. dictionary pop-ups that share no
+/// keyword with the search). The raw parser may over-collect, so filtering
+/// happens before the caller renders the final list.
+fn filter_results(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult> {
+    let keywords = extract_keywords(query);
+    let mut seen = std::collections::HashSet::new();
+    results
+        .into_iter()
+        .filter(|result| {
+            // Skip Bing-internal navigation/feature pages.
+            let host = result
+                .url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or_default()
+                .to_lowercase();
+            if matches!(
+                host.as_str(),
+                "bing.com" | "www.bing.com" | "cn.bing.com" | "global.bing.com"
+            ) {
+                return false;
+            }
+            // Skip duplicate titles.
+            let key = result.title.to_lowercase();
+            if !seen.insert(key) {
+                return false;
+            }
+            // Keep results that share at least one keyword with the query.
+            if keywords.is_empty() {
+                return true;
+            }
+            let haystack = format!(
+                "{} {}",
+                result.title.to_lowercase(),
+                result.snippet.to_lowercase()
+            );
+            keywords.iter().any(|keyword| haystack.contains(keyword))
+        })
+        .collect()
+}
+
+/// Extract searchable keywords from a query: CJK runs and ASCII words with at
+/// least 2 characters. Single CJK chars (stopword-like) are dropped.
+fn extract_keywords(query: &str) -> Vec<String> {
+    let mut keywords = Vec::new();
+    let mut cjk_run = String::new();
+    let push_cjk = |run: &mut String, keywords: &mut Vec<String>| {
+        if run.chars().count() >= 2 {
+            keywords.push(run.clone());
+        }
+        run.clear();
+    };
+    let mut word = String::new();
+    for ch in query.chars() {
+        if ch.is_ascii_alphanumeric() {
+            word.push(ch);
+        } else {
+            if word.len() >= 2 {
+                keywords.push(word.to_lowercase());
+            }
+            word.clear();
+            if is_cjk_char(ch) {
+                cjk_run.push(ch);
+            } else {
+                push_cjk(&mut cjk_run, &mut keywords);
+            }
+            continue;
+        }
+        push_cjk(&mut cjk_run, &mut keywords);
+    }
+    if word.len() >= 2 {
+        keywords.push(word.to_lowercase());
+    }
+    push_cjk(&mut cjk_run, &mut keywords);
+    keywords
+}
+
+fn is_cjk_char(ch: char) -> bool {
+    matches!(ch as u32,
+        0x2E80..=0x303F
+        | 0x3040..=0x30FF
+        | 0x31C0..=0x31EF
+        | 0x3400..=0x9FFF
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F
+        | 0xFF00..=0xFFEF
+        | 0x20000..=0x2FA1F
+    )
 }
 
 fn extract(block: &str, re: &Regex) -> String {
@@ -188,10 +288,16 @@ mod tests {
     }
 
     #[test]
-    fn respects_max_results() {
+    fn parse_rss_over_collects_candidates_for_filtering() {
+        // parse_rss now gathers up to 2x the requested count so junk can be
+        // filtered before truncation; the final count is capped by execute().
         let results = parse_rss(SAMPLE, 1);
-        assert_eq!(results.len(), 1);
+        assert_eq!(results.len(), 2);
         assert_eq!(results[0].title, "测试标题 & 更多");
+        let filtered = filter_results("测试", results);
+        // 第二条与查询词无关，被相关性过滤丢弃。
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].title, "测试标题 & 更多");
     }
 
     #[test]
@@ -200,6 +306,76 @@ mod tests {
             decode_entities("a&amp;b&lt;c&gt;d&quot;e&#39;f"),
             "a&b<c>d\"e'f"
         );
+    }
+
+    #[test]
+    fn filters_out_bing_navigation_and_irrelevant_entries() {
+        let results = vec![
+            SearchResult {
+                title: "异环 - 百度百科".into(),
+                url: "https://baike.baidu.com/item/异环".into(),
+                snippet: "异环是游戏《异环》中的虚构地点。".into(),
+            },
+            SearchResult {
+                title: "字典：异".into(),
+                url: "https://cn.bing.com/search?q=异".into(),
+                snippet: "异：不同的、特别的。".into(),
+            },
+            SearchResult {
+                title: "兑换码领取攻略".into(),
+                url: "https://example.com/codes".into(),
+                snippet: "异环1.3版本兑换码大全。".into(),
+            },
+            SearchResult {
+                title: "某无关新闻".into(),
+                url: "https://news.example.com/x".into(),
+                snippet: "今日天气晴朗。".into(),
+            },
+        ];
+        let filtered = filter_results("异环 兑换码", results);
+        // Bing 导航页被过滤；字典条目（不含查询词）被过滤；无关新闻被过滤。
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|r| r.title != "字典：异"));
+        assert!(filtered.iter().all(|r| !r.url.contains("bing.com/search")));
+        assert!(filtered.iter().any(|r| r.title == "异环 - 百度百科"));
+        assert!(filtered.iter().any(|r| r.title == "兑换码领取攻略"));
+    }
+
+    #[test]
+    fn duplicate_titles_are_deduplicated() {
+        let results = vec![
+            SearchResult {
+                title: "同一条新闻".into(),
+                url: "https://a.example.com/1".into(),
+                snippet: "异环内容".into(),
+            },
+            SearchResult {
+                title: "同一条新闻".into(),
+                url: "https://b.example.com/2".into(),
+                snippet: "异环内容".into(),
+            },
+        ];
+        let filtered = filter_results("异环", results);
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn empty_query_keywords_keep_all_results() {
+        let results = vec![SearchResult {
+            title: "anything".into(),
+            url: "https://x.example.com".into(),
+            snippet: "".into(),
+        }];
+        assert_eq!(filter_results("!!", results).len(), 1);
+    }
+
+    #[test]
+    fn extract_keywords_splits_cjk_and_ascii() {
+        assert_eq!(extract_keywords("异环 兑换码"), vec!["异环", "兑换码"]);
+        assert_eq!(extract_keywords("deepseek r1"), vec!["deepseek", "r1"]);
+        // Single CJK chars are dropped as stopword-like.
+        assert_eq!(extract_keywords("的"), Vec::<String>::new());
+        assert_eq!(extract_keywords("异环1.3版本"), vec!["异环", "版本"]);
     }
 
     #[tokio::test]

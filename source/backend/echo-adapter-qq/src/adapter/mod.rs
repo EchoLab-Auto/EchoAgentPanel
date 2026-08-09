@@ -67,6 +67,10 @@ pub(crate) struct QqInner {
     /// `send_file` works even when the agent and NapCat are on different
     /// hosts (agent on host, NapCat in Docker).
     pub(crate) file_bridge: crate::file_bridge::FileBridge,
+    /// Cache of group_id → group_name, refreshed lazily when a group message
+    /// arrives without a known name. Lets inbound messages carry the group
+    /// name even though OneBot group events only include the group_id.
+    pub(crate) group_names: dashmap::DashMap<i64, String>,
 }
 
 /// Wrapper to make a boxed handler satisfy the `Handler` trait constraint.
@@ -142,6 +146,7 @@ impl QqAdapter {
                     &napcat_container,
                     &napcat_container_data_dir,
                 ),
+                group_names: dashmap::DashMap::new(),
             }),
         };
         adapter.rebuild_filter_pipeline();
@@ -599,7 +604,10 @@ impl QqAdapter {
         Err(last_error.unwrap_or_else(|| "upload failed".into()))
     }
 
-    pub(crate) fn convert_message(event: &OneBotEvent) -> Option<IncomingMessage> {
+    pub(crate) fn convert_message(
+        event: &OneBotEvent,
+        group_names: &dashmap::DashMap<i64, String>,
+    ) -> Option<IncomingMessage> {
         let msg = event.as_message()?;
         if matches!(msg, MessageEvent::Unknown) {
             return None;
@@ -613,7 +621,7 @@ impl QqAdapter {
                 ChannelType::Group {
                     group_id: gid.to_string(),
                 },
-                None,
+                group_names.get(&gid).map(|name| name.clone()),
             )
         } else {
             (ChannelType::Direct, None)
@@ -831,6 +839,9 @@ impl Adapter for QqAdapter {
                     ChannelType::Group { group_id } => group_id.parse().ok(),
                     ChannelType::Direct => None,
                 };
+                // The owner is always exempt from outbound gating.
+                let owner = self.inner.config.owner_qq;
+                let is_owner = user_id != 0 && user_id == owner;
 
                 match mode {
                     QqGateMode::Allowlist => {
@@ -840,6 +851,7 @@ impl Adapter for QqAdapter {
                             cfg.allowlist.group_ids.iter().cloned().collect();
                         if !allow_users.is_empty()
                             && user_id != 0
+                            && !is_owner
                             && !allow_users.contains(&user_id)
                         {
                             tracing::info!(%user_id, "send_message blocked: user not allowlisted");
@@ -867,7 +879,11 @@ impl Adapter for QqAdapter {
                             cfg.denylist.user_ids.iter().cloned().collect();
                         let deny_groups: std::collections::HashSet<i64> =
                             cfg.denylist.group_ids.iter().cloned().collect();
-                        if !deny_users.is_empty() && user_id != 0 && deny_users.contains(&user_id) {
+                        if !deny_users.is_empty()
+                            && user_id != 0
+                            && !is_owner
+                            && deny_users.contains(&user_id)
+                        {
                             tracing::info!(%user_id, "send_message blocked: user denylisted");
                             return Ok(SendResult {
                                 message_id: None,
@@ -1251,7 +1267,8 @@ mod tests {
 
     #[test]
     fn converts_private_message_to_direct_channel() {
-        let msg = QqAdapter::convert_message(&private_event("hello")).expect("converted");
+        let names = dashmap::DashMap::new();
+        let msg = QqAdapter::convert_message(&private_event("hello"), &names).expect("converted");
         assert_eq!(msg.platform, "qq");
         assert_eq!(msg.user_id, "123456");
         assert_eq!(msg.user_name, "tester");
@@ -1263,7 +1280,9 @@ mod tests {
 
     #[test]
     fn converts_group_message_with_group_id() {
-        let msg = QqAdapter::convert_message(&group_event("hi all", false)).expect("converted");
+        let names = dashmap::DashMap::new();
+        let msg =
+            QqAdapter::convert_message(&group_event("hi all", false), &names).expect("converted");
         match msg.channel {
             ChannelType::Group { group_id } => assert_eq!(group_id, "999"),
             other => panic!("expected group channel, got {other:?}"),
@@ -1272,15 +1291,25 @@ mod tests {
     }
 
     #[test]
+    fn group_message_carries_cached_group_name() {
+        let names = dashmap::DashMap::new();
+        names.insert(999, "开发群".into());
+        let msg = QqAdapter::convert_message(&group_event("hi", true), &names).expect("converted");
+        assert_eq!(msg.group_name.as_deref(), Some("开发群"));
+    }
+
+    #[test]
     fn detects_at_me_in_group_message() {
-        let msg = QqAdapter::convert_message(&group_event("hi", true)).expect("converted");
+        let names = dashmap::DashMap::new();
+        let msg = QqAdapter::convert_message(&group_event("hi", true), &names).expect("converted");
         assert!(msg.at_me);
     }
 
     #[test]
     fn rejects_blank_content() {
-        assert!(QqAdapter::convert_message(&private_event("   ")).is_none());
-        assert!(QqAdapter::convert_message(&private_event("")).is_none());
+        let names = dashmap::DashMap::new();
+        assert!(QqAdapter::convert_message(&private_event("   "), &names).is_none());
+        assert!(QqAdapter::convert_message(&private_event(""), &names).is_none());
     }
 
     #[test]
@@ -1323,7 +1352,8 @@ mod tests {
             "status": {"online": true}
         }))
         .unwrap();
-        assert!(QqAdapter::convert_message(&heartbeat).is_none());
+        let names = dashmap::DashMap::new();
+        assert!(QqAdapter::convert_message(&heartbeat, &names).is_none());
     }
 
     #[test]
@@ -1344,7 +1374,8 @@ mod tests {
         }))
         .unwrap();
         // Image-only messages carry no text, so they are dropped.
-        assert!(QqAdapter::convert_message(&event).is_none());
+        let names = dashmap::DashMap::new();
+        assert!(QqAdapter::convert_message(&event, &names).is_none());
     }
 }
 

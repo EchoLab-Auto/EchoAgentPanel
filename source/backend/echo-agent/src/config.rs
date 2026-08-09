@@ -126,6 +126,10 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Maximum number of tool-call iterations in one agent turn.
     pub max_tool_iterations: usize,
+    /// Per-tool-call timeout in seconds. A tool that exceeds this is aborted
+    /// and the LLM receives an error result. `None` disables the timeout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_timeout_secs: Option<u64>,
     /// Directory containing `SKILL.md` definitions.
     pub skills_dir: String,
     /// DEPRECATED — legacy message-count limit. Kept only for config
@@ -137,6 +141,12 @@ pub struct AgentConfig {
     /// (1M × 0.8 = 800,000 tokens).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_limit_tokens: Option<usize>,
+    /// Model context window in tokens. When set, the effective trunk budget is
+    /// capped at `window × 0.8` so the request always fits the model window
+    /// (leaving room for the system prompt and the completion). `None` keeps
+    /// the trunk budget unclamped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<usize>,
     /// Privileged framework update policy.
     pub self_update: SelfUpdateConfig,
 }
@@ -155,9 +165,11 @@ impl Default for AgentConfig {
             active_api: String::new(),
             system_prompt: "You are a helpful assistant. Respond concisely and clearly.".into(),
             max_tool_iterations: 5,
+            tool_timeout_secs: Some(120),
             skills_dir: "skills".into(),
             memory_limit: 40,
             memory_limit_tokens: None,
+            context_window_tokens: None,
             self_update: SelfUpdateConfig::default(),
         }
     }
@@ -237,11 +249,23 @@ impl AgentConfig {
     /// - Otherwise the default budget is [`DEFAULT_MEMORY_LIMIT_TOKENS`]
     ///   (1M × 0.8 = 800,000 tokens). The legacy `memory_limit`
     ///   message-count field is deprecated and no longer participates.
+    /// - When `context_window_tokens` is set, the result is capped at
+    ///   `window × 0.8` so the prompt never exceeds the model window.
     pub fn effective_memory_limit_tokens(&self) -> usize {
-        if let Some(tokens) = self.memory_limit_tokens {
-            return tokens.max(200);
+        let limit = if let Some(tokens) = self.memory_limit_tokens {
+            tokens.max(200)
+        } else {
+            DEFAULT_MEMORY_LIMIT_TOKENS
+        };
+        match self.context_window_tokens {
+            Some(window) if window > 0 => limit.min(window * 8 / 10).max(200),
+            _ => limit,
         }
-        DEFAULT_MEMORY_LIMIT_TOKENS
+    }
+
+    /// Effective per-tool timeout (seconds), defaulting to 120 when unset.
+    pub fn effective_tool_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.tool_timeout_secs.unwrap_or(120))
     }
 }
 
@@ -431,6 +455,80 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(cfg.effective_memory_limit_tokens(), 200);
+    }
+
+    #[test]
+    fn context_window_clamps_effective_budget() {
+        // Explicit 800k budget + 128k window → capped at 128k × 0.8.
+        let cfg = AgentConfig {
+            memory_limit_tokens: Some(800_000),
+            context_window_tokens: Some(128_000),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_memory_limit_tokens(), 102_400);
+
+        // Window larger than the budget → budget wins.
+        let cfg = AgentConfig {
+            memory_limit_tokens: Some(10_000),
+            context_window_tokens: Some(1_000_000),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_memory_limit_tokens(), 10_000);
+
+        // No window → default budget.
+        let cfg = AgentConfig {
+            context_window_tokens: None,
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_memory_limit_tokens(), 800_000);
+
+        // Zero window is ignored (treat as unset).
+        let cfg = AgentConfig {
+            context_window_tokens: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_memory_limit_tokens(), 800_000);
+
+        // Tiny window still respects the 200-token floor.
+        let cfg = AgentConfig {
+            context_window_tokens: Some(100),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_memory_limit_tokens(), 200);
+    }
+
+    #[test]
+    fn context_window_and_tool_timeout_roundtrip_through_toml() {
+        let cfg = AgentConfig {
+            context_window_tokens: Some(131_072),
+            tool_timeout_secs: Some(30),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&cfg).unwrap();
+        assert!(toml_str.contains("context_window_tokens = 131072"));
+        assert!(toml_str.contains("tool_timeout_secs = 30"));
+        let parsed: AgentConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.context_window_tokens, Some(131_072));
+        assert_eq!(parsed.tool_timeout_secs, Some(30));
+        let default_str = toml::to_string(&AgentConfig::default()).unwrap();
+        assert!(!default_str.contains("context_window_tokens"));
+    }
+
+    #[test]
+    fn tool_timeout_defaults_to_120_seconds() {
+        let cfg = AgentConfig::default();
+        assert_eq!(
+            cfg.effective_tool_timeout(),
+            std::time::Duration::from_secs(120)
+        );
+        let cfg = AgentConfig {
+            tool_timeout_secs: Some(5),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.effective_tool_timeout(),
+            std::time::Duration::from_secs(5)
+        );
     }
 
     #[test]

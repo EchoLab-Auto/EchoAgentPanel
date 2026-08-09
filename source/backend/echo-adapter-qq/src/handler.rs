@@ -39,7 +39,34 @@ impl echo_server::Handler for QqHandler {
         // Store context for outbound sends.
         *self.inner.active_context.lock().expect("ctx poisoned") = Some(Arc::new(ctx.clone()));
 
-        let Some(msg) = QqAdapter::convert_message(event) else {
+        // Lazily learn group names: OneBot group events carry only group_id,
+        // so query the name once and cache it for later messages.
+        if let Some(gid) = event.as_message().and_then(|msg| msg.group_id()) {
+            if !self.inner.group_names.contains_key(&gid) {
+                let group_names = self.inner.group_names.clone();
+                let ctx = Arc::new(ctx.clone());
+                tokio::spawn(async move {
+                    let request = echo_core::action::actions::get_group_info(gid);
+                    match ctx.send_api(request).await {
+                        Ok(resp) => {
+                            if let Some(name) = resp
+                                .data
+                                .get("group_name")
+                                .and_then(|n| n.as_str())
+                                .filter(|n| !n.trim().is_empty())
+                            {
+                                group_names.insert(gid, name.trim().to_string());
+                            }
+                        }
+                        Err(error) => {
+                            tracing::debug!(%gid, %error, "group name lookup failed");
+                        }
+                    }
+                });
+            }
+        }
+
+        let Some(msg) = QqAdapter::convert_message(event, &self.inner.group_names) else {
             return HandleResult::Pass;
         };
         // convert_message returns Some only for message events, so this
@@ -178,6 +205,7 @@ mod tests {
                 "napcat",
                 "/app/napcat/data",
             ),
+            group_names: dashmap::DashMap::new(),
         })
     }
 
