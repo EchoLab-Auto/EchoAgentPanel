@@ -455,7 +455,6 @@ pub struct AppState {
     pub mode: ConversationMode,
     pub form_overlay: FormOverlay,
     pub pending_action: Option<String>,
-    pub menu_msg_idx: isize,
     pub qq_filter: QqFilterCache,
     /// Current QQ gate mode.
     pub qq_gate_mode: echo_adapter::GateMode,
@@ -522,7 +521,6 @@ impl AppState {
             mode: ConversationMode::Normal,
             form_overlay: Default::default(),
             pending_action: None,
-            menu_msg_idx: -1,
             qq_filter: QqFilterCache::default(),
             qq_gate_mode: echo_adapter::GateMode::None,
             qq_groups: Vec::new(),
@@ -1159,31 +1157,6 @@ impl AppState {
         self.chat_scroll = 0;
     }
 
-    /// Push or update the interactive form as a chat message.
-    pub fn refresh_menu_msg(&mut self) {
-        if !self.form_overlay.is_active() {
-            return;
-        }
-        let sid = TRUNK_SESSION_ID.to_string();
-        let text = self.form_overlay.render_text();
-
-        if self.menu_msg_idx >= 0 {
-            if let Some(msgs) = self.messages.get_mut(&sid) {
-                let idx = self.menu_msg_idx as usize;
-                if idx < msgs.len() {
-                    msgs[idx].content = text;
-                    msgs[idx].time = chrono::Utc::now().timestamp();
-                    return;
-                }
-            }
-        }
-        self.push_message(
-            &sid,
-            DisplayMessage::plain(MsgRole::System, text, chrono::Utc::now().timestamp()),
-        );
-        self.menu_msg_idx = (self.messages.get(&sid).map(|m| m.len()).unwrap_or(1) - 1) as isize;
-    }
-
     // ── Mouse selection helpers ────────────────────────────────────────
 
     pub fn point_in_conv(&self, x: u16, y: u16) -> bool {
@@ -1338,7 +1311,8 @@ impl AppState {
     /// Exit any active config mode.
     pub fn exit_config_mode(&mut self) {
         self.mode = ConversationMode::Normal;
-        self.menu_msg_idx = -1;
+        self.form_overlay.deactivate();
+        self.pending_action = None;
     }
 
     /// Number of messages currently held in the global trunk timeline.
@@ -1525,7 +1499,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_menu_msg_inserts_or_updates() {
+    fn activating_a_form_does_not_write_to_the_timeline() {
         let mut st = state();
         let mut fo = crate::components::form_overlay::FormOverlay::default();
         fo.activate(
@@ -1537,15 +1511,8 @@ mod tests {
             crate::components::form_overlay::FormKind::QqFilter,
         );
         st.form_overlay = fo;
-        st.refresh_menu_msg();
-        assert_eq!(st.active_messages().len(), 1);
-        assert_eq!(st.menu_msg_idx, 0);
-        let first = st.active_messages()[0].content.clone();
-        assert!(first.contains("t"));
-
-        // Second refresh updates the same message instead of appending.
-        st.refresh_menu_msg();
-        assert_eq!(st.active_messages().len(), 1, "updated in place");
+        assert!(st.form_overlay.is_active());
+        assert!(st.active_messages().is_empty());
     }
 
     #[test]
@@ -1610,10 +1577,19 @@ mod tests {
     fn exit_config_mode_returns_to_normal() {
         let mut st = state();
         st.mode = ConversationMode::ApiConfig;
-        st.menu_msg_idx = 5;
+        st.form_overlay.activate(
+            "API",
+            vec![crate::components::form_overlay::SelectItem {
+                label: "配置".into(),
+                value: "profile".into(),
+            }],
+            crate::components::form_overlay::FormKind::ApiConfig,
+        );
+        st.pending_action = Some("switch ".into());
         st.exit_config_mode();
         assert_eq!(st.mode, ConversationMode::Normal);
-        assert_eq!(st.menu_msg_idx, -1);
+        assert!(!st.form_overlay.is_active());
+        assert!(st.pending_action.is_none());
     }
 
     #[test]

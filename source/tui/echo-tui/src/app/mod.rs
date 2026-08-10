@@ -18,9 +18,11 @@ use crate::components::{
     chat_view::ChatView,
     checklist_panel::ChecklistPanel,
     command_palette::PaletteAction,
+    form_menu::FormMenu,
     help_popup::HelpPopup,
     prompt_input::PromptInput,
     settings_popup::SettingsPopup,
+    slash_menu::SlashMenu,
     status_bar::StatusBar,
     task_panel::{TaskInspector, TaskStatusBar},
     Component,
@@ -39,7 +41,9 @@ pub struct App {
     backend: Backend,
     status_bar: StatusBar,
     chat_view: ChatView,
+    form_menu: FormMenu,
     prompt_input: PromptInput,
+    slash_menu: SlashMenu,
     command_palette: command_palette::CommandPalette,
     settings_popup: SettingsPopup,
     help_popup: HelpPopup,
@@ -55,7 +59,9 @@ impl App {
             backend,
             status_bar: StatusBar,
             chat_view: ChatView,
+            form_menu: FormMenu,
             prompt_input: PromptInput::default(),
+            slash_menu: SlashMenu,
             command_palette: command_palette::CommandPalette,
             settings_popup: SettingsPopup,
             help_popup: HelpPopup,
@@ -199,8 +205,6 @@ impl App {
                     &self.backend,
                     is_deny,
                 );
-            } else {
-                self.state.refresh_menu_msg();
             }
             return;
         }
@@ -209,7 +213,6 @@ impl App {
         if self.state.mode == ConversationMode::ApiConfig {
             if self.state.form_overlay.state == FormState::Editing {
                 self.state.form_overlay.set_field_value(&content);
-                self.state.refresh_menu_msg();
             } else {
                 use crate::slash_commands::api;
                 let msg = if let Some(ref pending) = self.state.pending_action.take() {
@@ -220,7 +223,6 @@ impl App {
                 api::handle_message(&mut self.state, &self.backend, &msg);
                 if self.state.mode == ConversationMode::ApiConfig {
                     api::populate_form(&mut self.state);
-                    self.state.refresh_menu_msg();
                 }
             }
             return;
@@ -334,7 +336,6 @@ impl App {
                     self.state.quit_armed = true;
                     self.state.quit_armed_at = std::time::Instant::now();
                     if still_active {
-                        self.state.refresh_menu_msg();
                         self.state
                             .toast("已返回 (再按 Ctrl+C 退出)", ToastKind::Info);
                     } else {
@@ -514,7 +515,6 @@ impl App {
             }
             let still_active = self.state.form_overlay.back();
             if still_active {
-                self.state.refresh_menu_msg();
                 self.state.toast("已返回", ToastKind::Info);
             } else {
                 self.state.exit_config_mode();
@@ -524,7 +524,6 @@ impl App {
         }
 
         if self.state.form_overlay.handle_key(key, &self.backend) {
-            self.state.refresh_menu_msg();
             return;
         }
 
@@ -743,7 +742,6 @@ impl App {
                                 _ => {}
                             }
                         }
-                        self.state.refresh_menu_msg();
                     }
                     _ => {}
                 }
@@ -788,17 +786,35 @@ impl App {
         let area = f.area();
         f.render_widget(ratatui::widgets::Clear, area);
         let prompt_height = self.prompt_input.preferred_height(area.height);
+        let fixed_height = 2u16.saturating_add(prompt_height).saturating_add(1);
+        let conversation_space = area.height.saturating_sub(fixed_height);
+        let chat_reserve = if conversation_space >= 6 { 4 } else { 1 };
+        let available = conversation_space.saturating_sub(chat_reserve);
+        let menu_height = if self.state.form_overlay.is_active() {
+            FormMenu::preferred_height(&self.state.form_overlay).min(available)
+        } else if self.state.show_slash {
+            SlashMenu::preferred_height(&self.state).min(available)
+        } else {
+            0
+        };
+        if menu_height > 0 {
+            self.state
+                .form_overlay
+                .set_viewport_size(menu_height.saturating_sub(1) as usize);
+        }
 
         let chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
                 ratatui::layout::Constraint::Length(2),
                 ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(menu_height),
                 ratatui::layout::Constraint::Length(prompt_height),
                 ratatui::layout::Constraint::Length(1),
             ])
             .split(area);
-        let (top, main, prompt_area, task_area) = (chunks[0], chunks[1], chunks[2], chunks[3]);
+        let (top, main, menu_area, prompt_area, task_area) =
+            (chunks[0], chunks[1], chunks[2], chunks[3], chunks[4]);
         self.status_bar.render(f, top, &self.state);
 
         // Build rendered lines for mouse coordinate mapping.
@@ -857,6 +873,8 @@ impl App {
             }
         }
 
+        self.form_menu.render(f, menu_area, &self.state);
+        self.slash_menu.render(f, menu_area, &self.state);
         self.prompt_input.render(f, prompt_area, &self.state);
         self.state.task_bar_area = task_area;
         self.task_status_bar.render(f, task_area, &self.state);
@@ -941,6 +959,115 @@ mod tests {
         }
         app.handle_input(&key(KeyCode::Enter));
         assert_eq!(app.state.pending_slash, Some(SlashAction::Quit));
+    }
+
+    #[test]
+    fn temporary_form_menu_sits_between_chat_and_prompt_and_vanishes_on_exit() {
+        let mut app = app();
+        app.state.push_message(
+            crate::state::TRUNK_SESSION_ID,
+            crate::state::DisplayMessage::plain(crate::state::MsgRole::User, "CHAT_MARKER", 0),
+        );
+        activate_form(
+            &mut app,
+            crate::components::form_overlay::FormKind::ApiConfig,
+            vec![("DeepSeek", "1"), ("OpenAI", "2")],
+        );
+        app.state.form_overlay.title = "API MENU".into();
+        let timeline_len = app.state.active_messages().len();
+
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let rows = buffer_rows(terminal.backend().buffer());
+        let chat_y = rows
+            .iter()
+            .position(|row| row.contains("CHAT_MARKER"))
+            .unwrap_or_else(|| panic!("chat marker missing:\n{}", rows.join("\n")));
+        let menu_y = rows
+            .iter()
+            .position(|row| row.contains("API MENU"))
+            .unwrap();
+        let prompt_y = rows.iter().position(|row| row.contains('┌')).unwrap();
+        assert!(chat_y < menu_y && menu_y < prompt_y);
+        assert!(rows[menu_y].contains('─'), "menu must have a top separator");
+        assert_eq!(
+            app.state.active_messages().len(),
+            timeline_len,
+            "msgs: {:?}",
+            app.state
+                .active_messages()
+                .iter()
+                .map(|m| m.content.clone())
+                .collect::<Vec<_>>()
+        );
+
+        app.handle_input(&key_event(KeyCode::Esc));
+        assert!(!app.state.form_overlay.is_active());
+        // Esc emits one toast (已退出配置) into the trunk timeline.
+        assert_eq!(app.state.active_messages().len(), timeline_len + 1);
+        assert!(!app
+            .state
+            .active_messages()
+            .iter()
+            .any(|m| m.content.contains("API MENU")));
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        assert!(!buffer_rows(terminal.backend().buffer())
+            .iter()
+            .any(|row| row.contains("API MENU")));
+    }
+
+    #[test]
+    fn temporary_slash_menu_sits_between_chat_and_prompt_and_vanishes_on_exit() {
+        let mut app = app();
+        app.state.push_message(
+            crate::state::TRUNK_SESSION_ID,
+            crate::state::DisplayMessage::plain(crate::state::MsgRole::User, "CHAT_MARKER", 0),
+        );
+        app.handle_input(&key(KeyCode::Char('/')));
+        assert!(app.state.show_slash, "输入 / 后 slash 菜单打开");
+
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let rows = buffer_rows(terminal.backend().buffer());
+        let chat_y = rows
+            .iter()
+            .position(|row| row.contains("CHAT_MARKER"))
+            .unwrap_or_else(|| panic!("chat marker missing:\n{}", rows.join("\n")));
+        let menu_y = rows
+            .iter()
+            .position(|row| row.contains("Tab 补全") || row.contains("/help"))
+            .unwrap_or_else(|| panic!("slash menu content missing:\n{}", rows.join("\n")));
+        let prompt_y = rows.iter().position(|row| row.contains('┌')).unwrap();
+        assert!(chat_y < menu_y && menu_y < prompt_y);
+        assert!(
+            rows[menu_y.saturating_sub(1)].contains('─'),
+            "slash menu must have a top separator above its content"
+        );
+
+        let timeline_len = app.state.active_messages().len();
+        app.handle_input(&key(KeyCode::Esc));
+        assert!(!app.state.show_slash, "Esc 关闭 slash 菜单");
+        assert_eq!(
+            app.state.active_messages().len(),
+            timeline_len,
+            "Esc on slash menu must not emit messages"
+        );
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        assert!(!buffer_rows(terminal.backend().buffer())
+            .iter()
+            .any(|row| row.contains("Tab 补全") || row.contains("/help")));
+    }
+
+    fn buffer_rows(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect()
     }
 
     #[test]

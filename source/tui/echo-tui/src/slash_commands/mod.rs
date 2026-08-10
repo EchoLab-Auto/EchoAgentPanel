@@ -66,6 +66,24 @@ pub const SLASH_COMMANDS: &[(&str, &str, SlashAction)] = &[
 
 pub use SlashAction::*;
 
+/// Filter slash commands by the current input filter.
+/// When the filter has no space, only first-level (no-space) commands are shown.
+pub fn filtered_commands<'a>(filter: &str) -> Vec<&'a (&'a str, &'a str, SlashAction)> {
+    let show_sub = filter.contains(' ');
+    SLASH_COMMANDS
+        .iter()
+        .filter(|(name, _, _)| {
+            if !name.starts_with(filter) {
+                return false;
+            }
+            if !show_sub && name.contains(' ') {
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
 /// Dispatch a slash command. Called from the app loop.
 pub fn dispatch(state: &mut AppState, backend: &Backend, action: SlashAction, text: String) {
     match action {

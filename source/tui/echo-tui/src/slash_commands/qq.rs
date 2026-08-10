@@ -213,14 +213,8 @@ pub fn setting(state: &mut AppState, backend: &Backend) {
     ];
 
     let mut fo = FormOverlay::default();
-    fo.activate(
-        "QQ 设置 (↑↓选择 Enter切换 Esc退出)",
-        items,
-        FormKind::QqFilter,
-    );
+    fo.activate("QQ 设置", items, FormKind::QqFilter);
     state.form_overlay = fo;
-    state.menu_msg_idx = -1;
-    state.refresh_menu_msg();
 }
 
 /// Build a filter management form shared by allowlist and denylist.
@@ -393,7 +387,7 @@ fn render_filter_form(state: &mut AppState, is_deny: bool) {
         value: "__info__".into(),
     });
 
-    let title = format!("QQ {kind_label}管理 (↑↓选择 Enter/e执行 Esc退出)");
+    let title = format!("QQ {kind_label}管理");
     let mut fo = FormOverlay::default();
     fo.activate(&title, items, FormKind::QqFilter);
     let selected_index = selected_value
@@ -410,8 +404,6 @@ fn render_filter_form(state: &mut AppState, is_deny: bool) {
         }
     }
     state.form_overlay = fo;
-    state.menu_msg_idx = -1;
-    state.refresh_menu_msg();
 }
 
 /// Open the allowlist management form.

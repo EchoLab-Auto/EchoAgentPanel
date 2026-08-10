@@ -3,10 +3,12 @@
 pub mod chat_view;
 pub mod checklist_panel;
 pub mod command_palette;
+pub mod form_menu;
 pub mod form_overlay;
 pub mod help_popup;
 pub mod prompt_input;
 pub mod settings_popup;
+pub mod slash_menu;
 pub mod status_bar;
 pub mod task_panel;
 pub mod toast;

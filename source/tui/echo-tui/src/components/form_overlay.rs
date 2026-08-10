@@ -1,4 +1,4 @@
-//! 对话内嵌表单组件 — 二级交互（选择列表 → 表单编辑）。
+//! 临时菜单状态 — 二级交互（选择列表 → 表单编辑）。
 //!
 //! Supports multiple form kinds via [`FormKind`]:
 //! - `ApiConfig`: API configuration (multi-field editing, Ctrl+S save)
@@ -54,7 +54,7 @@ pub enum FieldKind {
     Password,
 }
 
-/// 对话内嵌表单组件。
+/// Temporary menu state shared by API and QQ configuration flows.
 #[derive(Debug, Clone)]
 pub struct FormOverlay {
     pub state: FormState,
@@ -105,7 +105,11 @@ impl FormOverlay {
         // Calculate viewport size before moving items
         self.viewport_size = items.len().clamp(5, 15);
         self.select_items = items;
-        self.select_idx = 0;
+        self.select_idx = self
+            .select_items
+            .iter()
+            .position(is_selectable)
+            .unwrap_or(0);
         self.fields.clear();
         self.field_idx = 0;
         self.form_kind = kind;
@@ -117,17 +121,40 @@ impl FormOverlay {
         self.state = FormState::Inactive;
     }
 
+    pub fn set_viewport_size(&mut self, size: usize) {
+        self.viewport_size = size.max(1);
+        self.update_select_scroll_offset();
+        self.update_edit_scroll_offset();
+    }
+
     // ── navigation ──
 
-    /// Move by `delta` items (wrapping), or 0 for no-op.
+    /// Move by `delta` actionable entries (wrapping), or 0 for no-op.
     fn shift_idx(&mut self, delta: isize) {
-        let (idx, len) = match self.state {
-            FormState::Selecting => (&mut self.select_idx, self.select_items.len()),
-            FormState::Editing => (&mut self.field_idx, self.fields.len()),
-            _ => return,
-        };
-        let len = len.max(1) as isize;
-        *idx = ((*idx as isize + delta + len) % len) as usize;
+        match self.state {
+            FormState::Selecting => {
+                let len = self.select_items.len();
+                if len == 0 || !self.select_items.iter().any(is_selectable) {
+                    return;
+                }
+                let direction = if delta < 0 { -1 } else { 1 };
+                for _ in 0..delta.unsigned_abs() {
+                    for _ in 0..len {
+                        self.select_idx = (self.select_idx as isize + direction)
+                            .rem_euclid(len as isize)
+                            as usize;
+                        if is_selectable(&self.select_items[self.select_idx]) {
+                            break;
+                        }
+                    }
+                }
+            }
+            FormState::Editing => {
+                let len = self.fields.len().max(1) as isize;
+                self.field_idx = (self.field_idx as isize + delta).rem_euclid(len) as usize;
+            }
+            FormState::Inactive => return,
+        }
 
         // Adaptive scrolling based on mode
         match self.state {
@@ -194,14 +221,14 @@ impl FormOverlay {
     fn jump_to(&mut self, end: bool) {
         match self.state {
             FormState::Selecting => {
-                if end {
-                    self.select_idx = self.select_items.len().saturating_sub(1);
-                    // Scroll to show the last item
-                    let max_offset = self.select_items.len().saturating_sub(self.viewport_size);
-                    self.select_scroll_offset = max_offset;
+                let target = if end {
+                    self.select_items.iter().rposition(is_selectable)
                 } else {
-                    self.select_idx = 0;
-                    self.select_scroll_offset = 0;
+                    self.select_items.iter().position(is_selectable)
+                };
+                if let Some(target) = target {
+                    self.select_idx = target;
+                    self.update_select_scroll_offset();
                 }
             }
             FormState::Editing => {
@@ -280,6 +307,7 @@ impl FormOverlay {
         }
         self.select_items
             .get(self.select_idx)
+            .filter(|item| is_selectable(item))
             .map(|s| s.value.clone())
     }
 
@@ -306,131 +334,6 @@ impl FormOverlay {
                 f.value = value.to_string();
             }
         }
-    }
-
-    // ── rendering ──
-
-    /// Build the chat message text for the current form state.
-    pub fn render_text(&self) -> String {
-        let mut lines: Vec<String> = Vec::new();
-        match self.state {
-            FormState::Editing => {
-                let total = self.fields.len();
-                let pos = format!("{}/{}", self.field_idx.saturating_add(1), total);
-                lines.push(format!("── 编辑: {}  ({pos}) ──", self.edit_label));
-
-                // Show scroll indicators at appropriate positions
-                let has_scroll_up = self.edit_scroll_offset > 0;
-                let has_scroll_down = {
-                    let viewport_end = self
-                        .edit_scroll_offset
-                        .saturating_add(self.viewport_size)
-                        .min(total);
-                    viewport_end < total
-                };
-
-                if has_scroll_up {
-                    lines.push("    ▲ (向上滚动)".to_string());
-                } else {
-                    lines.push(String::new());
-                }
-
-                // Only render visible fields in the viewport
-                let viewport_end = self
-                    .edit_scroll_offset
-                    .saturating_add(self.viewport_size)
-                    .min(total);
-                for i in self.edit_scroll_offset..viewport_end {
-                    if let Some(field) = self.fields.get(i) {
-                        let mark = if i == self.field_idx { "▸ " } else { "  " };
-                        let display = match field.kind {
-                            FieldKind::Password => {
-                                if field.value.is_empty() {
-                                    "(未设置)".to_string()
-                                } else {
-                                    "***".to_string()
-                                }
-                            }
-                            FieldKind::Text => {
-                                if field.value.is_empty() {
-                                    "(空)".to_string()
-                                } else {
-                                    field.value.clone()
-                                }
-                            }
-                        };
-                        lines.push(format!("{mark}{}: {}", field.label, display));
-                    }
-                }
-
-                if has_scroll_down {
-                    lines.push("    ▼ (向下滚动)".to_string());
-                }
-
-                lines.push(String::new());
-                match self.form_kind {
-                    FormKind::ApiConfig => {
-                        lines.push(
-                            "↑↓选字段  直接输入改值  Ctrl+S保存  Esc返回  Ctrl+C×2退出".into(),
-                        );
-                    }
-                    FormKind::QqFilter => {
-                        lines.push("输入号码后 Enter确认  Esc取消".into());
-                    }
-                }
-            }
-            FormState::Selecting => {
-                let total = self.select_items.len();
-                let pos = format!("{}/{}", self.select_idx.saturating_add(1), total);
-                lines.push(format!("── {}  ({pos}) ──", self.title));
-
-                // Show scroll indicators at appropriate positions
-                let has_scroll_up = self.select_scroll_offset > 0;
-                let has_scroll_down = {
-                    let viewport_end = self
-                        .select_scroll_offset
-                        .saturating_add(self.viewport_size)
-                        .min(total);
-                    viewport_end < total
-                };
-
-                if has_scroll_up {
-                    lines.push("    ▲ (向上滚动)".to_string());
-                } else {
-                    lines.push(String::new());
-                }
-
-                // Max visible width for labels (keep each row on one terminal line).
-                const LABEL_MAX_CHARS: usize = 64;
-
-                // Only render visible items in the viewport
-                let viewport_end = self
-                    .select_scroll_offset
-                    .saturating_add(self.viewport_size)
-                    .min(total);
-                for i in self.select_scroll_offset..viewport_end {
-                    if let Some(item) = self.select_items.get(i) {
-                        let mark = if i == self.select_idx { "▸" } else { " " };
-                        let radio = if item.value == "__info__" { " " } else { "●" };
-                        let label = truncate_label(&item.label, LABEL_MAX_CHARS);
-                        lines.push(format!(" {mark}{radio} {label}"));
-                    }
-                }
-
-                if has_scroll_down {
-                    lines.push("    ▼ (向下滚动)".to_string());
-                }
-
-                lines.push(String::new());
-                let nav = match self.form_kind {
-                    FormKind::ApiConfig => "↑↓选择  Home/End首尾  Enter切换  e编辑  Ctrl+C×2退出",
-                    FormKind::QqFilter => "↑↓选择  Home/End首尾  Enter/e执行  Ctrl+C×2退出",
-                };
-                lines.push(nav.into());
-            }
-            FormState::Inactive => {}
-        }
-        lines.join("\n")
     }
 
     // ── input handling ──
@@ -493,20 +396,8 @@ impl FormOverlay {
     }
 }
 
-/// Truncate a label to `max_chars` visual characters, appending "…" if cut.
-fn truncate_label(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        return s.to_string();
-    }
-    let mut out = String::with_capacity(max_chars + 3);
-    for (i, ch) in s.chars().enumerate() {
-        if i >= max_chars.saturating_sub(1) {
-            break;
-        }
-        out.push(ch);
-    }
-    out.push('…');
-    out
+fn is_selectable(item: &SelectItem) -> bool {
+    item.value != "__info__"
 }
 
 #[cfg(test)]
@@ -560,6 +451,40 @@ mod tests {
     }
 
     #[test]
+    fn selection_navigation_skips_informational_rows() {
+        let mut fo = FormOverlay::default();
+        fo.activate(
+            "t",
+            vec![
+                SelectItem {
+                    label: "标题".into(),
+                    value: "__info__".into(),
+                },
+                SelectItem {
+                    label: "第一项".into(),
+                    value: "first".into(),
+                },
+                SelectItem {
+                    label: String::new(),
+                    value: "__info__".into(),
+                },
+                SelectItem {
+                    label: "第二项".into(),
+                    value: "second".into(),
+                },
+            ],
+            FormKind::QqFilter,
+        );
+        assert_eq!(fo.select_idx, 1);
+        fo.navigate(1);
+        assert_eq!(fo.select_idx, 3);
+        fo.navigate(1);
+        assert_eq!(fo.select_idx, 1);
+        fo.jump_to(true);
+        assert_eq!(fo.confirm(), Some("second".into()));
+    }
+
+    #[test]
     fn confirm_returns_selected_value() {
         let mut fo = FormOverlay::default();
         fo.activate("t", items(3), FormKind::QqFilter);
@@ -587,42 +512,6 @@ mod tests {
         assert_eq!(fo.state, FormState::Selecting);
         assert!(!fo.back());
         assert_eq!(fo.state, FormState::Inactive);
-    }
-
-    #[test]
-    fn render_text_lists_selection_with_cursor() {
-        let mut fo = FormOverlay::default();
-        fo.activate("标题", items(2), FormKind::QqFilter);
-        fo.select_idx = 1;
-        let text = fo.render_text();
-        assert!(text.contains("── 标题"), "title present: {text}");
-        assert!(text.contains("(2/2)"), "position indicator: {text}");
-        assert!(text.contains("▸"));
-        assert!(text.contains("item 0"));
-        assert!(text.contains("item 1"));
-    }
-
-    #[test]
-    fn render_text_masks_password_fields() {
-        let mut fo = FormOverlay::default();
-        fo.activate("api", items(0), FormKind::ApiConfig);
-        fo.set_fields(vec![
-            FormField {
-                label: "APIKey".into(),
-                value: "secret".into(),
-                kind: FieldKind::Password,
-            },
-            FormField {
-                label: "Model".into(),
-                value: String::new(),
-                kind: FieldKind::Text,
-            },
-        ]);
-        fo.enter_edit();
-        let text = fo.render_text();
-        assert!(text.contains("***"), "password must be masked");
-        assert!(!text.contains("secret"), "password must not leak");
-        assert!(text.contains("(空)"));
     }
 
     #[test]
@@ -787,27 +676,5 @@ mod tests {
         assert_eq!(fo.select_idx, 4, "End");
         fo.jump_to(false);
         assert_eq!(fo.select_idx, 0, "Home");
-    }
-
-    #[test]
-    fn render_text_includes_position_indicator() {
-        let mut fo = FormOverlay::default();
-        fo.activate("标题", items(5), FormKind::QqFilter);
-        fo.select_idx = 2;
-        let text = fo.render_text();
-        assert!(
-            text.contains("(3/5)"),
-            "position indicator in title: {text}"
-        );
-    }
-
-    #[test]
-    fn truncate_label_cuts_long_strings() {
-        let s = "x".repeat(100);
-        let t = truncate_label(&s, 20);
-        assert_eq!(t.chars().count(), 20, "truncated with …");
-        assert!(t.ends_with('…'));
-        // Short strings unchanged.
-        assert_eq!(truncate_label("hi", 20), "hi");
     }
 }

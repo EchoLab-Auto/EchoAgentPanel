@@ -1,4 +1,4 @@
-//! /api — interactive API configuration with select list + form fields in chat.
+//! /api — interactive API configuration using the temporary form menu.
 
 use crate::backend::Backend;
 use crate::components::form_overlay::{FormKind, SelectItem};
@@ -9,13 +9,11 @@ use echo_agent::BackendCommand;
 pub fn config(state: &mut AppState, backend: &Backend) {
     backend.send(BackendCommand::RequestState);
     state.mode = ConversationMode::ApiConfig;
-    state.menu_msg_idx = -1;
     state.form_overlay.deactivate(); // force fresh start
     populate_form(state);
-    state.refresh_menu_msg();
 }
 
-/// Build the ChatForm from current API state.
+/// Build the temporary form menu from current API state.
 pub fn populate_form(state: &mut AppState) {
     let s = &state.settings;
     let st = &state.status;
@@ -61,10 +59,7 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
 
     match parts.first().copied() {
         Some("q") | Some("/q") | Some("quit") => {
-            state.mode = ConversationMode::Normal;
-            state.form_overlay.deactivate();
-            state.menu_msg_idx = -1;
-            state.toast("已退出 API 配置", ToastKind::Info);
+            state.exit_config_mode();
             return true;
         }
         Some(n) if n.parse::<usize>().is_ok() => {
@@ -230,7 +225,6 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
         }
         [""] => {
             populate_form(state);
-            state.refresh_menu_msg();
             true
         }
         _ => {

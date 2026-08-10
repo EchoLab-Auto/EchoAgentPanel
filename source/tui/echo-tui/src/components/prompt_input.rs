@@ -6,16 +6,16 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use tui_textarea::{Input, Key, TextArea};
 use unicode_width::UnicodeWidthChar;
 
 use super::{Component, ComponentResult};
 use crate::event::Event;
-use crate::slash_commands::{SlashAction, SLASH_COMMANDS};
+use crate::slash_commands::SlashAction;
 use crate::state::AppState;
 
 #[derive(Debug, Default)]
@@ -51,84 +51,13 @@ impl PromptInput {
     /// Filter commands by the current slash filter.
     /// When filter has no space, only show first-level (no-space) commands.
     fn filtered_commands<'a>(filter: &str) -> Vec<&'a (&'a str, &'a str, SlashAction)> {
-        let show_sub = filter.contains(' ');
-        SLASH_COMMANDS
-            .iter()
-            .filter(|(name, _, _)| {
-                if !name.starts_with(filter) {
-                    return false;
-                }
-                if !show_sub && name.contains(' ') {
-                    return false;
-                }
-                true
-            })
-            .collect()
-    }
-
-    fn render_slash_menu(&self, f: &mut Frame, area: Rect, state: &AppState) {
-        let theme = state.theme;
-        let filtered = Self::filtered_commands(&state.slash_filter);
-        if filtered.is_empty() {
-            return;
-        }
-        let sel = state.slash_selection.min(filtered.len().saturating_sub(1));
-        // Use the FULL terminal area, not just the prompt area.
-        let term_h = f.area().height;
-        let h = (filtered.len() + 2).min((term_h.saturating_sub(4)) as usize) as u16;
-        let w = 54u16.min(area.width.saturating_sub(2));
-        let x = area.x;
-        // Position the menu above the prompt, clamped to top of screen.
-        let y = area.y.saturating_sub(h).max(1);
-        let rect = Rect::new(x, y, w.min(area.width.saturating_sub(x)), h);
-
-        let mut lines: Vec<Line> = Vec::new();
-        for (i, (name, desc, _)) in filtered.iter().enumerate() {
-            let marker = if i == sel { "▸" } else { " " };
-            let name_style = if i == sel {
-                Style::default().fg(theme.accent).bold()
-            } else {
-                Style::default().fg(theme.fg)
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!(" {marker} "),
-                    if i == sel { theme.accent } else { theme.faint },
-                ),
-                Span::styled(*name, name_style),
-                Span::styled(format!("  {desc}"), theme.dim),
-            ]));
-        }
-        // Help hint on last line.
-        lines.push(Line::from(Span::styled(
-            " Tab 补全  ↑↓ 选择  Enter 执行  Esc 关闭",
-            theme.faint,
-        )));
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(theme.border_focused)
-            .title(Span::styled(
-                format!(" /{} ", state.slash_filter),
-                Style::default().fg(theme.title),
-            ));
-        let p = Paragraph::new(lines)
-            .block(block)
-            .style(Style::default().bg(theme.panel_bg));
-        f.render_widget(Clear, rect);
-        f.render_widget(p, rect);
+        crate::slash_commands::filtered_commands(filter)
     }
 }
 
 impl Component for PromptInput {
     fn render(&self, f: &mut Frame, area: Rect, state: &AppState) {
         let theme = state.theme;
-        // slash 命令菜单渲染在输入框上方
-        if state.show_slash {
-            self.render_slash_menu(f, area, state);
-        }
-
         let focused = true;
         let title = " 消息输入 (全局时间线) ".to_string();
         let block = Block::default()
