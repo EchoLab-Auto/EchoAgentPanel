@@ -3,6 +3,7 @@
 mod commands;
 mod orchestration;
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -27,6 +28,10 @@ const MAX_CONCURRENT_REPLY_BRANCHES: usize = 8;
 /// QQ branch spawns a delayed interim reply; without a cap, many parallel
 /// branches would each fire an extra LLM request at the same moment.
 const MAX_CONCURRENT_WAIT_REPLIES: usize = 4;
+
+/// Pending reasoning fragments keyed by session; each queue holds
+/// (branch_id, fragments in arrival order).
+type ReasoningByBranch = std::collections::HashMap<String, VecDeque<(String, Vec<String>)>>;
 
 #[derive(Debug, Clone)]
 struct ActiveInboundTurn {
@@ -68,6 +73,13 @@ pub struct Agent {
     wait_reply_slots: tokio::sync::Semaphore,
     active_inbound_turns: DashMap<String, ActiveInboundTurn>,
     next_message_sequence: AtomicU64,
+    /// Reasoning fragments per (session, branch), in arrival order. Consumed
+    /// when the branch's final `AgentOutput` is recorded into the timeline.
+    timeline_pending_reasoning: std::sync::Mutex<ReasoningByBranch>,
+    /// Branches whose final reply already arrived (mirrors the TUI's
+    /// completed-reasoning queue for `branch_id == None` outputs).
+    timeline_completed_branches:
+        std::sync::Mutex<std::collections::HashMap<String, VecDeque<String>>>,
     /// Cancels background tasks (identity eviction / save) on shutdown.
     cancel: tokio_util::sync::CancellationToken,
 }
@@ -117,6 +129,8 @@ impl Agent {
             wait_reply_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_WAIT_REPLIES),
             active_inbound_turns: DashMap::new(),
             next_message_sequence: AtomicU64::new(1),
+            timeline_pending_reasoning: std::sync::Mutex::new(std::collections::HashMap::new()),
+            timeline_completed_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             cancel,
         };
         // Spawn periodic identity eviction (every 5 minutes). Only stale
@@ -481,7 +495,12 @@ impl Agent {
     }
 
     /// Emit an event to subscribers (TUI, ...). No-op when unattached.
+    ///
+    /// Every emitted event is also fed into the persisted display timeline
+    /// (before the subscriber hand-off) so the TUI can restore history after a
+    /// restart — see `record_timeline`.
     pub fn emit(&self, event: BackendEvent) {
+        self.record_timeline(&event);
         if let Some(h) = self
             .handle
             .try_read()
@@ -491,6 +510,215 @@ impl Agent {
         {
             h.emit(event);
         }
+    }
+
+    /// Record an event into the persisted display timeline. Only conversation
+    /// content is kept: inbound user messages (with source provenance), timer
+    /// summaries, tool calls/results and final agent outputs (with reasoning).
+    /// Background-task hooks and lifecycle noise are deliberately skipped.
+    fn record_timeline(&self, event: &BackendEvent) {
+        use crate::event::{TimelineMessage, TimelineSource, TimelineTool};
+        match event {
+            BackendEvent::MessageReceived {
+                adapter_name,
+                platform,
+                user_id,
+                user_name,
+                channel,
+                group_name,
+                content,
+                timestamp,
+                received_at_ms,
+                message_sequence,
+                ..
+            } => {
+                if adapter_name == "background" {
+                    return; // internal parent-context hook, not conversation content
+                }
+                if adapter_name == "timer" {
+                    let task = timeline_timer_task(content);
+                    self.trunk.push_timeline(TimelineMessage {
+                        kind: "system".into(),
+                        content: match task {
+                            Some(task) => {
+                                format!("定时任务触发 · {}", truncate_one_line(&task, 120))
+                            }
+                            None => "定时任务触发".into(),
+                        },
+                        time: *timestamp,
+                        source: None,
+                        reasoning: None,
+                        tool: None,
+                    });
+                    return;
+                }
+                self.trunk.push_timeline(TimelineMessage {
+                    kind: "user".into(),
+                    content: content.clone(),
+                    time: *timestamp,
+                    source: Some(TimelineSource {
+                        adapter_name: adapter_name.clone(),
+                        platform: platform.clone(),
+                        user_id: user_id.clone(),
+                        user_name: user_name.clone(),
+                        channel: channel.clone(),
+                        group_name: group_name.clone(),
+                        received_at_ms: *received_at_ms,
+                        message_sequence: *message_sequence,
+                    }),
+                    reasoning: None,
+                    tool: None,
+                });
+            }
+            BackendEvent::AgentReasoning {
+                session_id,
+                branch_id,
+                content,
+            } => {
+                let content = content.trim().to_string();
+                if content.is_empty() {
+                    return;
+                }
+                if let Ok(mut pending) = self.timeline_pending_reasoning.lock() {
+                    let queue = pending.entry(session_id.clone()).or_default();
+                    if let Some((_, reasoning)) = queue.back_mut() {
+                        reasoning.push(content);
+                    } else {
+                        queue.push_back((branch_id.clone(), vec![content]));
+                    }
+                }
+            }
+            BackendEvent::ReplyBranchCompleted {
+                session_id,
+                branch_id,
+                success,
+                cancelled,
+                ..
+            } => {
+                if *success && !*cancelled {
+                    if let Ok(mut completed) = self.timeline_completed_branches.lock() {
+                        completed
+                            .entry(session_id.clone())
+                            .or_default()
+                            .push_back(branch_id.clone());
+                    }
+                }
+            }
+            BackendEvent::AgentOutput {
+                session_id,
+                content,
+                branch_id,
+            } => {
+                let reasoning = self.take_timeline_reasoning(session_id, branch_id.as_deref());
+                let reasoning = (!reasoning.is_empty()).then_some(reasoning);
+                self.trunk.push_timeline(TimelineMessage {
+                    kind: "backend".into(),
+                    content: content.clone(),
+                    time: chrono::Utc::now().timestamp(),
+                    source: None,
+                    reasoning,
+                    tool: None,
+                });
+            }
+            BackendEvent::ToolCall {
+                tool_name,
+                arguments,
+                ..
+            } => {
+                self.trunk.push_timeline(TimelineMessage {
+                    kind: "tool".into(),
+                    content: tool_name.clone(),
+                    time: chrono::Utc::now().timestamp(),
+                    source: None,
+                    reasoning: None,
+                    tool: Some(TimelineTool {
+                        name: tool_name.clone(),
+                        input: summarize_timeline_value(arguments, 160),
+                        output: None,
+                        failed: false,
+                    }),
+                });
+            }
+            BackendEvent::ToolResult {
+                tool_name, result, ..
+            } => {
+                let failed = result.trim_start().starts_with("error:");
+                self.update_timeline_tool(tool_name, result, failed);
+            }
+            _ => {}
+        }
+    }
+
+    /// Consume pending reasoning for an agent output. With a branch id the
+    /// matching branch is removed directly; without one, the oldest completed
+    /// branch of that session is consumed first (mirrors the TUI behaviour).
+    fn take_timeline_reasoning(&self, session_id: &str, branch_id: Option<&str>) -> Vec<String> {
+        let target = if let Some(branch_id) = branch_id {
+            Some(branch_id.to_string())
+        } else if let Ok(mut completed) = self.timeline_completed_branches.lock() {
+            completed
+                .get_mut(session_id)
+                .and_then(|queue| queue.pop_front())
+        } else {
+            None
+        };
+        let Some(target) = target else {
+            return Vec::new();
+        };
+        if let Ok(mut pending) = self.timeline_pending_reasoning.lock() {
+            let Some(queue) = pending.get_mut(session_id) else {
+                return Vec::new();
+            };
+            let Some(index) = queue.iter().position(|(branch, _)| *branch == target) else {
+                return Vec::new();
+            };
+            let Some((_, reasoning)) = queue.remove(index) else {
+                return Vec::new();
+            };
+            if queue.is_empty() {
+                pending.remove(session_id);
+            }
+            reasoning
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Attach the outcome to the newest still-running timeline tool entry with
+    /// the same name (mirrors the TUI's `finish_tool_entry`).
+    fn update_timeline_tool(&self, tool_name: &str, result: &str, failed: bool) {
+        let mut timeline = match self.trunk.timeline_mut() {
+            Some(guard) => guard,
+            None => return,
+        };
+        if let Some(entry) = timeline.iter_mut().rev().find(|entry| {
+            entry.kind == "tool"
+                && entry
+                    .tool
+                    .as_ref()
+                    .is_some_and(|tool| tool.name == tool_name && tool.output.is_none())
+        }) {
+            if let Some(tool) = entry.tool.as_mut() {
+                tool.output = Some(summarize_timeline_value(result, 200));
+                tool.failed = failed;
+            }
+            return;
+        }
+        // No running entry found — record a completed tool entry directly.
+        drop(timeline);
+        self.trunk.push_timeline(crate::event::TimelineMessage {
+            kind: "tool".into(),
+            content: tool_name.to_string(),
+            time: chrono::Utc::now().timestamp(),
+            source: None,
+            reasoning: None,
+            tool: Some(crate::event::TimelineTool {
+                name: tool_name.to_string(),
+                input: String::new(),
+                output: Some(summarize_timeline_value(result, 200)),
+                failed,
+            }),
+        });
     }
 
     fn emit_reasoning(&self, session_id: &str, branch_id: &str, reasoning: &Option<String>) {
@@ -1909,6 +2137,67 @@ pub(crate) fn structured_message_sequence(content: &str) -> Option<u64> {
     serde_json::from_str::<serde_json::Value>(&content[start..=end]).ok()?["message_sequence"]
         .as_u64()
 }
+/// Extract the task description from a `<timer_event>` payload (used for the
+/// display timeline summary).
+fn timeline_timer_task(content: &str) -> Option<String> {
+    let payload = content
+        .trim()
+        .strip_prefix("<timer_event>")?
+        .strip_suffix("</timer_event>")?;
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()?
+        .get("task")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Collapse whitespace and truncate to `max_chars`.
+fn truncate_one_line(value: &str, max_chars: usize) -> String {
+    let one_line = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.chars().count() <= max_chars {
+        one_line
+    } else {
+        one_line.chars().take(max_chars).collect::<String>() + "…"
+    }
+}
+
+/// Compact, secret-redacting summary of a tool argument/result payload for the
+/// display timeline. JSON objects are walked shallowly (one level); values of
+/// sensitive keys are replaced with "[已隐藏]".
+fn summarize_timeline_value(value: &str, max_chars: usize) -> String {
+    let compact = match serde_json::from_str::<serde_json::Value>(value) {
+        Ok(serde_json::Value::Object(map)) => {
+            let summarized = map
+                .iter()
+                .take(8)
+                .map(|(key, value)| {
+                    let rendered = if is_sensitive_timeline_key(key) {
+                        "[已隐藏]".into()
+                    } else {
+                        match value {
+                            serde_json::Value::String(s) => truncate_one_line(s, 48),
+                            serde_json::Value::Array(items) => format!("[{}]", items.len()),
+                            other => other.to_string(),
+                        }
+                    };
+                    format!("{key}={rendered}")
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            format!("{{{summarized}}}")
+        }
+        Ok(other) => other.to_string(),
+        Err(_) => truncate_one_line(value, max_chars),
+    };
+    truncate_one_line(&compact, max_chars)
+}
+
+fn is_sensitive_timeline_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    ["token", "secret", "password", "api_key", "access_key"]
+        .iter()
+        .any(|needle| key.contains(needle))
+}
 
 /// After a delay, generate and send one interim reply for a still-running
 /// branch, unless the branch already produced a visible reply or finished.
@@ -2121,6 +2410,164 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn emitted_events_are_recorded_into_the_display_timeline() {
+        let provider = Arc::new(MockProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: "Hello!".into(),
+        });
+        let agent = test_agent(provider);
+        let key = SessionKey::local_tui();
+        let session = agent.trunk.get_or_create(&key, "user".into(), None);
+        // Adapter flow: inbound message event, then branch execution, then output.
+        agent.emit(BackendEvent::MessageReceived {
+            session_id: session.id.clone(),
+            adapter_name: "local".into(),
+            platform: "local".into(),
+            user_id: "local_user".into(),
+            user_name: "local user".into(),
+            channel: "direct".into(),
+            group_name: None,
+            content: "hi".into(),
+            timestamp: 1700000000,
+            received_at_ms: 1700000000123,
+            message_sequence: 1,
+        });
+        let reply = agent.process_message(&session, "hi").await.unwrap();
+        agent.emit(BackendEvent::AgentOutput {
+            session_id: session.id.clone(),
+            content: reply.clone(),
+            branch_id: None,
+        });
+        assert_eq!(reply, "Hello!");
+
+        let timeline = agent.trunk.timeline_snapshot();
+        // user entry + backend reply entry.
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0].kind, "user");
+        assert_eq!(timeline[0].content, "hi");
+        assert!(timeline[0].source.is_some(), "source provenance recorded");
+        assert_eq!(timeline[1].kind, "backend");
+        assert_eq!(timeline[1].content, "Hello!");
+    }
+
+    #[tokio::test]
+    async fn timeline_records_tools_and_attaches_outcomes() {
+        let provider = Arc::new(MockProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: "ok".into(),
+        });
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(MockTool {
+            name: "mock_tool",
+            result: "found".into(),
+        }));
+        let agent = Agent::new(
+            provider,
+            AgentConfig::default(),
+            SkillRegistry::new(),
+            tools,
+            Arc::new(AdapterRegistry::new()),
+        );
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "mock_tool".into(),
+            arguments: r#"{"query":"x","api_key":"secret-1"}"#.into(),
+        };
+        let result = agent.run_tool("local:tui::one", "branch-1", &call).await;
+        assert_eq!(result, "found");
+
+        let timeline = agent.trunk.timeline_snapshot();
+        assert_eq!(timeline.len(), 1);
+        let tool = timeline[0].tool.as_ref().expect("tool entry");
+        assert_eq!(tool.name, "mock_tool");
+        assert!(tool.output.is_some(), "outcome attached");
+        assert!(!tool.input.contains("secret-1"), "secrets redacted");
+        assert!(tool.input.contains("[已隐藏]"), "redaction marker shown");
+        assert!(!tool.failed);
+    }
+
+    #[tokio::test]
+    async fn timeline_skips_background_hooks_and_timer_summaries_cleanly() {
+        let provider = Arc::new(MockProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: "ok".into(),
+        });
+        let agent = test_agent(provider);
+        // Background hook — must NOT appear in the timeline.
+        agent.emit(BackendEvent::MessageReceived {
+            session_id: "local:tui::one".into(),
+            adapter_name: "background".into(),
+            platform: "qq".into(),
+            user_id: "1".into(),
+            user_name: "background task".into(),
+            channel: "direct".into(),
+            group_name: None,
+            content: "<background_task_event>{}</background_task_event>".into(),
+            timestamp: 1,
+            received_at_ms: 1000,
+            message_sequence: 1,
+        });
+        assert!(agent.trunk.timeline_snapshot().is_empty());
+
+        // Timer event — becomes a system summary.
+        agent.emit(BackendEvent::MessageReceived {
+            session_id: "local:tui::one".into(),
+            adapter_name: "timer".into(),
+            platform: "local".into(),
+            user_id: "1".into(),
+            user_name: "timer".into(),
+            channel: "direct".into(),
+            group_name: None,
+            content: r#"<timer_event>{"message_sequence":2,"task":"发送提醒"}</timer_event>"#
+                .into(),
+            timestamp: 2,
+            received_at_ms: 2000,
+            message_sequence: 2,
+        });
+        let timeline = agent.trunk.timeline_snapshot();
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].kind, "system");
+        assert_eq!(timeline[0].content, "定时任务触发 · 发送提醒");
+    }
+
+    #[tokio::test]
+    async fn timeline_associates_reasoning_with_the_final_output() {
+        let provider = Arc::new(MockProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: "done".into(),
+        });
+        let agent = test_agent(provider);
+        let session_id = "local:tui::one";
+        let branch_id = "branch-abc";
+        agent.emit(BackendEvent::AgentReasoning {
+            session_id: session_id.into(),
+            branch_id: branch_id.into(),
+            content: "先查资料".into(),
+        });
+        agent.emit(BackendEvent::ReplyBranchCompleted {
+            session_id: session_id.into(),
+            branch_id: branch_id.into(),
+            message_sequence: 1,
+            success: true,
+            cancelled: false,
+            completed_at_ms: 1000,
+        });
+        agent.emit(BackendEvent::AgentOutput {
+            session_id: session_id.into(),
+            content: "done".into(),
+            branch_id: Some(branch_id.into()),
+        });
+        let timeline = agent.trunk.timeline_snapshot();
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].kind, "backend");
+        assert_eq!(
+            timeline[0].reasoning.as_deref(),
+            Some(vec!["先查资料".to_string()].as_slice()),
+            "reasoning attached to its branch output"
+        );
+    }
+
+    #[tokio::test]
     async fn agent_replies_and_remembers() {
         let provider = Arc::new(MockProvider {
             calls: Arc::new(AtomicUsize::new(0)),
@@ -2180,6 +2627,48 @@ pub mod tests {
         assert_eq!(history[1].content, "reply-1");
         assert_eq!(structured_message_sequence(&history[2].content), Some(2));
         assert_eq!(history[3].content, "reply-2");
+    }
+
+    #[tokio::test]
+    async fn request_trunk_timeline_returns_the_persisted_history() {
+        let provider = Arc::new(MockProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: "ok".into(),
+        });
+        let agent = Arc::new(test_agent(provider));
+        let (bridge, handle) = crate::create_bridge();
+        agent.attach(Arc::new(handle));
+        agent.emit(BackendEvent::MessageReceived {
+            session_id: "local:tui::local_user".into(),
+            adapter_name: "local".into(),
+            platform: "local".into(),
+            user_id: "local_user".into(),
+            user_name: "local user".into(),
+            channel: "direct".into(),
+            group_name: None,
+            content: "你好".into(),
+            timestamp: 1700000000,
+            received_at_ms: 1700000000123,
+            message_sequence: 1,
+        });
+
+        agent
+            .apply_command(BackendCommand::RequestTrunkTimeline)
+            .await;
+        let mut events = Vec::new();
+        while let Ok(event) = bridge.event_rx.lock().await.try_recv() {
+            events.push(event);
+        }
+        let timeline = events
+            .into_iter()
+            .find_map(|event| match event {
+                BackendEvent::TrunkTimeline { messages } => Some(messages),
+                _ => None,
+            })
+            .expect("TrunkTimeline event emitted");
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].kind, "user");
+        assert_eq!(timeline[0].content, "你好");
     }
 
     #[tokio::test]

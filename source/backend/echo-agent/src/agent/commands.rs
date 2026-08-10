@@ -148,6 +148,11 @@ impl Agent {
                     limit_tokens: self.trunk.memory_limit_tokens(),
                 });
             }
+            BackendCommand::RequestTrunkTimeline => {
+                self.emit(BackendEvent::TrunkTimeline {
+                    messages: self.trunk.timeline_snapshot(),
+                });
+            }
             BackendCommand::SendMessage {
                 session_id,
                 content,

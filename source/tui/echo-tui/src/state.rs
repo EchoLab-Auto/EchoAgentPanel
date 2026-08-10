@@ -1095,6 +1095,70 @@ impl AppState {
         self.chat_flash_until = Some(std::time::Instant::now() + Duration::from_millis(700));
     }
 
+    /// Replace the trunk timeline with persisted history restored from the
+    /// backend (`BackendEvent::TrunkTimeline`, requested at TUI startup).
+    /// Live events continue to append on top afterwards.
+    pub fn load_trunk_timeline(&mut self, messages: Vec<echo_agent::TimelineMessage>) {
+        let converted = messages
+            .into_iter()
+            .map(|message| match message.kind.as_str() {
+                "user" => DisplayMessage {
+                    role: MsgRole::User,
+                    content: message.content,
+                    time: message.time,
+                    metadata: message.source.map(|source| {
+                        MessageMetadata::Inbound(InboundMessage {
+                            adapter_name: source.adapter_name,
+                            platform: source.platform,
+                            user_id: source.user_id,
+                            user_name: source.user_name,
+                            channel: source.channel,
+                            group_name: source.group_name,
+                            received_at_ms: source.received_at_ms,
+                            message_sequence: source.message_sequence,
+                        })
+                    }),
+                },
+                "backend" => DisplayMessage {
+                    role: MsgRole::Backend,
+                    content: message.content,
+                    time: message.time,
+                    metadata: message
+                        .reasoning
+                        .filter(|reasoning| !reasoning.is_empty())
+                        .map(|reasoning| MessageMetadata::Agent(AgentMessage { reasoning })),
+                },
+                "tool" => DisplayMessage {
+                    role: MsgRole::Tool,
+                    content: message
+                        .tool
+                        .as_ref()
+                        .map(|tool| tool.name.clone())
+                        .unwrap_or(message.content),
+                    time: message.time,
+                    metadata: message.tool.map(|tool| {
+                        MessageMetadata::Tool(ToolMessage {
+                            name: tool.name,
+                            input: tool.input,
+                            output: tool.output,
+                            status: if tool.failed {
+                                ToolMessageStatus::Failed
+                            } else {
+                                ToolMessageStatus::Succeeded
+                            },
+                            started_at: std::time::Instant::now(),
+                            elapsed: None,
+                        })
+                    }),
+                },
+                _ => DisplayMessage::plain(MsgRole::System, message.content, message.time),
+            })
+            .collect();
+        self.messages
+            .insert(TRUNK_SESSION_ID.to_string(), converted);
+        self.chat_scroll = 0;
+    }
+
     /// Push or update the interactive form as a chat message.
     pub fn refresh_menu_msg(&mut self) {
         if !self.form_overlay.is_active() {
@@ -1565,6 +1629,86 @@ mod tests {
             DisplayMessage::plain(MsgRole::System, "x", 0),
         );
         assert_eq!(st.trunk_message_count(), 3);
+    }
+
+    #[test]
+    fn load_trunk_timeline_restores_conversation_history() {
+        let mut st = state();
+        st.push_message("live", DisplayMessage::plain(MsgRole::User, "live-only", 1));
+        st.load_trunk_timeline(vec![
+            echo_agent::TimelineMessage {
+                kind: "user".into(),
+                content: "历史问题".into(),
+                time: 100,
+                source: Some(echo_agent::TimelineSource {
+                    adapter_name: "qq".into(),
+                    platform: "qq".into(),
+                    user_id: "123".into(),
+                    user_name: "alice".into(),
+                    channel: "direct".into(),
+                    group_name: None,
+                    received_at_ms: 100_000,
+                    message_sequence: 7,
+                }),
+                reasoning: None,
+                tool: None,
+            },
+            echo_agent::TimelineMessage {
+                kind: "backend".into(),
+                content: "历史回答".into(),
+                time: 101,
+                source: None,
+                reasoning: Some(vec!["先分析".into()]),
+                tool: None,
+            },
+            echo_agent::TimelineMessage {
+                kind: "tool".into(),
+                content: "web_search".into(),
+                time: 102,
+                source: None,
+                reasoning: None,
+                tool: Some(echo_agent::TimelineTool {
+                    name: "web_search".into(),
+                    input: "query=你好".into(),
+                    output: Some("ok".into()),
+                    failed: false,
+                }),
+            },
+            echo_agent::TimelineMessage {
+                kind: "system".into(),
+                content: "定时任务触发".into(),
+                time: 103,
+                source: None,
+                reasoning: None,
+                tool: None,
+            },
+        ]);
+        let messages = st.active_messages();
+        assert_eq!(messages.len(), 4, "history replaces the live-only view");
+        assert_eq!(messages[0].role, MsgRole::User);
+        assert_eq!(messages[0].content, "历史问题");
+        let Some(MessageMetadata::Inbound(source)) = &messages[0].metadata else {
+            panic!("source metadata missing");
+        };
+        assert_eq!(source.user_name, "alice");
+        assert_eq!(source.message_sequence, 7);
+
+        assert_eq!(messages[1].role, MsgRole::Backend);
+        let Some(MessageMetadata::Agent(agent)) = &messages[1].metadata else {
+            panic!("reasoning metadata missing");
+        };
+        assert_eq!(agent.reasoning, ["先分析"]);
+
+        assert_eq!(messages[2].role, MsgRole::Tool);
+        let Some(MessageMetadata::Tool(tool)) = &messages[2].metadata else {
+            panic!("tool metadata missing");
+        };
+        assert_eq!(tool.name, "web_search");
+        assert_eq!(tool.status, ToolMessageStatus::Succeeded);
+        assert_eq!(tool.output.as_deref(), Some("ok"));
+
+        assert_eq!(messages[3].role, MsgRole::System);
+        assert_eq!(st.chat_scroll, 0, "scrolls to bottom after restore");
     }
 
     #[test]

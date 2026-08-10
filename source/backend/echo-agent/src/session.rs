@@ -153,6 +153,10 @@ pub struct TrunkStore {
     memory_limit_tokens: usize,
     trunk_history: Arc<Mutex<Vec<ChatMessage>>>,
     trunk_turn_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Display timeline (persisted, survives TUI restarts). Independent of the
+    /// token-bounded LLM trunk: bounded by entry count, keeps richer metadata
+    /// (source provenance, tool calls, reasoning) for the TUI history view.
+    timeline: Arc<Mutex<Vec<crate::event::TimelineMessage>>>,
     persist_path: std::sync::Mutex<Option<std::path::PathBuf>>,
     dirty: std::sync::atomic::AtomicBool,
 }
@@ -164,6 +168,7 @@ impl Clone for TrunkStore {
             memory_limit_tokens: self.memory_limit_tokens,
             trunk_history: Arc::clone(&self.trunk_history),
             trunk_turn_lock: Arc::clone(&self.trunk_turn_lock),
+            timeline: Arc::clone(&self.timeline),
             persist_path: std::sync::Mutex::new(
                 self.persist_path.lock().expect("poisoned").clone(),
             ),
@@ -187,8 +192,13 @@ impl std::fmt::Debug for TrunkStore {
 /// source label is evicted; the trunk history is never touched.
 const IDENTITY_IDLE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Persistence format version. v3 = single global trunk + identity labels.
-const PERSIST_VERSION: u32 = 3;
+/// Persistence format version. v4 = single global trunk + identity labels +
+/// display timeline. Older versions (v1 per-session array, v2 shared context,
+/// v3 single trunk) migrate into the same structures.
+const PERSIST_VERSION: u32 = 4;
+
+/// Upper bound on persisted display timeline entries.
+const TRUNK_TIMELINE_MAX: usize = 1024;
 
 impl TrunkStore {
     /// Create a store owning the single global conversation trunk.
@@ -198,6 +208,7 @@ impl TrunkStore {
             memory_limit_tokens,
             trunk_history: Arc::new(Mutex::new(Vec::new())),
             trunk_turn_lock: Arc::new(tokio::sync::Mutex::new(())),
+            timeline: Arc::new(Mutex::new(Vec::new())),
             persist_path: std::sync::Mutex::new(None),
             dirty: std::sync::atomic::AtomicBool::new(false),
         }
@@ -211,6 +222,41 @@ impl TrunkStore {
     /// Mark sessions as needing save.
     pub fn mark_dirty(&self) {
         self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Append one entry to the display timeline, dropping the oldest entries
+    /// beyond the cap. Marks the store dirty so the entry is persisted.
+    pub fn push_timeline(&self, message: crate::event::TimelineMessage) {
+        let mut timeline = match self.timeline.try_lock() {
+            Ok(guard) => guard,
+            // A concurrent save/record is holding the lock; skip rather than
+            // block the event loop (emit runs on the hot path).
+            Err(_) => return,
+        };
+        timeline.push(message);
+        if timeline.len() > TRUNK_TIMELINE_MAX {
+            let excess = timeline.len() - TRUNK_TIMELINE_MAX;
+            timeline.drain(..excess);
+        }
+        drop(timeline);
+        self.mark_dirty();
+    }
+
+    /// Point-in-time snapshot of the display timeline (oldest first).
+    pub fn timeline_snapshot(&self) -> Vec<crate::event::TimelineMessage> {
+        self.timeline
+            .try_lock()
+            .map(|timeline| timeline.clone())
+            .unwrap_or_default()
+    }
+
+    /// Mutable access to the display timeline for in-place updates (e.g.
+    /// attaching a tool result to its running entry). Returns `None` when the
+    /// lock is contended — callers must then fall back to an append.
+    pub fn timeline_mut(
+        &self,
+    ) -> Option<tokio::sync::MutexGuard<'_, Vec<crate::event::TimelineMessage>>> {
+        self.timeline.try_lock().ok()
     }
 
     /// Save sessions to JSON file if dirty.
@@ -281,11 +327,13 @@ impl TrunkStore {
     /// with garbage.
     fn serialize(&self) -> Option<String> {
         let history = self.trunk_history.try_lock().ok()?;
+        let timeline = self.timeline.try_lock().ok()?;
         let identities = self.all().iter().map(identity_metadata).collect::<Vec<_>>();
         serde_json::to_string_pretty(&serde_json::json!({
             "version": PERSIST_VERSION,
             "trunk_history": serialize_messages(&history),
             "identities": identities,
+            "timeline": &*timeline,
         }))
         .map_err(|error| {
             tracing::error!(%error, "trunk serialization failed, skipping save");
@@ -354,6 +402,23 @@ impl TrunkStore {
         trim_by_tokens(&mut history, self.memory_limit_tokens);
         if let Ok(mut trunk) = self.trunk_history.try_lock() {
             *trunk = history;
+        }
+
+        // Restore the display timeline (v4+). Older files have no timeline —
+        // an empty history is the correct fallback.
+        let restored_timeline = root["timeline"]
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| {
+                        serde_json::from_value::<crate::event::TimelineMessage>(entry.clone()).ok()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if let Ok(mut timeline) = self.timeline.try_lock() {
+            *timeline = restored_timeline;
         }
         count
     }
@@ -671,7 +736,7 @@ mod tests {
 
         let root: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(root["version"], 3);
+        assert_eq!(root["version"], 4, "v4 persistence format");
         assert_eq!(root["trunk_history"].as_array().unwrap().len(), 2);
         assert!(root["identities"]
             .as_array()
@@ -756,6 +821,104 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].content, "shared");
         assert_eq!(store.len(), 2, "both identities restored");
+    }
+
+    #[test]
+    fn timeline_push_caps_at_max_and_keeps_newest() {
+        let store = TrunkStore::new(1000);
+        for i in 0..(TRUNK_TIMELINE_MAX + 50) {
+            store.push_timeline(crate::event::TimelineMessage {
+                kind: "user".into(),
+                content: format!("msg-{i}"),
+                time: i as i64,
+                source: None,
+                reasoning: None,
+                tool: None,
+            });
+        }
+        let timeline = store.timeline_snapshot();
+        assert_eq!(timeline.len(), TRUNK_TIMELINE_MAX, "capped at the max");
+        assert_eq!(
+            timeline.first().unwrap().content,
+            "msg-50",
+            "oldest dropped"
+        );
+        assert_eq!(
+            timeline.last().unwrap().content,
+            format!("msg-{}", TRUNK_TIMELINE_MAX + 49)
+        );
+    }
+
+    #[tokio::test]
+    async fn timeline_roundtrips_through_the_persisted_file() {
+        let path = temp_sessions_path("timeline-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        let store = TrunkStore::new(1000);
+        store.set_persist_path(&path);
+        store.push_timeline(crate::event::TimelineMessage {
+            kind: "user".into(),
+            content: "你好".into(),
+            time: 1700000000,
+            source: Some(crate::event::TimelineSource {
+                adapter_name: "qq".into(),
+                platform: "qq".into(),
+                user_id: "123".into(),
+                user_name: "alice".into(),
+                channel: "direct".into(),
+                group_name: None,
+                received_at_ms: 1700000000123,
+                message_sequence: 7,
+            }),
+            reasoning: None,
+            tool: None,
+        });
+        store.push_timeline(crate::event::TimelineMessage {
+            kind: "backend".into(),
+            content: "回复".into(),
+            time: 1700000001,
+            source: None,
+            reasoning: Some(vec!["先分析".into()]),
+            tool: None,
+        });
+        store.save_now().await;
+
+        let root: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(root["version"], 4, "timeline persisted as v4");
+        assert_eq!(root["timeline"].as_array().unwrap().len(), 2);
+
+        let restored = TrunkStore::new(1000);
+        restored.set_persist_path(&path);
+        restored.load_from_file().await;
+        let timeline = restored.timeline_snapshot();
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0].kind, "user");
+        assert_eq!(timeline[0].content, "你好");
+        assert_eq!(
+            timeline[0].source.as_ref().unwrap().message_sequence,
+            7,
+            "source provenance restored"
+        );
+        assert_eq!(
+            timeline[1].reasoning.as_deref(),
+            Some(vec!["先分析".to_string()].as_slice()),
+            "reasoning restored"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn v3_file_without_timeline_loads_with_empty_timeline() {
+        let store = TrunkStore::new(1000);
+        let restored = store.deserialize(
+            r#"{
+                "version": 3,
+                "trunk_history": [{"role":"user","content":"hi"}],
+                "identities": []
+            }"#,
+        );
+        assert_eq!(restored, 0);
+        assert!(store.timeline_snapshot().is_empty(), "no timeline → empty");
     }
 
     #[tokio::test]

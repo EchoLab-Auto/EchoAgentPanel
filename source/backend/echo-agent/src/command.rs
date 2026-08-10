@@ -36,6 +36,9 @@ pub enum BackendCommand {
     RequestState,
     /// Request a snapshot of the current trunk context (`BackendEvent::ContextSnapshot`).
     RequestContext,
+    /// Request the persisted display timeline (`BackendEvent::TrunkTimeline`).
+    /// The TUI sends this on startup to restore historical messages.
+    RequestTrunkTimeline,
     /// Start an adapter by name.
     StartAdapter { name: String },
     /// Stop an adapter by name.

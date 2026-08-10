@@ -27,6 +27,7 @@ pub use command::BackendCommand;
 pub use config::{AgentConfig, ReasoningEffort, SelfUpdateConfig, ThinkingMode};
 pub use event::{
     ApiProfileInfo, BackendEvent, BackendState, ContextMessageInfo, GroupInfo, SessionInfo,
+    TimelineMessage, TimelineSource, TimelineTool,
 };
 pub use llm::LlmProvider;
 pub use session::{Session, SessionKey, TrunkStore};

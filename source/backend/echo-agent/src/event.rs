@@ -45,6 +45,47 @@ pub struct ContextMessageInfo {
     pub sequence: Option<u64>,
 }
 
+/// Source provenance of a timeline user message (mirrors `MessageReceived`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimelineSource {
+    pub adapter_name: String,
+    pub platform: String,
+    pub user_id: String,
+    pub user_name: String,
+    /// Channel descriptor: "direct" or "group:{group_id}".
+    pub channel: String,
+    pub group_name: Option<String>,
+    pub received_at_ms: i64,
+    pub message_sequence: u64,
+}
+
+/// Tool-call details of a timeline tool message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimelineTool {
+    pub name: String,
+    pub input: String,
+    pub output: Option<String>,
+    pub failed: bool,
+}
+
+/// One persisted trunk timeline entry. The timeline is a *display* history
+/// (up to `TRUNK_TIMELINE_MAX` entries) that survives TUI restarts; it is
+/// independent of the LLM-facing trunk context, which is token-bounded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimelineMessage {
+    /// "user" | "backend" | "tool" | "system".
+    pub kind: String,
+    pub content: String,
+    /// Unix seconds.
+    pub time: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<TimelineSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<TimelineTool>,
+}
+
 /// Events flowing from the backend to the TUI.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BackendEvent {
@@ -208,6 +249,11 @@ pub enum BackendEvent {
         total_tokens: usize,
         /// Effective token budget for the trunk.
         limit_tokens: usize,
+    },
+    /// The persisted display timeline (response to `RequestTrunkTimeline`).
+    /// Sent on TUI startup so historical messages survive restarts.
+    TrunkTimeline {
+        messages: Vec<TimelineMessage>,
     },
     /// API configuration changed (for TUI settings form).
     ApiConfigUpdated {

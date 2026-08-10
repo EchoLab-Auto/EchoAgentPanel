@@ -354,6 +354,9 @@ impl App {
                     ts,
                 );
             }
+            BackendEvent::TrunkTimeline { messages } => {
+                self.state.load_trunk_timeline(messages);
+            }
             BackendEvent::AgentOutput {
                 session_id,
                 content,
@@ -1224,6 +1227,45 @@ mod tests {
     fn timer_event_is_presented_as_a_backend_task() {
         let content = r#"<timer_event>{"task":"发送提醒"}</timer_event>"#;
         assert_eq!(summarize_timer_event(content), "定时任务触发 · 发送提醒");
+    }
+
+    #[test]
+    fn trunk_timeline_event_restores_messages_from_backend() {
+        let mut app = app();
+        app.apply_backend_event(BackendEvent::TrunkTimeline {
+            messages: vec![
+                echo_agent::TimelineMessage {
+                    kind: "user".into(),
+                    content: "你好".into(),
+                    time: 1,
+                    source: Some(echo_agent::TimelineSource {
+                        adapter_name: "qq".into(),
+                        platform: "qq".into(),
+                        user_id: "1".into(),
+                        user_name: "alice".into(),
+                        channel: "direct".into(),
+                        group_name: None,
+                        received_at_ms: 1000,
+                        message_sequence: 3,
+                    }),
+                    reasoning: None,
+                    tool: None,
+                },
+                echo_agent::TimelineMessage {
+                    kind: "backend".into(),
+                    content: "回复".into(),
+                    time: 2,
+                    source: None,
+                    reasoning: None,
+                    tool: None,
+                },
+            ],
+        });
+        let messages = app.state.active_messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, MsgRole::User);
+        assert_eq!(messages[1].role, MsgRole::Backend);
+        assert_eq!(app.state.trunk_message_count(), 2);
     }
 
     #[test]

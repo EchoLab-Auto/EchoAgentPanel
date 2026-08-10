@@ -93,6 +93,8 @@ impl App {
         // Source identities received from Core remain routing metadata only.
         self.state.ensure_trunk_session();
         self.backend.send(BackendCommand::RequestState);
+        // Restore persisted history so past messages survive TUI restarts.
+        self.backend.send(BackendCommand::RequestTrunkTimeline);
         tracing::debug!("TUI 主循环启动");
 
         let mut iter: u64 = 0;
