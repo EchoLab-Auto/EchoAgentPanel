@@ -73,7 +73,8 @@ Core 与 Panel 可部署在不同机器：Core 的 `[core] management_address` �
 
 安装器把二进制装到 `~/.local/libexec/echo-agent-panel/`，启动器装到
 `~/.local/bin/echo-agent-panel`，配置种子到
-`~/.config/echo-agent-panel/panel.toml`。Panel 由用户手动启动，
+`~/.config/echo-agent-panel/panel.toml`，并在
+`~/.local/share/echo-agent-panel/source` 中维护源码仓库。Panel 由用户手动启动，
 无 systemd 服务（Core 的服务与自更新由 EchoAgentCore 的安装器负责）。
 
 ## TUI 用法

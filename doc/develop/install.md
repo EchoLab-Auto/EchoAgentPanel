@@ -18,7 +18,9 @@ crate via a relative path, so the build fails without it.
 ```
 
 Use `./scripts/install.sh --dry-run` to inspect all resolved paths without
-changing the machine. `ECHO_PREFIX` and `XDG_CONFIG_HOME` are respected.
+changing the machine. `ECHO_PREFIX`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME`
+are respected. Pass `--repository <url>` (or set `ECHO_REPOSITORY_URL`) to
+override the managed checkout's upstream URL.
 
 ## Installed layout
 
@@ -27,11 +29,18 @@ changing the machine. `ECHO_PREFIX` and `XDG_CONFIG_HOME` are respected.
 | `~/.local/bin/echo-agent-panel` | Panel launcher (injects default `--config`) |
 | `~/.local/libexec/echo-agent-panel/echo-agent-panel-bin` | Runtime binary |
 | `~/.config/echo-agent-panel/panel.toml` | Persistent Panel configuration |
+| `~/.local/share/echo-agent-panel/source` | Managed Git source checkout |
 
-An existing `panel.toml` is preserved on re-install. Unlike the Core
-installer there is no systemd unit and no managed Git checkout: the Panel is
-started manually by the user, and updating means `git pull` + re-running
-`install.sh` (which rebuilds and atomically swaps the binary).
+An existing `panel.toml` is preserved on re-install. The managed source is
+created as a local clone of the checkout running the installer. Re-installing
+fast-forwards it to the invoking checkout when possible, refuses to overwrite
+tracked local changes, and preserves a diverged checkout. The binary is still
+built from the invoking checkout because the Panel's `echo-protocol` dependency
+comes from its sibling `EchoAgentCore` repository.
+
+There is no Panel systemd unit: it is started manually by the user. Updating
+means `git pull` in the development checkout and re-running `install.sh`, which
+refreshes the managed source and atomically swaps the binary.
 
 ## Configuration
 
