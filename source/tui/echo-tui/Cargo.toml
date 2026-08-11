@@ -8,8 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-echo-adapter = { path = "../../backend/echo-adapter" }
-echo-agent = { path = "../../backend/echo-agent" }
+echo-protocol = { path = "../../../../EchoAgentCore/source/protocol/echo-protocol" }
 tokio.workspace = true
 anyhow.workspace = true
 ratatui.workspace = true
@@ -23,6 +22,3 @@ qrcode.workspace = true
 rxing.workspace = true
 serde_json.workspace = true
 unicode-width = "0.2"
-
-[dev-dependencies]
-echo-test-utils = { path = "../../backend/echo-test-utils" }

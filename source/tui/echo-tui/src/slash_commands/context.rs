@@ -5,7 +5,7 @@
 
 use crate::backend::Backend;
 use crate::state::{AppState, ToastKind};
-use echo_agent::BackendCommand;
+use echo_protocol::BackendCommand;
 
 /// /context — ask the backend to report the currently filled context.
 pub fn run(state: &mut AppState, backend: &Backend) {
@@ -21,7 +21,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_sends_request_context() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(std::sync::Arc::new(bridge));
         let mut st = AppState::new(Theme::dark(), Keybindings::default());
         run(&mut st, &backend);

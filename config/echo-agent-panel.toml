@@ -1,6 +1,6 @@
 # EchoAgentPanel 配置 — Panel（终端 UI）
 # 复制为 config/echo-agent-panel.local.toml 后按需修改。
-# Core 的配置见 config/echo-agent-core.toml。
+# Core（Agent 核心服务）的配置在 EchoAgentCore 仓库的 config/echo-agent-core.toml。
 
 [logging]
 level = "info"    # trace | debug | info | warn | error

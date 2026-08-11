@@ -8,7 +8,7 @@
 
 use crate::backend::Backend;
 use crate::state::{AppState, ToastKind};
-use echo_agent::BackendCommand;
+use echo_protocol::BackendCommand;
 use qrcode::QrCode;
 
 pub fn login(state: &mut AppState, backend: &Backend) {
@@ -163,7 +163,7 @@ pub fn setting(state: &mut AppState, backend: &Backend) {
     backend.send(BackendCommand::RequestQqFilterConfig);
 
     let mode = state.qq_gate_mode;
-    let mode_label = |m: echo_adapter::GateMode, label: &str| -> String {
+    let mode_label = |m: echo_protocol::GateMode, label: &str| -> String {
         if mode == m {
             format!("● {label}")
         } else {
@@ -177,19 +177,19 @@ pub fn setting(state: &mut AppState, backend: &Backend) {
             value: "__info__".into(),
         },
         SelectItem {
-            label: mode_label(echo_adapter::GateMode::None, "无约束 — 所有人可用"),
+            label: mode_label(echo_protocol::GateMode::None, "无约束 — 所有人可用"),
             value: "gate_mode:none".into(),
         },
         SelectItem {
             label: mode_label(
-                echo_adapter::GateMode::Allowlist,
+                echo_protocol::GateMode::Allowlist,
                 "白名单模式 — 仅白名单用户/群可用",
             ),
             value: "gate_mode:allowlist".into(),
         },
         SelectItem {
             label: mode_label(
-                echo_adapter::GateMode::Denylist,
+                echo_protocol::GateMode::Denylist,
                 "黑名单模式 — 禁止黑名单用户/群",
             ),
             value: "gate_mode:denylist".into(),

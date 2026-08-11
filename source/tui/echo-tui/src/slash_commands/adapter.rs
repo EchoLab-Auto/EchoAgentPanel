@@ -2,7 +2,7 @@
 
 use crate::backend::Backend;
 use crate::state::{AppState, ToastKind};
-use echo_agent::BackendCommand;
+use echo_protocol::BackendCommand;
 
 /// /adapters — show adapter status with connection details.
 pub fn status(state: &mut AppState, backend: &Backend) {
@@ -60,7 +60,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_requests_refresh_and_reports_empty() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(std::sync::Arc::new(bridge));
         let mut st = AppState::new(Theme::dark(), Keybindings::default());
         status(&mut st, &backend);
@@ -73,7 +73,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_shows_connected_self_id() {
-        let (bridge, _handle) = echo_agent::create_bridge();
+        let (bridge, _handle) = echo_protocol::create_bridge();
         let backend = Backend::new(std::sync::Arc::new(bridge));
         let mut st = AppState::new(Theme::dark(), Keybindings::default());
         st.status.set_adapter_state(AdapterStatusEntry {
@@ -94,7 +94,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_shows_waiting_hints_when_disconnected() {
-        let (bridge, _handle) = echo_agent::create_bridge();
+        let (bridge, _handle) = echo_protocol::create_bridge();
         let backend = Backend::new(std::sync::Arc::new(bridge));
         let mut st = AppState::new(Theme::dark(), Keybindings::default());
         st.status.set_adapter_state(AdapterStatusEntry {

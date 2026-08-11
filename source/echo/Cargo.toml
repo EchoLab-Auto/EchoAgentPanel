@@ -1,6 +1,6 @@
 [package]
 name = "echo"
-description = "EchoAgentPanel — a Rust agent that talks to QQ over OneBot v11"
+description = "EchoAgentPanel — TUI frontend for a remote EchoAgentCore"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,24 +12,11 @@ name = "echo-agent-panel"
 path = "src/main.rs"
 
 [dependencies]
-echo-core = { path = "../backend/echo-core" }
-echo-server = { path = "../backend/echo-server" }
-echo-agent = { path = "../backend/echo-agent" }
-echo-adapter = { path = "../backend/echo-adapter" }
-echo-adapter-qq = { path = "../backend/echo-adapter-qq" }
 echo-tui = { path = "../tui/echo-tui" }
 tokio.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 toml.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-async-trait.workspace = true
-tokio-tungstenite.workspace = true
-futures-util.workspace = true
-
-[dev-dependencies]
-echo-test-utils = { path = "../backend/echo-test-utils" }
-dashmap.workspace = true

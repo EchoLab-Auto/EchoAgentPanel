@@ -6,7 +6,7 @@
 //! - **编辑模式**：表单编辑（新建含 name 字段；编辑已有不含），Enter 保存、Esc 返回列表
 
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
-use echo_agent::BackendCommand;
+use echo_protocol::BackendCommand;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -41,10 +41,10 @@ pub struct SettingsForm {
     pub focus: usize,
     pub api_key_set: bool,
     /// Effective top-level/profile reasoning settings received from backend.
-    pub thinking: echo_agent::ThinkingMode,
-    pub reasoning_effort: echo_agent::ReasoningEffort,
+    pub thinking: echo_protocol::ThinkingMode,
+    pub reasoning_effort: echo_protocol::ReasoningEffort,
     /// 后端推送的 profile 列表。
-    pub profiles: Vec<echo_agent::ApiProfileInfo>,
+    pub profiles: Vec<echo_protocol::ApiProfileInfo>,
     /// 当前激活的 profile 名（空 = 顶层默认）。
     pub active_api: String,
     /// 列表模式选中项（0 = 顶层默认，1.. = profiles）。
@@ -59,8 +59,8 @@ impl Default for SettingsForm {
             fields: Vec::new(),
             focus: 0,
             api_key_set: false,
-            thinking: echo_agent::ThinkingMode::default(),
-            reasoning_effort: echo_agent::ReasoningEffort::default(),
+            thinking: echo_protocol::ThinkingMode::default(),
+            reasoning_effort: echo_protocol::ReasoningEffort::default(),
             profiles: Vec::new(),
             active_api: String::new(),
             selection: 0,
@@ -92,8 +92,8 @@ impl SettingsForm {
             model,
             base_url,
             api_key_set,
-            echo_agent::ThinkingMode::default(),
-            echo_agent::ReasoningEffort::default(),
+            echo_protocol::ThinkingMode::default(),
+            echo_protocol::ReasoningEffort::default(),
         );
     }
 
@@ -105,8 +105,8 @@ impl SettingsForm {
         model: &str,
         base_url: &str,
         api_key_set: bool,
-        thinking: echo_agent::ThinkingMode,
-        reasoning_effort: echo_agent::ReasoningEffort,
+        thinking: echo_protocol::ThinkingMode,
+        reasoning_effort: echo_protocol::ReasoningEffort,
     ) {
         self.mode = SettingsMode::EditProfile;
         self.focus = 0;
@@ -195,13 +195,13 @@ impl SettingsForm {
                     base_url: rest[2].clone(),
                     api_key: rest[3].clone(),
                     thinking: Some(match rest[4].as_str() {
-                        "disabled" => echo_agent::ThinkingMode::Disabled,
-                        _ => echo_agent::ThinkingMode::Enabled,
+                        "disabled" => echo_protocol::ThinkingMode::Disabled,
+                        _ => echo_protocol::ThinkingMode::Enabled,
                     }),
                     reasoning_effort: Some(match rest[5].as_str() {
-                        "low" => echo_agent::ReasoningEffort::Low,
-                        "high" => echo_agent::ReasoningEffort::High,
-                        _ => echo_agent::ReasoningEffort::Max,
+                        "low" => echo_protocol::ReasoningEffort::Low,
+                        "high" => echo_protocol::ReasoningEffort::High,
+                        _ => echo_protocol::ReasoningEffort::Max,
                     }),
                 }
             }
@@ -219,7 +219,7 @@ impl SettingsForm {
 
     /// 列表选中项：`None` = 顶层默认，`Some(i)` = profiles[i]。
     /// selection==0 必须映射到顶层默认（None），不能用 saturating_sub。
-    pub fn selected_profile(&self) -> Option<&echo_agent::ApiProfileInfo> {
+    pub fn selected_profile(&self) -> Option<&echo_protocol::ApiProfileInfo> {
         self.selection
             .checked_sub(1)
             .and_then(|i| self.profiles.get(i))
@@ -230,15 +230,15 @@ impl SettingsForm {
 mod tests {
     use super::*;
 
-    fn profile(name: &str) -> echo_agent::ApiProfileInfo {
-        echo_agent::ApiProfileInfo {
+    fn profile(name: &str) -> echo_protocol::ApiProfileInfo {
+        echo_protocol::ApiProfileInfo {
             name: name.into(),
             provider: "deepseek".into(),
             model: "ds-v4".into(),
             base_url: "https://api.deepseek.com".into(),
             api_key_set: true,
-            thinking: echo_agent::ThinkingMode::Enabled,
-            reasoning_effort: echo_agent::ReasoningEffort::Max,
+            thinking: echo_protocol::ThinkingMode::Enabled,
+            reasoning_effort: echo_protocol::ReasoningEffort::Max,
         }
     }
 
@@ -337,8 +337,8 @@ mod tests {
                 assert_eq!(model, "ds-v4");
                 assert_eq!(base_url, "http://x");
                 assert_eq!(api_key, "sk");
-                assert_eq!(thinking, Some(echo_agent::ThinkingMode::Enabled));
-                assert_eq!(reasoning_effort, Some(echo_agent::ReasoningEffort::Max));
+                assert_eq!(thinking, Some(echo_protocol::ThinkingMode::Enabled));
+                assert_eq!(reasoning_effort, Some(echo_protocol::ReasoningEffort::Max));
             }
             other => panic!("unexpected command: {other:?}"),
         }

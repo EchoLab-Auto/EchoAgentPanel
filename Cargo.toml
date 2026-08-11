@@ -1,12 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "source/backend/echo-core",
-    "source/backend/echo-server",
-    "source/backend/echo-agent",
-    "source/backend/echo-adapter",
-    "source/backend/echo-adapter-qq",
-    "source/backend/echo-test-utils",
     "source/tui/echo-tui",
     "source/echo",
 ]
@@ -23,6 +17,11 @@ repository = "https://github.com/EchoLab-Auto/EchoAgentPanel"
 opt-level = 1
 
 [workspace.dependencies]
+# The frontend–Core wire contract lives in the sibling EchoAgentCore
+# repository (expected checked out next to this one; see README). To build
+# against a remote instead, point echo-tui's dependency at the git repo:
+# echo-protocol = { git = "https://gitlab.com/echo_tech/EchoAgentCore.git" }
+
 # async runtime
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
@@ -33,7 +32,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # error handling
-thiserror = "2"
 anyhow = "1"
 
 # logging
@@ -44,17 +42,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }
 
-# concurrency / misc
-dashmap = "6"
-uuid = { version = "1", features = ["v4"] }
-async-trait = "0.1"
-tokio-util = { version = "0.7", features = ["rt"] }
-
-# agent framework
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+# misc
 chrono = "0.4"
-walkdir = "2"
-regex = "1"
 
 # tui
 ratatui = "0.29"

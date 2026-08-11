@@ -3,7 +3,7 @@
 //! Split out of `mod.rs` so the large `match` over `BackendEvent` lives in
 //! its own file.
 
-use echo_agent::{BackendEvent, ContextMessageInfo, SessionInfo};
+use echo_protocol::{BackendEvent, ContextMessageInfo, SessionInfo};
 
 use crate::app::App;
 use crate::state::{
@@ -692,7 +692,7 @@ mod tests {
     use crate::theme::Theme;
 
     fn app() -> App {
-        let (bridge, _handle) = echo_agent::create_bridge();
+        let (bridge, _handle) = echo_protocol::create_bridge();
         App::new(
             crate::backend::Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -784,7 +784,7 @@ mod tests {
     fn message_received_goes_to_session() {
         let mut app = app();
         app.apply_backend_event(BackendEvent::SessionUpdated {
-            session: echo_agent::SessionInfo {
+            session: echo_protocol::SessionInfo {
                 id: "s1".into(),
                 platform: "qq".into(),
                 nickname: "alice".into(),
@@ -824,7 +824,7 @@ mod tests {
     fn agent_output_marks_backend_role_and_attaches_reasoning() {
         let mut app = app();
         app.apply_backend_event(BackendEvent::SessionUpdated {
-            session: echo_agent::SessionInfo {
+            session: echo_protocol::SessionInfo {
                 id: "s1".into(),
                 platform: "qq".into(),
                 nickname: "alice".into(),
@@ -848,7 +848,7 @@ mod tests {
     #[test]
     fn session_updated_inserts_and_updates() {
         let mut app = app();
-        let info = echo_agent::SessionInfo {
+        let info = echo_protocol::SessionInfo {
             id: "s1".into(),
             platform: "qq".into(),
             nickname: "alice".into(),
@@ -888,7 +888,7 @@ mod tests {
     fn tool_call_and_result_update_one_timeline_entry() {
         let mut app = app();
         app.apply_backend_event(BackendEvent::SessionUpdated {
-            session: echo_agent::SessionInfo {
+            session: echo_protocol::SessionInfo {
                 id: "s1".into(),
                 platform: "qq".into(),
                 nickname: "a".into(),
@@ -1234,11 +1234,11 @@ mod tests {
         let mut app = app();
         app.apply_backend_event(BackendEvent::TrunkTimeline {
             messages: vec![
-                echo_agent::TimelineMessage {
+                echo_protocol::TimelineMessage {
                     kind: "user".into(),
                     content: "你好".into(),
                     time: 1,
-                    source: Some(echo_agent::TimelineSource {
+                    source: Some(echo_protocol::TimelineSource {
                         adapter_name: "qq".into(),
                         platform: "qq".into(),
                         user_id: "1".into(),
@@ -1251,7 +1251,7 @@ mod tests {
                     reasoning: None,
                     tool: None,
                 },
-                echo_agent::TimelineMessage {
+                echo_protocol::TimelineMessage {
                     kind: "backend".into(),
                     content: "回复".into(),
                     time: 2,

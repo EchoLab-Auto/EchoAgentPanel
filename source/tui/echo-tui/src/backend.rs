@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite;
 
-use echo_agent::{BackendBridge, BackendCommand, BackendEvent};
+use echo_protocol::{BackendBridge, BackendCommand, BackendEvent};
 
 /// Thin client for the agent backend: send commands, drain events.
 pub struct Backend {
@@ -80,8 +80,8 @@ impl Backend {
                     _ = async {
                         while let Some(Ok(msg)) = read.next().await {
                             if let tungstenite::Message::Text(text) = msg {
-                                if let Some(echo_agent::bridge::WsMessage::Event(ev)) =
-                                    echo_agent::bridge::deserialize_message(&text.to_string())
+                                if let Some(echo_protocol::bridge::WsMessage::Event(ev)) =
+                                    echo_protocol::bridge::deserialize_message(&text.to_string())
                                 {
                                     events_clone.lock().await.push(ev);
                                 }
@@ -102,7 +102,7 @@ impl Backend {
         match &self.inner {
             BackendInner::Mpsc(bridge) => bridge.send_command(cmd),
             BackendInner::Ws { tx, .. } => {
-                let text = echo_agent::bridge::serialize_command(&cmd);
+                let text = echo_protocol::bridge::serialize_command(&cmd);
                 tx.send(text).is_ok()
             }
         }
@@ -128,11 +128,11 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use echo_agent::BackendEvent;
+    use echo_protocol::BackendEvent;
 
     #[tokio::test]
     async fn mpsc_send_forwards_command_to_handle() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(Arc::new(bridge));
         assert!(backend.send(BackendCommand::SwitchModel {
             model: "gpt-x".into()
@@ -147,7 +147,7 @@ mod tests {
 
     #[tokio::test]
     async fn mpsc_send_reports_failure_when_agent_gone() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(Arc::new(bridge));
         drop(handle); // receiver gone → send must fail
         assert!(!backend.send(BackendCommand::RequestState));
@@ -155,7 +155,7 @@ mod tests {
 
     #[tokio::test]
     async fn drain_events_empties_shared_buffer() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(Arc::new(bridge));
         handle.emit(BackendEvent::AgentOutput {
             session_id: "s1".into(),
@@ -178,7 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn drain_events_appends_to_existing_vec() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(Arc::new(bridge));
         handle.emit(BackendEvent::AgentOutput {
             session_id: "s".into(),

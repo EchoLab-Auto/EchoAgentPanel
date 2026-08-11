@@ -1,139 +1,49 @@
-# Installation and controlled self-update
+# Panel installation
 
 ## Scope
 
-The installer targets Linux hosts with a systemd user manager. It does not
-require root and does not modify system-wide directories.
+EchoAgentPanel is the TUI frontend only. It connects to an EchoAgentCore
+service over WebSocket; the Core's systemd service, controlled self-update,
+and QQ/NapCat setup all live in the EchoAgentCore repository.
+
+The installer targets Linux hosts, does not require root, and does not modify
+system-wide directories.
+
+**Prerequisite**: the EchoAgentCore repository must be checked out next to
+this one (`../EchoAgentCore`) — `echo-tui` depends on its `echo-protocol`
+crate via a relative path, so the build fails without it.
 
 ```bash
-./scripts/install.sh [--owner-qq QQ_ID] [--no-start]
+./scripts/install.sh
 ```
 
 Use `./scripts/install.sh --dry-run` to inspect all resolved paths without
-changing the machine. `ECHO_PREFIX`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and
-`XDG_STATE_HOME` are respected.
+changing the machine. `ECHO_PREFIX` and `XDG_CONFIG_HOME` are respected.
 
 ## Installed layout
 
 | Path | Purpose |
 |---|---|
-| `~/.local/bin/echo-agent-panel` | Panel launcher |
-| `~/.local/libexec/echo-agent-panel/` | Runtime binary and updater |
-| `~/.config/echo-agent-panel/core.toml` | Persistent Core configuration |
+| `~/.local/bin/echo-agent-panel` | Panel launcher (injects default `--config`) |
+| `~/.local/libexec/echo-agent-panel/echo-agent-panel-bin` | Runtime binary |
 | `~/.config/echo-agent-panel/panel.toml` | Persistent Panel configuration |
-| `~/.local/share/echo-agent-panel/source` | Clean managed Git checkout |
-| `~/.local/state/echo-agent-panel/` | Update lock, revision and status |
-| `~/.config/systemd/user/echo-agent-panel-core.service` | Long-running Core |
-| `~/.config/systemd/user/echo-agent-panel-update.service` | One-shot updater |
 
-Existing configuration files are preserved. Re-running the installer refreshes
-the binary, updater and service units. The installer enables self-update in an
-existing config without changing API credentials or other settings.
+An existing `panel.toml` is preserved on re-install. Unlike the Core
+installer there is no systemd unit and no managed Git checkout: the Panel is
+started manually by the user, and updating means `git pull` + re-running
+`install.sh` (which rebuilds and atomically swaps the binary).
 
-Re-running the installer is transactional after the release build completes:
-the current binary, launcher, updater, configuration, units and revision state
-are snapshotted under `~/.local/state/echo-agent-panel/install-rollback/`.
-That snapshot is removed only after `daemon-reload` and the Core active-state
-health check succeed. If activation or a later install step fails, all changed
-files are restored and the previous Core is restarted when it was running.
+## Configuration
 
-The Core user service is enabled under `default.target`. Whether it starts at
-machine boot before an interactive login depends on the host's user lingering
-policy. An administrator can enable that explicitly:
-
-```bash
-sudo loginctl enable-linger "$USER"
-```
-
-## Update flow
-
-```text
-authorized conversation
-        |
-        v
-framework_update tool (fixed actions only)
-        |
-        v
-systemctl --user start echo-agent-panel-update.service
-        |
-        +--> flock --> git fetch --> fast-forward check
-        |                         |
-        |                         v
-        +-------------------- cargo build --locked
-                                  |
-                                  v
-                         atomic binary replacement
-                                  |
-                                  v
-                       Core restart + health check
-                            |             |
-                          healthy       failed
-                            |             |
-                          finish       rollback
-```
-
-The Agent cannot provide a command, repository, path, branch, or service name to
-the tool. The only accepted actions are `status` and `apply`; `apply` also
-requires `confirm=true`. The service name is compiled as
-`echo-agent-panel-update.service`.
-
-Authorization is evaluated from the real session ID:
-
-- local TUI sessions are allowed when `allow_local = true`;
-- QQ sessions must match `[adapters.qq].owner_qq` or an entry in
-  `allowed_qq_users`;
-- all other platforms and malformed session IDs are denied.
+`panel.toml` only needs the Core address and TUI preferences:
 
 ```toml
-[agent.self_update]
-enabled = true
-allow_local = true
-allowed_qq_users = [123456789]
+[tui]
+theme = "dark"
+
+[core]
+connect_url = "ws://127.0.0.1:3132"
 ```
 
-## Failure behavior
-
-The updater takes a non-blocking file lock and refuses concurrent runs. It also
-refuses to update when the managed checkout has tracked local changes, is on a
-detached HEAD, or the remote update is not a fast-forward. Untracked custom
-skills are left in place.
-
-Git advances before compilation, but the installed binary is replaced only
-after a successful locked release build. A fetch or build failure therefore
-leaves the old Core binary installed and does not restart it. The next update
-attempt rebuilds the managed revision because the installed revision is tracked
-separately. When Core was running, the updater also retains the previous binary
-until the restarted service passes a 15-second active-state health check. A
-failed check, updater refresh failure, or commit/state write failure restores
-the old binary and updater and restarts it, recording `state=rolled_back`.
-
-Inspect an update with:
-
-```bash
-systemctl --user status echo-agent-panel-update.service
-journalctl --user -u echo-agent-panel-update.service
-cat ~/.local/state/echo-agent-panel/update-status
-```
-
-Manual triggering uses the same constrained path as the Agent:
-
-```bash
-systemctl --user start echo-agent-panel-update.service
-```
-
-## Install the current local worktree
-
-For development builds, use the updater's explicit local mode. It skips Git
-fetch and merge, then compiles the current worktree including uncommitted
-changes:
-
-```bash
-scripts/update.sh --local \
-  --source "$PWD" \
-  --binary "$HOME/.local/libexec/echo-agent-panel/echo-agent-panel-bin" \
-  --status "$HOME/.local/state/echo-agent-panel/update-status"
-```
-
-Local mode always rebuilds. It records `local:<commit>+dirty` when the worktree
-has changes. The systemd updater remains remote-only and continues to require a
-clean managed checkout.
+Point `connect_url` at the Core's `[core] management_address` (they can be on
+different hosts), or pass `--connect ws://…` on the command line.

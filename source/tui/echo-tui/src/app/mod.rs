@@ -9,7 +9,7 @@ mod events;
 use std::time::Duration;
 
 use anyhow::Result;
-use echo_agent::{BackendCommand, BackendEvent};
+use echo_protocol::{BackendCommand, BackendEvent};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{Frame, Terminal};
 
@@ -638,9 +638,9 @@ impl App {
                                 // QQ setting: gate mode switch.
                                 FormKind::QqFilter if val.starts_with("gate_mode:") => {
                                     let mode = match val.strip_prefix("gate_mode:") {
-                                        Some("allowlist") => echo_adapter::GateMode::Allowlist,
-                                        Some("denylist") => echo_adapter::GateMode::Denylist,
-                                        _ => echo_adapter::GateMode::None,
+                                        Some("allowlist") => echo_protocol::GateMode::Allowlist,
+                                        Some("denylist") => echo_protocol::GateMode::Denylist,
+                                        _ => echo_protocol::GateMode::None,
                                     };
                                     tracing::info!(mode = %mode.as_str(), "TUI: gate mode switch");
                                     self.backend.send(BackendCommand::SetQqGateMode { mode });
@@ -908,7 +908,7 @@ mod tests {
     }
 
     fn app() -> App {
-        let (bridge, _handle) = echo_agent::create_bridge();
+        let (bridge, _handle) = echo_protocol::create_bridge();
         App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -1114,14 +1114,14 @@ mod tests {
             app.state
                 .settings
                 .profiles
-                .push(echo_agent::ApiProfileInfo {
+                .push(echo_protocol::ApiProfileInfo {
                     name: format!("dup-{}", i % 3),
                     provider: "deepseek".into(),
                     model: "deepseek-v4-flash".into(),
                     base_url: "https://api.deepseek.com/anthropic".into(),
                     api_key_set: true,
-                    thinking: echo_agent::ThinkingMode::Enabled,
-                    reasoning_effort: echo_agent::ReasoningEffort::Max,
+                    thinking: echo_protocol::ThinkingMode::Enabled,
+                    reasoning_effort: echo_protocol::ReasoningEffort::Max,
                 });
         }
         app.state.show_settings = true;
@@ -1139,7 +1139,7 @@ mod tests {
         for width in [40, 80, 140] {
             let mut app = app();
             app.apply_backend_event(BackendEvent::SessionUpdated {
-                session: echo_agent::SessionInfo {
+                session: echo_protocol::SessionInfo {
                     id: "s1".into(),
                     platform: "qq".into(),
                     nickname: "alice".into(),
@@ -1420,7 +1420,7 @@ mod tests {
 
     #[test]
     fn form_enter_switches_gate_mode_and_sends_command() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let mut app = App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -1435,14 +1435,14 @@ mod tests {
         assert_eq!(
             handle.try_recv_command(),
             Some(BackendCommand::SetQqGateMode {
-                mode: echo_adapter::GateMode::Allowlist
+                mode: echo_protocol::GateMode::Allowlist
             })
         );
     }
 
     #[tokio::test]
     async fn submit_in_qq_filter_edit_sends_allowlist_command() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let mut app = App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -1512,7 +1512,7 @@ mod tests {
 
     #[test]
     fn enter_on_existing_allowlist_user_removes_it() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let mut app = App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -1537,7 +1537,7 @@ mod tests {
 
     #[test]
     fn manual_group_add_and_direct_remove_work_without_group_list() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let mut app = App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -1576,7 +1576,7 @@ mod tests {
 
     #[test]
     fn known_group_can_be_selected_from_group_list() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let mut app = App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -1588,7 +1588,7 @@ mod tests {
             crate::components::form_overlay::FormKind::QqFilter,
         );
         app.apply_backend_event(BackendEvent::GroupList {
-            groups: vec![echo_agent::event::GroupInfo {
+            groups: vec![echo_protocol::event::GroupInfo {
                 group_id: 987654,
                 group_name: "known group".into(),
             }],
@@ -1614,7 +1614,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_in_api_config_mode_routes_to_api_handler() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let mut app = App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),
@@ -1632,7 +1632,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_normal_sends_message() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let mut app = App::new(
             Backend::new(std::sync::Arc::new(bridge)),
             Theme::dark(),

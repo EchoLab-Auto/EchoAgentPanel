@@ -1,6 +1,6 @@
 //! Unified event enum for the TUI event loop.
 
-use echo_agent::BackendEvent;
+use echo_protocol::BackendEvent;
 
 #[derive(Debug)]
 pub enum Event {

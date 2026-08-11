@@ -9,6 +9,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # echo-tui depends on EchoAgentCore's echo-protocol crate via a relative
+  # path (../EchoAgentCore), so every job materialises that sibling checkout.
+  ECHO_CORE_REPO: "https://gitlab.com/echo_tech/EchoAgentCore.git"
 
 jobs:
   fmt:
@@ -26,11 +29,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: EchoAgentPanel
+      - name: Check out EchoAgentCore (echo-protocol path dependency)
+        run: git clone --depth 1 "$ECHO_CORE_REPO" EchoAgentCore
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: EchoAgentPanel
 
   test:
     name: test (${{ matrix.toolchain }})
@@ -41,8 +49,14 @@ jobs:
         toolchain: [stable, nightly]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: EchoAgentPanel
+      - name: Check out EchoAgentCore (echo-protocol path dependency)
+        run: git clone --depth 1 "$ECHO_CORE_REPO" EchoAgentCore
       - uses: dtolnay/rust-toolchain@${{ matrix.toolchain }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+        working-directory: EchoAgentPanel
       # Release mode catches debug-only assertions and optimizes the test profile.
       - run: cargo test --workspace --release
+        working-directory: EchoAgentPanel

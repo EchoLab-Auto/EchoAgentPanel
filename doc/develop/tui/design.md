@@ -254,5 +254,5 @@ Agent::emit(BackendEvent)
 5. **帧缓冲选区**：文本选择不走系统选区，而是应用内自绘高亮 + OSC 52 复制，不依赖终端特性
 6. **CJK 感知**：所有列计算使用 visual width（`unicode_width`），正确处理中文字符占 2 列的情况
 7. **OSC 52 回退链**：剪贴板优先用系统工具(xclip/xsel/wl-copy/pbcopy)，均不可用时回退 OSC 52
-8. **枚举化门控**：GateMode 作为跨层枚举（echo-adapter → echo-agent → echo-tui），编译期杜绝非法值
+8. **枚举化门控**：GateMode 作为跨层枚举（echo-protocol 单一定义，Core 各 crate 与 echo-tui 共享），编译期杜绝非法值
 9. **事件处理分离**：`apply_backend_event` 独立为 `app/events.rs`，大型 match 不影响主循环可读性

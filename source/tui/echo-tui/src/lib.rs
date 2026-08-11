@@ -2,7 +2,7 @@
 //!
 //! An opencode-style TUI: status bar + chat area + prompt input, with a
 //! toggleable session sidebar, command palette, toasts, and keybinding help.
-//! Talks to the agent backend through a [`BackendBridge`](echo_agent::BackendBridge).
+//! Talks to the agent backend through a [`BackendBridge`](echo_protocol::BackendBridge).
 
 pub mod app;
 pub mod backend;
@@ -41,7 +41,10 @@ impl Drop for TermGuard {
 }
 
 /// Run the TUI with an in-process mpsc bridge.
-pub async fn run_tui(bridge: Arc<echo_agent::BackendBridge>, theme: Theme) -> anyhow::Result<()> {
+pub async fn run_tui(
+    bridge: Arc<echo_protocol::BackendBridge>,
+    theme: Theme,
+) -> anyhow::Result<()> {
     run_tui_inner(Backend::new(bridge), theme).await
 }
 
@@ -57,7 +60,7 @@ async fn run_tui_inner(backend: Backend, theme: Theme) -> anyhow::Result<()> {
     use ratatui::backend::CrosstermBackend;
 
     if !crossterm::tty::IsTty::is_tty(&std::io::stdout()) {
-        anyhow::bail!("stdout 不是终端，TUI 不可用（可用 --headless 运行）");
+        anyhow::bail!("stdout 不是终端，TUI 不可用");
     }
     enable_raw_mode()?;
     let _guard = TermGuard;

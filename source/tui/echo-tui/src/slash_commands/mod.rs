@@ -4,7 +4,7 @@
 
 use crate::backend::Backend;
 use crate::state::AppState;
-use echo_agent::BackendCommand;
+use echo_protocol::BackendCommand;
 
 pub mod adapter;
 pub mod api;

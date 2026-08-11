@@ -5,7 +5,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-use echo_agent::{BackendCommand, SessionInfo};
+use echo_protocol::{BackendCommand, SessionInfo};
 
 use crate::components::form_overlay::FormOverlay;
 use crate::components::settings_popup::SettingsForm;
@@ -457,7 +457,7 @@ pub struct AppState {
     pub pending_action: Option<String>,
     pub qq_filter: QqFilterCache,
     /// Current QQ gate mode.
-    pub qq_gate_mode: echo_adapter::GateMode,
+    pub qq_gate_mode: echo_protocol::GateMode,
     /// Cached QQ group list (fetched from adapter on request).
     pub qq_groups: Vec<(i64, String)>,
     /// Whether the group list has been fetched at least once.
@@ -522,7 +522,7 @@ impl AppState {
             form_overlay: Default::default(),
             pending_action: None,
             qq_filter: QqFilterCache::default(),
-            qq_gate_mode: echo_adapter::GateMode::None,
+            qq_gate_mode: echo_protocol::GateMode::None,
             qq_groups: Vec::new(),
             qq_groups_loaded: false,
             qq_friends: Vec::new(),
@@ -1096,7 +1096,7 @@ impl AppState {
     /// Replace the trunk timeline with persisted history restored from the
     /// backend (`BackendEvent::TrunkTimeline`, requested at TUI startup).
     /// Live events continue to append on top afterwards.
-    pub fn load_trunk_timeline(&mut self, messages: Vec<echo_agent::TimelineMessage>) {
+    pub fn load_trunk_timeline(&mut self, messages: Vec<echo_protocol::TimelineMessage>) {
         let converted = messages
             .into_iter()
             .map(|message| match message.kind.as_str() {
@@ -1612,11 +1612,11 @@ mod tests {
         let mut st = state();
         st.push_message("live", DisplayMessage::plain(MsgRole::User, "live-only", 1));
         st.load_trunk_timeline(vec![
-            echo_agent::TimelineMessage {
+            echo_protocol::TimelineMessage {
                 kind: "user".into(),
                 content: "历史问题".into(),
                 time: 100,
-                source: Some(echo_agent::TimelineSource {
+                source: Some(echo_protocol::TimelineSource {
                     adapter_name: "qq".into(),
                     platform: "qq".into(),
                     user_id: "123".into(),
@@ -1629,7 +1629,7 @@ mod tests {
                 reasoning: None,
                 tool: None,
             },
-            echo_agent::TimelineMessage {
+            echo_protocol::TimelineMessage {
                 kind: "backend".into(),
                 content: "历史回答".into(),
                 time: 101,
@@ -1637,20 +1637,20 @@ mod tests {
                 reasoning: Some(vec!["先分析".into()]),
                 tool: None,
             },
-            echo_agent::TimelineMessage {
+            echo_protocol::TimelineMessage {
                 kind: "tool".into(),
                 content: "web_search".into(),
                 time: 102,
                 source: None,
                 reasoning: None,
-                tool: Some(echo_agent::TimelineTool {
+                tool: Some(echo_protocol::TimelineTool {
                     name: "web_search".into(),
                     input: "query=你好".into(),
                     output: Some("ok".into()),
                     failed: false,
                 }),
             },
-            echo_agent::TimelineMessage {
+            echo_protocol::TimelineMessage {
                 kind: "system".into(),
                 content: "定时任务触发".into(),
                 time: 103,

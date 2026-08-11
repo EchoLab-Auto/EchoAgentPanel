@@ -1,21 +1,24 @@
 # EchoAgentPanel
 
-一个用 Rust 编写的 **AI Agent 框架**，支持通过 [OneBot v11](https://github.com/botuniverse/onebot-11) 协议接入 QQ（[NapCat](https://napcat.napneko.icu/)），内置 **OpenCode 风格 TUI 终端界面**。
+**EchoAgentCore 的 TUI 前端** —— 一个 opencode 风格的终端界面，通过
+WebSocket（JSON 协议，默认 `ws://127.0.0.1:3132`）连接远程 Agent 核心服务。
+
+本仓库只包含前端。Agent 核心（LLM agent 循环、工具/技能、会话记忆、QQ 适配器、
+management WS 服务）在独立仓库 **EchoAgentCore** 中，可独立部署。
 
 ```
-                    ┌────────────────────────────────────────┐
-QQ 用户 ──> NapCat ──反向 WS──> echo-server ──> HandlerRegistry
- (登录端)                               │                  └──> QqHandler
-                                        │                       │
-                                        ▼                       ▼
-                                 echo-agent (Agent 框架)     过滤管道
-                                 LLM / Tools / Skills / Memory  │
-                                        │                       │
-                               BackendBridge (mpsc / WS)       │
-                                        │                       │
-                                        ▼                       ▼
-                                 echo-tui (TUI 终端)    QQ 门控配置
+ EchoAgentCore (Core 服务)                EchoAgentPanel (本仓库)
+ ┌──────────────────────────┐   WS/JSON   ┌─────────────────────────┐
+ │ Agent · Tools · Skills · │ ◄─────────► │ echo-tui · 聊天/表单/   │
+ │ Memory · QQ 适配器       │   :3132     │ 命令面板 · 设置弹窗      │
+ └──────────────────────────┘             └─────────────────────────┘
+        ▲ reverse WS :3131
+   NapCat (QQ)
 ```
+
+线协议（`BackendCommand`/`BackendEvent`）由 EchoAgentCore 仓库的
+`echo-protocol` crate 定义，契约文档见 EchoAgentCore 的
+`doc/develop/protocol.md`。
 
 ## 架构
 
@@ -23,130 +26,55 @@ Cargo workspace，源码位于 `source/`：
 
 | crate | 路径 | 职责 |
 |---|---|---|
-| `echo-core` | `source/backend/echo-core` | OneBot v11 协议类型（纯 serde，无 I/O） |
-| `echo-server` | `source/backend/echo-server` | 反向 WebSocket 服务端 |
-| `echo-adapter` | `source/backend/echo-adapter` | 适配器 trait、消息类型、过滤管道、注册中心、ConfigStore |
-| `echo-agent` | `source/backend/echo-agent` | Agent 框架：LLM Provider、工具、技能、会话记忆、命令分发 |
-| `echo-adapter-qq` | `source/backend/echo-adapter-qq` | QQ/OneBot 适配器：消息处理、过滤配置、NapCat API |
-| `echo-tui` | `source/tui/echo-tui` | 终端 UI：聊天区、命令系统、交互式表单、鼠标选区 |
-| `echo-test-utils` | `source/backend/echo-test-utils` | 测试共享 mock（仅 dev-dependency，不依赖 echo-agent） |
-| `echo` | `source/echo` | 可执行程序：配置加载、接线、多运行模式 |
+| `echo-tui` | `source/tui/echo-tui` | 终端 UI：聊天区、命令系统、交互式表单、鼠标选区；`Backend` 双传输（WS / 进程内 mpsc） |
+| `echo` | `source/echo` | 可执行程序 `echo-agent-panel`：配置加载、日志、WS 连接、启动 TUI |
 
-关键设计：适配器只依赖单向的 `echo_adapter::InboundMessageHook` trait，
-`echo-adapter-qq` 不依赖 `echo-agent`。Agent 后台输出不会自动发送到 QQ；
-QQ 出站必须显式调用 `send_private_msg` 或 `send_group_msg` tool。
-所有 TOML 持久化经共享的 `echo_adapter::ConfigStore`
-（原子 read-modify-write），避免并发写丢失。
+前端对 Core 的全部依赖就是 `echo-protocol` 中的协议类型
+（`BackendCommand`/`BackendEvent`/`GateMode` 等）——Panel 是纯粹的
+"协议客户端"，不包含任何 agent 或 QQ 逻辑。
+
+## 构建前置条件
+
+`echo-tui` 通过**相对路径依赖**引用 EchoAgentCore 仓库的 `echo-protocol` crate，
+因此两个仓库必须并排克隆：
+
+```
+…/echo_tech/
+├── EchoAgentCore/    # 提供 echo-protocol
+└── EchoAgentPanel/   # 本仓库
+```
+
+（如需改为 git 依赖，编辑 `source/tui/echo-tui/Cargo.toml` 中
+`echo-protocol` 一行即可，见根 `Cargo.toml` 注释。）
 
 ## 快速开始
 
-### 一键安装（Linux + systemd）
-
-本机已安装 Rust/Cargo、Git 和 systemd 用户服务后，在仓库根目录执行：
+先确保 EchoAgentCore 服务已在运行（见 EchoAgentCore 的 README），然后：
 
 ```bash
-./scripts/install.sh
-# 同时设置 QQ 管理员（可选）：
-./scripts/install.sh --owner-qq 123456789
-```
-
-安装器会在 `~/.local` 下安装 Panel 命令和独立运行文件，在
-`~/.config/echo-agent-panel` 保留配置，并立即启用
-`echo-agent-panel-core.service`。之后运行 `echo-agent-panel` 即可打开 TUI；
-Core 状态与日志可通过以下命令查看：
-
-```bash
-systemctl --user status echo-agent-panel-core.service
-journalctl --user -u echo-agent-panel-core.service -f
-```
-
-安装模式会启用受控的 `framework_update` tool。向本机 Panel 中的 Agent 明确提出
-更新请求，或由配置的 QQ 管理员提出请求后，Agent 可启动独立更新服务。更新器只做
-Git 快进、锁定构建和原子二进制替换，成功后才重启 Core。
-详细机制和路径见 [安装与自更新文档](doc/develop/install.md)。
-
-安装模式下有三种更新方式，共用同一套受控流程：
-本地源码构建 -> 原子二进制替换 -> Core 健康检查重启。
-默认 **local 模式**（不访问网络，直接用当前源码树构建）；需要跟随远端时
-改用 `--remote`（Git 快进后再构建）。
-
-**1. 通过 Agent 更新（推荐）**
-
-向本机 Panel 或配置的 QQ 管理员提出更新请求，Agent 调用内置的
-`framework_update` 工具执行（需要显式确认）：
-
-```
-framework_update action=status   # 查看自更新服务状态
-framework_update action=apply confirm=true   # 触发更新
-```
-
-**2. 手动触发 systemd 更新服务**
-
-```bash
-systemctl --user start echo-agent-panel-update.service
-```
-
-**3. 本地开发模式（scripts/update.sh）**
-
-```bash
-scripts/update.sh \
-  --source "$PWD" \
-  --binary "$HOME/.local/libexec/echo-agent-panel/echo-agent-panel-bin" \
-  --status "$HOME/.local/state/echo-agent-panel/update-status"
-```
-
-- 默认 **local 模式**：直接用当前源码树构建并安装，不做 Git fetch/merge，
-  包含未提交的改动（记录为 `local:<commit>+dirty`）。适合
-  "先 `git pull` 再更新"的场景，不依赖网络，避免 fetch 失败/超时导致的
-  更新中断
-- `--remote`：切回远程模式（要求受管仓库干净、非 detached HEAD、且为快进
-  合并，否则拒绝更新）
-- 更新器持有非阻塞文件锁，拒绝并发运行
-
-查看更新结果与状态：
-
-```bash
-systemctl --user status echo-agent-panel-update.service
-journalctl --user -u echo-agent-panel-update.service
-cat ~/.local/state/echo-agent-panel/update-status   # state=updated / failed / rolled_back
-```
-
-以下步骤用于源码开发或手动部署。
-
-### 1. 部署 NapCat
-
-```bash
-docker run -d -p 6099:6099 -p 3000:3000 -p 3001:3001 mlikiowa/napcat-docker:latest
-```
-
-打开 `http://<服务器IP>:6099`（WebUI），用手机 QQ 扫码登录。
-
-### 2. 配置并运行（Panel 与 Core 分离启动）
-
-```bash
-# Panel 配置（TUI 外观 + Core 连接地址）
+# 配置（TUI 外观 + Core 连接地址）
 cp config/echo-agent-panel.toml config/echo-agent-panel.local.toml
-# Core 配置（编辑 [agent]：provider / model / api_key，按需启用 [adapters.qq]）
-cp config/echo-agent-core.toml config/echo-agent-core.local.toml
 
-# 终端 1 — 启动 Core（Agent + QQ 适配器 + management 服务）
-cargo run --release -- --core --config config/echo-agent-core.local.toml
-
-# 终端 2 — 启动 Panel（TUI，连接远程 Core）
-cargo run --release -- --panel --config config/echo-agent-panel.local.toml
+# 构建并运行
+cargo run --release -- --config config/echo-agent-panel.local.toml
 # 或直接用 --connect 指定 Core 地址（覆盖配置中的 connect_url）：
 cargo run --release -- --connect ws://127.0.0.1:3132
 ```
 
 Core 与 Panel 可部署在不同机器：Core 的 `[core] management_address` 需监听
 可被 Panel 访问的地址（如 `0.0.0.0:3132`），Panel 的 `[core] connect_url`
-指向该地址。
+指向该地址。Core 重启后 Panel 会自动重连（指数退避，1s→30s）。
 
-### 3. 验证
+### 安装（Linux）
 
-- **私聊**机器人任意消息 → QQ hook 投递来源和正文，Agent 调用 tool 回复
-- **群聊** @机器人 → QQ hook 投递群和发送人信息，Agent 调用 tool 回复
-- TUI 中输入 `/qq login` 查看扫码状态
+```bash
+./scripts/install.sh          # 先 --dry-run 查看路径
+```
+
+安装器把二进制装到 `~/.local/libexec/echo-agent-panel/`，启动器装到
+`~/.local/bin/echo-agent-panel`，配置种子到
+`~/.config/echo-agent-panel/panel.toml`。Panel 由用户手动启动，
+无 systemd 服务（Core 的服务与自更新由 EchoAgentCore 的安装器负责）。
 
 ## TUI 用法
 
@@ -173,7 +101,7 @@ TUI 只显示一个全局时间线对话框，汇总本地、QQ 私聊和 QQ 群
 | 命令 | 功能 |
 |---|---|
 | `/help` | 显示按键帮助 |
-| `/api` | 交互式 API 配置 |
+| `/api` | 交互式 API 配置（由 Core 持久化） |
 | `/adapters` | 查看适配器状态 |
 | `/qq login` | QQ 扫码登录 |
 | `/qq setting` | QQ 设置（门控模式 + 白名单/黑名单管理） |
@@ -193,159 +121,35 @@ TUI 只显示一个全局时间线对话框，汇总本地、QQ 私聊和 QQ 群
       └── 🚫 管理黑名单 → 同上
 ```
 
-门控配置持久化到 `[adapters.qq.gate]` 和 `[adapters.qq.filter]`，重启后保留。
+门控配置由 Core 持久化到 `[adapters.qq.gate]` 和 `[adapters.qq.filter]`，
+重启后保留（详见 EchoAgentCore 的 `doc/develop/adapter/qq/gating.md`）。
 
 ## 配置说明
 
-Panel 与 Core 使用各自独立的配置文件。
-
-### `config/echo-agent-panel.toml`（Panel）
+`config/echo-agent-panel.toml`（Panel 唯一配置）：
 
 ```toml
 [logging]
 level = "info"
 format = "text"
-log_file = ""             # Panel 留空时使用 logs/echo-agent-panel.log
+log_file = ""             # 留空时使用 logs/echo-agent-panel.log（stdout 被 TUI 占用）
 max_file_size_mb = 20
 max_files = 5
 
 [tui]
 enabled = true
-theme = "dark"
+theme = "dark"            # dark | light
 
 [core]
 connect_url = "ws://127.0.0.1:3132"      # 远程 Core 地址（--connect 可覆盖）
 ```
 
-### `config/echo-agent-core.toml`（Core）
-
-```toml
-[core]
-management_address = "127.0.0.1:3132"    # Panel 连接地址
-
-[logging]
-level = "info"
-format = "text"
-log_file = ""             # Core 留空时使用 stdout/systemd journal
-max_file_size_mb = 20
-max_files = 5
-
-[adapters.qq]
-enabled = true
-owner_qq = 0                            # 管理员 QQ（0=禁用，管理员消息绕过所有过滤）
-command_prefix = "/"
-napcat_webui_url = "http://localhost:6099"
-napcat_onebot_url = "http://localhost:3000" # 完整群/好友列表查询
-
-[adapters.qq.server]
-bind_address = "0.0.0.0:3131"
-access_token = ""
-heartbeat_interval = 30
-
-[adapters.qq.trigger]
-dm_auto_reply = true                    # 私聊自动回复
-group_at_reply = true                   # 群聊仅 @ 回复
-
-[adapters.qq.filter.allowlist]          # 白名单（运行时可通过 /qq setting 修改）
-user_ids = []
-group_ids = []
-
-[adapters.qq.filter.denylist]           # 黑名单
-user_ids = []
-group_ids = []
-
-[agent]
-provider = "deepseek"
-model = "deepseek-v4-flash"
-base_url = "https://api.deepseek.com/anthropic"
-api_key = ""
-thinking = "enabled"                    # enabled / disabled，默认 enabled
-reasoning_effort = "max"                # low / high / max，默认 max
-system_prompt = "请你使用中文"
-max_tool_iterations = 1024
-# 上下文 token 预算：trunk 按 token 裁剪（保守估算：CJK 1 字符≈1 token，
-# 其余 ≈3 字符/token，每条消息另计 4 token 结构开销）。
-# 默认 1M × 0.8 = 800,000 tokens；旧字段 memory_limit（按消息条数）已废弃。
-memory_limit_tokens = 800000
-```
-
-DeepSeek 的 OpenAI 兼容端点会发送 `thinking.type` 与 `reasoning_effort`；
-`/anthropic` 兼容端点会发送 `thinking.type` 与 `output_config.effort`。
-工具调用期间，Core 会把模型返回的完整思考内容带回下一轮请求。TUI 将思考与
-最终答复分开显示在全局时间线中；可在 API 设置弹窗中切换，也可在 `/api`
-模式输入 `thinking enabled|disabled` 和 `effort low|high|max`。
-
-Core 会每秒检查一次 `skills_dir`。新增、修改或删除任意递归目录下的
-`SKILL.md` 后会自动重载，无需重启；运行时禁用的 skill 在重载后仍保持禁用。
-如果新文件暂时无法读取或解析，Core 会继续使用上一版注册表并记录警告。
-
-Agent 还内置以下编排工具，无需额外配置：
-
-| 工具 | 用途 |
-|---|---|
-| `schedule_timer` | 按相对秒数或 RFC 3339 时间创建会话内定时任务 |
-| `list_timers` | 查询当前会话的待执行定时任务 |
-| `cancel_timer` | 取消当前会话的定时任务 |
-| `run_subagent` | 使用隔离上下文执行一次子任务并把结果交回主 Agent |
-| `spawn_background_task` | 挂起长任务并立即返回，完成后按创建顺序整合 |
-| `spawn_parallel_task` | 并发运行最多 8 个临时分支，并分别投递到后台/私聊/群 |
-| `list_background_tasks` | 查询当前来源会话创建的后台任务及状态 |
-| `cancel_background_task` | 取消当前来源会话创建的后台任务 |
-| `send_backend_message` | 将后台分支结果显式投递到指定 TUI 会话 |
-| `framework_update` | 安装模式下查看或触发受控的框架自更新 |
-
-定时器到期后以 `<timer_event>` 后台事件重新进入原会话；若要通知 QQ，
-Agent 仍须显式调用 QQ 发送工具。定时器目前仅保存在内存中，Core 重启后失效。
-同步 `run_subagent` 不继承工具。后台任务基于创建时的共享历史快照运行，可使用
-非消息工具，但不能直接发送 QQ 或后台消息；完成结果进入有序整合队列，由主 Agent
-按声明目标显式投递。即使后创建的任务先完成，也不会越过先创建的任务写入共享历史。
-普通对话轮次也统一在最多 8 路的临时快照分支中执行，主会话锁只负责输入登记和结果
-普通对话轮次也统一在最多 8 路的临时快照分支中执行，trunk 锁只负责输入登记和结果
-合并。QQ 分支 20 秒内尚未成功回复且仍在运行时，由辅助 LLM 根据对话快照生成自然的
-进度回应；正常回复或分支结束会取消该回应，不使用固定模板兜底。
-
-### 会话模型：全局 Trunk + 临时分支
-
-Agent 已抛弃"每用户独立会话"的上下文模型，改为 **单 trunk + 临时分支**：
-
-- **Trunk（主干）**：全平台共享的唯一条对话历史（受 `memory_limit_tokens`
-- **Trunk（主干）**：全平台共享的唯一条对话历史（受 `memory_limit_tokens`
-  token 预算约束，默认 1M × 0.8 = 800,000 tokens，超出从最旧消息开始丢弃），
-  持久化为 `echo-sessions.json`
-  （version 3）。TUI、QQ 私聊、QQ 群、timer 与后台任务都读写同一份 trunk。
-  在 TUI 输入 `/context` 可查看当前已填充的上下文（已用/预算 token、消息数
-  与逐条角色、token 与内容预览）。
-  投递和授权，不拥有各自的上下文，也不会在 TUI 中形成可切换的对话框。
-- **分支（Branch）**：每条入站消息都从 trunk 的即时快照 fork 出一个只读分支，
-  Agent 在分支上完成整轮（LLM + 工具）；分支结束后按 message_sequence
-  以 append-only 顺序把回复合并回 trunk，并发分支互不阻塞。
-- 因此不再提供 `/clear` 等按会话清空命令；trunk 只能被新消息推进。
-  旧版 v1（每会话数组）与 v2（共享历史对象）持久化文件会自动迁移。
-
-详细设计见 [后台任务与并行分支](doc/develop/agent/background-tasks.md)。
-可调用，执行更新还要求显式确认。
-
-Panel 中通过 `/api`、`/qq setting` 等命令修改的配置，会经 Core 的
-management WebSocket API 下发，并由 Core 持久化回 `echo-agent-core.toml`。
-
-## LLM Provider
-
-| provider | 说明 | 端点 |
-|---|---|---|
-| `openai` | OpenAI 及兼容端点 | `https://api.openai.com/v1` |
-| `deepseek` | DeepSeek（OpenAI/Anthropic 兼容） | `https://api.deepseek.com/anthropic` |
-| `anthropic` | Claude Messages API | `https://api.anthropic.com/v1` |
-| `ollama` | 本地模型 | `http://localhost:11434/v1` |
+Core 侧配置（provider/model/api_key、QQ 适配器、门控、自更新授权等）全部在
+EchoAgentCore 仓库的 `config/echo-agent-core.toml`。Panel 中通过 `/api`、
+`/qq setting` 等命令发起的修改，会经 management WebSocket 下发并由 Core
+持久化。
 
 ## 测试
-
-350+ 个测试覆盖全部 7 个 crate 的每个源文件，分三层：
-
-- **单元测试**：协议解析（OneBot 事件/段）、过滤管道、工具（含路径穿越安全防护）、
-  TUI 组件与状态、配置持久化
-- **属性测试（proptest）**：SessionKey 往返、ChatMessage/ToolCall JSON 往返、
-  消息事件 JSON 稳定往返
-- **集成测试**：echo-server 反向 WS 全链路、Agent 端到端命令流、NapCat HTTP mock
 
 ```bash
 cargo test --workspace
@@ -354,34 +158,27 @@ cargo fmt --all --check
 ```
 
 CI（`.github/workflows/ci.yml`）在 push/PR 时自动执行 fmt + clippy + test
-（stable + nightly）。
+（stable + nightly），并会先克隆 EchoAgentCore 作为 sibling 检出以满足
+path 依赖。
 
 ## 目录结构
 
 ```
 source/
-├── backend/
-│   ├── echo-core/          # OneBot v11 协议类型
-│   ├── echo-server/        # 反向 WS 服务端
-│   ├── echo-adapter/       # 适配器 trait + 过滤管道 + ConfigStore
-│   ├── echo-agent/         # Agent 框架（agent/ 含命令分发子模块）
-│   ├── echo-adapter-qq/    # QQ 适配器（adapter/ 含过滤管理子模块）
-│   └── echo-test-utils/    # 共享测试 mock
 ├── tui/
 │   └── echo-tui/           # TUI 终端界面（app/ 含事件处理子模块）
-└── echo/                   # 可执行程序入口
+└── echo/                   # 可执行程序入口（echo-agent-panel）
 
-doc/
-├── develop/
-│   ├── adapter/qq/gating.md        # QQ 门控设计
-│   ├── tui/design.md               # TUI 架构设计
-│   └── config/persistence.md       # 配置持久化
-└── design/
-    └── adapter/qq/gating.md        # 门控设计精简版
+config/echo-agent-panel.toml   # Panel 配置模板
+doc/develop/
+├── tui/design.md                    # TUI 架构设计
+└── tui/qq-setting-interaction.md    # /qq setting 交互设计
+scripts/install.sh                 # Panel 安装器
 ```
 
 ## 参考
 
+- EchoAgentCore（Core 服务仓库，需并排克隆）
 - [OneBot 11 协议](https://github.com/botuniverse/onebot-11)
 - [NapCat 文档](https://napcat.napneko.icu/)
 - [opencode](https://github.com/sst/opencode)

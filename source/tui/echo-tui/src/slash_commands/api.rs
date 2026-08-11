@@ -3,7 +3,7 @@
 use crate::backend::Backend;
 use crate::components::form_overlay::{FormKind, SelectItem};
 use crate::state::{AppState, ConversationMode, ToastKind};
-use echo_agent::BackendCommand;
+use echo_protocol::BackendCommand;
 
 /// /api — enter interactive API config mode.
 pub fn config(state: &mut AppState, backend: &Backend) {
@@ -163,8 +163,8 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
         }
         ["thinking", val] => {
             let thinking = match *val {
-                "enabled" | "on" => Some(echo_agent::ThinkingMode::Enabled),
-                "disabled" | "off" => Some(echo_agent::ThinkingMode::Disabled),
+                "enabled" | "on" => Some(echo_protocol::ThinkingMode::Enabled),
+                "disabled" | "off" => Some(echo_protocol::ThinkingMode::Disabled),
                 _ => None,
             };
             if let Some(thinking) = thinking {
@@ -184,9 +184,9 @@ pub fn handle_message(state: &mut AppState, backend: &Backend, msg: &str) -> boo
         }
         ["effort", val] => {
             let effort = match *val {
-                "low" => Some(echo_agent::ReasoningEffort::Low),
-                "high" => Some(echo_agent::ReasoningEffort::High),
-                "max" => Some(echo_agent::ReasoningEffort::Max),
+                "low" => Some(echo_protocol::ReasoningEffort::Low),
+                "high" => Some(echo_protocol::ReasoningEffort::High),
+                "max" => Some(echo_protocol::ReasoningEffort::Max),
                 _ => None,
             };
             if let Some(effort) = effort {
@@ -345,12 +345,12 @@ mod tests {
     }
 
     /// A Backend plus a handle for reading sent commands.
-    fn test_backend() -> (Backend, echo_agent::BackendHandle) {
-        let (bridge, handle) = echo_agent::create_bridge();
+    fn test_backend() -> (Backend, echo_protocol::BackendHandle) {
+        let (bridge, handle) = echo_protocol::create_bridge();
         (Backend::new(Arc::new(bridge)), handle)
     }
 
-    async fn recv_command(handle: &echo_agent::BackendHandle) -> BackendCommand {
+    async fn recv_command(handle: &echo_protocol::BackendHandle) -> BackendCommand {
         handle
             .command_rx
             .lock()
@@ -398,7 +398,7 @@ mod tests {
         match recv_command(&handle).await {
             BackendCommand::UpdateApiConfig { name, thinking, .. } => {
                 assert_eq!(name, "deepseek");
-                assert_eq!(thinking, Some(echo_agent::ThinkingMode::Disabled));
+                assert_eq!(thinking, Some(echo_protocol::ThinkingMode::Disabled));
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -411,7 +411,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(name, "deepseek");
-                assert_eq!(reasoning_effort, Some(echo_agent::ReasoningEffort::Max));
+                assert_eq!(reasoning_effort, Some(echo_protocol::ReasoningEffort::Max));
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -430,14 +430,14 @@ mod tests {
     async fn numeric_index_switches_profile() {
         let (backend, handle) = test_backend();
         let mut state = test_state();
-        state.settings.profiles.push(echo_agent::ApiProfileInfo {
+        state.settings.profiles.push(echo_protocol::ApiProfileInfo {
             name: "deepseek".into(),
             provider: "deepseek".into(),
             model: "deepseek-v4-flash".into(),
             base_url: "https://api.deepseek.com".into(),
             api_key_set: false,
-            thinking: echo_agent::ThinkingMode::Enabled,
-            reasoning_effort: echo_agent::ReasoningEffort::Max,
+            thinking: echo_protocol::ThinkingMode::Enabled,
+            reasoning_effort: echo_protocol::ReasoningEffort::Max,
         });
         assert!(handle_message(&mut state, &backend, "1"));
         assert_eq!(

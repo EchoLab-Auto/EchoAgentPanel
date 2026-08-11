@@ -9,7 +9,7 @@
 //! - Editing:   ↑↓选字段 直接输入改值 Ctrl+S保存 Esc返回 Ctrl+C×2退出
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use echo_agent::BackendCommand;
+use echo_protocol::BackendCommand;
 
 use crate::backend::Backend;
 
@@ -273,14 +273,14 @@ impl FormOverlay {
         let key = vals.get(3).cloned().unwrap_or_default();
         let prompt = vals.get(4).cloned().unwrap_or_default();
         let thinking = match vals.get(5).map(String::as_str) {
-            Some("disabled") => Some(echo_agent::ThinkingMode::Disabled),
-            Some("enabled") => Some(echo_agent::ThinkingMode::Enabled),
+            Some("disabled") => Some(echo_protocol::ThinkingMode::Disabled),
+            Some("enabled") => Some(echo_protocol::ThinkingMode::Enabled),
             _ => None,
         };
         let reasoning_effort = match vals.get(6).map(String::as_str) {
-            Some("low") => Some(echo_agent::ReasoningEffort::Low),
-            Some("high") => Some(echo_agent::ReasoningEffort::High),
-            Some("max") => Some(echo_agent::ReasoningEffort::Max),
+            Some("low") => Some(echo_protocol::ReasoningEffort::Low),
+            Some("high") => Some(echo_protocol::ReasoningEffort::High),
+            Some("max") => Some(echo_protocol::ReasoningEffort::Max),
             _ => None,
         };
 
@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn inactive_form_ignores_keys() {
         let (backend, _handle) = {
-            let (bridge, handle) = echo_agent::create_bridge();
+            let (bridge, handle) = echo_protocol::create_bridge();
             (Backend::new(std::sync::Arc::new(bridge)), handle)
         };
         let mut fo = FormOverlay::default();
@@ -538,7 +538,7 @@ mod tests {
 
     #[tokio::test]
     async fn save_sends_commands_for_nonempty_fields() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(std::sync::Arc::new(bridge));
         let mut fo = FormOverlay::default();
         fo.activate("api", items(0), FormKind::ApiConfig);
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn save_is_noop_for_non_api_forms() {
-        let (bridge, handle) = echo_agent::create_bridge();
+        let (bridge, handle) = echo_protocol::create_bridge();
         let backend = Backend::new(std::sync::Arc::new(bridge));
         let mut fo = FormOverlay::default();
         fo.activate("qq", items(0), FormKind::QqFilter);
@@ -615,7 +615,7 @@ mod tests {
 
     #[test]
     fn handle_key_navigates_and_consumes() {
-        let (bridge, _handle) = echo_agent::create_bridge();
+        let (bridge, _handle) = echo_protocol::create_bridge();
         let backend = Backend::new(std::sync::Arc::new(bridge));
         let mut fo = FormOverlay::default();
         fo.activate("t", items(3), FormKind::ApiConfig);
