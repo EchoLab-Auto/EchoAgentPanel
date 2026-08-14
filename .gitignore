@@ -1,6 +1,19 @@
+# Rust
 /target
-/config/*.local.toml
+**/*.rs.bk
+
+# Node / frontend
+web/node_modules
+web/dist
+web/*.tsbuildinfo
+
+# Local config overrides
+config/*.local.toml
+
+# Logs
 *.log
-qrcode.png
-/napcat/data/
-echo-sessions.json
+logs/
+
+# Editor
+.idea/
+.vscode/

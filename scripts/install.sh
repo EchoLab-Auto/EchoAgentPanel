@@ -18,15 +18,12 @@ usage() {
     cat <<'EOF'
 Usage: scripts/install.sh [options]
 
-Install the EchoAgentPanel TUI for the current user.
+Install the EchoAgentPanel web UI for the current user (Rust backend +
+React frontend). The backend relays a browser WebSocket to the EchoAgentCore
+management WS and serves the built frontend.
 
-The Panel is only the frontend: it connects to an EchoAgentCore service
-(agent core, separate repository) over WebSocket. Install/start the Core
-first (see EchoAgentCore's scripts/install.sh), then point this Panel at it
-via [core] connect_url in panel.toml or --connect.
-
-Prerequisite: the EchoAgentCore repository must be checked out next to this
-one (echo-tui depends on its echo-protocol crate via a relative path).
+Prerequisites: the Rust toolchain and Node.js (npm) must be available.
+The EchoAgentCore service must be running for the panel to be useful.
 
 Options:
   --repository <url>  Upstream Git repository stored in the managed checkout
@@ -80,16 +77,16 @@ EchoAgentPanel install plan
   project:    $PROJECT_ROOT
   source:     $SOURCE_DIR
   binary:     $LIBEXEC_DIR/echo-agent-panel-bin
+  frontend:   $LIBEXEC_DIR/web
   launcher:   $BIN_DIR/echo-agent-panel
   config:     $PANEL_CONFIG
   repository: $REPOSITORY_URL
   branch:     $BRANCH
-  requires:   $PROJECT_ROOT/../EchoAgentCore (echo-protocol path dependency)
 EOF
     exit 0
 fi
 
-for command in cargo git install; do
+for command in cargo git install npm node; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "error: required command not found: $command" >&2
         exit 1
@@ -123,8 +120,19 @@ else
     git -C "$SOURCE_DIR" remote set-url origin "$REPOSITORY_URL"
 fi
 
-echo "==> Building release binary"
-cargo build --release --locked -p echo --manifest-path "$PROJECT_ROOT/Cargo.toml"
+echo "==> Building Rust backend"
+cargo build --release --locked -p echo-web-server --manifest-path "$PROJECT_ROOT/Cargo.toml"
+
+echo "==> Building web frontend"
+(
+    cd "$PROJECT_ROOT/web"
+    if [[ -f package-lock.json ]]; then
+        npm ci
+    else
+        npm install
+    fi
+    npm run build
+)
 
 binary_temporary=$(mktemp "$LIBEXEC_DIR/echo-agent-panel-bin.new.XXXXXX")
 install -m 755 "$PROJECT_ROOT/target/release/echo-agent-panel" "$binary_temporary"
@@ -137,19 +145,13 @@ else
     echo "==> Preserved existing Panel config: $PANEL_CONFIG"
 fi
 
+rm -rf "$LIBEXEC_DIR/web"
+cp -r "$PROJECT_ROOT/web/dist" "$LIBEXEC_DIR/web"
+
 launcher_temporary=$(mktemp "$BIN_DIR/echo-agent-panel.new.XXXXXX")
 cat >"$launcher_temporary" <<EOF
 #!/usr/bin/env sh
-has_config=0
-for argument in "\$@"; do
-    case "\$argument" in
-        -c|--config|--config=*) has_config=1 ;;
-    esac
-done
-if [ "\$has_config" -eq 1 ]; then
-    exec "$LIBEXEC_DIR/echo-agent-panel-bin" "\$@"
-fi
-exec "$LIBEXEC_DIR/echo-agent-panel-bin" --config "$PANEL_CONFIG" "\$@"
+exec "$LIBEXEC_DIR/echo-agent-panel-bin" --config "$PANEL_CONFIG" --static-dir "$LIBEXEC_DIR/web" "\$@"
 EOF
 chmod 755 "$launcher_temporary"
 mv -f "$launcher_temporary" "$BIN_DIR/echo-agent-panel"
@@ -161,5 +163,6 @@ Installation complete.
   Config: $PANEL_CONFIG
   Source: $SOURCE_DIR
 
-Ensure $BIN_DIR is in PATH, the EchoAgentCore service is running, then run: echo-agent-panel
+Start it with: echo-agent-panel
+Then open: http://127.0.0.1:8080  (地址取决于 [server] bind_address)
 EOF

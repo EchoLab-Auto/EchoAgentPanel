@@ -1,21 +1,20 @@
-# EchoAgentPanel 配置 — Panel（终端 UI）
+# EchoAgentPanel 配置 — Web 面板（Rust 后端 + React 前端）
 # 复制为 config/echo-agent-panel.local.toml 后按需修改。
 # Core（Agent 核心服务）的配置在 EchoAgentCore 仓库的 config/echo-agent-core.toml。
 
 [logging]
 level = "info"    # trace | debug | info | warn | error
 format = "text"   # text | json
-# 日志文件路径。留空 = 自动：TUI 模式写 logs/echo-agent-panel.log（stdout 被界面占用）。
 log_file = ""
 max_file_size_mb = 20
 max_files = 5
 
-[tui]
-# 是否启动终端 UI。
-enabled = true
-# dark | light
-theme = "dark"
+[server]
+# HTTP/WS 监听地址。仅本机访问保持 127.0.0.1；局域网访问改为 0.0.0.0:8080。
+bind_address = "127.0.0.1:8080"
+# 构建后的前端静态目录（默认相对当前工作目录；安装器会写入绝对路径）。
+static_dir = "web/dist"
 
 [core]
-# 远程 Core 的 management WebSocket 地址（--connect 可覆盖）。
+# EchoAgentCore management WebSocket 地址（与 Core 的 [core] management_address 对应）。
 connect_url = "ws://127.0.0.1:3132"

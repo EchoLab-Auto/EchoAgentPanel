@@ -1,63 +1,40 @@
 # EchoAgentPanel Development Documentation
 
-EchoAgentPanel 是 EchoAgentCore 的 **TUI 前端**：通过 management WebSocket
-（JSON 协议，默认 `:3132`）连接远程 Core。线协议契约（`BackendCommand`/
-`BackendEvent`/兼容规则）见 EchoAgentCore 仓库的 `doc/develop/protocol.md`。
+EchoAgentPanel 是 EchoAgentCore 的 **Web 面板**：Rust 后端（axum）托管 React
+前端，并把浏览器 WebSocket 中继到 Core 的 management WS。终端 UI 已迁移到
+EchoAgentTui 仓库。
 
-## Index
+## 仓库布局
 
-| Document | Content |
-|---|---|
-| [install.md](install.md) | Panel 安装（二进制 + 启动器 + 配置种子） |
-| [tui/design.md](tui/design.md) | TUI layout, components, state machine, slash commands, form overlay |
-| [tui/qq-setting-interaction.md](tui/qq-setting-interaction.md) | /qq setting interaction design (gate mode + allow/denylist UI) |
-| [testing.md](testing.md) | Test strategy for the frontend crates |
-
-> Core 侧文档（agent 框架、QQ 适配器门控、配置持久化、自更新）已随拆分迁入
-> EchoAgentCore 仓库的 `doc/develop/`。
-
-## Quick Reference
-
-### Project Structure
 ```
 EchoAgentPanel/
-├── config/echo-agent-panel.toml   # Panel 配置模板
-├── source/
-│   ├── tui/echo-tui/              # Terminal UI（协议客户端）
-│   └── echo/                      # echo-agent-panel 二进制入口
-├── doc/develop/                   # This documentation
-├── scripts/install.sh             # Panel installer
-└── Cargo.toml                     # Workspace manifest
+├── config/echo-agent-panel.toml     # 面板配置模板
+├── source/echo-web-server/          # Rust 后端（axum + WS 中继）
+│   ├── src/main.rs                  # 服务入口（静态托管 + /ws 路由）
+│   ├── src/proxy.rs                 # 浏览器 ↔ Core 帧中继（不解析负载）
+│   └── src/config.rs                # 面板配置加载
+├── web/                             # React + TypeScript + Vite 前端
+│   └── src/
+│       ├── protocol.ts              # echo-protocol 线格式的 TS 镜像
+│       ├── state.ts                 # 状态 + reducer（移植自 EchoAgentTui）
+│       ├── ws.ts                    # WS 连接 hook（重连退避）
+│       └── components/              # 聊天 / 设置 / sudo / QQ / 任务 / 清单
+├── scripts/install.sh               # 一键安装（Rust + 前端）
+├── scripts/uninstall.sh             # 卸载
+└── doc/decisions/                   # 架构决策记录
 ```
 
-### Dependency on EchoAgentCore
-
-`echo-tui` 通过相对路径依赖引用 `../EchoAgentCore/source/protocol/echo-protocol`
-——构建本仓库前需并排克隆 EchoAgentCore。前端使用的协议类型：
-
-- `BackendCommand` / `BackendEvent` — 全部交互语义
-- `BackendBridge` / `create_bridge` — 进程内 mpsc 传输（测试用）
-- `serialize_command` / `deserialize_message` / `WsMessage` — WS 帧编解码
-- `GateMode` / `ThinkingMode` / `ReasoningEffort` — 共享枚举
-
-### Key Abstractions
-- `Backend` — 双传输后端（WS 生产 / mpsc 测试），WS 带指数退避自动重连
-- `AppState` — 全部 TUI 状态（消息、会话、滚动、焦点、表单）
-- `Component` — TUI 组件（render + handle_event）
-- Slash 命令经 `BackendCommand` 发往 Core；`/api`、`/qq setting` 的修改由
-  **Core** 持久化（Panel 不写 Core 配置文件）
-
-### Build & Run
+## 开发
 
 ```bash
-# 前提：../EchoAgentCore 已克隆（echo-protocol path 依赖）
-cargo run -- --config config/echo-agent-panel.local.toml
-cargo run -- --connect ws://127.0.0.1:3132
-
-# Tests
-cargo test --workspace
-
-# Quality gates (CI enforces all three)
-cargo clippy --workspace --all-targets   # zero warnings required
-cargo fmt --all --check
+cargo test --workspace          # 后端测试（含 /ws 中继集成测试）
+cd web && npm run build         # 前端类型检查 + 构建
+cd web && npm run dev           # 前端热更新（/ws 代理到 :8080）
 ```
+
+## 协议
+
+前端不解析后端：后端只是字节级中继，帧格式由 echo-protocol 定义（信封
+`{"type":"command|event|sudo_password","payload":{...}}`）。`web/src/protocol.ts`
+镜像这些类型；改协议时两端（EchoAgentCore 的 echo-protocol 与本仓库的
+protocol.ts）需同步更新。

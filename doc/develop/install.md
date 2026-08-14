@@ -2,16 +2,13 @@
 
 ## Scope
 
-EchoAgentPanel is the TUI frontend only. It connects to an EchoAgentCore
-service over WebSocket; the Core's systemd service, controlled self-update,
-and QQ/NapCat setup all live in the EchoAgentCore repository.
+EchoAgentPanel is the web UI for EchoAgentCore: a Rust backend (axum) that
+serves a React frontend and relays a browser WebSocket to the Core's
+management WS. The terminal UI lives in the separate EchoAgentTui repository.
 
 The installer targets Linux hosts, does not require root, and does not modify
-system-wide directories.
-
-**Prerequisite**: the EchoAgentCore repository must be checked out next to
-this one (`../EchoAgentCore`) — `echo-tui` depends on its `echo-protocol`
-crate via a relative path, so the build fails without it.
+system-wide directories. The Rust toolchain and Node.js (npm) must be
+installed.
 
 ```bash
 ./scripts/install.sh
@@ -26,33 +23,52 @@ override the managed checkout's upstream URL.
 
 | Path | Purpose |
 |---|---|
-| `~/.local/bin/echo-agent-panel` | Panel launcher (injects default `--config`) |
-| `~/.local/libexec/echo-agent-panel/echo-agent-panel-bin` | Runtime binary |
+| `~/.local/bin/echo-agent-panel` | Panel launcher (injects `--config` + `--static-dir`) |
+| `~/.local/libexec/echo-agent-panel/echo-agent-panel-bin` | Rust backend binary |
+| `~/.local/libexec/echo-agent-panel/web` | Built frontend (served by the backend) |
 | `~/.config/echo-agent-panel/panel.toml` | Persistent Panel configuration |
 | `~/.local/share/echo-agent-panel/source` | Managed Git source checkout |
 
 An existing `panel.toml` is preserved on re-install. The managed source is
-created as a local clone of the checkout running the installer. Re-installing
-fast-forwards it to the invoking checkout when possible, refuses to overwrite
-tracked local changes, and preserves a diverged checkout. The binary is still
-built from the invoking checkout because the Panel's `echo-protocol` dependency
-comes from its sibling `EchoAgentCore` repository.
+created as a local clone of the checkout running the installer; the binary
+and frontend are always built from the invoking checkout, so uncommitted
+changes deploy directly.
 
-There is no Panel systemd unit: it is started manually by the user. Updating
-means `git pull` in the development checkout and re-running `install.sh`, which
-refreshes the managed source and atomically swaps the binary.
+## Running
+
+```bash
+echo-agent-panel
+# open http://127.0.0.1:8080 (address from [server] bind_address)
+```
+
+The EchoAgentCore service must be running and reachable at `[core]
+connect_url`. When the Core is down, the page still loads and shows
+"连接中…" with automatic reconnection (exponential backoff).
+
+## Uninstall
+
+```bash
+./scripts/uninstall.sh            # keep panel.toml
+./scripts/uninstall.sh --purge    # also remove the config directory
+```
+
+Removes the launcher, the backend binary, the frontend build, and the managed
+source checkout. `panel.toml` is kept by default so a reinstall restores it.
+The EchoAgentCore service is unaffected — uninstall it separately with
+EchoAgentCore's `scripts/uninstall.sh`.
 
 ## Configuration
 
-`panel.toml` only needs the Core address and TUI preferences:
+`panel.toml` only needs the server bind address and the Core address:
 
 ```toml
-[tui]
-theme = "dark"
+[server]
+bind_address = "127.0.0.1:8080"
 
 [core]
 connect_url = "ws://127.0.0.1:3132"
 ```
 
 Point `connect_url` at the Core's `[core] management_address` (they can be on
-different hosts), or pass `--connect ws://…` on the command line.
+different hosts), or pass `--core ws://…` on the command line. `--bind` and
+`--static-dir` override the server settings at runtime.

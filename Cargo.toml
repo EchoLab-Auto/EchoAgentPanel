@@ -1,9 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "source/tui/echo-tui",
-    "source/echo",
-]
+members = ["source/echo-web-server"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,15 +14,13 @@ repository = "https://github.com/EchoLab-Auto/EchoAgentPanel"
 opt-level = 1
 
 [workspace.dependencies]
-# The frontend–Core wire contract lives in the sibling EchoAgentCore
-# repository (expected checked out next to this one; see README). To build
-# against a remote instead, point echo-tui's dependency at the git repo:
-# echo-protocol = { git = "https://gitlab.com/echo_tech/EchoAgentCore.git" }
-
 # async runtime
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 tokio-tungstenite = "0.24"
+
+# http / ws server
+axum = { version = "0.8", features = ["ws"] }
 
 # serialization
 serde = { version = "1", features = ["derive"] }
@@ -41,13 +36,3 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # config
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }
-
-# misc
-chrono = "0.4"
-
-# tui
-ratatui = "0.29"
-crossterm = "0.28"
-tui-textarea = "0.6"
-qrcode = "0.14"
-rxing = "0.5"
