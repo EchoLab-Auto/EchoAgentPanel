@@ -102,6 +102,30 @@ export function SettingsModal({
     setReasoning(t.reasoning);
   };
 
+  // Provider 预配置：选择常见服务商时自动填充 base_url / model。
+  const applyProviderPreset = (value: string) => {
+    setProvider(value);
+    if (value === 'deepseek') {
+      setBaseUrl('https://api.deepseek.com/anthropic');
+      setModel('deepseek-v4-flash');
+      setThinking('enabled');
+      setReasoning('max');
+    } else if (value === 'openai') {
+      setBaseUrl('https://api.openai.com/v1');
+      setModel('gpt-4o');
+      setThinking('disabled');
+      setReasoning('low');
+    }
+    // third-party：保留手动输入的 base_url / model，仅切换 provider 名。
+  };
+
+  // 当前 provider 不在下拉选项中时（如旧配置 anthropic/ollama），保留为额外选项。
+  const providerOptions = ['deepseek', 'openai', 'third-party'];
+  const currentProvider = api?.provider ?? '';
+  if (currentProvider && !providerOptions.includes(currentProvider)) {
+    providerOptions.push(currentProvider);
+  }
+
   const saveTopLevel = (asProfile: boolean) => {
     sendCommand({
       UpdateApiConfig: {
@@ -141,11 +165,32 @@ export function SettingsModal({
           </div>
 
           <label>Provider</label>
-          <input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="deepseek / anthropic / openai" />
+          <select
+            value={providerOptions.includes(provider) ? provider : 'third-party'}
+            onChange={(e) => applyProviderPreset(e.target.value)}
+          >
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI</option>
+            <option value="third-party">第三方（OpenAI 兼容）</option>
+            {currentProvider && !providerOptions.slice(0, 3).includes(currentProvider) && (
+              <option value={currentProvider}>{currentProvider}（现有配置）</option>
+            )}
+          </select>
           <label>Model</label>
           <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-v4-flash" />
           <label>Base URL</label>
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.deepseek.com/anthropic" />
+          <input
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={
+              provider === 'third-party'
+                ? 'https://你的网关/v1（OpenAI 兼容，如 one-api / new-api）'
+                : 'https://api.deepseek.com/anthropic'
+            }
+          />
+          {provider === 'third-party' && (
+            <div className="muted field-hint">第三方服务需为 OpenAI 兼容接口；若网关提供 /anthropic 端点也会自动识别。</div>
+          )}
           <label>API Key {api?.api_key_set ? '（已设置，留空保持不变）' : '（未设置）'}</label>
           <input
             type="password"

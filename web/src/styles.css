@@ -565,3 +565,5 @@ hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 }
 .template-name { font-size: 13px; font-weight: 600; }
 .template-hint { font-size: 11px; color: var(--muted); }
+
+.field-hint { margin-top: 4px; font-size: 12px; line-height: 1.4; }
