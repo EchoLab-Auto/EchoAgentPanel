@@ -16,6 +16,7 @@ export function Chat({
 }) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [showJumpDown, setShowJumpDown] = useState(false);
 
   // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
   const visibleMessages =
@@ -30,11 +31,17 @@ export function Chat({
     const container = containerRef.current;
     if (!container) return;
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+    setShowJumpDown(!nearBottom);
     if (nearBottom) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     // Re-scroll when a new message arrives or the last tool output updates.
   }, [visibleMessages.length, lastMessage?.tool?.output, lastMessage?.branch?.msgs.length]);
+
+  const jumpToBottom = () => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowJumpDown(false);
+  };
 
   const emptyHint =
     sessionId === 'global'
@@ -50,12 +57,26 @@ export function Chat({
 
   return (
     <div className="chat">
-      <div className="chat-messages" ref={containerRef}>
+      <div
+        className="chat-messages"
+        ref={containerRef}
+        onScroll={() => {
+          const container = containerRef.current;
+          if (!container) return;
+          const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+          setShowJumpDown(!nearBottom);
+        }}
+      >
         {visibleMessages.length === 0 && <div className="muted empty-hint">{emptyHint}</div>}
         {visibleMessages.map((message) => (
           <MessageView key={message.key} message={message} />
         ))}
         <div ref={bottomRef} />
+        {showJumpDown && (
+          <button className="jump-bottom" onClick={jumpToBottom} title="跳转到最新消息">
+            ↓
+          </button>
+        )}
       </div>
       <div className="chat-input-row">
         <div className="chat-meta">

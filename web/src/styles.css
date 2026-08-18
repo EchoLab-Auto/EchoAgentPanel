@@ -771,3 +771,23 @@ hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 }
 .branch-merge-inner .msg { border-left: 2px solid var(--border); }
 .branch-entry-notice { font-size: 12px; }
+
+/* ── 跳到底部按钮 ── */
+.jump-bottom {
+  position: sticky;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg2, #2a2a33);
+  color: var(--accent);
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+  z-index: 5;
+  transition: transform .15s ease;
+}
+.jump-bottom:hover { transform: translateX(-50%) scale(1.1); border-color: var(--accent); }
