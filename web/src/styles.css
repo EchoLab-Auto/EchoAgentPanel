@@ -536,3 +536,32 @@ hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
   background: color-mix(in srgb, var(--bg) 40%, transparent);
   color: var(--fg);
 }
+
+/* ── API 快速模板 ── */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.template-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color .15s ease, background .15s ease;
+}
+.template-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(0,0,0,.04));
+}
+.template-name { font-size: 13px; font-weight: 600; }
+.template-hint { font-size: 11px; color: var(--muted); }

@@ -2,6 +2,71 @@ import { useEffect, useState } from 'react';
 import type { ApiConfig } from '../state';
 import type { BackendCommand } from '../protocol';
 
+interface ApiTemplate {
+  key: string;
+  label: string;
+  provider: string;
+  base_url: string;
+  model: string;
+  thinking: 'enabled' | 'disabled';
+  reasoning: 'low' | 'high' | 'max';
+  hint?: string;
+}
+
+// 预配置模板：选中后自动填充表单字段，只需填 API Key 即可保存。
+const TEMPLATES: ApiTemplate[] = [
+  {
+    key: 'deepseek-anthropic',
+    label: 'DeepSeek（Anthropic 兼容）',
+    provider: 'deepseek',
+    base_url: 'https://api.deepseek.com/anthropic',
+    model: 'deepseek-v4-flash',
+    thinking: 'enabled',
+    reasoning: 'max',
+    hint: '支持思考模式与推理强度',
+  },
+  {
+    key: 'deepseek-openai',
+    label: 'DeepSeek（OpenAI 兼容）',
+    provider: 'deepseek',
+    base_url: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    thinking: 'enabled',
+    reasoning: 'max',
+    hint: 'OpenAI 格式端点',
+  },
+  {
+    key: 'openai',
+    label: 'OpenAI',
+    provider: 'openai',
+    base_url: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+    thinking: 'disabled',
+    reasoning: 'low',
+    hint: 'OpenAI 官方 API',
+  },
+  {
+    key: 'anthropic',
+    label: 'Anthropic',
+    provider: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    model: 'claude-sonnet-4-20250514',
+    thinking: 'enabled',
+    reasoning: 'max',
+    hint: '原生 Anthropic Messages API',
+  },
+  {
+    key: 'ollama',
+    label: 'Ollama（本地）',
+    provider: 'ollama',
+    base_url: 'http://localhost:11434/v1',
+    model: 'llama3.1',
+    thinking: 'disabled',
+    reasoning: 'low',
+    hint: '本地模型，无需 API Key',
+  },
+];
+
 export function SettingsModal({
   api,
   sendCommand,
@@ -29,6 +94,14 @@ export function SettingsModal({
     }
   }, [api]);
 
+  const applyTemplate = (t: ApiTemplate) => {
+    setProvider(t.provider);
+    setModel(t.model);
+    setBaseUrl(t.base_url);
+    setThinking(t.thinking);
+    setReasoning(t.reasoning);
+  };
+
   const saveTopLevel = (asProfile: boolean) => {
     sendCommand({
       UpdateApiConfig: {
@@ -52,6 +125,21 @@ export function SettingsModal({
           <button className="close" onClick={onClose}>×</button>
         </div>
         <div className="modal-body settings-form">
+          <label>快速模板</label>
+          <div className="template-grid">
+            {TEMPLATES.map((t) => (
+              <button
+                key={t.key}
+                className="template-item"
+                onClick={() => applyTemplate(t)}
+                title={t.hint}
+              >
+                <span className="template-name">{t.label}</span>
+                <span className="template-hint">{t.hint}</span>
+              </button>
+            ))}
+          </div>
+
           <label>Provider</label>
           <input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="deepseek / anthropic / openai" />
           <label>Model</label>
