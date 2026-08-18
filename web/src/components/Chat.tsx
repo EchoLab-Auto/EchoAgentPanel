@@ -18,11 +18,18 @@ export function Chat({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const lastMessage = state.trunk[state.trunk.length - 1];
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  // 仅在用户位于底部附近时自动滚动，避免打断向上翻阅历史。
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = containerRef.current;
+    if (!container) return;
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+    if (nearBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
     // Re-scroll when a new message arrives or the last tool output updates.
-  }, [state.trunk.length, lastMessage?.tool?.output]);
+  }, [state.trunk.length, lastMessage?.tool?.output, lastMessage?.branch?.msgs.length]);
 
   const submit = () => {
     const content = input.trim();
@@ -33,7 +40,7 @@ export function Chat({
 
   return (
     <div className="chat">
-      <div className="chat-messages">
+      <div className="chat-messages" ref={containerRef}>
         {state.trunk.length === 0 && <div className="muted empty-hint">（暂无消息，从下方输入开始对话）</div>}
         {state.trunk.map((message) => (
           <MessageView key={message.key} message={message} />

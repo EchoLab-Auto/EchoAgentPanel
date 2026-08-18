@@ -32,6 +32,16 @@ export function useAgentConnection(): AgentConnection {
         if (closed) return;
         setConnected(true);
         retryMs = 500;
+        // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
+        // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。Timeline
+        // 会由 RequestTrunkTimeline 重新加载。
+        setState((previous) => {
+          const next = { ...previous, trunk: [...previous.trunk] };
+          next.branchTabs = {};
+          next.tasks = [];
+          next.activities = {};
+          return next;
+        });
         // Bootstrap the panel state on (re)connect.
         for (const command of [
           'RequestState' as BackendCommand,
