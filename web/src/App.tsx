@@ -164,7 +164,11 @@ export function App() {
       )}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       {showContext && (
-        <ContextModal snapshot={state.context} onClose={() => setShowContext(false)} />
+        <ContextModal
+          snapshot={state.context}
+          onClose={() => setShowContext(false)}
+          sendCommand={sendCommand}
+        />
       )}
       {showLogs && <LogModal onClose={() => setShowLogs(false)} />}
       {showSystemPrompt && (

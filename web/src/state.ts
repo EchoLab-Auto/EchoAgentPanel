@@ -5,6 +5,7 @@ import type {
   AdapterStatus,
   ApiProfileInfo,
   BackendEvent,
+  ContextBlockInfo,
   ContextMessageInfo,
   GateMode,
   SessionInfo,
@@ -120,6 +121,7 @@ export interface Toast {
 
 export interface ContextSnapshotData {
   messages: ContextMessageInfo[];
+  blocks: ContextBlockInfo[];
   total_tokens: number;
   limit_tokens: number;
 }
@@ -578,9 +580,21 @@ function loadTimeline(state: AppState, messages: TimelineMessage[]) {
   state.trunk = converted;
 }
 
-function renderContext(messages: ContextMessageInfo[], total: number, limit: number): string {
+function renderContext(
+  messages: ContextMessageInfo[],
+  blocks: ContextBlockInfo[],
+  total: number,
+  limit: number,
+): string {
+  const pct = limit > 0 ? Math.round((total / limit) * 100) : 0;
+  const blockLine =
+    blocks.length > 0
+      ? blocks.map((b) => `${b.label} ${b.tokens}t`).join(' · ')
+      : '';
   const lines = messages.map((m) => `[${m.role}]${m.tokens}t ${truncate(oneLine(m.content), 120)}`);
-  return `📋 上下文快照 · ${total}/${limit} tokens · ${messages.length} 条\n` + lines.join('\n');
+  return `📋 上下文快照 · ${total}/${limit} tokens (${pct}%) · ${messages.length} 条\n` +
+    (blockLine ? `块: ${blockLine}\n` : '') +
+    lines.join('\n');
 }
 
 // ── main reducer ───────────────────────────────────────────────────────────
@@ -734,7 +748,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'ContextSnapshot': {
       const e = (event as { ContextSnapshot: ContextSnapshotData }).ContextSnapshot;
       state.context = e;
-      pushTo(state, 'system', renderContext(e.messages, e.total_tokens, e.limit_tokens), Math.floor(Date.now() / 1000));
+      pushTo(state, 'system', renderContext(e.messages, e.blocks || [], e.total_tokens, e.limit_tokens), Math.floor(Date.now() / 1000));
       return state;
     }
     case 'TrunkTimeline': {

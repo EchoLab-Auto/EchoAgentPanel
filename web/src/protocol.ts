@@ -56,6 +56,15 @@ export interface ContextMessageInfo {
   sequence: number | null;
 }
 
+export interface ContextBlockInfo {
+  key: string;
+  label: string;
+  kind: string;
+  tokens: number;
+  chars: number;
+  content: string;
+}
+
 export interface TimelineSource {
   adapter_name: string;
   platform: string;
@@ -227,6 +236,7 @@ export type BackendEvent =
   | {
       ContextSnapshot: {
         messages: ContextMessageInfo[];
+        blocks: ContextBlockInfo[];
         total_tokens: number;
         limit_tokens: number;
       };
