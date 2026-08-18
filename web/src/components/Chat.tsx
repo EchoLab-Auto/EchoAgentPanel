@@ -43,7 +43,8 @@ export function Chat({
           placeholder={connected ? "输入消息，Enter 发送（Shift+Enter 换行）" : "未连接到 Core，暂时无法发送"}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            const composing = e.nativeEvent.isComposing || e.key === 'Process' || e.keyCode === 229;
+            if (e.key === 'Enter' && !e.shiftKey && !composing) {
               e.preventDefault();
               submit();
             }
