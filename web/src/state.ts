@@ -16,7 +16,7 @@ import type {
 
 export const TRUNK_SESSION_ID = 'trunk';
 
-export type MsgRole = 'user' | 'backend' | 'tool' | 'system';
+export type MsgRole = 'user' | 'backend' | 'tool' | 'system' | 'branch';
 export type ToolStatus = 'running' | 'succeeded' | 'failed';
 
 export interface ToolMsg {
@@ -33,6 +33,12 @@ export interface DisplayMessage {
   time: number;
   reasoning?: string[];
   tool?: ToolMsg;
+  /** 临时回复分支的合并块（分支结束后插入主会话） */
+  branch?: {
+    branchId: string;
+    summary: string;
+    msgs: BranchMsg[];
+  };
   source?: {
     adapter_name: string;
     platform: string;
@@ -41,6 +47,28 @@ export interface DisplayMessage {
     channel: string;
     group_name: string | null;
   } | null;
+}
+
+/** 临时回复分支内部的单条活动记录 */
+export interface BranchMsg {
+  kind: 'reasoning' | 'tool' | 'content' | 'notice';
+  text: string;
+  time: number;
+  toolName?: string;
+  input?: string;
+  output?: string;
+  status?: ToolStatus;
+}
+
+/** 运行中的临时回复分支（侧边临时会话标签） */
+export interface BranchTab {
+  sessionId: string;
+  task: string;
+  target: string;
+  startedAtMs: number;
+  status: 'running' | 'completed' | 'cancelled' | 'failed';
+  finalContent: string | null;
+  msgs: BranchMsg[];
 }
 
 export type AgentPhase = 'thinking' | 'tool' | 'subagent' | 'completed' | 'failed';
@@ -150,6 +178,8 @@ export interface AppState {
   sudoPrompt: SudoPrompt | null;
   toasts: Toast[];
   context: ContextSnapshotData | null;
+  /** 运行中的临时回复分支（branch_id → tab） */
+  branchTabs: Record<string, BranchTab>;
   pendingBackground: Record<
     string,
     { kind: OrchKind; objective: string; branches: BranchActivity[] }
@@ -185,6 +215,7 @@ export function initialState(): AppState {
     sudoPrompt: null,
     toasts: [],
     context: null,
+    branchTabs: {},
     pendingBackground: {},
     pendingReasoning: {},
     completedReasoning: {},
@@ -646,10 +677,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'AgentReasoning': {
       const e = (event as { AgentReasoning: { session_id: string; branch_id: string; content: string } }).AgentReasoning;
       const content = e.content.trim();
-      if (content) {
-        const key = `${e.session_id}:${e.branch_id}`;
-        (state.pendingReasoning[key] ??= []).push(content);
+      if (!content) return state;
+      const tab = state.branchTabs[e.branch_id];
+      if (tab) {
+        tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
+        return state;
       }
+      const key = `${e.session_id}:${e.branch_id}`;
+      (state.pendingReasoning[key] ??= []).push(content);
       return state;
     }
     case 'SubagentStarted': {
@@ -669,6 +704,17 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'ReplyBranchStarted': {
       const e = (event as { ReplyBranchStarted: { session_id: string; branch_id: string; message_sequence: number; task: string; target: string; started_at_ms: number } }).ReplyBranchStarted;
       startReplyBranch(state, e.session_id, e.branch_id, e.message_sequence, e.task, e.target, e.started_at_ms);
+      // 单开一个侧边临时会话标签：分支运行期间的活动都路由到这里，
+      // 不进入主会话 trunk。
+      state.branchTabs[e.branch_id] = {
+        sessionId: e.session_id,
+        task: e.task,
+        target: e.target,
+        startedAtMs: e.started_at_ms,
+        status: 'running',
+        finalContent: null,
+        msgs: [],
+      };
       return state;
     }
     case 'ReplyBranchContent': {
@@ -676,6 +722,10 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const task = state.tasks.find((t) => t.id === e.branch_id && t.kind === 'reply');
       if (task && task.branches[0]) {
         task.branches[0].result = bounded(e.content, 4000);
+      }
+      const tab = state.branchTabs[e.branch_id];
+      if (tab) {
+        tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
       }
       return state;
     }
@@ -693,6 +743,22 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       completeReplyBranch(state, e.branch_id, e.success, e.cancelled, e.completed_at_ms);
       if (!state.tasks.some((t) => t.sessionId === e.session_id && t.kind === 'reply' && t.status === 'running')) {
         setPhase(state, e.session_id, 'completed', null);
+      }
+      // 分支结束：临时标签消失，主会话以折叠合并块形式出现。
+      const tab = state.branchTabs[e.branch_id];
+      if (tab) {
+        tab.status = e.cancelled ? 'cancelled' : e.success ? 'completed' : 'failed';
+        const finalText = tab.finalContent ?? tab.msgs.filter((m) => m.kind === 'content').map((m) => m.text).join('\n');
+        const summary = truncate(oneLine(finalText || tab.task || '临时分支'), 96);
+        const shortId = e.branch_id.length > 8 ? e.branch_id.slice(0, 8) : e.branch_id;
+        pushTo(state, 'branch', `分支 ${shortId} · ${summary}`, Math.floor(e.completed_at_ms / 1000), {
+          branch: {
+            branchId: e.branch_id,
+            summary,
+            msgs: [...tab.msgs],
+          },
+        });
+        delete state.branchTabs[e.branch_id];
       }
       return state;
     }
@@ -718,16 +784,42 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ToolCall': {
-      const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string } }).ToolCall;
+      const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; branch_id?: string } }).ToolCall;
       stageOrchestrationTool(state, e.session_id, e.tool_name, e.arguments);
       setPhase(state, e.session_id, e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
+      const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
+      if (tab) {
+        // 分支运行期间：工具调用只进临时分支标签，不进主会话。
+        tab.msgs.push({
+          kind: 'tool',
+          text: e.tool_name,
+          time: Math.floor(Date.now() / 1000),
+          toolName: e.tool_name,
+          input: summarizeArguments(e.arguments),
+          status: 'running',
+        });
+        return state;
+      }
       pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
         tool: { name: e.tool_name, input: summarizeArguments(e.arguments), output: null, status: 'running' },
       });
       return state;
     }
     case 'ToolResult': {
-      const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string } }).ToolResult;
+      const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; branch_id?: string } }).ToolResult;
+      const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
+      if (tab) {
+        const failed = e.result.trimStart().startsWith('error:');
+        for (let i = tab.msgs.length - 1; i >= 0; i--) {
+          const msg = tab.msgs[i];
+          if (msg.kind === 'tool' && msg.toolName === e.tool_name && msg.status === 'running') {
+            msg.output = bounded(e.result, 4000);
+            msg.status = failed ? 'failed' : 'succeeded';
+            break;
+          }
+        }
+        return state;
+      }
       finishToolMessage(state, e.tool_name, e.result);
       const act = activity(state, e.session_id);
       if (e.tool_name !== 'run_subagent') act.toolsCompleted += 1;
@@ -758,6 +850,15 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'AgentOutput': {
       const e = (event as { AgentOutput: { session_id: string; content: string; branch_id: string | null } }).AgentOutput;
+      if (e.branch_id) {
+        const tab = state.branchTabs[e.branch_id];
+        if (tab) {
+          // 分支输出只进临时标签；由 ReplyBranchCompleted 负责在结束后
+          // 以折叠合并块形式写入主会话。
+          tab.finalContent = e.content;
+          tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
+        }
+      }
       const act = state.activities[e.session_id];
       if (act && act.phase !== 'completed' && act.phase !== 'failed') {
         act.phase = 'completed';

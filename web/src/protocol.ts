@@ -228,8 +228,8 @@ export type BackendEvent =
         integrated_at_ms: number;
       };
     }
-  | { ToolCall: { session_id: string; tool_name: string; arguments: string } }
-  | { ToolResult: { session_id: string; tool_name: string; result: string } }
+  | { ToolCall: { session_id: string; tool_name: string; arguments: string; branch_id?: string } }
+  | { ToolResult: { session_id: string; tool_name: string; result: string; branch_id?: string } }
   | { ChecklistUpdated: { session_id: string; state: ChecklistState } }
   | { AgentOutput: { session_id: string; content: string; branch_id: string | null } }
   | { AgentCompleted: { session_id: string } }

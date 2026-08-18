@@ -11,8 +11,14 @@ import { Toasts } from './components/Toasts';
 import { ContextModal } from './components/ContextModal';
 import { LogModal } from './components/LogModal';
 import { SystemPromptModal } from './components/SystemPromptModal';
+import { BranchModal } from './components/BranchModal';
 
 type View = 'chat' | 'qq' | 'tasks' | 'checklist';
+
+function truncateTask(task: string): string {
+  const oneLine = task.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 24 ? oneLine.slice(0, 24) + '…' : oneLine;
+}
 
 export function App() {
   const { state, connected, sendCommand, sendSudoPassword, dismissToast } = useAgentConnection();
@@ -41,6 +47,7 @@ export function App() {
   const [showContext, setShowContext] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       const saved = localStorage.getItem('echo-panel-theme');
@@ -66,6 +73,7 @@ export function App() {
         setShowContext(false);
         setShowLogs(false);
         setShowSystemPrompt(false);
+        setActiveBranchId(null);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -149,6 +157,28 @@ export function App() {
               </div>
             ))}
           </div>
+          <div className="sidebar-section-title">
+            临时分支
+            {Object.keys(state.branchTabs).length > 0 && (
+              <span className="branch-tab-count">{Object.keys(state.branchTabs).length}</span>
+            )}
+          </div>
+          <div className="branch-tab-list">
+            {Object.keys(state.branchTabs).length === 0 && (
+              <div className="muted">（无运行中的分支）</div>
+            )}
+            {Object.entries(state.branchTabs).map(([branchId, tab]) => (
+              <div
+                key={branchId}
+                className={`branch-tab ${activeBranchId === branchId ? 'active' : ''}`}
+                onClick={() => setActiveBranchId(branchId)}
+                title="点击查看分支执行过程"
+              >
+                <span className="branch-tab-spinner" />
+                <span className="branch-tab-task">{truncateTask(tab.task)}</span>
+              </div>
+            ))}
+          </div>
           <div className="sidebar-section-title">会话</div>
           <div className="session-list">
             {state.sessions.length === 0 && <div className="muted">（暂无会话）</div>}
@@ -213,6 +243,13 @@ export function App() {
             sendCommand({ SetSystemPrompt: { prompt: text } });
           }}
           onClose={() => setShowSystemPrompt(false)}
+        />
+      )}
+      {activeBranchId && (
+        <BranchModal
+          tab={state.branchTabs[activeBranchId] ?? null}
+          branchId={activeBranchId}
+          onClose={() => setActiveBranchId(null)}
         />
       )}
       {state.sudoPrompt && (

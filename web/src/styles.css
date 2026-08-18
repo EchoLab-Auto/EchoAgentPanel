@@ -633,3 +633,89 @@ hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
   margin-left: auto;
 }
 .task-cancel:hover { border-color: var(--warn, #d9a13b); }
+
+/* ── 临时分支标签与查看器 ── */
+.branch-tab-count {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9px;
+  padding: 0 6px;
+  font-size: 10px;
+  margin-left: 6px;
+}
+.branch-tab-list { padding: 4px 0; }
+.branch-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  margin: 3px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.branch-tab:hover { border-color: var(--accent); }
+.branch-tab.active { border-color: var(--accent); background: var(--accent-soft, rgba(0,0,0,.05)); }
+.branch-tab-spinner {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--warn, #d9a13b);
+  animation: branch-pulse 1s ease-in-out infinite;
+}
+@keyframes branch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+.branch-tab-task {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-modal { width: 640px; max-width: 94vw; }
+.branch-status {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+  background: var(--border);
+  color: var(--muted);
+}
+.branch-status.running { background: var(--warn, #d9a13b); color: #fff; }
+.branch-status.completed { background: var(--ok, #2ea46e); color: #fff; }
+.branch-status.failed { background: #e5484d; color: #fff; }
+.branch-status.cancelled { background: var(--muted); color: #fff; }
+.branch-meta {
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.branch-viewer {
+  max-height: 55vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.branch-msg {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.branch-msg-head { display: flex; align-items: center; gap: 8px; }
+.branch-msg-tool { border-color: var(--warn, #d9a13b); }
+.branch-msg-reasoning { border-color: var(--accent); }
+.branch-msg-content { border-color: var(--ok, #2ea46e); }
+.branch-running-hint { font-size: 12px; font-style: italic; }
+.branch-detail {
+  margin: 6px 0 2px;
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

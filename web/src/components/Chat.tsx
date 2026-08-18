@@ -91,6 +91,8 @@ function CopyButton({ text }: { text: string }) {
 function MessageView({ message }: { message: DisplayMessage }) {
   // 工具调用详情（参数 + 输出）默认折叠
   const [showToolDetails, setShowToolDetails] = useState(false);
+  // 分支合并块默认折叠
+  const [showBranchDetail, setShowBranchDetail] = useState(false);
   const roleClass = `msg msg-${message.role}`;
   const time = new Date(message.time * 1000).toLocaleTimeString('zh-CN', { hour12: false });
 
@@ -123,6 +125,53 @@ function MessageView({ message }: { message: DisplayMessage }) {
         </div>
         {showToolDetails && tool?.input && <pre className="msg-input">{tool.input}</pre>}
         {showToolDetails && tool?.output && <pre className="msg-output">{tool.output}</pre>}
+      </div>
+    );
+  }
+
+  if (message.role === 'branch' && message.branch) {
+    const branch = message.branch;
+    const shortId = branch.branchId.length > 8 ? branch.branchId.slice(0, 8) : branch.branchId;
+    const toolCount = branch.msgs.filter((m) => m.kind === 'tool').length;
+    const reasoningCount = branch.msgs.filter((m) => m.kind === 'reasoning').length;
+    return (
+      <div className={roleClass}>
+        <div className="msg-head">
+          <span className="msg-role">分支合并</span>
+          <span className="msg-name">{shortId}</span>
+          <span className="msg-time">{time}</span>
+          <CopyButton text={JSON.stringify(branch.msgs, null, 2)} />
+          <button
+            className="msg-collapse"
+            onClick={() => setShowBranchDetail(!showBranchDetail)}
+            title={showBranchDetail ? '折叠分支详情' : '展开分支详情'}
+          >
+            {showBranchDetail ? '▾ 收起' : `▸ ${toolCount} 工具 · ${reasoningCount} 推理`}
+          </button>
+        </div>
+        <div className="msg-content">{branch.summary}</div>
+        {showBranchDetail && (
+          <div className="branch-detail">
+            {branch.msgs.map((m, index) => (
+              <div key={index} className={`branch-msg branch-msg-${m.kind}`}>
+                {m.kind === 'tool' && (
+                  <>
+                    <div className="branch-msg-head">
+                      <span className="msg-name">工具 · {m.toolName}</span>
+                      {m.status && <span className={`tool-status ${m.status}`}>{m.status === 'running' ? '运行中' : m.status === 'succeeded' ? '成功' : '失败'}</span>}
+                    </div>
+                    {m.input && <pre className="msg-input">{m.input}</pre>}
+                    {m.output && <pre className="msg-output">{m.output}</pre>}
+                  </>
+                )}
+                {m.kind === 'reasoning' && <details className="reasoning"><summary>推理</summary><p>{m.text}</p></details>}
+                {m.kind === 'content' && <div className="msg-content">{m.text}</div>}
+                {m.kind === 'notice' && <div className="muted">{m.text}</div>}
+              </div>
+            ))}
+            {branch.msgs.length === 0 && <div className="muted">（分支无详细活动记录）</div>}
+          </div>
+        )}
       </div>
     );
   }
