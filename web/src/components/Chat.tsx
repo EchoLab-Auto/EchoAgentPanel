@@ -89,12 +89,14 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function MessageView({ message }: { message: DisplayMessage }) {
+  const [showToolInput, setShowToolInput] = useState(false);
   const [showToolOutput, setShowToolOutput] = useState(true);
   const roleClass = `msg msg-${message.role}`;
   const time = new Date(message.time * 1000).toLocaleTimeString('zh-CN', { hour12: false });
 
   if (message.role === 'tool') {
     const tool = message.tool;
+    const input = tool?.input ?? '';
     const output = tool?.output ?? '';
     return (
       <div className={roleClass}>
@@ -107,6 +109,15 @@ function MessageView({ message }: { message: DisplayMessage }) {
               {tool.status === 'running' ? '运行中' : tool.status === 'succeeded' ? '成功' : '失败'}
             </span>
           )}
+          {input && (
+            <button
+              className="msg-collapse"
+              onClick={() => setShowToolInput(!showToolInput)}
+              title={showToolInput ? '折叠调用参数' : '展开调用参数'}
+            >
+              {showToolInput ? '参数 ▾' : `参数 ▸ ${input.length} 字符`}
+            </button>
+          )}
           {output && <CopyButton text={output} />}
           {output && (
             <button
@@ -114,11 +125,11 @@ function MessageView({ message }: { message: DisplayMessage }) {
               onClick={() => setShowToolOutput(!showToolOutput)}
               title={showToolOutput ? '折叠输出' : '展开输出'}
             >
-              {showToolOutput ? '▾' : `▸ ${output.length} 字符`}
+              {showToolOutput ? '输出 ▾' : `输出 ▸ ${output.length} 字符`}
             </button>
           )}
         </div>
-        {tool?.input && <div className="msg-input">{tool.input}</div>}
+        {tool?.input && showToolInput && <pre className="msg-input">{tool.input}</pre>}
         {tool?.output && showToolOutput && <pre className="msg-output">{tool.output}</pre>}
       </div>
     );
