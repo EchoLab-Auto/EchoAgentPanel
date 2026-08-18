@@ -335,3 +335,45 @@ button.primary:hover { filter: brightness(1.1); }
 
 .muted { color: var(--muted); }
 hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+/* ── QQ login ── */
+.qq-login { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.qq-login-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.qq-login-head h3 { margin: 0; }
+.qq-login-status { margin: 6px 0; }
+.qq-login-online { color: var(--ok); }
+.qq-login-offline { color: var(--warn); }
+.qq-login-qr { margin: 10px 0; }
+.qr-img { width: 220px; height: 220px; image-rendering: pixelated; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.qq-login-error { color: var(--err); margin: 6px 0; }
+
+/* ── log viewer ── */
+.log-modal { width: min(920px, 90vw); max-height: 84vh; display: flex; flex-direction: column; }
+.log-tabs { display: flex; gap: 6px; margin-left: 12px; }
+.log-body { overflow: hidden; display: flex; min-height: 0; }
+.log-viewer {
+  flex: 1;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--bg);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── system prompt editor ── */
+.system-prompt-editor {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  font-family: inherit;
+}

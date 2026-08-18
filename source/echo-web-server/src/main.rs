@@ -16,7 +16,9 @@ use axum::routing::get;
 use axum::Router;
 use clap::Parser;
 use echo_web_server::config::PanelConfig;
+use echo_web_server::log;
 use echo_web_server::proxy;
+use echo_web_server::qq;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -64,10 +66,15 @@ async fn main() -> Result<()> {
     let state = proxy::AppState {
         core_url: Arc::from(core_url.as_str()),
         static_dir: Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
+        qq: cfg.qq.clone(),
     };
 
     let app = Router::new()
         .route("/ws", get(proxy::ws_handler))
+        .route("/api/qq/login-status", get(qq::login_status))
+        .route("/api/qq/qrcode", get(qq::qrcode))
+        .route("/api/logs/panel", get(log::panel_logs))
+        .route("/api/logs/core", get(log::core_logs))
         .fallback(static_handler)
         .with_state(state);
 

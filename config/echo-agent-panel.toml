@@ -10,11 +10,19 @@ max_file_size_mb = 20
 max_files = 5
 
 [server]
-# HTTP/WS 监听地址。仅本机访问保持 127.0.0.1；局域网访问改为 0.0.0.0:8080。
-bind_address = "127.0.0.1:8080"
+# HTTP/WS 监听地址。默认 0.0.0.0 允许局域网/外部访问；仅本机访问改为 127.0.0.1:8080。
+bind_address = "0.0.0.0:8080"
 # 构建后的前端静态目录（默认相对当前工作目录；安装器会写入绝对路径）。
 static_dir = "web/dist"
 
 [core]
 # EchoAgentCore management WebSocket 地址（与 Core 的 [core] management_address 对应）。
 connect_url = "ws://127.0.0.1:3132"
+
+[qq]
+# NapCat Docker 容器名，Panel 通过 docker exec 读取登录二维码。
+napcat_container = "napcat"
+# OneBot HTTP API 地址，用于查询 QQ 登录状态。
+napcat_onebot_url = "http://localhost:3000"
+# NapCat WebUI 地址，用于展示扫码登录链接。
+napcat_webui_url = "http://localhost:6099"

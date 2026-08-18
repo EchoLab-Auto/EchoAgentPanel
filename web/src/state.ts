@@ -133,6 +133,7 @@ export interface AppState {
   adapters: AdapterStatus[];
   model: string;
   api: ApiConfig | null;
+  systemPrompt: string;
   qqFilter: {
     allowlist_users: number[];
     allowlist_groups: number[];
@@ -140,6 +141,7 @@ export interface AppState {
     denylist_groups: number[];
   };
   qqGateMode: GateMode;
+  qqOwner: number;
   qqGroups: Array<[number, string]>;
   qqFriends: Array<[number, string]>;
   checklists: ChecklistEntry[];
@@ -166,6 +168,7 @@ export function initialState(): AppState {
     adapters: [],
     model: '',
     api: null,
+    systemPrompt: '',
     qqFilter: {
       allowlist_users: [],
       allowlist_groups: [],
@@ -173,6 +176,7 @@ export function initialState(): AppState {
       denylist_groups: [],
     },
     qqGateMode: 'none',
+    qqOwner: 0,
     qqGroups: [],
     qqFriends: [],
     checklists: [],
@@ -589,7 +593,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         name: e.adapter_name,
         display_name: e.adapter_name,
         connected: e.connected,
-        running: e.connected,
+        // `AdapterStateChanged` only fires while the adapter is running; a
+        // disconnected client still means the adapter process is up.
+        running: true,
         self_id: e.self_id,
         bind_address: '',
         started_at: null,
@@ -789,6 +795,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       }
       return state;
     }
+    case 'SystemPrompt': {
+      const e = (event as { SystemPrompt: { text: string } }).SystemPrompt;
+      state.systemPrompt = e.text;
+      return state;
+    }
     case 'QqFilterConfig': {
       const e = (event as { QqFilterConfig: AppState['qqFilter'] }).QqFilterConfig;
       state.qqFilter = e;
@@ -797,6 +808,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'QqGateMode': {
       const e = (event as { QqGateMode: { mode: GateMode } }).QqGateMode;
       state.qqGateMode = e.mode;
+      return state;
+    }
+    case 'QqOwner': {
+      const e = (event as { QqOwner: { owner_qq: number } }).QqOwner;
+      state.qqOwner = e.owner_qq;
       return state;
     }
     case 'GroupList': {
@@ -949,4 +965,9 @@ export function pushToast(state: AppState, text: string, kind: Toast['kind']) {
   if (state.toasts.length > 8) {
     state.toasts.splice(0, state.toasts.length - 8);
   }
+}
+
+export function dismissToast(state: AppState, id: number) {
+  const index = state.toasts.findIndex((toast) => toast.id === id);
+  if (index >= 0) state.toasts.splice(index, 1);
 }

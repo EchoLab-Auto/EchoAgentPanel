@@ -15,7 +15,6 @@ export function SettingsModal({
   const [model, setModel] = useState(api?.model ?? '');
   const [baseUrl, setBaseUrl] = useState(api?.base_url ?? '');
   const [apiKey, setApiKey] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState(api?.system_prompt ?? '');
   const [thinking, setThinking] = useState(api?.thinking ?? 'enabled');
   const [reasoning, setReasoning] = useState(api?.reasoning_effort ?? 'max');
   const [profileName, setProfileName] = useState('');
@@ -25,7 +24,6 @@ export function SettingsModal({
       setProvider(api.provider);
       setModel(api.model);
       setBaseUrl(api.base_url);
-      setSystemPrompt(api.system_prompt);
       setThinking(api.thinking);
       setReasoning(api.reasoning_effort);
     }
@@ -84,14 +82,7 @@ export function SettingsModal({
               </select>
             </div>
           </div>
-          <label>System Prompt</label>
-          <textarea
-            rows={4}
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-          />
           <div className="form-actions">
-            <button onClick={() => sendCommand({ SetSystemPrompt: { prompt: systemPrompt } })}>保存提示词</button>
             <button className="primary" onClick={() => saveTopLevel(false)}>保存为默认</button>
           </div>
 

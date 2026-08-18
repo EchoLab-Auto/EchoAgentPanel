@@ -1,17 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppState, DisplayMessage } from '../state';
 
-export function Chat({ state, onSend }: { state: AppState; onSend: (content: string) => void }) {
+export function Chat({
+  state,
+  connected,
+  onSend,
+}: {
+  state: AppState;
+  connected: boolean;
+  onSend: (content: string) => void;
+}) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const lastMessage = state.trunk[state.trunk.length - 1];
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state.trunk.length]);
+    // Re-scroll when a new message arrives or the last tool output updates.
+  }, [state.trunk.length, lastMessage?.tool?.output]);
 
   const submit = () => {
     const content = input.trim();
-    if (!content) return;
+    if (!connected || !content) return;
     onSend(content);
     setInput('');
   };
@@ -29,7 +40,7 @@ export function Chat({ state, onSend }: { state: AppState; onSend: (content: str
         <textarea
           className="chat-input"
           value={input}
-          placeholder="输入消息，Enter 发送（Shift+Enter 换行）"
+          placeholder={connected ? "输入消息，Enter 发送（Shift+Enter 换行）" : "未连接到 Core，暂时无法发送"}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -38,7 +49,7 @@ export function Chat({ state, onSend }: { state: AppState; onSend: (content: str
             }
           }}
         />
-        <button className="send-button" onClick={submit} disabled={!input.trim()}>
+        <button className="send-button" onClick={submit} disabled={!connected || !input.trim()}>
           发送
         </button>
       </div>

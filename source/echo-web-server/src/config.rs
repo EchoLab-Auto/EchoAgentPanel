@@ -36,7 +36,7 @@ impl Default for LoggingSection {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ServerSection {
-    /// HTTP/WS 监听地址（默认 `127.0.0.1:8080`）。
+    /// HTTP/WS 监听地址（默认 `0.0.0.0:8080`，允许局域网/外部访问）。
     pub bind_address: String,
     /// 前端静态文件目录（构建后的 `web/dist`）。
     pub static_dir: String,
@@ -45,7 +45,7 @@ pub struct ServerSection {
 impl Default for ServerSection {
     fn default() -> Self {
         Self {
-            bind_address: "127.0.0.1:8080".to_string(),
+            bind_address: "0.0.0.0:8080".to_string(),
             static_dir: "web/dist".to_string(),
         }
     }
@@ -66,13 +66,37 @@ impl Default for CoreSection {
     }
 }
 
-/// Panel 侧配置：日志、HTTP 服务与 Core 连接。
+/// QQ / NapCat 登录辅助配置：Panel 后端直接读取本机 OneBot API 和
+/// NapCat 容器的二维码文件，用于 Web 端扫码登录模块。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct QqSection {
+    /// NapCat Docker 容器名，用于 `docker exec ... cat qrcode.png`。
+    pub napcat_container: String,
+    /// OneBot HTTP API 地址，用于查询 `get_login_info`。
+    pub napcat_onebot_url: String,
+    /// NapCat WebUI 地址，用于展示扫码登录链接。
+    pub napcat_webui_url: String,
+}
+
+impl Default for QqSection {
+    fn default() -> Self {
+        Self {
+            napcat_container: "napcat".to_string(),
+            napcat_onebot_url: "http://localhost:3000".to_string(),
+            napcat_webui_url: "http://localhost:6099".to_string(),
+        }
+    }
+}
+
+/// Panel 侧配置：日志、HTTP 服务、Core 连接与 QQ 登录辅助。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct PanelConfig {
     pub logging: LoggingSection,
     pub server: ServerSection,
     pub core: CoreSection,
+    pub qq: QqSection,
 }
 
 impl PanelConfig {
@@ -129,6 +153,12 @@ connect_url = "ws://10.0.0.5:3132"
         assert_eq!(config.server.static_dir, "web/dist");
         assert_eq!(config.core.connect_url, "ws://10.0.0.5:3132");
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn default_bind_allows_external_access() {
+        let config = PanelConfig::default();
+        assert_eq!(config.server.bind_address, "0.0.0.0:8080");
     }
 
     #[test]

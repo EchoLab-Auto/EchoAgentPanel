@@ -1,8 +1,8 @@
 const COMMANDS: Array<[string, string, string]> = [
-  ['/api key <key>', '设置 API Key（仅内存，重启后需重新设置直到持久化修复生效）', 'API'],
+  ['/api key <key>', '设置 API Key（保存后持久化到 core.toml）', 'API'],
   ['/api model <model>', '切换模型（持久化）', 'API'],
   ['/api provider <provider>', '切换 provider（持久化）', 'API'],
-  ['/api base_url <url>', '设置 Base URL', 'API'],
+  ['/api base_url <url>', '设置 Base URL（持久化）', 'API'],
   ['/api profile save <name>', '保存当前配置为新 profile', 'API'],
   ['/api profile switch <name>', '切换到指定 profile', 'API'],
   ['/api profile delete <name>', '删除 profile', 'API'],

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAgentConnection } from './ws';
 import { Chat } from './components/Chat';
 import { SettingsModal } from './components/SettingsModal';
@@ -9,16 +9,27 @@ import { ChecklistPanel } from './components/ChecklistPanel';
 import { HelpModal } from './components/HelpModal';
 import { Toasts } from './components/Toasts';
 import { ContextModal } from './components/ContextModal';
+import { LogModal } from './components/LogModal';
+import { SystemPromptModal } from './components/SystemPromptModal';
 
 type View = 'chat' | 'qq' | 'tasks' | 'checklist';
 
 export function App() {
-  const { state, connected, sendCommand, sendSudoPassword } = useAgentConnection();
+  const { state, connected, sendCommand, sendSudoPassword, dismissToast } = useAgentConnection();
   const [view, setView] = useState<View>('chat');
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showContext, setShowContext] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [showLogs, setShowLogs] = useState(false);
+  const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      const saved = localStorage.getItem('echo-panel-theme');
+      return saved === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
 
   const send = (content: string) => {
     sendCommand({ SendMessage: { session_id: 'local:tui::local_user', content } });
@@ -27,6 +38,20 @@ export function App() {
   const busyCount = Object.values(state.activities).filter((a) =>
     ['thinking', 'tool', 'subagent'].includes(a.phase),
   ).length;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowSettings(false);
+        setShowHelp(false);
+        setShowContext(false);
+        setShowLogs(false);
+        setShowSystemPrompt(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const navButton = (target: View, label: string) => (
     <button
@@ -55,8 +80,29 @@ export function App() {
           {navButton('tasks', `任务${state.tasks.filter((t) => t.status === 'running').length ? `(${state.tasks.filter((t) => t.status === 'running').length})` : ''}`)}
           {navButton('checklist', `清单${state.checklists.length ? `(${state.checklists.length})` : ''}`)}
           <button className="nav-button" onClick={() => setShowContext(true)}>上下文</button>
+          <button
+            className="nav-button"
+            onClick={() => {
+              sendCommand('RequestSystemPrompt');
+              setShowSystemPrompt(true);
+            }}
+          >
+            系统提示词
+          </button>
+          <button className="nav-button" onClick={() => setShowLogs(true)}>日志</button>
           <button className="nav-button" onClick={() => setShowSettings(true)}>设置</button>
-          <button className="nav-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+          <button
+            className="nav-button"
+            onClick={() => {
+              const next = theme === 'dark' ? 'light' : 'dark';
+              setTheme(next);
+              try {
+                localStorage.setItem('echo-panel-theme', next);
+              } catch {
+                // ignore storage errors (private mode)
+              }
+            }}
+          >
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
           <button className="nav-button" onClick={() => setShowHelp(true)}>帮助</button>
@@ -75,11 +121,11 @@ export function App() {
                 {adapter.self_id && <span className="adapter-id">{adapter.self_id}</span>}
                 <span className="adapter-actions">
                   {adapter.running ? (
-                    <button onClick={() => sendCommand({ StopAdapter: { name: adapter.name } })}>停</button>
+                    <button disabled={!connected} onClick={() => sendCommand({ StopAdapter: { name: adapter.name } })}>停</button>
                   ) : (
-                    <button onClick={() => sendCommand({ StartAdapter: { name: adapter.name } })}>启</button>
+                    <button disabled={!connected} onClick={() => sendCommand({ StartAdapter: { name: adapter.name } })}>启</button>
                   )}
-                  <button onClick={() => sendCommand({ RestartAdapter: { name: adapter.name } })}>重启</button>
+                  <button disabled={!connected} onClick={() => sendCommand({ RestartAdapter: { name: adapter.name } })}>重启</button>
                 </span>
               </div>
             ))}
@@ -102,8 +148,8 @@ export function App() {
         </aside>
 
         <main className="main">
-          {view === 'chat' && <Chat state={state} onSend={send} />}
-          {view === 'qq' && <QqPanel state={state} sendCommand={sendCommand} />}
+          {view === 'chat' && <Chat state={state} connected={connected} onSend={send} />}
+          {view === 'qq' && <QqPanel state={state} connected={connected} sendCommand={sendCommand} />}
           {view === 'tasks' && <TasksPanel state={state} />}
           {view === 'checklist' && <ChecklistPanel state={state} />}
         </main>
@@ -120,10 +166,20 @@ export function App() {
       {showContext && (
         <ContextModal snapshot={state.context} onClose={() => setShowContext(false)} />
       )}
+      {showLogs && <LogModal onClose={() => setShowLogs(false)} />}
+      {showSystemPrompt && (
+        <SystemPromptModal
+          initialText={state.systemPrompt}
+          onSave={(text) => {
+            sendCommand({ SetSystemPrompt: { prompt: text } });
+          }}
+          onClose={() => setShowSystemPrompt(false)}
+        />
+      )}
       {state.sudoPrompt && (
         <SudoModal prompt={state.sudoPrompt} onSubmit={sendSudoPassword} />
       )}
-      <Toasts toasts={state.toasts} />
+      <Toasts toasts={state.toasts} onDismiss={dismissToast} />
     </div>
   );
 }

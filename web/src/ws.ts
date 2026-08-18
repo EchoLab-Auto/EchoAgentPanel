@@ -1,7 +1,7 @@
 //! WebSocket 连接 hook：连接 `/ws`，把事件流交给 reducer，暴露命令发送。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { initialState, type AppState, reduce, pushToast } from './state';
+import { dismissToast as removeToast, initialState, type AppState, reduce, pushToast } from './state';
 import { parseEvent, serializeCommand, serializeSudoPassword, type BackendCommand, type SudoPasswordSubmit } from './protocol';
 
 export interface AgentConnection {
@@ -9,6 +9,7 @@ export interface AgentConnection {
   connected: boolean;
   sendCommand: (command: BackendCommand) => void;
   sendSudoPassword: (submit: SudoPasswordSubmit) => void;
+  dismissToast: (id: number) => void;
 }
 
 export function useAgentConnection(): AgentConnection {
@@ -81,7 +82,13 @@ export function useAgentConnection(): AgentConnection {
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(serializeCommand(command));
+      return;
     }
+    setState((previous) => {
+      const next = { ...previous, trunk: [...previous.trunk] };
+      pushToast(next, '未连接到 Core，命令未发送', 'error');
+      return next;
+    });
   }, []);
 
   const sendSudoPassword = useCallback((submit: SudoPasswordSubmit) => {
@@ -91,5 +98,13 @@ export function useAgentConnection(): AgentConnection {
     }
   }, []);
 
-  return { state, connected, sendCommand, sendSudoPassword };
+  const dismissToast = useCallback((id: number) => {
+    setState((previous) => {
+      const next = { ...previous, trunk: [...previous.trunk] };
+      removeToast(next, id);
+      return next;
+    });
+  }, []);
+
+  return { state, connected, sendCommand, sendSudoPassword, dismissToast };
 }

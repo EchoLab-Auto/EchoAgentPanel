@@ -13,6 +13,7 @@ export function SudoModal({
 
   const submit = (password: string | null) => {
     onSubmit({ request_id: prompt.request_id, password });
+    setInput('');
   };
 
   return (

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { AppState, OrchActivity } from '../state';
 
 const KIND_LABEL: Record<string, string> = {
@@ -25,6 +26,17 @@ const BRANCH_LABEL: Record<string, string> = {
 };
 
 export function TasksPanel({ state }: { state: AppState }) {
+  const [, setTick] = useState(0);
+  const hasActiveTask = state.tasks.some(
+    (task) => task.status === 'running' || task.status === 'awaiting',
+  );
+
+  useEffect(() => {
+    if (!hasActiveTask) return;
+    const timer = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveTask]);
+
   if (state.tasks.length === 0) {
     return <div className="panel muted">（暂无后台任务 / Subagent / 临时回复分支）</div>;
   }

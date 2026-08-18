@@ -38,7 +38,7 @@ changes deploy directly.
 
 ```bash
 echo-agent-panel
-# open http://127.0.0.1:8080 (address from [server] bind_address)
+# open http://<your-server-ip>:8080 (address from [server] bind_address)
 ```
 
 The EchoAgentCore service must be running and reachable at `[core]
@@ -63,7 +63,7 @@ EchoAgentCore's `scripts/uninstall.sh`.
 
 ```toml
 [server]
-bind_address = "127.0.0.1:8080"
+bind_address = "0.0.0.0:8080"
 
 [core]
 connect_url = "ws://127.0.0.1:3132"

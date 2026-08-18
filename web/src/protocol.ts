@@ -104,6 +104,7 @@ export type BackendCommand =
   | { SwitchModel: { model: string } }
   | { SwitchProvider: { provider: string } }
   | { SetSystemPrompt: { prompt: string } }
+  | 'RequestSystemPrompt'
   | {
       UpdateApiConfig: {
         name: string;
@@ -133,6 +134,7 @@ export type BackendCommand =
   | { UpdateQqDenylist: { user_ids: number[]; group_ids: number[] } }
   | 'RequestQqFilterConfig'
   | { SetQqGateMode: { mode: GateMode } }
+  | 'RequestQqOwner'
   | { SetQqOwner: { owner_qq: number } };
 
 // ── BackendEvent（外部标签枚举）────────────────────────────────────────────
@@ -244,6 +246,7 @@ export type BackendEvent =
       };
     }
   | { ApiProfilesUpdated: { active_api: string; profiles: ApiProfileInfo[] } }
+  | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
   | { AdapterList: { adapters: AdapterStatus[] } }
   | { GroupList: { groups: GroupInfo[] } }
@@ -256,6 +259,7 @@ export type BackendEvent =
       };
     }
   | { QqGateMode: { mode: GateMode } }
+  | { QqOwner: { owner_qq: number } }
   | { FriendList: { friends: FriendInfo[] } }
   | { SudoRequest: { request_id: number; command: string; session_id: string } }
   | { SudoResolved: { request_id: number; accepted: boolean; message: string } };

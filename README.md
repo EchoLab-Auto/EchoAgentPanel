@@ -26,7 +26,7 @@
 - 工具调用进度、后台任务 / Subagent / 临时回复分支面板、清单面板
 - API 设置（provider / model / base_url / api_key / profiles / system prompt）
 - 🔐 sudo 授权弹窗（遮罩密码，Enter 授权 / Esc 拒绝，专用通道提交）
-- QQ 管理（门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
+- QQ 管理（扫码登录、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
 - 上下文快照、帮助与斜杠命令、深浅主题
 
 ## 快速开始（开发）
@@ -40,7 +40,7 @@ cd EchoAgentPanel
 cargo run -p echo-web-server -- --config config/echo-agent-panel.toml --static-dir web/dist
 # 或前端热更新开发：cd web && npm run dev（/ws 已代理到 :8080）
 
-# 3. 打开 http://127.0.0.1:8080
+# 3. 打开 http://<你的服务器IP>:8080（本机可用 http://localhost:8080）
 ```
 
 ## 安装（Linux，用户级）
@@ -55,7 +55,7 @@ cargo run -p echo-web-server -- --config config/echo-agent-panel.toml --static-d
 
 ```bash
 echo-agent-panel
-# 打开 http://127.0.0.1:8080（地址取决于 [server] bind_address）
+# 打开 http://<你的服务器IP>:8080（地址取决于 [server] bind_address）
 ```
 
 卸载：`./scripts/uninstall.sh`（保留 `panel.toml`；`--purge` 连配置一起删）。
@@ -64,9 +64,10 @@ echo-agent-panel
 
 见 [config/echo-agent-panel.toml](config/echo-agent-panel.toml) 内联注释：
 
-- `[server] bind_address`：HTTP/WS 监听地址（默认 `127.0.0.1:8080`）
+- `[server] bind_address`：HTTP/WS 监听地址（默认 `0.0.0.0:8080`，允许外部访问）
 - `[server] static_dir`：前端静态目录（安装器注入绝对路径，一般无需改）
 - `[core] connect_url`：Core management WS 地址（默认 `ws://127.0.0.1:3132`）
+- `[qq]`：NapCat 容器名 / OneBot HTTP / WebUI 地址，用于 Panel 扫码登录模块
 
 ## 文档
 

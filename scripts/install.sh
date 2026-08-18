@@ -164,5 +164,5 @@ Installation complete.
   Source: $SOURCE_DIR
 
 Start it with: echo-agent-panel
-Then open: http://127.0.0.1:8080  (地址取决于 [server] bind_address)
+Then open: http://<你的服务器IP>:8080  (地址取决于 [server] bind_address)
 EOF

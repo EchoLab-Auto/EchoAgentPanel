@@ -13,6 +13,8 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
 use tracing::warn;
 
+use crate::config::QqSection;
+
 /// Shared server state handed to handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -20,6 +22,8 @@ pub struct AppState {
     pub core_url: Arc<str>,
     /// Static frontend directory (built `web/dist`).
     pub static_dir: Arc<str>,
+    /// NapCat/QQ login helper settings.
+    pub qq: QqSection,
 }
 
 /// `GET /ws` — upgrade the browser connection and bridge it to Core.
