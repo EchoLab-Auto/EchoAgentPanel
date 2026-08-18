@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import type { SessionInfo } from './protocol';
+import type { AppState } from './state';
 import { useAgentConnection } from './ws';
 import { Chat } from './components/Chat';
 import { SettingsModal } from './components/SettingsModal';
@@ -14,6 +16,107 @@ import { SystemPromptModal } from './components/SystemPromptModal';
 import { BranchModal } from './components/BranchModal';
 
 type View = 'chat' | 'qq' | 'tasks' | 'checklist';
+
+function sessionTag(session: SessionInfo): { group: string; label: string; tag: string } {
+  if (session.id === 'global') {
+    return { group: 'global', label: '全部消息', tag: '全局' };
+  }
+  const parts = session.id.split(':');
+  const platform = parts[0] ?? '';
+  const scope = parts[1] ?? '';
+  if (platform === 'local') {
+    return { group: 'local', label: session.nickname || session.id, tag: 'Local' };
+  }
+  if (platform === 'qq') {
+    if (scope === 'group') {
+      return {
+        group: 'qq-group',
+        label: session.group_name || session.id,
+        tag: '群',
+      };
+    }
+    return { group: 'qq-dm', label: session.nickname || session.id, tag: '私聊' };
+  }
+  return { group: 'other', label: session.nickname || session.id, tag: platform };
+}
+
+const SESSION_GROUP_LABEL: Record<string, string> = {
+  global: '全局',
+  local: 'Local',
+  'qq-dm': 'QQ 私聊',
+  'qq-group': 'QQ 群',
+  other: '其他',
+};
+
+function SessionGroups({
+  sessions,
+  activities,
+  activeSessionId,
+  onSelect,
+}: {
+  sessions: SessionInfo[];
+  activities: AppState['activities'];
+  activeSessionId: string;
+  onSelect: (id: string) => void;
+}) {
+  const groups: Array<{ key: string; sessions: SessionInfo[] }> = [
+    { key: 'global', sessions: [] },
+    { key: 'local', sessions: [] },
+    { key: 'qq-dm', sessions: [] },
+    { key: 'qq-group', sessions: [] },
+    { key: 'other', sessions: [] },
+  ];
+  for (const session of sessions) {
+    const tag = sessionTag(session);
+    const group = groups.find((g) => g.key === tag.group) ?? groups[groups.length - 1];
+    group.sessions.push(session);
+  }
+
+  return (
+    <div className="session-list">
+      {groups.map((group) => {
+        if (group.sessions.length === 0 && group.key !== 'global') return null;
+        return (
+          <div key={group.key} className="session-group">
+            <div className="session-group-title">{SESSION_GROUP_LABEL[group.key]}</div>
+            {group.key === 'global' && (
+              <div
+                className={`session-item ${activeSessionId === 'global' ? 'active' : ''}`}
+                onClick={() => onSelect('global')}
+                title="全局上下文：显示全部会话的消息"
+              >
+                <div className="session-title">
+                  <span className="session-tag tag-global">全局</span>
+                  全部消息
+                </div>
+                <div className="session-preview">共享同一 trunk 上下文</div>
+              </div>
+            )}
+            {group.sessions.map((session) => {
+              const tag = sessionTag(session);
+              const busy = activities[session.id] && activities[session.id].phase !== 'completed';
+              return (
+                <div
+                  key={session.id}
+                  className={`session-item ${activeSessionId === session.id ? 'active' : ''}`}
+                  onClick={() => onSelect(session.id)}
+                  title="点击切换到此会话"
+                >
+                  <div className="session-title">
+                    <span className={`session-tag tag-${tag.group}`}>{tag.tag}</span>
+                    {session.nickname || session.id}
+                    {busy && <span className="session-busy">●</span>}
+                  </div>
+                  <div className="session-preview">{session.last_message || ''}</div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function truncateTask(task: string): string {
   const oneLine = task.replace(/\s+/g, ' ').trim();
@@ -40,7 +143,8 @@ export function App() {
       // ignore storage errors
     }
   };
-  // 当前对话目标会话；默认 trunk（本地 TUI 会话）
+  // 当前对话目标会话；'global' = 全局上下文（显示全部消息）。
+  // 默认 local user 会话。
   const [activeSessionId, setActiveSessionId] = useState('local:tui::local_user');
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -58,7 +162,8 @@ export function App() {
   });
 
   const send = (content: string) => {
-    sendCommand({ SendMessage: { session_id: activeSessionId, content } });
+    const target = activeSessionId === 'global' ? 'local:tui::local_user' : activeSessionId;
+    sendCommand({ SendMessage: { session_id: target, content } });
   };
 
   const busyCount = Object.values(state.activities).filter((a) =>
@@ -180,28 +285,15 @@ export function App() {
             ))}
           </div>
           <div className="sidebar-section-title">会话</div>
-          <div className="session-list">
-            {state.sessions.length === 0 && <div className="muted">（暂无会话）</div>}
-            {state.sessions.map((session) => (
-              <div
-                key={session.id}
-                className={`session-item ${activeSessionId === session.id ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveSessionId(session.id);
-                  setView('chat');
-                }}
-                title="点击切换到此会话"
-              >
-                <div className="session-title">
-                  {session.nickname || session.id}
-                  {state.activities[session.id] && state.activities[session.id].phase !== 'completed' && (
-                    <span className="session-busy">●</span>
-                  )}
-                </div>
-                <div className="session-preview">{session.last_message || ''}</div>
-              </div>
-            ))}
-          </div>
+          <SessionGroups
+            sessions={state.sessions}
+            activities={state.activities}
+            activeSessionId={activeSessionId}
+            onSelect={(id) => {
+              setActiveSessionId(id);
+              setView('chat');
+            }}
+          />
         </aside>
 
         <main className="main">

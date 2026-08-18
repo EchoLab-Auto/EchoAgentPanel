@@ -17,7 +17,12 @@ export function Chat({
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const lastMessage = state.trunk[state.trunk.length - 1];
+  // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
+  const visibleMessages =
+    sessionId === 'global'
+      ? state.trunk
+      : state.trunk.filter((m) => m.sessionId === sessionId);
+  const lastMessage = visibleMessages[visibleMessages.length - 1];
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 仅在用户位于底部附近时自动滚动，避免打断向上翻阅历史。
@@ -29,7 +34,12 @@ export function Chat({
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     // Re-scroll when a new message arrives or the last tool output updates.
-  }, [state.trunk.length, lastMessage?.tool?.output, lastMessage?.branch?.msgs.length]);
+  }, [visibleMessages.length, lastMessage?.tool?.output, lastMessage?.branch?.msgs.length]);
+
+  const emptyHint =
+    sessionId === 'global'
+      ? '（暂无消息，从下方输入开始对话）'
+      : `（会话 ${sessionId} 暂无消息，从下方输入开始对话）`;
 
   const submit = () => {
     const content = input.trim();
@@ -41,8 +51,8 @@ export function Chat({
   return (
     <div className="chat">
       <div className="chat-messages" ref={containerRef}>
-        {state.trunk.length === 0 && <div className="muted empty-hint">（暂无消息，从下方输入开始对话）</div>}
-        {state.trunk.map((message) => (
+        {visibleMessages.length === 0 && <div className="muted empty-hint">{emptyHint}</div>}
+        {visibleMessages.map((message) => (
           <MessageView key={message.key} message={message} />
         ))}
         <div ref={bottomRef} />

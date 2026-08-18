@@ -31,6 +31,8 @@ export interface DisplayMessage {
   role: MsgRole;
   content: string;
   time: number;
+  /** 归属会话 key（空 = 全局/未知） */
+  sessionId?: string;
   reasoning?: string[];
   tool?: ToolMsg;
   /** 临时回复分支的合并块（分支结束后插入主会话） */
@@ -573,7 +575,11 @@ function finishToolMessage(state: AppState, toolName: string, result: string) {
 
 function loadTimeline(state: AppState, messages: TimelineMessage[]) {
   const converted: DisplayMessage[] = messages.map((message) => {
-    const base = { key: nextKey(state), time: message.time };
+    const base = {
+      key: nextKey(state),
+      time: message.time,
+      sessionId: message.session_id || undefined,
+    };
     if (message.kind === 'user') {
       return {
         ...base,
@@ -752,6 +758,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         const summary = truncate(oneLine(finalText || tab.task || '临时分支'), 96);
         const shortId = e.branch_id.length > 8 ? e.branch_id.slice(0, 8) : e.branch_id;
         pushTo(state, 'branch', `分支 ${shortId} · ${summary}`, Math.floor(e.completed_at_ms / 1000), {
+          sessionId: e.session_id,
           branch: {
             branchId: e.branch_id,
             summary,
