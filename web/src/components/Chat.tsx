@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AppState, DisplayMessage } from '../state';
+import type { AppState, BranchMsg, DisplayMessage, ToolMsg } from '../state';
 
 export function Chat({
   state,
@@ -105,92 +105,168 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function MessageView({ message }: { message: DisplayMessage }) {
-  // 工具调用详情（参数 + 输出）默认折叠
-  const [showToolDetails, setShowToolDetails] = useState(false);
-  // 分支合并块默认折叠
-  const [showBranchDetail, setShowBranchDetail] = useState(false);
-  const roleClass = `msg msg-${message.role}`;
-  const time = new Date(message.time * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+function fmtTime(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+}
 
-  if (message.role === 'tool') {
-    const tool = message.tool;
-    const input = tool?.input ?? '';
-    const output = tool?.output ?? '';
-    const total = input.length + output.length;
-    return (
-      <div className={roleClass}>
-        <div className="msg-head">
-          <span className="msg-role">工具</span>
-          <span className="msg-name">{message.content}</span>
-          <span className="msg-time">{time}</span>
-          {tool && (
-            <span className={`tool-status ${tool.status}`}>
-              {tool.status === 'running' ? '运行中' : tool.status === 'succeeded' ? '成功' : '失败'}
-            </span>
-          )}
-          {output && <CopyButton text={output} />}
-          {total > 0 && (
-            <button
-              className="msg-collapse"
-              onClick={() => setShowToolDetails(!showToolDetails)}
-              title={showToolDetails ? '折叠调用详情' : '展开调用详情'}
-            >
-              {showToolDetails ? '▾ 收起详情' : `▸ 详情 ${total} 字符`}
-            </button>
-          )}
-        </div>
-        {showToolDetails && tool?.input && <pre className="msg-input">{tool.input}</pre>}
-        {showToolDetails && tool?.output && <pre className="msg-output">{tool.output}</pre>}
+// 工具调用详情（参数 + 输出可折叠）——与一般对话框中的工具消息排版一致。
+function ToolCallView({
+  name,
+  input,
+  output,
+  status,
+  time,
+}: {
+  name: string;
+  input?: string;
+  output?: string;
+  status?: ToolMsg['status'];
+  time?: string;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  const inputText = input ?? '';
+  const outputText = output ?? '';
+  const total = inputText.length + outputText.length;
+  return (
+    <div className="msg msg-tool">
+      <div className="msg-head">
+        <span className="msg-role">工具</span>
+        <span className="msg-name">{name}</span>
+        {time && <span className="msg-time">{time}</span>}
+        {status && (
+          <span className={`tool-status ${status}`}>
+            {status === 'running' ? '运行中' : status === 'succeeded' ? '成功' : '失败'}
+          </span>
+        )}
+        {outputText && <CopyButton text={outputText} />}
+        {total > 0 && (
+          <button
+            className="msg-collapse"
+            onClick={() => setShowDetails(!showDetails)}
+            title={showDetails ? '折叠调用详情' : '展开调用详情'}
+          >
+            {showDetails ? '▾ 收起详情' : `▸ 详情 ${total} 字符`}
+          </button>
+        )}
       </div>
+      {showDetails && inputText && <pre className="msg-input">{inputText}</pre>}
+      {showDetails && outputText && <pre className="msg-output">{outputText}</pre>}
+    </div>
+  );
+}
+
+// 推理过程块——与一般对话框中的推理折叠一致。
+function ReasoningView({ parts, time }: { parts: string[]; time?: string }) {
+  return (
+    <details className="reasoning" open>
+      <summary>
+        推理过程（{parts.length} 段）
+        {time && <span className="msg-time"> · {time}</span>}
+      </summary>
+      {parts.map((part, index) => (
+        <p key={index}>{part}</p>
+      ))}
+    </details>
+  );
+}
+
+// 分支合并框：展开后嵌套展示分支内部的完整交互记录（推理 / 工具调用 / 内容），
+// 排版与一般对话一致，只是多了一层"分支合并"外框。
+function BranchMergeView({ message }: { message: DisplayMessage }) {
+  const [showDetail, setShowDetail] = useState(false);
+  const branch = message.branch!;
+  const shortId = branch.branchId.length > 8 ? branch.branchId.slice(0, 8) : branch.branchId;
+  const toolCount = branch.msgs.filter((m) => m.kind === 'tool').length;
+  const reasoningCount = branch.msgs.filter((m) => m.kind === 'reasoning').length;
+
+  // 把相邻的 reasoning 片段合并成一段段，模拟一般消息的 reasoning 数组。
+  const entries = useBranchEntries(branch.msgs);
+
+  return (
+    <div className="msg msg-branch">
+      <div className="branch-merge-head" onClick={() => setShowDetail(!showDetail)}>
+        <span className="msg-role">分支合并</span>
+        <span className="msg-name">{shortId}</span>
+        <span className="msg-time">{fmtTime(message.time)}</span>
+        <span className="msg-collapse">
+          {showDetail ? '▾ 收起' : `▸ ${toolCount} 工具 · ${reasoningCount} 推理`}
+        </span>
+      </div>
+      <div className="msg-content">{branch.summary}</div>
+      {showDetail && (
+        <div className="branch-merge-inner">
+          {entries.length === 0 && <div className="muted">（分支无详细活动记录）</div>}
+          {entries.map((entry, index) => {
+            if (entry.kind === 'tool') {
+              return (
+                <ToolCallView
+                  key={index}
+                  name={entry.toolName ?? entry.text}
+                  input={entry.input}
+                  output={entry.output}
+                  status={entry.status}
+                  time={fmtTime(entry.time)}
+                />
+              );
+            }
+            if (entry.kind === 'reasoning') {
+              return <ReasoningView key={index} parts={[entry.text]} time={fmtTime(entry.time)} />;
+            }
+            if (entry.kind === 'content') {
+              return (
+                <div className="msg msg-backend" key={index}>
+                  <div className="msg-head">
+                    <span className="msg-role">Agent</span>
+                    <span className="msg-time">{fmtTime(entry.time)}</span>
+                  </div>
+                  <div className="msg-content">{entry.text}</div>
+                </div>
+              );
+            }
+            return (
+              <div className="muted branch-entry-notice" key={index}>
+                {entry.text}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function useBranchEntries(msgs: BranchMsg[]): BranchMsg[] {
+  // 合并连续 reasoning 片段为一段（与主会话 reasoning 数组一致）。
+  const merged: BranchMsg[] = [];
+  for (const m of msgs) {
+    const last = merged[merged.length - 1];
+    if (m.kind === 'reasoning' && last && last.kind === 'reasoning') {
+      last.text += '\n\n' + m.text;
+    } else {
+      merged.push({ ...m });
+    }
+  }
+  return merged;
+}
+
+function MessageView({ message }: { message: DisplayMessage }) {
+  const roleClass = `msg msg-${message.role}`;
+  const time = fmtTime(message.time);
+
+  if (message.role === 'tool' && message.tool) {
+    return (
+      <ToolCallView
+        name={message.content}
+        input={message.tool.input ?? undefined}
+        output={message.tool.output ?? undefined}
+        status={message.tool.status}
+        time={time}
+      />
     );
   }
 
   if (message.role === 'branch' && message.branch) {
-    const branch = message.branch;
-    const shortId = branch.branchId.length > 8 ? branch.branchId.slice(0, 8) : branch.branchId;
-    const toolCount = branch.msgs.filter((m) => m.kind === 'tool').length;
-    const reasoningCount = branch.msgs.filter((m) => m.kind === 'reasoning').length;
-    return (
-      <div className={roleClass}>
-        <div className="msg-head">
-          <span className="msg-role">分支合并</span>
-          <span className="msg-name">{shortId}</span>
-          <span className="msg-time">{time}</span>
-          <CopyButton text={JSON.stringify(branch.msgs, null, 2)} />
-          <button
-            className="msg-collapse"
-            onClick={() => setShowBranchDetail(!showBranchDetail)}
-            title={showBranchDetail ? '折叠分支详情' : '展开分支详情'}
-          >
-            {showBranchDetail ? '▾ 收起' : `▸ ${toolCount} 工具 · ${reasoningCount} 推理`}
-          </button>
-        </div>
-        <div className="msg-content">{branch.summary}</div>
-        {showBranchDetail && (
-          <div className="branch-detail">
-            {branch.msgs.map((m, index) => (
-              <div key={index} className={`branch-msg branch-msg-${m.kind}`}>
-                {m.kind === 'tool' && (
-                  <>
-                    <div className="branch-msg-head">
-                      <span className="msg-name">工具 · {m.toolName}</span>
-                      {m.status && <span className={`tool-status ${m.status}`}>{m.status === 'running' ? '运行中' : m.status === 'succeeded' ? '成功' : '失败'}</span>}
-                    </div>
-                    {m.input && <pre className="msg-input">{m.input}</pre>}
-                    {m.output && <pre className="msg-output">{m.output}</pre>}
-                  </>
-                )}
-                {m.kind === 'reasoning' && <details className="reasoning"><summary>推理</summary><p>{m.text}</p></details>}
-                {m.kind === 'content' && <div className="msg-content">{m.text}</div>}
-                {m.kind === 'notice' && <div className="muted">{m.text}</div>}
-              </div>
-            ))}
-            {branch.msgs.length === 0 && <div className="muted">（分支无详细活动记录）</div>}
-          </div>
-        )}
-      </div>
-    );
+    return <BranchMergeView message={message} />;
   }
 
   return (
@@ -210,12 +286,7 @@ function MessageView({ message }: { message: DisplayMessage }) {
         {message.content && <CopyButton text={message.content} />}
       </div>
       {message.reasoning && message.reasoning.length > 0 && (
-        <details className="reasoning">
-          <summary>推理过程（{message.reasoning.length} 段）</summary>
-          {message.reasoning.map((part, index) => (
-            <p key={index}>{part}</p>
-          ))}
-        </details>
+        <ReasoningView parts={message.reasoning} />
       )}
       <div className="msg-content">{message.content}</div>
     </div>

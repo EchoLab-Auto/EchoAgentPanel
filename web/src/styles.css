@@ -745,3 +745,29 @@ hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .tag-qq-dm { background: #2ea46e; }
 .tag-qq-group { background: #f59e0b; }
 .tag-other { background: #8b5cf6; }
+
+/* ── 分支合并框（展开后嵌套一般对话排版） ── */
+.msg-branch {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+}
+.branch-merge-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px dashed var(--border);
+}
+.branch-merge-head:hover { background: var(--hover, rgba(128,128,128,.08)); }
+.branch-merge-inner {
+  margin: 8px 10px 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.branch-merge-inner .msg { border-left: 2px solid var(--border); }
+.branch-entry-notice { font-size: 12px; }
