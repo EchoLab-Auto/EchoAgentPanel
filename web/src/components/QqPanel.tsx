@@ -29,7 +29,7 @@ export function QqPanel({
 
   useEffect(() => {
     if (connected) refreshLists();
-    // Re-runs when the panel (re)connects so lists stay fresh.
+    // 挂载/重连时都刷新，切回 QQ 面板也能拿到最新列表。
   }, [sendCommand, connected]);
 
   const setGateMode = (mode: GateMode) => {

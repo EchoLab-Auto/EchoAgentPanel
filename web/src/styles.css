@@ -567,3 +567,69 @@ hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .template-hint { font-size: 11px; color: var(--muted); }
 
 .field-hint { margin-top: 4px; font-size: 12px; line-height: 1.4; }
+
+/* ── 交互增强：会话切换 / 复制 / 折叠 / 取消 ── */
+.session-item { cursor: pointer; }
+.session-item.active {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft, rgba(0,0,0,.05));
+}
+.chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.chat-session {
+  font-size: 11px;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+.chat-cancel {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--warn, #d9a13b);
+  cursor: pointer;
+}
+.chat-cancel:hover:not(:disabled) { border-color: var(--warn, #d9a13b); }
+.chat-cancel:disabled { opacity: .4; cursor: default; }
+.msg-copy {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1.6;
+}
+.msg-copy:hover { border-color: var(--accent); color: var(--accent); }
+.msg-collapse {
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1.6;
+}
+.msg-collapse:hover { border-color: var(--accent); color: var(--accent); }
+.task-cancel {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--warn, #d9a13b);
+  cursor: pointer;
+  margin-left: auto;
+}
+.task-cancel:hover { border-color: var(--warn, #d9a13b); }

@@ -25,7 +25,13 @@ const BRANCH_LABEL: Record<string, string> = {
   cancelled: '已取消',
 };
 
-export function TasksPanel({ state }: { state: AppState }) {
+export function TasksPanel({
+  state,
+  sendCommand,
+}: {
+  state: AppState;
+  sendCommand: (command: import('../protocol').BackendCommand) => void;
+}) {
   const [, setTick] = useState(0);
   const hasActiveTask = state.tasks.some(
     (task) => task.status === 'running' || task.status === 'awaiting',
@@ -47,7 +53,7 @@ export function TasksPanel({ state }: { state: AppState }) {
         <h2>任务与分支</h2>
       </div>
       {tasks.map((task) => (
-        <TaskCard key={task.id} task={task} />
+        <TaskCard key={task.id} task={task} sendCommand={sendCommand} />
       ))}
     </div>
   );
@@ -60,7 +66,13 @@ function formatMs(ms: number): string {
   return m > 0 ? `${m}m${s}s` : `${s}s`;
 }
 
-function TaskCard({ task }: { task: OrchActivity }) {
+function TaskCard({
+  task,
+  sendCommand,
+}: {
+  task: OrchActivity;
+  sendCommand: (command: import('../protocol').BackendCommand) => void;
+}) {
   const elapsed = formatMs(Date.now() - task.createdAtMs);
   const active = task.status === 'running' || task.status === 'awaiting';
   return (
@@ -69,6 +81,16 @@ function TaskCard({ task }: { task: OrchActivity }) {
         <span className="task-kind">{KIND_LABEL[task.kind] ?? task.kind}</span>
         <span className={`task-status ${task.status}`}>{STATUS_LABEL[task.status] ?? task.status}</span>
         <span className="task-elapsed">{elapsed}</span>
+        {active && task.sessionId && (
+          <button
+            className="task-cancel"
+            onClick={() =>
+              sendCommand({ CancelRequestedWork: { session_id: task.sessionId, all: false } })
+            }
+          >
+            取消
+          </button>
+        )}
       </div>
       <div className="task-objective">{task.objective}</div>
       <div className="task-branches">

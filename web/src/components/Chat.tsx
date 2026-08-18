@@ -4,11 +4,15 @@ import type { AppState, DisplayMessage } from '../state';
 export function Chat({
   state,
   connected,
+  sessionId,
   onSend,
+  onCancel,
 }: {
   state: AppState;
   connected: boolean;
+  sessionId: string;
   onSend: (content: string) => void;
+  onCancel: () => void;
 }) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -37,6 +41,14 @@ export function Chat({
         <div ref={bottomRef} />
       </div>
       <div className="chat-input-row">
+        <div className="chat-meta">
+          <span className="chat-session muted" title="当前会话">
+            {sessionId}
+          </span>
+          <button className="chat-cancel" onClick={onCancel} disabled={!connected} title="取消当前进行中的任务">
+            取消任务
+          </button>
+        </div>
         <textarea
           className="chat-input"
           value={input}
@@ -58,12 +70,32 @@ export function Chat({
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  };
+  return (
+    <button className="msg-copy" onClick={copy} title="复制">
+      {copied ? '✓' : '⧉'}
+    </button>
+  );
+}
+
 function MessageView({ message }: { message: DisplayMessage }) {
+  const [showToolOutput, setShowToolOutput] = useState(true);
   const roleClass = `msg msg-${message.role}`;
   const time = new Date(message.time * 1000).toLocaleTimeString('zh-CN', { hour12: false });
 
   if (message.role === 'tool') {
     const tool = message.tool;
+    const output = tool?.output ?? '';
     return (
       <div className={roleClass}>
         <div className="msg-head">
@@ -75,9 +107,19 @@ function MessageView({ message }: { message: DisplayMessage }) {
               {tool.status === 'running' ? '运行中' : tool.status === 'succeeded' ? '成功' : '失败'}
             </span>
           )}
+          {output && <CopyButton text={output} />}
+          {output && (
+            <button
+              className="msg-collapse"
+              onClick={() => setShowToolOutput(!showToolOutput)}
+              title={showToolOutput ? '折叠输出' : '展开输出'}
+            >
+              {showToolOutput ? '▾' : `▸ ${output.length} 字符`}
+            </button>
+          )}
         </div>
         {tool?.input && <div className="msg-input">{tool.input}</div>}
-        {tool?.output && <pre className="msg-output">{tool.output}</pre>}
+        {tool?.output && showToolOutput && <pre className="msg-output">{tool.output}</pre>}
       </div>
     );
   }
@@ -96,6 +138,7 @@ function MessageView({ message }: { message: DisplayMessage }) {
           </span>
         )}
         <span className="msg-time">{time}</span>
+        {message.content && <CopyButton text={message.content} />}
       </div>
       {message.reasoning && message.reasoning.length > 0 && (
         <details className="reasoning">

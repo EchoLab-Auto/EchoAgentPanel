@@ -16,7 +16,26 @@ type View = 'chat' | 'qq' | 'tasks' | 'checklist';
 
 export function App() {
   const { state, connected, sendCommand, sendSudoPassword, dismissToast } = useAgentConnection();
-  const [view, setView] = useState<View>('chat');
+  const [view, setViewState] = useState<View>(() => {
+    try {
+      const saved = localStorage.getItem('echo-panel-view');
+      return (['chat', 'qq', 'tasks', 'checklist'] as View[]).includes(saved as View)
+        ? (saved as View)
+        : 'chat';
+    } catch {
+      return 'chat';
+    }
+  });
+  const setView = (next: View) => {
+    setViewState(next);
+    try {
+      localStorage.setItem('echo-panel-view', next);
+    } catch {
+      // ignore storage errors
+    }
+  };
+  // 当前对话目标会话；默认 trunk（本地 TUI 会话）
+  const [activeSessionId, setActiveSessionId] = useState('local:tui::local_user');
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showContext, setShowContext] = useState(false);
@@ -32,7 +51,7 @@ export function App() {
   });
 
   const send = (content: string) => {
-    sendCommand({ SendMessage: { session_id: 'local:tui::local_user', content } });
+    sendCommand({ SendMessage: { session_id: activeSessionId, content } });
   };
 
   const busyCount = Object.values(state.activities).filter((a) =>
@@ -134,7 +153,15 @@ export function App() {
           <div className="session-list">
             {state.sessions.length === 0 && <div className="muted">（暂无会话）</div>}
             {state.sessions.map((session) => (
-              <div key={session.id} className="session-item">
+              <div
+                key={session.id}
+                className={`session-item ${activeSessionId === session.id ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveSessionId(session.id);
+                  setView('chat');
+                }}
+                title="点击切换到此会话"
+              >
                 <div className="session-title">
                   {session.nickname || session.id}
                   {state.activities[session.id] && state.activities[session.id].phase !== 'completed' && (
@@ -148,9 +175,17 @@ export function App() {
         </aside>
 
         <main className="main">
-          {view === 'chat' && <Chat state={state} connected={connected} onSend={send} />}
+          {view === 'chat' && (
+            <Chat
+              state={state}
+              connected={connected}
+              sessionId={activeSessionId}
+              onSend={send}
+              onCancel={() => sendCommand({ CancelRequestedWork: { session_id: activeSessionId, all: false } })}
+            />
+          )}
           {view === 'qq' && <QqPanel state={state} connected={connected} sendCommand={sendCommand} />}
-          {view === 'tasks' && <TasksPanel state={state} />}
+          {view === 'tasks' && <TasksPanel state={state} sendCommand={sendCommand} />}
           {view === 'checklist' && <ChecklistPanel state={state} />}
         </main>
       </div>
