@@ -5,10 +5,13 @@ PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 PREFIX=${ECHO_PREFIX:-"$HOME/.local"}
 CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
 DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
+STATE_HOME=${XDG_STATE_HOME:-"$HOME/.local/state"}
 CONFIG_DIR="$CONFIG_HOME/echo-agent-panel"
 DATA_DIR="$DATA_HOME/echo-agent-panel"
+STATE_DIR="$STATE_HOME/echo-agent-panel"
 LIBEXEC_DIR="$PREFIX/libexec/echo-agent-panel"
 BIN_DIR="$PREFIX/bin"
+SYSTEMD_DIR="$CONFIG_HOME/systemd/user"
 
 PURGE=0
 DRY_RUN=0
@@ -17,10 +20,10 @@ usage() {
     cat <<'EOF'
 Usage: scripts/uninstall.sh [options]
 
-Remove the EchoAgentPanel installation for the current user: the launcher,
-the runtime binary, the frontend build, and the managed source checkout.
-The configuration (panel.toml) is kept by default so a reinstall restores
-it; pass --purge to remove it as well.
+Remove the EchoAgentPanel installation for the current user: the systemd
+service units, the launcher, the runtime binary, the frontend build, and the
+managed source checkout. The configuration (panel.toml) is kept by default so
+a reinstall restores it; pass --purge to remove it as well.
 
 The EchoAgentCore service is unaffected — uninstall it separately with
 EchoAgentCore's scripts/uninstall.sh.
@@ -57,9 +60,11 @@ done
 if ((DRY_RUN)); then
     cat <<EOF
 EchoAgentPanel uninstall plan
+  service:   $SYSTEMD_DIR/echo-agent-panel.service (+ update unit)
   launcher:  $BIN_DIR/echo-agent-panel
   libexec:   $LIBEXEC_DIR
   data:      $DATA_DIR
+  state:     $STATE_DIR
   config:    $CONFIG_DIR ($( ((PURGE)) && echo "will be removed" || echo "kept — use --purge to remove" ))
 EOF
     exit 0
@@ -81,9 +86,17 @@ remove_file() {
     fi
 }
 
+echo "==> Stopping Panel service"
+systemctl --user stop echo-agent-panel.service 2>/dev/null || true
+systemctl --user disable echo-agent-panel.service 2>/dev/null || true
+remove_file "$SYSTEMD_DIR/echo-agent-panel.service" "service unit"
+remove_file "$SYSTEMD_DIR/echo-agent-panel-update.service" "update unit"
+systemctl --user daemon-reload 2>/dev/null || true
+
 remove_file "$BIN_DIR/echo-agent-panel" "launcher"
 remove_dir "$LIBEXEC_DIR" "runtime libexec"
 remove_dir "$DATA_DIR" "managed source checkout"
+remove_dir "$STATE_DIR" "state directory"
 
 if ((PURGE)); then
     remove_dir "$CONFIG_DIR" "config directory"
@@ -94,6 +107,5 @@ fi
 echo
 echo "Uninstall complete."
 if ((!PURGE)); then
-    echo "  Config kept at: $CONFIG_DIR"
+    echo "Config was kept at: $CONFIG_DIR"
 fi
-echo "  Reinstall with: scripts/install.sh"
