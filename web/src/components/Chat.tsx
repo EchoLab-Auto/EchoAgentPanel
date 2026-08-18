@@ -57,21 +57,23 @@ export function Chat({
 
   return (
     <div className="chat">
-      <div
-        className="chat-messages"
-        ref={containerRef}
-        onScroll={() => {
-          const container = containerRef.current;
-          if (!container) return;
-          const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-          setShowJumpDown(!nearBottom);
-        }}
-      >
-        {visibleMessages.length === 0 && <div className="muted empty-hint">{emptyHint}</div>}
-        {visibleMessages.map((message) => (
-          <MessageView key={message.key} message={message} />
-        ))}
-        <div ref={bottomRef} />
+      <div className="chat-scroll-area">
+        <div
+          className="chat-messages"
+          ref={containerRef}
+          onScroll={() => {
+            const container = containerRef.current;
+            if (!container) return;
+            const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+            setShowJumpDown(!nearBottom);
+          }}
+        >
+          {visibleMessages.length === 0 && <div className="muted empty-hint">{emptyHint}</div>}
+          {visibleMessages.map((message) => (
+            <MessageView key={message.key} message={message} />
+          ))}
+          <div ref={bottomRef} />
+        </div>
         {showJumpDown && (
           <button className="jump-bottom" onClick={jumpToBottom} title="跳转到最新消息">
             ↓
