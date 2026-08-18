@@ -853,11 +853,18 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       if (e.branch_id) {
         const tab = state.branchTabs[e.branch_id];
         if (tab) {
-          // 分支输出只进临时标签；由 ReplyBranchCompleted 负责在结束后
-          // 以折叠合并块形式写入主会话。
+          // 分支运行期间：输出只进临时标签，绝不写入主会话；
+          // 由 ReplyBranchCompleted 在结束后以折叠合并块形式归档。
           tab.finalContent = e.content;
           tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
+          const act = state.activities[e.session_id];
+          if (act && act.phase !== 'completed' && act.phase !== 'failed') {
+            act.phase = 'completed';
+            act.detail = null;
+          }
+          return state;
         }
+        // tab 已不存在（如重连后状态清空）：回退到主会话输出，避免丢失。
       }
       const act = state.activities[e.session_id];
       if (act && act.phase !== 'completed' && act.phase !== 'failed') {
