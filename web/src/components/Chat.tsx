@@ -89,8 +89,8 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function MessageView({ message }: { message: DisplayMessage }) {
-  const [showToolInput, setShowToolInput] = useState(false);
-  const [showToolOutput, setShowToolOutput] = useState(true);
+  // 工具调用详情（参数 + 输出）默认折叠
+  const [showToolDetails, setShowToolDetails] = useState(false);
   const roleClass = `msg msg-${message.role}`;
   const time = new Date(message.time * 1000).toLocaleTimeString('zh-CN', { hour12: false });
 
@@ -98,6 +98,7 @@ function MessageView({ message }: { message: DisplayMessage }) {
     const tool = message.tool;
     const input = tool?.input ?? '';
     const output = tool?.output ?? '';
+    const total = input.length + output.length;
     return (
       <div className={roleClass}>
         <div className="msg-head">
@@ -109,28 +110,19 @@ function MessageView({ message }: { message: DisplayMessage }) {
               {tool.status === 'running' ? '运行中' : tool.status === 'succeeded' ? '成功' : '失败'}
             </span>
           )}
-          {input && (
-            <button
-              className="msg-collapse"
-              onClick={() => setShowToolInput(!showToolInput)}
-              title={showToolInput ? '折叠调用参数' : '展开调用参数'}
-            >
-              {showToolInput ? '参数 ▾' : `参数 ▸ ${input.length} 字符`}
-            </button>
-          )}
           {output && <CopyButton text={output} />}
-          {output && (
+          {total > 0 && (
             <button
               className="msg-collapse"
-              onClick={() => setShowToolOutput(!showToolOutput)}
-              title={showToolOutput ? '折叠输出' : '展开输出'}
+              onClick={() => setShowToolDetails(!showToolDetails)}
+              title={showToolDetails ? '折叠调用详情' : '展开调用详情'}
             >
-              {showToolOutput ? '输出 ▾' : `输出 ▸ ${output.length} 字符`}
+              {showToolDetails ? '▾ 收起详情' : `▸ 详情 ${total} 字符`}
             </button>
           )}
         </div>
-        {tool?.input && showToolInput && <pre className="msg-input">{tool.input}</pre>}
-        {tool?.output && showToolOutput && <pre className="msg-output">{tool.output}</pre>}
+        {showToolDetails && tool?.input && <pre className="msg-input">{tool.input}</pre>}
+        {showToolDetails && tool?.output && <pre className="msg-output">{tool.output}</pre>}
       </div>
     );
   }
