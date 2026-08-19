@@ -86,7 +86,7 @@ export interface TimelineTool {
 export interface TimelineMessage {
   kind: string;
   content: string;
-  session_id: string;
+  session_id?: string;
   time: number;
   source?: TimelineSource | null;
   reasoning?: string[] | null;
