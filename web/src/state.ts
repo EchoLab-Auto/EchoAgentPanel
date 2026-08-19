@@ -617,23 +617,6 @@ function loadTimeline(state: AppState, messages: TimelineMessage[]) {
   state.trunk = converted;
 }
 
-function renderContext(
-  messages: ContextMessageInfo[],
-  blocks: ContextBlockInfo[],
-  total: number,
-  limit: number,
-): string {
-  const pct = limit > 0 ? Math.round((total / limit) * 100) : 0;
-  const blockLine =
-    blocks.length > 0
-      ? blocks.map((b) => `${b.label} ${b.tokens}t`).join(' · ')
-      : '';
-  const lines = messages.map((m) => `[${m.role}]${m.tokens}t ${truncate(oneLine(m.content), 120)}`);
-  return `📋 上下文快照 · ${total}/${limit} tokens (${pct}%) · ${messages.length} 条\n` +
-    (blockLine ? `块: ${blockLine}\n` : '') +
-    lines.join('\n');
-}
-
 // ── main reducer ───────────────────────────────────────────────────────────
 
 export function reduce(state: AppState, event: BackendEvent): AppState {
@@ -846,8 +829,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'ContextSnapshot': {
       const e = (event as { ContextSnapshot: ContextSnapshotData }).ContextSnapshot;
+      // 只更新状态栏/详情弹窗用的快照数据，不再把快照作为系统消息写进聊天流。
       state.context = e;
-      pushTo(state, 'system', renderContext(e.messages, e.blocks || [], e.total_tokens, e.limit_tokens), Math.floor(Date.now() / 1000));
       return state;
     }
     case 'TrunkTimeline': {

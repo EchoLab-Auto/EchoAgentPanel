@@ -132,6 +132,7 @@ export type BackendCommand =
   | 'RequestState'
   | 'RequestContext'
   | 'RequestTrunkTimeline'
+  | 'ClearHistory'
   | { CancelRequestedWork: { session_id: string; all: boolean } }
   | { StartAdapter: { name: string } }
   | { StopAdapter: { name: string } }

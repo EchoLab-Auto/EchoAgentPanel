@@ -64,11 +64,24 @@ export function ContextModal({
   sendCommand: (command: BackendCommand) => void;
 }) {
   const [showMessages, setShowMessages] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   // Refresh the snapshot every time the modal opens.
   useEffect(() => {
     sendCommand('RequestContext');
   }, []);
+
+  // Two-step confirm: first click arms, second click sends the wipe command.
+  // Core broadcasts an empty TrunkTimeline + fresh ContextSnapshot in reply,
+  // so the chat view and this modal update themselves.
+  const handleClear = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    sendCommand('ClearHistory');
+    setConfirmClear(false);
+  };
   const blocks = snapshot?.blocks ?? [];
   const maxBlockTokens = Math.max(1, ...blocks.map((b) => b.tokens));
   const pct = snapshot && snapshot.limit_tokens > 0
@@ -94,6 +107,13 @@ export function ContextModal({
               </span>
             )}
           </h2>
+          <button
+            className={`ctx-clear ${confirmClear ? 'confirm' : ''}`}
+            onClick={handleClear}
+            title="清空 agent 的全部对话历史与上下文记忆（不可恢复）"
+          >
+            {confirmClear ? '确认清理？不可恢复' : '清理历史记忆'}
+          </button>
           <button className="close" onClick={() => sendCommand('RequestContext')} title="刷新">↻</button>
           <button className="close" onClick={onClose}>×</button>
         </div>

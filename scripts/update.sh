@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
+STATE_HOME=${XDG_STATE_HOME:-"$HOME/.local/state"}
+PREFIX=${ECHO_PREFIX:-"$HOME/.local"}
+
+# Defaults mirror install.sh's installed layout, so a bare `scripts/update.sh`
+# rebuilds and replaces the running installation. `--source` prefers this
+# checkout when it has a Cargo.toml (covers dev worktrees with uncommitted
+# changes), falling back to the managed source checkout.
+DEFAULT_BINARY="$PREFIX/libexec/echo-agent-panel/echo-agent-panel-bin"
+DEFAULT_STATIC_DIR="$PREFIX/libexec/echo-agent-panel/web"
+DEFAULT_STATUS_FILE="$STATE_HOME/echo-agent-panel/update-status"
+DEFAULT_SOURCE_DIR="$DATA_HOME/echo-agent-panel/source"
+
 SOURCE_DIR=""
 BINARY=""
 STATUS_FILE=""
@@ -9,18 +23,26 @@ UPDATE_MODE=local
 
 usage() {
     cat <<'EOF'
-Usage: scripts/update.sh [--local|--remote] --source <dir> --binary <path> --status <path> --static-dir <path>
+Usage: scripts/update.sh [options]
 
-Modes:
-  local (default)  Build the current source tree exactly as it is, including
-                   uncommitted changes. No fetch or merge is performed. Use
-                   this when the checkout is already on the desired revision.
-  --remote         Fetch and fast-forward the clean managed checkout before
-                   building (previous default; requires network access).
+Rebuild EchoAgentPanel (Rust backend + React frontend) and atomically replace
+the installed binary and static frontend directory, then restart the Panel
+service if it is running.
 
-The update builds the Rust backend and the React frontend, replaces the
-runtime binary and the static frontend directory, then restarts the
-echo-agent-panel.service user unit.
+Options:
+  --source <dir>      Source tree to build. Default: this checkout when it
+                      contains Cargo.toml, else $HOME/.local/share/echo-agent-panel/source
+  --binary <path>     Installed binary to replace. Default:
+                      $HOME/.local/libexec/echo-agent-panel/echo-agent-panel-bin
+  --static-dir <dir>  Installed frontend directory to replace. Default:
+                      $HOME/.local/libexec/echo-agent-panel/web
+  --status <path>     Update status file. Default:
+                      $HOME/.local/state/echo-agent-panel/update-status
+  --local             Build the source tree as-is, including uncommitted changes
+                      (default). No fetch or merge is performed.
+  --remote            Fetch and fast-forward the clean managed checkout before
+                      building (requires network access and a clean checkout).
+  -h, --help          Show this help
 EOF
 }
 
@@ -62,11 +84,20 @@ while (($#)); do
     esac
 done
 
-if [[ -z "$SOURCE_DIR" || -z "$BINARY" || -z "$STATUS_FILE" || -z "$STATIC_DIR" ]]; then
-    echo "error: --source, --binary, --status and --static-dir are required" >&2
-    usage >&2
-    exit 2
+if [[ -z "$SOURCE_DIR" ]]; then
+    if [[ -f "$PROJECT_ROOT/Cargo.toml" ]]; then
+        SOURCE_DIR="$PROJECT_ROOT"
+    elif [[ -f "$DEFAULT_SOURCE_DIR/Cargo.toml" ]]; then
+        SOURCE_DIR="$DEFAULT_SOURCE_DIR"
+    else
+        echo "error: --source is required (no Cargo.toml in $PROJECT_ROOT or $DEFAULT_SOURCE_DIR)" >&2
+        usage >&2
+        exit 2
+    fi
 fi
+[[ -n "$BINARY" ]] || BINARY="$DEFAULT_BINARY"
+[[ -n "$STATIC_DIR" ]] || STATIC_DIR="$DEFAULT_STATIC_DIR"
+[[ -n "$STATUS_FILE" ]] || STATUS_FILE="$DEFAULT_STATUS_FILE"
 
 STATE_DIR=$(dirname -- "$STATUS_FILE")
 REVISION_FILE="$STATE_DIR/installed-revision"
