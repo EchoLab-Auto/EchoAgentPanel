@@ -1,0 +1,145 @@
+<script setup lang="ts">
+//! 任务与分支面板：后台任务 / 并行任务 / Subagent / 临时回复分支的实时进度。
+
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { NeumorphismButton, NeumorphismTag } from '@echolab-auto/ui-frame';
+import { state } from '../store';
+import { sendCommand } from '../connection';
+
+const KIND_LABEL: Record<string, string> = {
+  background: '后台',
+  parallel: '并行',
+  subagent: 'Subagent',
+  reply: '临时回复',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  running: '运行中',
+  awaiting: '等待整合',
+  completed: '已完成',
+  integrated: '已整合',
+  failed: '失败',
+  cancelled: '已取消',
+};
+
+const STATUS_VARIANT: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'error' | 'info'> = {
+  running: 'primary',
+  awaiting: 'info',
+  completed: 'success',
+  integrated: 'success',
+  failed: 'error',
+  cancelled: 'warning',
+};
+
+const BRANCH_LABEL: Record<string, string> = {
+  running: '运行中',
+  succeeded: '成功',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+};
+
+const BRANCH_VARIANT: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
+  running: 'primary',
+  succeeded: 'success',
+  completed: 'success',
+  failed: 'error',
+  cancelled: 'warning',
+};
+
+// 有任务在跑时每秒重渲染一次，刷新"已耗时"显示。
+const now = ref(Date.now());
+let timer: number | undefined;
+
+const hasActiveTask = computed(() =>
+  state.tasks.some((task) => task.status === 'running' || task.status === 'awaiting'),
+);
+
+watch(
+  hasActiveTask,
+  (active) => {
+    if (active && timer === undefined) {
+      now.value = Date.now();
+      timer = window.setInterval(() => {
+        now.value = Date.now();
+      }, 1000);
+    } else if (!active && timer !== undefined) {
+      window.clearInterval(timer);
+      timer = undefined;
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  if (timer !== undefined) window.clearInterval(timer);
+});
+
+const tasks = computed(() => [...state.tasks].reverse());
+
+function formatMs(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m${s}s` : `${s}s`;
+}
+
+function elapsed(createdAtMs: number): string {
+  return formatMs(now.value - createdAtMs);
+}
+
+function isActive(status: string): boolean {
+  return status === 'running' || status === 'awaiting';
+}
+
+function cancel(sessionId: string) {
+  sendCommand({ CancelRequestedWork: { session_id: sessionId, all: false } });
+}
+</script>
+
+<template>
+  <div v-if="state.tasks.length === 0" class="panel muted">
+    （暂无后台任务 / Subagent / 临时回复分支）
+  </div>
+  <div v-else class="panel">
+    <div class="panel-head">
+      <h2>任务与分支</h2>
+    </div>
+    <div
+      v-for="task in tasks"
+      :key="task.id"
+      class="task-card"
+      :class="{ active: isActive(task.status) }"
+    >
+      <div class="task-head">
+        <NeumorphismTag size="small" variant="default">
+          {{ KIND_LABEL[task.kind] ?? task.kind }}
+        </NeumorphismTag>
+        <NeumorphismTag size="small" :variant="STATUS_VARIANT[task.status] ?? 'default'">
+          {{ STATUS_LABEL[task.status] ?? task.status }}
+        </NeumorphismTag>
+        <span class="task-elapsed">{{ elapsed(task.createdAtMs) }}</span>
+        <NeumorphismButton
+          v-if="isActive(task.status) && task.sessionId"
+          size="small"
+          variant="flat"
+          @click="cancel(task.sessionId)"
+        >
+          取消
+        </NeumorphismButton>
+      </div>
+      <div class="task-objective">{{ task.objective }}</div>
+      <div class="task-branches">
+        <div v-for="branch in task.branches" :key="branch.branchId" class="task-branch">
+          <span class="task-branch-id">{{ branch.branchId }}</span>
+          <span class="task-branch-task">{{ branch.task || '—' }}</span>
+          <span class="task-branch-target muted">{{ branch.target }}</span>
+          <NeumorphismTag size="small" :variant="BRANCH_VARIANT[branch.status] ?? 'default'">
+            {{ BRANCH_LABEL[branch.status] ?? branch.status }}
+          </NeumorphismTag>
+          <pre v-if="branch.result" class="task-branch-result">{{ branch.result }}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>

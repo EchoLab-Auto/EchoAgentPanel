@@ -25,7 +25,7 @@ usage() {
 Usage: scripts/install.sh [options]
 
 Install EchoAgentPanel for the current user and run it as a systemd service
-(Rust backend + React frontend). The backend relays a browser WebSocket to the
+(Rust backend + Vue 3 frontend). The backend relays a browser WebSocket to the
 EchoAgentCore management WS and serves the built frontend.
 
 Prerequisites: the Rust toolchain, Node.js (npm) and a systemd user manager

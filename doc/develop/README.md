@@ -1,6 +1,6 @@
 # EchoAgentPanel Development Documentation
 
-EchoAgentPanel 是 EchoAgentCore 的 **Web 面板**：Rust 后端（axum）托管 React
+EchoAgentPanel 是 EchoAgentCore 的 **Web 面板**：Rust 后端（axum）托管 Vue 3
 前端，并把浏览器 WebSocket 中继到 Core 的 management WS。终端 UI 已迁移到
 EchoAgentTui 仓库。
 
@@ -13,7 +13,7 @@ EchoAgentPanel/
 │   ├── src/main.rs                  # 服务入口（静态托管 + /ws 路由）
 │   ├── src/proxy.rs                 # 浏览器 ↔ Core 帧中继（不解析负载）
 │   └── src/config.rs                # 面板配置加载
-├── web/                             # React + TypeScript + Vite 前端
+├── web/                             # Vue 3 + TypeScript + Vite 前端（@echolab-auto/ui-frame）
 │   └── src/
 │       ├── protocol.ts              # echo-protocol 线格式的 TS 镜像
 │       ├── state.ts                 # 状态 + reducer（移植自 EchoAgentTui）

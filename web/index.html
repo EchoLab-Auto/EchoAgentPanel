@@ -4,9 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EchoAgent Panel</title>
+    <script>
+      // 防主题闪烁：默认暗色；仅当用户显式选择 light 时不设 data-theme。
+      !(function () {
+        try {
+          var t = localStorage.getItem('echo-panel-theme');
+          if (t === 'light') return;
+          if (
+            t === 'dark' ||
+            !t ||
+            (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          ) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

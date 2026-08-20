@@ -3,7 +3,7 @@
 ## Scope
 
 EchoAgentPanel is the web UI for EchoAgentCore: a Rust backend (axum) that
-serves a React frontend and relays a browser WebSocket to the Core's
+serves a Vue 3 frontend and relays a browser WebSocket to the Core's
 management WS. The terminal UI lives in the separate EchoAgentTui repository.
 
 The installer targets Linux hosts, does not require root, and does not modify

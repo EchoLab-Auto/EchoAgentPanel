@@ -1,15 +1,15 @@
-# EchoAgentPanel — Web 面板（Rust 后端 + React 前端）
+# EchoAgentPanel — Web 面板（Rust 后端 + Vue 3 前端）
 
 对接 [EchoAgentCore](https://gitlab.com/echo_tech/EchoAgentCore) 的 Web UI 面板：
 一个 axum HTTP/WS 后端把浏览器 WebSocket 中继到 Core 的 management WS
-（默认 `ws://127.0.0.1:3132`），并托管构建后的 React 前端。
+（默认 `ws://127.0.0.1:3132`），并托管构建后的 Vue 3 前端。
 
 > 终端 UI（TUI）已迁移到独立的 [EchoAgentTui](https://github.com/EchoLab-Auto/EchoAgentTui) 仓库。
 
 ## 架构
 
 ```
-浏览器 (React)  ── /ws ──►  echo-agent-panel (Rust 后端)
+浏览器 (Vue 3)  ── /ws ──►  echo-agent-panel (Rust 后端)
                               │  帧按原文转发，不解析、不落日志
                               ▼
                        EchoAgentCore management WS (:3132)
@@ -18,7 +18,7 @@
 - **后端**（`source/echo-web-server`）：axum 静态托管 + WS 中继。每个浏览器连接
   对应一条到 Core 的连接；sudo 密码帧（`{"type":"sudo_password",...}`）只经过
   中继管道，与日志、命令队列完全隔离。
-- **前端**（`web/`）：React 18 + TypeScript + Vite，零后端依赖，纯 WS 协议。
+- **前端**（`web/`）：Vue 3 + TypeScript + Vite（组件库 @echolab-auto/ui-frame），零后端依赖，纯 WS 协议。
 
 ## 功能（对齐原 TUI）
 
@@ -49,7 +49,7 @@ cargo run -p echo-web-server -- --config config/echo-agent-panel.toml --static-d
 ./scripts/install.sh          # 先 --dry-run 查看路径
 ```
 
-安装器构建 Rust 后端与 React 前端，装到 `~/.local/libexec/echo-agent-panel/`，
+安装器构建 Rust 后端与 Vue 3 前端，装到 `~/.local/libexec/echo-agent-panel/`，
 启动器到 `~/.local/bin/echo-agent-panel`，配置种子到
 `~/.config/echo-agent-panel/panel.toml`。启动：
 
