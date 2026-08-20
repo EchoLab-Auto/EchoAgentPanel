@@ -7,7 +7,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { SudoModal } from './components/SudoModal';
 import { QqPanel } from './components/QqPanel';
 import { TasksPanel } from './components/TasksPanel';
-import { ChecklistPanel } from './components/ChecklistPanel';
+import { ChecklistSidebar } from './components/ChecklistSidebar';
 import { HelpModal } from './components/HelpModal';
 import { Toasts } from './components/Toasts';
 import { ContextModal } from './components/ContextModal';
@@ -15,7 +15,7 @@ import { LogModal } from './components/LogModal';
 import { SystemPromptModal } from './components/SystemPromptModal';
 import { BranchModal } from './components/BranchModal';
 
-type View = 'chat' | 'qq' | 'tasks' | 'checklist';
+type View = 'chat' | 'qq' | 'tasks';
 
 function sessionTag(session: SessionInfo): { group: string; label: string; tag: string } {
   if (session.id === 'global') {
@@ -128,7 +128,7 @@ export function App() {
   const [view, setViewState] = useState<View>(() => {
     try {
       const saved = localStorage.getItem('echo-panel-view');
-      return (['chat', 'qq', 'tasks', 'checklist'] as View[]).includes(saved as View)
+      return (['chat', 'qq', 'tasks'] as View[]).includes(saved as View)
         ? (saved as View)
         : 'chat';
     } catch {
@@ -210,7 +210,6 @@ export function App() {
           {navButton('chat', '聊天')}
           {navButton('qq', 'QQ')}
           {navButton('tasks', `任务${state.tasks.filter((t) => t.status === 'running').length ? `(${state.tasks.filter((t) => t.status === 'running').length})` : ''}`)}
-          {navButton('checklist', `清单${state.checklists.length ? `(${state.checklists.length})` : ''}`)}
           <button className="nav-button" onClick={() => setShowContext(true)}>上下文</button>
           <button
             className="nav-button"
@@ -294,6 +293,7 @@ export function App() {
               setView('chat');
             }}
           />
+          <ChecklistSidebar state={state} />
         </aside>
 
         <main className="main">
@@ -308,7 +308,6 @@ export function App() {
           )}
           {view === 'qq' && <QqPanel state={state} connected={connected} sendCommand={sendCommand} />}
           {view === 'tasks' && <TasksPanel state={state} sendCommand={sendCommand} />}
-          {view === 'checklist' && <ChecklistPanel state={state} />}
         </main>
       </div>
 
