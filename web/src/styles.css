@@ -592,3 +592,108 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+/* ── API 设置：编辑上下文横幅 ── */
+.edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--nm-border-subtle);
+  border-radius: 10px;
+  background: var(--nm-bg-color);
+  margin-bottom: 12px;
+}
+.edit-banner.editing {
+  border-color: var(--panel-accent);
+  background: var(--panel-accent-soft);
+}
+.edit-banner-label {
+  font-size: 11px;
+  color: var(--nm-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.edit-banner-target {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edit-banner-cancel {
+  flex: 0 0 auto;
+}
+.profiles-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0;
+}
+.profiles-head h3 {
+  margin: 0;
+}
+
+/* ── API 连通性测试 ── */
+.api-test-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  border: 1px solid var(--nm-border-subtle);
+  flex-wrap: wrap;
+}
+.api-test-result.ok {
+  color: var(--panel-ok);
+  background: color-mix(in srgb, var(--panel-ok) 8%, transparent);
+  border-color: color-mix(in srgb, var(--panel-ok) 40%, transparent);
+}
+.api-test-result.fail {
+  color: var(--panel-err);
+  background: color-mix(in srgb, var(--panel-err) 8%, transparent);
+  border-color: color-mix(in srgb, var(--panel-err) 40%, transparent);
+}
+.api-test-badge {
+  font-weight: 700;
+}
+.api-test-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.api-test-latency {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.profile-item {
+  flex-wrap: wrap;
+}
+.profile-test {
+  flex-basis: 100%;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.profile-test.ok {
+  color: var(--panel-ok);
+  background: color-mix(in srgb, var(--panel-ok) 8%, transparent);
+}
+.profile-test.fail {
+  color: var(--panel-err);
+  background: color-mix(in srgb, var(--panel-err) 8%, transparent);
+}
+.profile-test-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}

@@ -127,6 +127,7 @@ export type BackendCommand =
       };
     }
   | { SwitchApi: { name: string } }
+  | { TestApi: { name: string } }
   | { DeleteApi: { name: string } }
   | { ToggleSkill: { name: string; enabled: boolean } }
   | 'RequestState'
@@ -259,6 +260,14 @@ export type BackendEvent =
       };
     }
   | { ApiProfilesUpdated: { active_api: string; profiles: ApiProfileInfo[] } }
+  | {
+      ApiTestResult: {
+        name: string;
+        ok: boolean;
+        message: string;
+        latency_ms: number;
+      }
+    }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
   | { AdapterList: { adapters: AdapterStatus[] } }

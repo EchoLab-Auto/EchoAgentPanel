@@ -179,6 +179,8 @@ export interface AppState {
   checklists: ChecklistEntry[];
   sudoPrompt: SudoPrompt | null;
   toasts: Toast[];
+  /** API 连通性测试结果（name(空=默认) → { ok, message, latencyMs }） */
+  apiTests: Record<string, { ok: boolean; message: string; latencyMs: number }>;
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
@@ -216,6 +218,7 @@ export function initialState(): AppState {
     checklists: [],
     sudoPrompt: null,
     toasts: [],
+    apiTests: {},
     context: null,
     branchTabs: {},
     pendingBackground: {},
@@ -905,6 +908,15 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         state.api.active_api = e.active_api;
         state.api.profiles = e.profiles;
       }
+      return state;
+    }
+    case 'ApiTestResult': {
+      const e = (event as { ApiTestResult: { name: string; ok: boolean; message: string; latency_ms: number } }).ApiTestResult;
+      state.apiTests[e.name] = {
+        ok: e.ok,
+        message: e.message,
+        latencyMs: e.latency_ms,
+      };
       return state;
     }
     case 'SystemPrompt': {
