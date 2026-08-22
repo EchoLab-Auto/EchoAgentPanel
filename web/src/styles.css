@@ -74,15 +74,20 @@ html, body, #app { height: 100%; margin: 0; }
 .topbar-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
 /* ── layout ── */
-.layout { display: flex; flex: 1 1 auto; min-height: 0; }
+.layout { position: relative; display: flex; flex: 1 1 auto; min-height: 0; }
 
 .sidebar {
   width: 260px;
   flex: 0 0 auto;
-  border-right: 1px solid var(--nm-border-subtle);
+  /* 无独立背景：卡片直接悬浮在页面/主区同级的背景上 */
+  background: transparent;
+  border-right: none;
   overflow-y: auto;
-  padding: 10px;
-  background: var(--nm-surface-raised);
+  overflow-x: hidden;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 .sidebar-section-title {
   font-size: 12px;
@@ -91,7 +96,53 @@ html, body, #app { height: 100%; margin: 0; }
   text-transform: uppercase;
 }
 
-.main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+/* ── 侧边栏顶部：整栏收起按钮 ── */
+.sidebar-top {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* ── 收起态：左上角悬浮展开按钮 ── */
+.sidebar-open-float {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 60;
+}
+
+/* ── ui-frame 凸起卡片的头部与内容辅助样式 ── */
+.sidebar-card { flex: 0 0 auto; }
+.sidebar-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.sidebar-card-head:hover { background: var(--panel-hover); }
+.sidebar-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nm-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sidebar-card-caret { color: var(--nm-text-secondary); font-size: 11px; }
+.sidebar-card-body { padding: 4px 12px 12px; }
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 
 /* ── 适配器 ── */
 .adapter-item {
@@ -285,19 +336,14 @@ html, body, #app { height: 100%; margin: 0; }
 .checklist-float {
   position: sticky;
   bottom: 0;
-  margin-top: 12px;
-  background: var(--nm-surface-raised);
-  border: 1px solid var(--nm-border-color);
-  border-radius: 8px;
-  overflow: hidden;
+  margin-top: 0;
   z-index: 3;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.25);
 }
 .checklist-float-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 12px 14px;
   cursor: pointer;
   user-select: none;
 }
@@ -321,8 +367,7 @@ html, body, #app { height: 100%; margin: 0; }
 .checklist-float-body {
   max-height: 40vh;
   overflow-y: auto;
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--nm-border-subtle);
+  padding: 4px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -519,3 +564,31 @@ html, body, #app { height: 100%; margin: 0; }
 /* ── 杂项 ── */
 .muted { color: var(--nm-text-secondary); }
 hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0; }
+
+/* ── NeumorphismLayout 覆盖：sider 去背景/边框/阴影，折叠完全隐藏 ── */
+.panel-layout.nm-layout {
+  background: transparent;
+}
+.panel-layout .nm-layout__sider {
+  background: transparent;
+  border-right: none;
+  box-shadow: none;
+}
+.panel-layout .nm-layout__sider-inner {
+  background: none;
+}
+/* 折叠态：sider 完全隐藏（collapsedWidth=0 基础上再兜底） */
+.panel-layout.nm-layout--sider-collapsed .nm-layout__sider {
+  width: 0 !important;
+  overflow: hidden;
+}
+/* sider 槽位内容：卡片纵向堆叠，间距由卡片自身阴影区分 */
+.panel-sider {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
