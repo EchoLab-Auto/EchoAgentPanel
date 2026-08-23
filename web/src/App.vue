@@ -70,29 +70,25 @@ function cancelWork() {
   sendCommand({ CancelRequestedWork: { session_id: activeSessionId.value, all: false } });
 }
 
-// ── 顶部多级菜单：会话工具 / 设置 两个分组 ──
-const headerMenuItems: HeadlessMenuItem[] = [
-  {
-    key: 'grp-session',
-    label: '会话工具',
-    children: [
-      { key: 'showContext', label: '上下文' },
-      { key: 'showSystemPrompt', label: '系统提示词' },
-      { key: 'showLogs', label: '日志' },
-    ],
-  },
-  {
-    key: 'grp-settings',
-    label: '设置',
-    children: [{ key: 'showSettings', label: 'API 设置' }],
-  },
+// ── 顶部两个独立菜单：会话工具 / 设置 ──
+const sessionMenuItems: HeadlessMenuItem[] = [
+  { key: 'showContext', label: '上下文' },
+  { key: 'showSystemPrompt', label: '系统提示词' },
+  { key: 'showLogs', label: '日志' },
 ];
 
-function onHeaderMenuSelect(item: HeadlessMenuItem) {
+const settingsMenuItems: HeadlessMenuItem[] = [
+  { key: 'showSettings', label: 'API 设置' },
+];
+
+function onSessionMenuSelect(item: HeadlessMenuItem) {
   if (item.key === 'showContext') showContext.value = true;
   else if (item.key === 'showSystemPrompt') openSystemPrompt();
   else if (item.key === 'showLogs') showLogs.value = true;
-  else if (item.key === 'showSettings') showSettings.value = true;
+}
+
+function onSettingsMenuSelect(item: HeadlessMenuItem) {
+  if (item.key === 'showSettings') showSettings.value = true;
 }
 
 const busyCount = computed(
@@ -223,13 +219,24 @@ watch(
             资源
           </NeumorphismButton>
           <NeumorphismDropdown trigger="click" position="bottom">
-            <NeumorphismButton size="small" variant="flat">菜单 ▾</NeumorphismButton>
+            <NeumorphismButton size="small" variant="flat">会话 ▾</NeumorphismButton>
             <template #items>
               <NeumorphismMenu
-                :items="headerMenuItems"
+                :items="sessionMenuItems"
                 mode="vertical"
                 size="small"
-                @select="onHeaderMenuSelect"
+                @select="onSessionMenuSelect"
+              />
+            </template>
+          </NeumorphismDropdown>
+          <NeumorphismDropdown trigger="click" position="bottom">
+            <NeumorphismButton size="small" variant="flat">设置 ▾</NeumorphismButton>
+            <template #items>
+              <NeumorphismMenu
+                :items="settingsMenuItems"
+                mode="vertical"
+                size="small"
+                @select="onSettingsMenuSelect"
               />
             </template>
           </NeumorphismDropdown>
