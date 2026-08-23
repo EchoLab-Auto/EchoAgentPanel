@@ -9,9 +9,11 @@ import type {
   ContextMessageInfo,
   GateMode,
   SessionInfo,
+  SkillInfo,
   ThinkingMode,
   ReasoningEffort,
   TimelineMessage,
+  ToolInfo,
 } from './protocol';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -181,6 +183,10 @@ export interface AppState {
   toasts: Toast[];
   /** API 连通性测试结果（name(空=默认) → { ok, message, latencyMs }） */
   apiTests: Record<string, { ok: boolean; message: string; latencyMs: number }>;
+  /** 已发现并注册的技能列表 */
+  skills: SkillInfo[];
+  /** 已注册的工具定义列表 */
+  tools: ToolInfo[];
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
@@ -219,6 +225,8 @@ export function initialState(): AppState {
     sudoPrompt: null,
     toasts: [],
     apiTests: {},
+    skills: [],
+    tools: [],
     context: null,
     branchTabs: {},
     pendingBackground: {},
@@ -917,6 +925,16 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         message: e.message,
         latencyMs: e.latency_ms,
       };
+      return state;
+    }
+    case 'SkillsList': {
+      const e = (event as { SkillsList: { skills: SkillInfo[] } }).SkillsList;
+      state.skills = e.skills;
+      return state;
+    }
+    case 'ToolsList': {
+      const e = (event as { ToolsList: { tools: ToolInfo[] } }).ToolsList;
+      state.tools = e.tools;
       return state;
     }
     case 'SystemPrompt': {

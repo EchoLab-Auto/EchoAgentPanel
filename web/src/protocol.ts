@@ -39,6 +39,24 @@ export interface FriendInfo {
   nickname: string;
 }
 
+export interface SkillInfo {
+  name: string;
+  description: string;
+  keywords: string[];
+  always: boolean;
+  enabled: boolean;
+  category: string;
+  content: string;
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  parameters: unknown;
+  category: string;
+  enabled: boolean;
+}
+
 export interface ApiProfileInfo {
   name: string;
   provider: string;
@@ -128,8 +146,22 @@ export type BackendCommand =
     }
   | { SwitchApi: { name: string } }
   | { TestApi: { name: string } }
+  | 'RequestSkillsList'
+  | 'RequestToolsList'
   | { DeleteApi: { name: string } }
   | { ToggleSkill: { name: string; enabled: boolean } }
+  | { ToggleTool: { name: string; enabled: boolean } }
+  | {
+      SaveSkill: {
+        name: string;
+        description: string;
+        keywords: string[];
+        always: boolean;
+        category: string;
+        content: string;
+      };
+    }
+  | { DeleteSkill: { name: string } }
   | 'RequestState'
   | 'RequestContext'
   | 'RequestTrunkTimeline'
@@ -268,6 +300,8 @@ export type BackendEvent =
         latency_ms: number;
       }
     }
+  | { SkillsList: { skills: SkillInfo[] } }
+  | { ToolsList: { tools: ToolInfo[] } }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
   | { AdapterList: { adapters: AdapterStatus[] } }

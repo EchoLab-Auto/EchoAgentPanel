@@ -4,11 +4,14 @@
 import { computed, ref, watch } from 'vue';
 import {
   NeumorphismButton,
+  NeumorphismDropdown,
   NeumorphismLayout,
+  NeumorphismMenu,
   NeumorphismStatusDot,
   NeumorphismTag,
   NeumorphismToastProvider,
   ThemeProvider,
+  type HeadlessMenuItem,
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
 import { sendCommand, startConnection } from './connection';
@@ -16,6 +19,7 @@ import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import QqPanel from './components/QqPanel.vue';
 import TasksPanel from './components/TasksPanel.vue';
+import CapabilitiesPanel from './components/CapabilitiesPanel.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import ContextModal from './components/ContextModal.vue';
 import LogModal from './components/LogModal.vue';
@@ -26,14 +30,14 @@ import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'qq' | 'tasks';
+type View = 'chat' | 'qq' | 'tasks' | 'caps';
 
 const view = ref<View>(loadView());
 
 function loadView(): View {
   try {
     const saved = localStorage.getItem('echo-panel-view');
-    return (['chat', 'qq', 'tasks'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    return (['chat', 'qq', 'tasks', 'caps'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -64,6 +68,31 @@ function send(content: string) {
 
 function cancelWork() {
   sendCommand({ CancelRequestedWork: { session_id: activeSessionId.value, all: false } });
+}
+
+// ── 顶部多级菜单：会话工具 / 设置 两个分组 ──
+const headerMenuItems: HeadlessMenuItem[] = [
+  {
+    key: 'grp-session',
+    label: '会话工具',
+    children: [
+      { key: 'showContext', label: '上下文' },
+      { key: 'showSystemPrompt', label: '系统提示词' },
+      { key: 'showLogs', label: '日志' },
+    ],
+  },
+  {
+    key: 'grp-settings',
+    label: '设置',
+    children: [{ key: 'showSettings', label: 'API 设置' }],
+  },
+];
+
+function onHeaderMenuSelect(item: HeadlessMenuItem) {
+  if (item.key === 'showContext') showContext.value = true;
+  else if (item.key === 'showSystemPrompt') openSystemPrompt();
+  else if (item.key === 'showLogs') showLogs.value = true;
+  else if (item.key === 'showSettings') showSettings.value = true;
 }
 
 const busyCount = computed(
@@ -185,18 +214,25 @@ watch(
           >
             任务{{ runningTaskCount ? `(${runningTaskCount})` : '' }}
           </NeumorphismButton>
-          <NeumorphismButton size="small" variant="flat" @click="showContext = true">
-            上下文
+          <NeumorphismButton
+            size="small"
+            variant="flat"
+            :pressed="view === 'caps'"
+            @click="setView('caps')"
+          >
+            资源
           </NeumorphismButton>
-          <NeumorphismButton size="small" variant="flat" @click="openSystemPrompt">
-            系统提示词
-          </NeumorphismButton>
-          <NeumorphismButton size="small" variant="flat" @click="showLogs = true">
-            日志
-          </NeumorphismButton>
-          <NeumorphismButton size="small" variant="flat" @click="showSettings = true">
-            设置
-          </NeumorphismButton>
+          <NeumorphismDropdown trigger="click" position="bottom">
+            <NeumorphismButton size="small" variant="flat">菜单 ▾</NeumorphismButton>
+            <template #items>
+              <NeumorphismMenu
+                :items="headerMenuItems"
+                mode="vertical"
+                size="small"
+                @select="onHeaderMenuSelect"
+              />
+            </template>
+          </NeumorphismDropdown>
           <ThemeToggleButton />
         </div>
       </template>
@@ -220,6 +256,7 @@ watch(
           @cancel="cancelWork"
         />
         <QqPanel v-else-if="view === 'qq'" />
+        <CapabilitiesPanel v-else-if="view === 'caps'" />
         <TasksPanel v-else />
       </div>
     </NeumorphismLayout>
