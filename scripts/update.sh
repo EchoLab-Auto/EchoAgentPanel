@@ -25,7 +25,7 @@ usage() {
     cat <<'EOF'
 Usage: scripts/update.sh [options]
 
-Rebuild EchoAgentPanel (Rust backend + React frontend) and atomically replace
+Rebuild EchoAgentPanel (Rust backend + Vue 3 frontend) and atomically replace
 the installed binary and static frontend directory, then restart the Panel
 service if it is running.
 
