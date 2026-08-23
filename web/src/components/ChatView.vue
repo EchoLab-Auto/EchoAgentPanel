@@ -163,9 +163,23 @@ function imagesOf(message: ChatMessage): string[] {
           <button
             class="chat-view__attach-btn"
             title="添加图片（或直接粘贴截图）"
+            aria-label="添加图片"
             @click="fileInput?.click()"
           >
-            🖼
+            <svg
+              class="chat-view__icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <circle cx="9" cy="9" r="2" />
+              <path d="m21 15-4.5-4.5a2 2 0 0 0-2.83 0L5 19" />
+            </svg>
           </button>
           <input
             ref="fileInput"
@@ -189,7 +203,20 @@ function imagesOf(message: ChatMessage): string[] {
             :disabled="!canSubmit"
             @click="submit"
           >
-            发送
+            <svg
+              class="chat-view__icon chat-view__icon--btn"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m22 2-7 20-4-9-9-4Z" />
+              <path d="M22 2 11 13" />
+            </svg>
+            <span>发送</span>
           </NeumorphismButton>
         </template>
       </ChatComposer>
@@ -223,7 +250,7 @@ function imagesOf(message: ChatMessage): string[] {
   flex: 0 0 auto;
   margin: 0 12px 12px;
   padding: 10px 12px 12px;
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--nm-surface-raised);
   border: 1px solid var(--nm-border-subtle);
   box-shadow:
@@ -241,9 +268,53 @@ function imagesOf(message: ChatMessage): string[] {
   flex: 1;
   min-width: 0;
 }
+
+/* 图标基准：与 neumorphism stroke 风格保持一致 */
+.chat-view__icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+/* 图片附件按钮：方形圆角，hover 渐变高亮 */
+.chat-view__attach-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--nm-border-subtle);
+  border-radius: 10px;
+  background: var(--nm-surface-color);
+  color: var(--nm-text-secondary);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+.chat-view__attach-btn:hover {
+  color: var(--nm-text-primary);
+  background: var(--nm-surface-raised);
+  transform: translateY(-1px);
+}
+.chat-view__attach-btn:active {
+  transform: translateY(0);
+}
+
+/* 发送按钮：图标 + 文字内联 */
 .chat-view__send {
   flex: 0 0 auto;
-  margin-bottom: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px;
+}
+.chat-view__icon--btn {
+  width: 15px;
+  height: 15px;
 }
 
 .chat-view__session {
@@ -262,10 +333,11 @@ function imagesOf(message: ChatMessage): string[] {
 .chat-view__image {
   max-width: 260px;
   max-height: 200px;
-  border-radius: 8px;
+  border-radius: 12px;
   border: 1px solid var(--nm-border-subtle);
   object-fit: contain;
   background: var(--nm-bg-color);
+  box-shadow: 0 2px 10px var(--nm-shadow-dark, rgba(0, 0, 0, 0.28));
 }
 
 /* 待发送附件预览 */
@@ -282,24 +354,35 @@ function imagesOf(message: ChatMessage): string[] {
   width: 64px;
   height: 64px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--nm-border-subtle);
+  box-shadow: 0 2px 8px var(--nm-shadow-dark, rgba(0, 0, 0, 0.25));
+  transition: transform 0.15s ease;
+}
+.chat-view__attach:hover .chat-view__attach-img {
+  transform: translateY(-1px);
 }
 .chat-view__attach-remove {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 18px;
-  height: 18px;
+  top: -7px;
+  right: -7px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: none;
-  background: var(--nm-danger-color, #e5484d);
-  color: #fff;
-  font-size: 12px;
-  line-height: 18px;
+  background: var(--nm-surface-color);
+  color: var(--nm-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
   text-align: center;
   cursor: pointer;
   padding: 0;
+  box-shadow: 0 2px 6px var(--nm-shadow-dark, rgba(0, 0, 0, 0.35));
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.chat-view__attach-remove:hover {
+  color: var(--nm-text-primary);
+  background: var(--nm-surface-raised);
 }
 .chat-view__attach-btn {
   border: none;
