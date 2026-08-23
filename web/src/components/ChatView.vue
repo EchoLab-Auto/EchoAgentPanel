@@ -5,6 +5,7 @@
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, ref } from 'vue';
+import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
   ChatMessageItem,
@@ -150,6 +151,7 @@ function imagesOf(message: ChatMessage): string[] {
         v-model="input"
         :disabled="!connected"
         cancelable
+        :rows="2"
         :placeholder="placeholder"
         @send="onSend"
         @cancel="emit('cancel')"
@@ -157,11 +159,10 @@ function imagesOf(message: ChatMessage): string[] {
         <template #meta>
           <span class="chat-view__session" title="当前会话">{{ sessionId }}</span>
         </template>
-        <template #actions="{ canSubmit }">
+        <template #actions="{ submit, canSubmit }">
           <button
             class="chat-view__attach-btn"
             title="添加图片（或直接粘贴截图）"
-            :disabled="!canSubmit"
             @click="fileInput?.click()"
           >
             🖼
@@ -180,6 +181,16 @@ function imagesOf(message: ChatMessage): string[] {
               }
             "
           />
+          <NeumorphismButton
+            class="chat-view__send"
+            size="small"
+            variant="raised"
+            shape="pill"
+            :disabled="!canSubmit"
+            @click="submit"
+          >
+            发送
+          </NeumorphismButton>
         </template>
       </ChatComposer>
     </div>
@@ -211,14 +222,28 @@ function imagesOf(message: ChatMessage): string[] {
 .chat-composer-float {
   flex: 0 0 auto;
   margin: 0 12px 12px;
-  padding: 8px 10px 10px;
+  padding: 10px 12px 12px;
+  border-radius: 14px;
   background: var(--nm-surface-raised);
   border: 1px solid var(--nm-border-subtle);
-  border-radius: 14px;
   box-shadow:
     0 8px 24px var(--nm-shadow-ambient-xl, rgba(0, 0, 0, 0.35)),
     4px 4px 12px var(--nm-shadow-dark),
     -2px -2px 8px var(--nm-shadow-light);
+}
+
+/* actions 行：图片按钮 + 发送按钮底对齐、间距统一 */
+.chat-composer-float :deep(.nm-chat-composer__row) {
+  align-items: flex-end;
+  gap: 10px;
+}
+.chat-composer-float :deep(.nm-chat-composer__field) {
+  flex: 1;
+  min-width: 0;
+}
+.chat-view__send {
+  flex: 0 0 auto;
+  margin-bottom: 1px;
 }
 
 .chat-view__session {
