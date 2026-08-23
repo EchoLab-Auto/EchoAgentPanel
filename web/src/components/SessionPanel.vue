@@ -56,10 +56,15 @@ function onSelect(item: HeadlessMenuItem) {
   min-height: 0;
 }
 .session-side {
-  width: 168px;
+  /* 菜单项实际宽 192px + 内边距；放不下会溢出侵入主区，取 240 与资源面板对齐 */
+  width: 240px;
   flex-shrink: 0;
   padding: 12px 8px;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+.session-side :deep(.nm-menu) {
+  width: 100%;
 }
 .session-main {
   flex: 1;
