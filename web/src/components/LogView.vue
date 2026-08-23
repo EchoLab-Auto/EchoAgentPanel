@@ -1,12 +1,8 @@
 <script setup lang="ts">
-//! 日志查看器：Core / Panel 日志，支持 5s 自动刷新。
+//! 日志查看视图（内嵌于 SessionPanel，取代原 LogModal 弹窗）。
 
-import { onBeforeUnmount, ref, watch } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismModal,
-  NeumorphismSegmented,
-} from '@echolab-auto/ui-frame';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { NeumorphismButton, NeumorphismSegmented } from '@echolab-auto/ui-frame';
 
 type LogKind = 'panel' | 'core';
 
@@ -19,8 +15,6 @@ const KIND_OPTIONS = [
   { label: 'Core', value: 'core' },
   { label: 'Panel', value: 'panel' },
 ];
-
-const visible = defineModel<boolean>({ required: true });
 
 const kind = ref<LogKind>('core');
 const text = ref('（正在加载日志…）');
@@ -53,47 +47,38 @@ function startAuto() {
   }
 }
 
-// 打开时加载并启动自动刷新；关闭时停止。
-watch(visible, (open) => {
-  if (open) {
-    load(kind.value);
-    startAuto();
-  } else {
-    stopAuto();
-  }
-});
-watch([auto, kind], () => {
-  if (visible.value) {
-    load(kind.value);
-    startAuto();
-  }
+onMounted(() => {
+  load(kind.value);
+  startAuto();
 });
 onBeforeUnmount(stopAuto);
+watch([auto, kind], () => {
+  load(kind.value);
+  startAuto();
+});
 </script>
 
 <template>
-  <NeumorphismModal v-model="visible" size="large" :footer="false">
-    <template #header>
-      <div class="log-modal-head">
-        <h2 class="log-modal-title">日志查看器</h2>
-        <NeumorphismSegmented v-model="kind" :options="KIND_OPTIONS" size="small" />
-        <NeumorphismButton variant="flat" size="small" @click="auto = !auto">
-          {{ auto ? '自动刷新中' : '手动刷新' }}
-        </NeumorphismButton>
-      </div>
-    </template>
+  <div>
+    <div class="log-head">
+      <h2 class="log-title">日志查看器</h2>
+      <NeumorphismSegmented v-model="kind" :options="KIND_OPTIONS" size="small" />
+      <NeumorphismButton variant="flat" size="small" @click="auto = !auto">
+        {{ auto ? '自动刷新中' : '手动刷新' }}
+      </NeumorphismButton>
+    </div>
     <pre class="log-viewer">{{ text }}</pre>
-  </NeumorphismModal>
+  </div>
 </template>
 
 <style scoped>
-.log-modal-head {
+.log-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
+  margin-bottom: 8px;
 }
-.log-modal-title {
+.log-title {
   margin: 0;
   font-size: 16px;
 }

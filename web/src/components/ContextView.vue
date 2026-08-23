@@ -1,12 +1,8 @@
 <script setup lang="ts">
-//! 上下文分块可视化：token 仪表、系统块/历史块明细、两步确认清理。
+//! 上下文分块视图（内嵌于 SessionPanel，取代原 ContextModal 弹窗）。
 
-import { computed, ref, watch } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismModal,
-  NeumorphismProgress,
-} from '@echolab-auto/ui-frame';
+import { computed, onMounted, ref } from 'vue';
+import { NeumorphismButton, NeumorphismProgress } from '@echolab-auto/ui-frame';
 import { ChatFold } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
 import { sendCommand } from '../connection';
@@ -31,17 +27,11 @@ const KIND_CLASS: Record<string, string> = {
   history: 'ctx-history',
 };
 
-const visible = defineModel<boolean>({ required: true });
-
 const showMessages = ref(false);
 const confirmClear = ref(false);
 
-// 每次打开都刷新快照。
-watch(visible, (open) => {
-  if (open) {
-    confirmClear.value = false;
-    sendCommand('RequestContext');
-  }
+onMounted(() => {
+  sendCommand('RequestContext');
 });
 
 const snapshot = computed(() => state.context);
@@ -65,11 +55,12 @@ const systemBlocks = computed(() => blocks.value.filter((b) => b.kind !== 'histo
 const historyBlocks = computed(() => blocks.value.filter((b) => b.kind === 'history'));
 
 function blockPct(tokens: number): number {
-  return maxBlockTokens.value > 0 ? Math.max(1, Math.round((tokens / maxBlockTokens.value) * 100)) : 0;
+  return maxBlockTokens.value > 0
+    ? Math.max(1, Math.round((tokens / maxBlockTokens.value) * 100))
+    : 0;
 }
 
 // 两步确认：第一次点击武装，第二次发送清空命令。
-// Core 会广播空 TrunkTimeline + 新 ContextSnapshot，聊天区与本弹窗随之自动更新。
 function handleClear() {
   if (!confirmClear.value) {
     confirmClear.value = true;
@@ -85,27 +76,25 @@ function refresh() {
 </script>
 
 <template>
-  <NeumorphismModal v-model="visible" size="large" :footer="false">
-    <template #header>
-      <div class="ctx-modal-head">
-        <h2 class="ctx-modal-title">
-          上下文分块
-          <span v-if="snapshot" class="muted ctx-modal-subtitle">
-            · {{ snapshot.total_tokens }}/{{ snapshot.limit_tokens }} tokens ·
-            {{ snapshot.messages.length }} 条
-          </span>
-        </h2>
-        <button
-          class="ctx-clear"
-          :class="{ confirm: confirmClear }"
-          title="清空 agent 的全部对话历史与上下文记忆（不可恢复）"
-          @click="handleClear"
-        >
-          {{ confirmClear ? '确认清理？不可恢复' : '清理历史记忆' }}
-        </button>
-        <NeumorphismButton variant="flat" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
-      </div>
-    </template>
+  <div class="ctx-view">
+    <div class="ctx-view-head">
+      <h2 class="ctx-view-title">
+        上下文分块
+        <span v-if="snapshot" class="muted ctx-modal-subtitle">
+          · {{ snapshot.total_tokens }}/{{ snapshot.limit_tokens }} tokens ·
+          {{ snapshot.messages.length }} 条
+        </span>
+      </h2>
+      <button
+        class="ctx-clear"
+        :class="{ confirm: confirmClear }"
+        title="清空 agent 的全部对话历史与上下文记忆（不可恢复）"
+        @click="handleClear"
+      >
+        {{ confirmClear ? '确认清理？不可恢复' : '清理历史记忆' }}
+      </button>
+      <NeumorphismButton variant="flat" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
+    </div>
 
     <div v-if="!snapshot" class="muted">（暂无快照，可在聊天中发送 /context 获取）</div>
     <template v-else>
@@ -183,17 +172,17 @@ function refresh() {
         </div>
       </template>
     </template>
-  </NeumorphismModal>
+  </div>
 </template>
 
 <style scoped>
-.ctx-modal-head {
+.ctx-view-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
+  margin-bottom: 12px;
 }
-.ctx-modal-title {
+.ctx-view-title {
   margin: 0;
   font-size: 16px;
 }

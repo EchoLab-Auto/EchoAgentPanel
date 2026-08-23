@@ -20,24 +20,22 @@ import PanelSidebar from './components/PanelSidebar.vue';
 import QqPanel from './components/QqPanel.vue';
 import TasksPanel from './components/TasksPanel.vue';
 import CapabilitiesPanel from './components/CapabilitiesPanel.vue';
+import SessionPanel from './components/SessionPanel.vue';
 import SettingsModal from './components/SettingsModal.vue';
-import ContextModal from './components/ContextModal.vue';
-import LogModal from './components/LogModal.vue';
-import SystemPromptModal from './components/SystemPromptModal.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'qq' | 'tasks' | 'caps';
+type View = 'chat' | 'qq' | 'tasks' | 'caps' | 'session';
 
 const view = ref<View>(loadView());
 
 function loadView(): View {
   try {
     const saved = localStorage.getItem('echo-panel-view');
-    return (['chat', 'qq', 'tasks', 'caps'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    return (['chat', 'qq', 'tasks', 'caps', 'session'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -55,9 +53,6 @@ function setView(next: View) {
 // 当前对话目标会话；'global' = 全局上下文（显示全部消息）。默认 local user 会话。
 const activeSessionId = ref('local:tui::local_user');
 const showSettings = ref(false);
-const showContext = ref(false);
-const showLogs = ref(false);
-const showSystemPrompt = ref(false);
 const activeBranchId = ref<string | null>(null);
 
 function send(content: string) {
@@ -70,22 +65,10 @@ function cancelWork() {
   sendCommand({ CancelRequestedWork: { session_id: activeSessionId.value, all: false } });
 }
 
-// ── 顶部两个独立菜单：会话工具 / 设置 ──
-const sessionMenuItems: HeadlessMenuItem[] = [
-  { key: 'showContext', label: '上下文' },
-  { key: 'showSystemPrompt', label: '系统提示词' },
-  { key: 'showLogs', label: '日志' },
-];
-
+// ── 顶部设置菜单 ──
 const settingsMenuItems: HeadlessMenuItem[] = [
   { key: 'showSettings', label: 'API 设置' },
 ];
-
-function onSessionMenuSelect(item: HeadlessMenuItem) {
-  if (item.key === 'showContext') showContext.value = true;
-  else if (item.key === 'showSystemPrompt') openSystemPrompt();
-  else if (item.key === 'showLogs') showLogs.value = true;
-}
 
 function onSettingsMenuSelect(item: HeadlessMenuItem) {
   if (item.key === 'showSettings') showSettings.value = true;
@@ -105,15 +88,6 @@ const runningTaskCount = computed(
 function selectSession(id: string) {
   activeSessionId.value = id;
   setView('chat');
-}
-
-function openSystemPrompt() {
-  sendCommand('RequestSystemPrompt');
-  showSystemPrompt.value = true;
-}
-
-function saveSystemPrompt(text: string) {
-  sendCommand({ SetSystemPrompt: { prompt: text } });
 }
 
 // ── 侧边栏折叠：由 NeumorphismLayout 管理，状态持久化 ──
@@ -218,17 +192,14 @@ watch(
           >
             资源
           </NeumorphismButton>
-          <NeumorphismDropdown trigger="click" position="bottom">
-            <NeumorphismButton size="small" variant="flat">会话 ▾</NeumorphismButton>
-            <template #items>
-              <NeumorphismMenu
-                :items="sessionMenuItems"
-                mode="vertical"
-                size="small"
-                @select="onSessionMenuSelect"
-              />
-            </template>
-          </NeumorphismDropdown>
+          <NeumorphismButton
+            size="small"
+            variant="flat"
+            :pressed="view === 'session'"
+            @click="setView('session')"
+          >
+            会话
+          </NeumorphismButton>
           <NeumorphismDropdown trigger="click" position="bottom">
             <NeumorphismButton size="small" variant="flat">设置 ▾</NeumorphismButton>
             <template #items>
@@ -264,14 +235,12 @@ watch(
         />
         <QqPanel v-else-if="view === 'qq'" />
         <CapabilitiesPanel v-else-if="view === 'caps'" />
+        <SessionPanel v-else-if="view === 'session'" />
         <TasksPanel v-else />
       </div>
     </NeumorphismLayout>
 
     <SettingsModal v-model="showSettings" />
-    <ContextModal v-model="showContext" />
-    <LogModal v-model="showLogs" />
-    <SystemPromptModal v-model="showSystemPrompt" @save="saveSystemPrompt" />
     <BranchModal
       v-if="activeBranchId"
       :branch-id="activeBranchId"
