@@ -37,6 +37,8 @@ export interface DisplayMessage {
   sessionId?: string;
   reasoning?: string[];
   tool?: ToolMsg;
+  /** 多模态附件（图片 URL / data URI） */
+  images?: string[];
   /** 临时回复分支的合并块（分支结束后插入主会话） */
   branch?: {
     branchId: string;
@@ -597,6 +599,7 @@ function loadTimeline(state: AppState, messages: TimelineMessage[]) {
         role: 'user' as const,
         content: message.content,
         source: message.source ?? null,
+        images: message.images && message.images.length ? message.images : undefined,
       };
     }
     if (message.kind === 'backend') {
@@ -1010,6 +1013,7 @@ function reduceMessage(
     channel: string;
     group_name: string | null;
     content: string;
+    images?: string[];
     timestamp: number;
     received_at_ms: number;
     message_sequence: number;
@@ -1029,6 +1033,7 @@ function reduceMessage(
         channel: e.channel,
         group_name: e.group_name,
       },
+      images: e.images && e.images.length ? e.images : undefined,
     });
   }
   return state;

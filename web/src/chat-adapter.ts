@@ -23,12 +23,17 @@ function mergeReasoning(msgs: BranchMsg[]): ChatBranchEntry[] {
   return out;
 }
 
-export function toChatMessage(m: DisplayMessage): ChatMessage {
+export interface ChatMessageWithImages extends ChatMessage {
+  images?: string[];
+}
+
+export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
   return {
     id: m.key, // 'm{N}' → id
     role: m.role === 'backend' ? 'agent' : m.role, // 唯一的角色改名
     content: m.content,
     time: m.time, // 双方都是秒级 Unix 时间戳，无需换算
+    images: m.images,
     reasoning: m.reasoning,
     tool: m.tool && {
       name: m.tool.name,

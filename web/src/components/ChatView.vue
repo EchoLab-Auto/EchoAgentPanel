@@ -2,16 +2,28 @@
 //! 聊天主视图：消息列表 + 固定底部输入区（flex 布局，输入区占位不遮挡消息）。
 //! 渲染层整体由 @echolab-auto/ui-frame/chat 承担（吸底滚动、回到底部、
 //! IME 组合保护、Markdown、工具/思考/分支合并块），这里只做数据适配。
+//! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, ref } from 'vue';
-import { ChatComposer, ChatMessageList, type ChatMessage } from '@echolab-auto/ui-frame/chat';
+import {
+  ChatComposer,
+  ChatMessageItem,
+  ChatMessageList,
+  type ChatMessage,
+} from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
-import { formatTime, toChatMessage } from '../chat-adapter';
+import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 
 const props = defineProps<{ sessionId: string }>();
-const emit = defineEmits<{ send: [content: string]; cancel: [] }>();
+const emit = defineEmits<{
+  send: [content: string, images: string[]];
+  cancel: [];
+}>();
 
 const input = ref('');
+/** 待发送图片（data URL 形式） */
+const attachments = ref<string[]>([]);
+const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
 
@@ -32,29 +44,142 @@ const emptyText = computed(() =>
 
 // 空串占位 → 库回退到 locale 默认（输入消息，Enter 发送…）。
 const placeholder = computed(() => (connected.value ? '' : '未连接到 Core，暂时无法发送'));
+
+// ── 图片工具：压缩为 data URL（最长边 1600，JPEG 0.85）──
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('图片解码失败'));
+      img.onload = () => {
+        const MAX = 1600;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('canvas 不可用');
+          ctx.drawImage(img, 0, 0, w, h);
+          const isPng = file.type === 'image/png';
+          resolve(canvas.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addFiles(files: FileList | File[]) {
+  const list = Array.from(files).filter((f) => f.type.startsWith('image/'));
+  for (const file of list) {
+    try {
+      attachments.value.push(await fileToDataUrl(file));
+    } catch {
+      // 跳过无法解码的文件
+    }
+  }
+}
+
+function removeAttachment(index: number) {
+  attachments.value.splice(index, 1);
+}
+
+function onPaste(event: ClipboardEvent) {
+  const files = event.clipboardData?.files;
+  if (files && files.length > 0) {
+    event.preventDefault();
+    void addFiles(files);
+  }
+}
+
+// 发送：文本 + 图片一起发出；发送后清空附件。
+function onSend(content: string) {
+  emit('send', content, attachments.value.slice());
+  attachments.value = [];
+}
+
+// 消息是否带图（ChatMessage 类型无 images，扩展字段来自 chat-adapter）
+function imagesOf(message: ChatMessage): string[] {
+  return (message as ChatMessageWithImages).images ?? [];
+}
 </script>
 
 <template>
-  <div class="chat-view">
+  <div class="chat-view" @paste="onPaste">
     <!-- 消息列表：flex:1，内部 ChatTray 独立滚动 -->
     <ChatMessageList
       class="chat-view__list"
       :messages="messages"
       :format-time="formatTime"
       :empty-text="emptyText"
-    />
+    >
+      <template #message="slot">
+        <div v-if="imagesOf(slot.message).length" class="chat-view__images">
+          <img
+            v-for="(img, i) in imagesOf(slot.message)"
+            :key="i"
+            :src="img"
+            class="chat-view__image"
+            alt=""
+          />
+        </div>
+        <ChatMessageItem :message="slot.message" :format-time="formatTime" />
+      </template>
+    </ChatMessageList>
+
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
     <div class="chat-composer-float">
+      <!-- 待发送图片预览 -->
+      <div v-if="attachments.length" class="chat-view__attachments">
+        <div v-for="(img, i) in attachments" :key="i" class="chat-view__attach">
+          <img :src="img" class="chat-view__attach-img" alt="" />
+          <button class="chat-view__attach-remove" title="移除" @click="removeAttachment(i)">
+            ×
+          </button>
+        </div>
+      </div>
       <ChatComposer
         v-model="input"
         :disabled="!connected"
         cancelable
         :placeholder="placeholder"
-        @send="emit('send', $event)"
+        @send="onSend"
         @cancel="emit('cancel')"
       >
         <template #meta>
           <span class="chat-view__session" title="当前会话">{{ sessionId }}</span>
+        </template>
+        <template #actions="{ canSubmit }">
+          <button
+            class="chat-view__attach-btn"
+            title="添加图片（或直接粘贴截图）"
+            :disabled="!canSubmit"
+            @click="fileInput?.click()"
+          >
+            🖼
+          </button>
+          <input
+            ref="fileInput"
+            type="file"
+            accept="image/*"
+            multiple
+            class="chat-view__file-input"
+            @change="
+              (e) => {
+                const el = e.target as HTMLInputElement;
+                if (el.files?.length) void addFiles(el.files);
+                el.value = '';
+              }
+            "
+          />
         </template>
       </ChatComposer>
     </div>
@@ -100,5 +225,68 @@ const placeholder = computed(() => (connected.value ? '' : '未连接到 Core，
   font-family: var(--nm-font-mono, monospace);
   font-size: 12px;
   color: var(--nm-text-secondary, #888);
+}
+
+/* 消息内图片 */
+.chat-view__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.chat-view__image {
+  max-width: 260px;
+  max-height: 200px;
+  border-radius: 8px;
+  border: 1px solid var(--nm-border-subtle);
+  object-fit: contain;
+  background: var(--nm-bg-color);
+}
+
+/* 待发送附件预览 */
+.chat-view__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.chat-view__attach {
+  position: relative;
+}
+.chat-view__attach-img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--nm-border-subtle);
+}
+.chat-view__attach-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: var(--nm-danger-color, #e5484d);
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+}
+.chat-view__attach-btn {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.chat-view__attach-btn:hover {
+  opacity: 1;
+}
+.chat-view__file-input {
+  display: none;
 }
 </style>

@@ -55,10 +55,10 @@ const activeSessionId = ref('local:tui::local_user');
 const showSettings = ref(false);
 const activeBranchId = ref<string | null>(null);
 
-function send(content: string) {
+function send(content: string, images: string[] = []) {
   const target =
     activeSessionId.value === 'global' ? 'local:tui::local_user' : activeSessionId.value;
-  sendCommand({ SendMessage: { session_id: target, content } });
+  sendCommand({ SendMessage: { session_id: target, content, images } });
 }
 
 function cancelWork() {

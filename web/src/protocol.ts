@@ -109,6 +109,7 @@ export interface TimelineMessage {
   source?: TimelineSource | null;
   reasoning?: string[] | null;
   tool?: TimelineTool | null;
+  images?: string[];
 }
 
 export interface ChecklistState {
@@ -128,7 +129,7 @@ export interface SudoPasswordSubmit {
 // ── BackendCommand（外部标签枚举）──────────────────────────────────────────
 
 export type BackendCommand =
-  | { SendMessage: { session_id: string; content: string } }
+  | { SendMessage: { session_id: string; content: string; images?: string[] } }
   | { SwitchModel: { model: string } }
   | { SwitchProvider: { provider: string } }
   | { SetSystemPrompt: { prompt: string } }
@@ -196,6 +197,7 @@ export type BackendEvent =
         channel: string;
         group_name: string | null;
         content: string;
+        images?: string[];
         timestamp: number;
         received_at_ms: number;
         message_sequence: number;
