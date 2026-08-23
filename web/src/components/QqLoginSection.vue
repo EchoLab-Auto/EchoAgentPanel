@@ -4,6 +4,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import type { AdapterStatus } from '../protocol';
+import { fetchWithTimeout } from '../api';
 
 interface LoginStatus {
   online: boolean;
@@ -22,7 +23,7 @@ const qrRequested = ref(false);
 
 async function loadStatus() {
   try {
-    const resp = await fetch('/api/qq/login-status', { cache: 'no-store' });
+    const resp = await fetchWithTimeout('/api/qq/login-status', { cache: 'no-store' });
     const data = await resp.json();
     if (!resp.ok) {
       status.value = { online: false };
@@ -48,7 +49,7 @@ async function loadQr() {
   loading.value = true;
   error.value = null;
   try {
-    const resp = await fetch('/api/qq/qrcode');
+    const resp = await fetchWithTimeout('/api/qq/qrcode');
     if (!resp.ok) {
       let message = `二维码读取失败 (HTTP ${resp.status})`;
       try {

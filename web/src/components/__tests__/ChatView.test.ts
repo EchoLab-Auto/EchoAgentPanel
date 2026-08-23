@@ -23,12 +23,17 @@ const ChatComposerStub = defineComponent({
   name: 'ChatComposer',
   props: ['modelValue', 'disabled', 'cancelable', 'placeholder'],
   emits: ['update:modelValue', 'send', 'cancel'],
-  setup(props, { emit }) {
+  setup(props, { emit, slots }) {
     return () =>
       h('div', { class: 'stub-composer' }, [
         h('span', { class: 'stub-meta' }, `session=${props.modelValue ?? ''}`),
         h('input', { class: 'stub-input', onInput: (e: Event) => emit('update:modelValue', (e.target as HTMLInputElement).value) }),
         h('button', { class: 'stub-send', onClick: () => emit('send', 'hi') }, 'send'),
+        // 渲染自定义 actions 插槽（库语义：提供插槽替换默认发送按钮）
+        slots.actions?.({
+          submit: () => emit('send', props.modelValue ?? '', []),
+          canSubmit: true,
+        }),
       ]);
   },
 });
@@ -96,5 +101,43 @@ describe('ChatView 布局契约', () => {
     expect(styleBlock).not.toMatch(/\.chat-composer-float\s*\{[^}]*position:\s*absolute/s);
     // 不需要 padding-bottom hack 也能保证不遮挡
     expect(styleBlock).not.toMatch(/padding-bottom:\s*(?!0)[0-9]+px\s*!important/);
+  });
+
+  it('提供图片附件按钮（SVG 图标，无 emoji）与发送按钮（#actions 契约）', () => {
+    const wrapper = mountChatView();
+    // 附件按钮存在且内含 SVG（非 🖼 emoji 文本）
+    const attach = wrapper.find('.chat-view__attach-btn');
+    expect(attach.exists()).toBe(true);
+    expect(attach.find('svg').exists()).toBe(true);
+    expect(attach.text().trim()).not.toContain('🖼');
+    // 发送按钮存在（#actions 内自定义），点击触发 send
+    const sendBtn = wrapper.find('.chat-view__send');
+    expect(sendBtn.exists()).toBe(true);
+  });
+
+  it('发送事件携带空 images（无附件时）', () => {
+    const wrapper = mountChatView();
+    const sendBtn = wrapper.find('.chat-view__send');
+    sendBtn.trigger('click');
+    const emitted = wrapper.emitted('send');
+    expect(emitted).toBeTruthy();
+    expect(emitted![0][0]).toBe('');
+    expect(emitted![0][1]).toEqual([]);
+  });
+
+  it('受限样式契约：actions 行底对齐、图标 17px、SVG 图标而非 emoji', () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../ChatView.vue'),
+      'utf-8',
+    );
+    const styleBlock = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    // 图标规格：17px stroke SVG
+    expect(styleBlock).toMatch(/chat-view__icon\s*\{[^}]*width:\s*17px/s);
+    // actions 行底对齐
+    expect(styleBlock).toMatch(/nm-chat-composer__row[^}]*align-items:\s*flex-end/s);
+    // 源文件不得出现 emoji 图标
+    expect(raw).not.toContain('🖼');
+    // 发送按钮内联 flex 布局（图标+文字）
+    expect(styleBlock).toMatch(/chat-view__send\s*\{[^}]*display:\s*inline-flex/s);
   });
 });

@@ -147,6 +147,8 @@ function imagesOf(message: ChatMessage): string[] {
           </button>
         </div>
       </div>
+      <!-- 契约：ChatComposer 提供 #actions 插槽时*替换*渲染默认发送按钮，
+           因此必须自己渲染 submit 按钮；删除该插槽会恢复库默认发送按钮。 -->
       <ChatComposer
         v-model="input"
         :disabled="!connected"

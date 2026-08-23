@@ -3,12 +3,13 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismSegmented } from '@echolab-auto/ui-frame';
+import { fetchWithTimeout } from '../api';
 
 type LogKind = 'panel' | 'core';
 
 const LOG_ENDPOINT: Record<LogKind, string> = {
-  panel: '/api/logs/panel',
-  core: '/api/logs/core',
+  panel: '/api/logs/panel?lines=100',
+  core: '/api/logs/core?lines=100',
 };
 
 const KIND_OPTIONS = [
@@ -22,7 +23,7 @@ const auto = ref(true);
 
 async function load(selected: LogKind) {
   try {
-    const resp = await fetch(LOG_ENDPOINT[selected], { cache: 'no-store' });
+    const resp = await fetchWithTimeout(LOG_ENDPOINT[selected], { cache: 'no-store' });
     if (!resp.ok) {
       text.value = `日志接口返回 HTTP ${resp.status}`;
       return;
