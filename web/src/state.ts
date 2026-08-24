@@ -29,6 +29,7 @@ import type {
   ReasoningEffort,
   TimelineMessage,
   ToolInfo,
+  PluginInfo,
 } from './protocol';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -204,6 +205,8 @@ export interface AppState {
   skills: SkillInfo[];
   /** 已注册的工具定义列表 */
   tools: ToolInfo[];
+  /** 已挂载插件列表 */
+  plugins: PluginInfo[];
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
@@ -244,6 +247,7 @@ export function initialState(): AppState {
     apiTests: {},
     skills: [],
     tools: [],
+    plugins: [],
     context: null,
     branchTabs: {},
     pendingBackground: {},
@@ -559,6 +563,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'ToolsList': {
       const e = (event as { ToolsList: { tools: ToolInfo[] } }).ToolsList;
       state.tools = e.tools;
+      return state;
+    }
+    case 'PluginsList': {
+      const e = (event as { PluginsList: { plugins: PluginInfo[] } }).PluginsList;
+      state.plugins = e.plugins;
       return state;
     }
     case 'SystemPrompt': {

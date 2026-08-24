@@ -57,6 +57,18 @@ export interface ToolInfo {
   enabled: boolean;
 }
 
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  kind: string;
+  description: string;
+  entry: string;
+  author: string;
+  enabled: boolean;
+  builtin: boolean;
+}
+
 export interface ApiProfileInfo {
   name: string;
   provider: string;
@@ -163,6 +175,8 @@ export type BackendCommand =
       };
     }
   | { DeleteSkill: { name: string } }
+  | 'RequestPluginsList'
+  | { TogglePlugin: { id: string; enabled: boolean } }
   | 'RequestState'
   | 'RequestContext'
   | 'RequestTrunkTimeline'
@@ -304,6 +318,7 @@ export type BackendEvent =
     }
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
+  | { PluginsList: { plugins: PluginInfo[] } }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
   | { AdapterList: { adapters: AdapterStatus[] } }

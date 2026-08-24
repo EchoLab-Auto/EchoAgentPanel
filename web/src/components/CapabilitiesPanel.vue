@@ -19,7 +19,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
-import type { SkillInfo, ToolInfo } from '../protocol';
+import type { PluginInfo, SkillInfo, ToolInfo } from '../protocol';
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
@@ -28,6 +28,7 @@ const TOOL_OTHER = '扩展工具';
 // ── 选中状态 ──
 const selectedSkill = ref<SkillInfo | null>(null);
 const selectedTool = ref<ToolInfo | null>(null);
+const selectedPlugin = ref<PluginInfo | null>(null);
 const editing = ref(false);
 const creating = ref(false);
 
@@ -67,6 +68,43 @@ function skillMenuItems(): HeadlessMenuItem[] {
   ];
 }
 
+const KIND_LABEL_PLUGIN: Record<string, string> = {
+  skill: '技能',
+  tool: '工具',
+  provider: 'LLM Provider',
+  loop: 'Turn Runner',
+  adapter: '适配器',
+  orchestration: '编排',
+  management: '管理面',
+};
+
+function pluginMenuItems(): HeadlessMenuItem[] {
+  const groups = new Map<string, PluginInfo[]>();
+  for (const p of state.plugins) {
+    const cat = KIND_LABEL_PLUGIN[p.kind] ?? p.kind;
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat)!.push(p);
+  }
+  const cats = [...groups.keys()].sort();
+  return [
+    {
+      key: 'group-plugins',
+      label: '插件',
+      children: cats.map((cat) => ({
+        key: `pcat:${cat}`,
+        label: `${cat} (${groups.get(cat)!.length})`,
+        children: groups
+          .get(cat)!
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((p) => ({
+            key: `plugin:${p.id}`,
+            label: p.enabled ? p.name : `${p.name}（已禁用）`,
+          })),
+      })),
+    },
+  ];
+}
+
 function toolMenuItems(): HeadlessMenuItem[] {
   const groups = new Map<string, ToolInfo[]>();
   for (const t of state.tools) {
@@ -98,7 +136,7 @@ function toolMenuItems(): HeadlessMenuItem[] {
   ];
 }
 
-const menuItems = computed<HeadlessMenuItem[]>(() => [...skillMenuItems(), ...toolMenuItems()]);
+const menuItems = computed<HeadlessMenuItem[]>(() => [...skillMenuItems(), ...toolMenuItems(), ...pluginMenuItems()]);
 const defaultExpanded = ['group-skills', 'group-tools'];
 
 function onMenuSelect(item: HeadlessMenuItem) {
@@ -107,6 +145,17 @@ function onMenuSelect(item: HeadlessMenuItem) {
     const found = state.skills.find((s) => s.name === name);
     if (found) {
       selectedSkill.value = found;
+      selectedPlugin.value = null;
+      selectedTool.value = null;
+      editing.value = false;
+      creating.value = false;
+    }
+  } else if (item.key.startsWith('plugin:')) {
+    const id = item.key.slice('plugin:'.length);
+    const found = state.plugins.find((p) => p.id === id);
+    if (found) {
+      selectedPlugin.value = found;
+      selectedSkill.value = null;
       selectedTool.value = null;
       editing.value = false;
       creating.value = false;
@@ -117,6 +166,7 @@ function onMenuSelect(item: HeadlessMenuItem) {
     if (found) {
       selectedTool.value = found;
       selectedSkill.value = null;
+      selectedPlugin.value = null;
       editing.value = false;
       creating.value = false;
     }
@@ -126,6 +176,11 @@ function onMenuSelect(item: HeadlessMenuItem) {
 // ── 技能启停 ──
 function toggleSkill(skill: SkillInfo, enabled: boolean) {
   sendCommand({ ToggleSkill: { name: skill.name, enabled } });
+}
+
+// ── 插件启停 ──
+function togglePlugin(plugin: PluginInfo, enabled: boolean) {
+  sendCommand({ TogglePlugin: { id: plugin.id, enabled } });
 }
 
 // ── 工具启停 ──
@@ -206,6 +261,7 @@ function paramText(tool: ToolInfo): string {
 function refresh() {
   sendCommand('RequestSkillsList');
   sendCommand('RequestToolsList');
+  sendCommand('RequestPluginsList');
 }
 
 onMounted(refresh);
@@ -325,6 +381,37 @@ watch(
             <NeumorphismButton variant="primary" @click="saveSkill">保存</NeumorphismButton>
             <NeumorphismButton variant="flat" @click="cancelEdit">取消</NeumorphismButton>
           </div>
+        </div>
+      </div>
+
+      <!-- 插件详情 -->
+      <div v-else-if="selectedPlugin" class="caps-detail">
+        <div class="detail-head">
+          <h3>{{ selectedPlugin.name }}</h3>
+          <NeumorphismTag v-if="!selectedPlugin.builtin" variant="info" size="small">
+            外部插件
+          </NeumorphismTag>
+        </div>
+        <div class="detail-meta">
+          <NeumorphismTag size="small">{{ KIND_LABEL_PLUGIN[selectedPlugin.kind] ?? selectedPlugin.kind }}</NeumorphismTag>
+          <NeumorphismTag variant="info" size="small">v{{ selectedPlugin.version || '—' }}</NeumorphismTag>
+          <span class="muted">{{ selectedPlugin.description || '（无描述）' }}</span>
+        </div>
+        <div class="detail-field">
+          <span>启用（禁用即卸载该插件注册）</span>
+          <NeumorphismSwitch
+            :model-value="selectedPlugin.enabled"
+            size="small"
+            @change="togglePlugin(selectedPlugin!, $event)"
+          />
+        </div>
+        <div class="detail-keywords">
+          <span class="muted">ID:</span>
+          <code>{{ selectedPlugin.id }}</code>
+          <span class="muted">Entry:</span>
+          <code>{{ selectedPlugin.entry || '—' }}</code>
+          <span class="muted">Author:</span>
+          <code>{{ selectedPlugin.author || '—' }}</code>
         </div>
       </div>
 
