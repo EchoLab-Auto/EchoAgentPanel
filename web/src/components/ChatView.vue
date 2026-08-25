@@ -159,7 +159,8 @@ function imagesOf(message: ChatMessage): string[] {
         @cancel="emit('cancel')"
       >
         <template #meta>
-          <span class="chat-view__session" title="当前会话">{{ sessionId }}</span>
+          <!-- 移除会话标识，meta 行仅保留右侧取消任务按钮 -->
+          <span></span>
         </template>
         <template #actions="{ submit, canSubmit }">
           <button
@@ -268,7 +269,7 @@ function imagesOf(message: ChatMessage): string[] {
   right: 12px;
   bottom: 12px;
   z-index: 5;
-  padding: 10px 12px 12px;
+  padding: 12px;
   border-radius: 16px;
   /* 双层背景：低透明表面 + 顶部白色高光渐变（玻璃高光） */
   background:
@@ -341,19 +342,15 @@ function imagesOf(message: ChatMessage): string[] {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   min-height: 34px;
+  height: 34px;
   padding: 0 14px;
 }
 .chat-view__icon--btn {
   width: 15px;
   height: 15px;
-}
-
-.chat-view__session {
-  font-family: var(--nm-font-mono, monospace);
-  font-size: 12px;
-  color: var(--nm-text-secondary, #888);
 }
 
 /* 消息内图片 */
@@ -429,5 +426,21 @@ function imagesOf(message: ChatMessage): string[] {
 }
 .chat-view__file-input {
   display: none;
+}
+/* 输入框排布：内框零 padding（外框 12px 等宽）；meta 行紧凑；
+   取消/图片/发送 同一 34px 高、底部对齐 */
+.chat-composer-float :deep(.nm-chat-composer) {
+  padding: 0;
+}
+.chat-composer-float :deep(.nm-chat-composer__meta) {
+  min-height: 26px;
+  margin-bottom: 6px;
+}
+.chat-composer-float :deep(.nm-chat-composer__cancel) {
+  width: 74px;
+  height: 34px;
+}
+.chat-composer-float :deep(.nm-chat-composer__row) {
+  align-items: flex-end;
 }
 </style>
