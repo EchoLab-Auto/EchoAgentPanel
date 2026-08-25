@@ -213,6 +213,8 @@ const agentFormDescription = ref('');
 const agentFormPrompt = ref('');
 const agentFormEnabled = ref(true);
 const agentEditing = ref(false);
+/** 编辑已有人格时 ID 锁定；新建时 ID 可自由输入 */
+const agentFormIsEdit = ref(false);
 
 const agentFormModel = computed(() => ({
   id: agentFormId.value,
@@ -235,6 +237,7 @@ const agentFormRules = {
 
 function startAgentCreate() {
   agentEditing.value = true;
+  agentFormIsEdit.value = false;
   agentFormId.value = '';
   agentFormName.value = '';
   agentFormDescription.value = '';
@@ -245,6 +248,7 @@ function startAgentCreate() {
 
 function startAgentEdit(agent: AgentInfo) {
   agentEditing.value = true;
+  agentFormIsEdit.value = true;
   agentFormId.value = agent.id;
   agentFormName.value = agent.name;
   agentFormDescription.value = agent.description;
@@ -530,7 +534,7 @@ watch(
       </div>
 
       <div v-else-if="agentEditing" class="caps-detail">
-        <div class="detail-head"><h3>{{ agentFormId ? '编辑人格' : '新建人格' }}</h3></div>
+        <div class="detail-head"><h3>{{ agentFormIsEdit ? '编辑人格' : '新建人格' }}</h3></div>
         <NeumorphismForm
           :model="agentFormModel"
           :rules="agentFormRules"
@@ -542,7 +546,7 @@ watch(
             <NeumorphismInput
               v-model="agentFormId"
               placeholder="my-agent"
-              :disabled="!!agentFormId"
+              :disabled="agentFormIsEdit"
             />
           </NeumorphismFormItem>
           <NeumorphismFormItem label="名称" required name="name" :rules="agentFormRules.name">
