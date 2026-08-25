@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::extract::{OriginalUri, State};
-use axum::http::header::CONTENT_TYPE;
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -103,9 +103,18 @@ async fn static_handler(uri: OriginalUri, State(state): State<proxy::AppState>) 
     if file.is_dir() {
         return not_found();
     }
+    // HTML 永不缓存（SPA shell 每次最新）；带 hash 的静态资源（js/css）
+    // 允许短缓存并附带 ETag 校验，更新后浏览器自动取新版本。
+    let is_html = file.extension().and_then(|e| e.to_str()) == Some("html");
+    let cache_control = if is_html {
+        "no-cache"
+    } else {
+        "public, max-age=300"
+    };
     match tokio::fs::read(&file).await {
         Ok(bytes) => Response::builder()
             .header(CONTENT_TYPE, content_type(&file))
+            .header(CACHE_CONTROL, cache_control)
             .body(axum::body::Body::from(bytes))
             .unwrap_or_else(|_| not_found()),
         Err(_) => {
@@ -113,6 +122,7 @@ async fn static_handler(uri: OriginalUri, State(state): State<proxy::AppState>) 
             match tokio::fs::read(root.join("index.html")).await {
                 Ok(bytes) => Response::builder()
                     .header(CONTENT_TYPE, "text/html; charset=utf-8")
+                    .header(CACHE_CONTROL, "no-cache")
                     .body(axum::body::Body::from(bytes))
                     .unwrap_or_else(|_| not_found()),
                 Err(_) => not_found(),
