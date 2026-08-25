@@ -30,6 +30,7 @@ import type {
   TimelineMessage,
   ToolInfo,
   PluginInfo,
+  AgentInfo,
 } from './protocol';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -207,6 +208,8 @@ export interface AppState {
   tools: ToolInfo[];
   /** 已挂载插件列表 */
   plugins: PluginInfo[];
+  /** 多 agent 人格列表 */
+  agents: AgentInfo[];
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
@@ -248,6 +251,7 @@ export function initialState(): AppState {
     skills: [],
     tools: [],
     plugins: [],
+    agents: [],
     context: null,
     branchTabs: {},
     pendingBackground: {},
@@ -568,6 +572,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'PluginsList': {
       const e = (event as { PluginsList: { plugins: PluginInfo[] } }).PluginsList;
       state.plugins = e.plugins;
+      return state;
+    }
+    case 'AgentsList': {
+      const e = (event as { AgentsList: { agents: AgentInfo[] } }).AgentsList;
+      state.agents = e.agents;
       return state;
     }
     case 'SystemPrompt': {

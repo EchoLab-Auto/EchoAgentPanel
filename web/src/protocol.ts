@@ -20,6 +20,7 @@ export interface AdapterStatus {
 
 export interface SessionInfo {
   id: string;
+  agent_id?: string | null;
   platform: string;
   scope: string;
   user_id: string;
@@ -55,6 +56,14 @@ export interface ToolInfo {
   parameters: unknown;
   category: string;
   enabled: boolean;
+}
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  sessions: number;
 }
 
 export interface PluginInfo {
@@ -141,7 +150,7 @@ export interface SudoPasswordSubmit {
 // ── BackendCommand（外部标签枚举）──────────────────────────────────────────
 
 export type BackendCommand =
-  | { SendMessage: { session_id: string; content: string; images?: string[] } }
+  | { SendMessage: { session_id: string; content: string; images?: string[]; agent_id?: string | null } }
   | { SwitchModel: { model: string } }
   | { SwitchProvider: { provider: string } }
   | { SetSystemPrompt: { prompt: string } }
@@ -177,6 +186,8 @@ export type BackendCommand =
   | { DeleteSkill: { name: string } }
   | 'RequestPluginsList'
   | { TogglePlugin: { id: string; enabled: boolean } }
+  | 'RequestAgentsList'
+  | { ToggleAgent: { id: string; enabled: boolean } }
   | 'RequestState'
   | 'RequestContext'
   | 'RequestTrunkTimeline'
@@ -319,6 +330,7 @@ export type BackendEvent =
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
   | { PluginsList: { plugins: PluginInfo[] } }
+  | { AgentsList: { agents: AgentInfo[] } }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
   | { AdapterList: { adapters: AdapterStatus[] } }

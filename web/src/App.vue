@@ -41,6 +41,15 @@ function loadView(): View {
   }
 }
 
+const activeAgentName = computed(() => {
+  const a = state.agents.find((x) => x.id === (activeAgentId.value || 'default'));
+  return a?.name || '默认';
+});
+
+function onAgentSelect(item: HeadlessMenuItem) {
+  activeAgentId.value = item.key === 'default' ? null : item.key;
+}
+
 function setView(next: View) {
   view.value = next;
   try {
@@ -54,11 +63,32 @@ function setView(next: View) {
 const activeSessionId = ref('local:tui::local_user');
 const showSettings = ref(false);
 const activeBranchId = ref<string | null>(null);
+// 当前人格（空 = 默认/default）。切换后发送自动带上 agent_id。
+const activeAgentId = ref<string | null>(null);
+
+// 人格列表构造（下拉选项）
+const agentOptions = computed(() => {
+  const list = state.agents.length
+    ? state.agents
+    : [{ id: 'default', name: '默认', description: '', enabled: true, sessions: 0 }];
+  return list.map((a) => ({
+    key: a.id,
+    label: a.enabled ? a.name : `${a.name}（已禁用）`,
+    disabled: !a.enabled,
+  }));
+});
 
 function send(content: string, images: string[] = []) {
   const target =
     activeSessionId.value === 'global' ? 'local:tui::local_user' : activeSessionId.value;
-  sendCommand({ SendMessage: { session_id: target, content, images } });
+  sendCommand({
+    SendMessage: {
+      session_id: target,
+      content,
+      images,
+      agent_id: activeAgentId.value || undefined,
+    },
+  });
 }
 
 function cancelWork() {
@@ -155,6 +185,19 @@ watch(
             忙碌 ×{{ busyCount }}
           </NeumorphismTag>
         </div>
+        <NeumorphismDropdown trigger="click" position="bottom">
+          <NeumorphismButton size="small" variant="flat">
+            人格：{{ activeAgentName }}
+          </NeumorphismButton>
+          <template #items>
+            <NeumorphismMenu
+              :items="agentOptions"
+              mode="vertical"
+              size="small"
+              @select="onAgentSelect"
+            />
+          </template>
+        </NeumorphismDropdown>
       </template>
 
       <!-- 顶部栏右：导航 -->
