@@ -10,6 +10,8 @@ import { computed, onMounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismEmpty,
+  NeumorphismForm,
+  NeumorphismFormItem,
   NeumorphismInput,
   NeumorphismMenu,
   NeumorphismSwitch,
@@ -204,13 +206,32 @@ function onMenuSelect(item: HeadlessMenuItem) {
   }
 }
 
-// ── 人格编辑 ──
+// ── 人格编辑（ui-frame 表单模型，NeumorphismForm 受控）──
 const agentFormId = ref('');
 const agentFormName = ref('');
 const agentFormDescription = ref('');
 const agentFormPrompt = ref('');
 const agentFormEnabled = ref(true);
 const agentEditing = ref(false);
+
+const agentFormModel = computed(() => ({
+  id: agentFormId.value,
+  name: agentFormName.value,
+  description: agentFormDescription.value,
+  system_prompt: agentFormPrompt.value,
+  enabled: agentFormEnabled.value,
+}));
+
+const agentFormRules = {
+  id: [
+    { required: true, message: '请输入 ID' },
+    {
+      pattern: /^[A-Za-z0-9_-]+$/,
+      message: '仅允许字母、数字、- 和 _',
+    },
+  ],
+  name: [{ required: true, message: '请输入名称' }],
+};
 
 function startAgentCreate() {
   agentEditing.value = true;
@@ -237,7 +258,7 @@ function cancelAgentEdit() {
 
 function saveAgent() {
   const id = agentFormId.value.trim() || agentFormName.value.trim();
-  if (!id) return;
+  if (!id || !agentFormName.value.trim()) return;
   sendCommand({
     SaveAgent: {
       id,
@@ -510,24 +531,44 @@ watch(
 
       <div v-else-if="agentEditing" class="caps-detail">
         <div class="detail-head"><h3>{{ agentFormId ? '编辑人格' : '新建人格' }}</h3></div>
-        <div class="caps-form">
-          <label>ID（唯一键，仅新建时可填）</label>
-          <NeumorphismInput v-model="agentFormId" :disabled="!!agentFormId" placeholder="my-agent" />
-          <label>名称</label>
-          <NeumorphismInput v-model="agentFormName" placeholder="写作助理" />
-          <label>描述</label>
-          <NeumorphismInput v-model="agentFormDescription" placeholder="专注文档写作" />
-          <label>系统提示词（留空 = 继承全局提示词与技能）</label>
-          <NeumorphismTextarea v-model="agentFormPrompt" rows="8" auto-resize placeholder="你是…" />
-          <div class="detail-field">
-            <span>启用</span>
+        <NeumorphismForm
+          :model="agentFormModel"
+          :rules="agentFormRules"
+          direction="vertical"
+          label-width="96px"
+          @submit="saveAgent"
+        >
+          <NeumorphismFormItem label="ID" required name="id" :rules="agentFormRules.id">
+            <NeumorphismInput
+              v-model="agentFormId"
+              placeholder="my-agent"
+              :disabled="!!agentFormId"
+            />
+          </NeumorphismFormItem>
+          <NeumorphismFormItem label="名称" required name="name" :rules="agentFormRules.name">
+            <NeumorphismInput v-model="agentFormName" placeholder="写作助理" />
+          </NeumorphismFormItem>
+          <NeumorphismFormItem label="描述" name="description">
+            <NeumorphismInput v-model="agentFormDescription" placeholder="专注文档写作" />
+          </NeumorphismFormItem>
+          <NeumorphismFormItem label="系统提示词" name="system_prompt">
+            <template #default="{ }">
+              <NeumorphismTextarea
+                v-model="agentFormPrompt"
+                rows="8"
+                auto-resize
+                placeholder="你是…（留空 = 继承全局提示词与技能）"
+              />
+            </template>
+          </NeumorphismFormItem>
+          <NeumorphismFormItem label="启用" name="enabled">
             <NeumorphismSwitch v-model="agentFormEnabled" size="small" />
-          </div>
+          </NeumorphismFormItem>
           <div class="form-actions">
             <NeumorphismButton variant="primary" @click="saveAgent">保存</NeumorphismButton>
             <NeumorphismButton variant="flat" @click="cancelAgentEdit">取消</NeumorphismButton>
           </div>
-        </div>
+        </NeumorphismForm>
       </div>
 
       <!-- 插件详情 -->
