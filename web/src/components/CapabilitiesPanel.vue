@@ -240,10 +240,11 @@ const agentFormModel = computed(() => ({
 }));
 
 // 能力列表（复选框）：插件 / 工具 / 技能
-const PLUGIN_KIND_TOOLISH = ['tool', 'orchestration', 'adapter'];
+// 插件级勾选只保留"整类能力"（适配器/编排/管理面）；内置工具集
+// (kind=tool) 不作为插件出现——它的每个工具在下方"启用工具"单独勾选。
 const capabilityPluginOptions = computed(() =>
   state.plugins
-    .filter((p) => PLUGIN_KIND_TOOLISH.includes(p.kind) || p.kind === 'management')
+    .filter((p) => ['adapter', 'orchestration', 'management'].includes(p.kind))
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
 const capabilityToolOptions = computed(() =>
@@ -660,7 +661,7 @@ watch(
             <NeumorphismSwitch v-model="agentFormEnabled" size="small" />
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用插件">
-            <p class="muted caps-hint">勾选该人格可用的插件；全选 = 不限制（默认）。取消勾选即限制为仅勾选项。</p>
+            <p class="muted caps-hint">勾选该人格可用的能力块（适配器/编排/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。</p>
             <div class="caps-checkbox-grid">
               <NeumorphismCheckbox
                 v-for="opt in capabilityPluginOptions"
