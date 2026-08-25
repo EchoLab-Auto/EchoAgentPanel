@@ -213,6 +213,9 @@ const agentFormDescription = ref('');
 const agentFormPrompt = ref('');
 const agentFormEnabled = ref(true);
 const agentEditing = ref(false);
+const agentFormDisabledPlugins = ref<string[]>([]);
+const agentFormDisabledTools = ref<string[]>([]);
+const agentFormDisabledSkills = ref<string[]>([]);
 /** 编辑已有人格时 ID 锁定；新建时 ID 可自由输入 */
 const agentFormIsEdit = ref(false);
 
@@ -222,7 +225,28 @@ const agentFormModel = computed(() => ({
   description: agentFormDescription.value,
   system_prompt: agentFormPrompt.value,
   enabled: agentFormEnabled.value,
+  disabled_plugins: agentFormDisabledPlugins.value,
+  disabled_tools: agentFormDisabledTools.value,
+  disabled_skills: agentFormDisabledSkills.value,
 }));
+
+// 能力列表（复选框）：插件 / 工具 / 技能
+const PLUGIN_KIND_TOOLISH = ['tool', 'orchestration', 'adapter'];
+const capabilityPluginOptions = computed(() =>
+  state.plugins
+    .filter((p) => PLUGIN_KIND_TOOLISH.includes(p.kind) || p.kind === 'management')
+    .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
+);
+const capabilityToolOptions = computed(() =>
+  state.tools.map((t) => ({ key: t.name, label: t.name })),
+);
+const capabilitySkillOptions = computed(() =>
+  state.skills.map((s) => ({ key: s.name, label: s.name })),
+);
+
+function toggleArrayItem(arr: string[], key: string): string[] {
+  return arr.includes(key) ? arr.filter((k) => k !== key) : [...arr, key];
+}
 
 const agentFormRules = {
   id: [
@@ -243,6 +267,9 @@ function startAgentCreate() {
   agentFormDescription.value = '';
   agentFormPrompt.value = '';
   agentFormEnabled.value = true;
+  agentFormDisabledPlugins.value = [];
+  agentFormDisabledTools.value = [];
+  agentFormDisabledSkills.value = [];
   selectedAgent.value = null;
 }
 
@@ -254,6 +281,9 @@ function startAgentEdit(agent: AgentInfo) {
   agentFormDescription.value = agent.description;
   agentFormPrompt.value = agent.system_prompt ?? '';
   agentFormEnabled.value = agent.enabled;
+  agentFormDisabledPlugins.value = agent.disabled_plugins ?? [];
+  agentFormDisabledTools.value = agent.disabled_tools ?? [];
+  agentFormDisabledSkills.value = agent.disabled_skills ?? [];
 }
 
 function cancelAgentEdit() {
@@ -270,6 +300,9 @@ function saveAgent() {
       description: agentFormDescription.value.trim(),
       system_prompt: agentFormPrompt.value,
       enabled: agentFormEnabled.value,
+      disabled_plugins: agentFormDisabledPlugins.value,
+      disabled_tools: agentFormDisabledTools.value,
+      disabled_skills: agentFormDisabledSkills.value,
     },
   });
   agentEditing.value = false;
@@ -531,6 +564,21 @@ watch(
           <div class="muted content-title">系统提示词（留空 = 继承全局）</div>
           <pre class="content-pre">{{ selectedAgent.system_prompt || '（继承全局）' }}</pre>
         </div>
+        <div class="detail-keywords">
+          <span class="muted">禁用能力：</span>
+          <template v-if="(selectedAgent.disabled_plugins?.length ?? 0) || (selectedAgent.disabled_tools?.length ?? 0) || (selectedAgent.disabled_skills?.length ?? 0)">
+            <NeumorphismTag v-for="d in selectedAgent.disabled_plugins ?? []" :key="d" size="small" variant="error">
+              {{ d }}
+            </NeumorphismTag>
+            <NeumorphismTag v-for="d in selectedAgent.disabled_tools ?? []" :key="d" size="small" variant="error">
+              {{ d }}
+            </NeumorphismTag>
+            <NeumorphismTag v-for="d in selectedAgent.disabled_skills ?? []" :key="d" size="small" variant="error">
+              {{ d }}
+            </NeumorphismTag>
+          </template>
+          <span v-else class="muted">无（全部可用）</span>
+        </div>
       </div>
 
       <div v-else-if="agentEditing" class="caps-detail">
@@ -567,6 +615,45 @@ watch(
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用" name="enabled">
             <NeumorphismSwitch v-model="agentFormEnabled" size="small" />
+          </NeumorphismFormItem>
+          <NeumorphismFormItem label="禁用插件">
+            <div class="caps-checkbox-grid">
+              <label v-for="opt in capabilityPluginOptions" :key="opt.key" class="caps-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="agentFormDisabledPlugins.includes(opt.key)"
+                  @change="agentFormDisabledPlugins = toggleArrayItem(agentFormDisabledPlugins, opt.key)"
+                />
+                <span>{{ opt.label }}</span>
+              </label>
+              <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
+            </div>
+          </NeumorphismFormItem>
+          <NeumorphismFormItem label="禁用工具">
+            <div class="caps-checkbox-grid">
+              <label v-for="opt in capabilityToolOptions" :key="opt.key" class="caps-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="agentFormDisabledTools.includes(opt.key)"
+                  @change="agentFormDisabledTools = toggleArrayItem(agentFormDisabledTools, opt.key)"
+                />
+                <span>{{ opt.label }}</span>
+              </label>
+              <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
+            </div>
+          </NeumorphismFormItem>
+          <NeumorphismFormItem label="禁用技能">
+            <div class="caps-checkbox-grid">
+              <label v-for="opt in capabilitySkillOptions" :key="opt.key" class="caps-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="agentFormDisabledSkills.includes(opt.key)"
+                  @change="agentFormDisabledSkills = toggleArrayItem(agentFormDisabledSkills, opt.key)"
+                />
+                <span>{{ opt.label }}</span>
+              </label>
+              <span v-if="capabilitySkillOptions.length === 0" class="muted">（无）</span>
+            </div>
           </NeumorphismFormItem>
           <div class="form-actions">
             <NeumorphismButton variant="primary" @click="saveAgent">保存</NeumorphismButton>
@@ -723,3 +810,16 @@ watch(
   margin-top: 4px;
 }
 </style>
+
+.caps-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+.caps-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}

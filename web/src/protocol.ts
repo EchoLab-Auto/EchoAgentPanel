@@ -65,6 +65,9 @@ export interface AgentInfo {
   enabled: boolean;
   sessions: number;
   system_prompt?: string;
+  disabled_plugins?: string[];
+  disabled_tools?: string[];
+  disabled_skills?: string[];
 }
 
 export interface PluginInfo {
@@ -196,6 +199,9 @@ export type BackendCommand =
         description: string;
         system_prompt: string;
         enabled: boolean;
+        disabled_plugins?: string[];
+        disabled_tools?: string[];
+        disabled_skills?: string[];
       };
     }
   | { DeleteAgent: { id: string } }
