@@ -435,6 +435,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         return state;
       }
       pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
+        sessionId: e.session_id,
         tool: { name: e.tool_name, input: summarizeArguments(e.arguments), output: null, status: 'running' },
       });
       return state;
@@ -507,6 +508,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       }
       const reasoning = takeReasoning(state, e.session_id, e.branch_id);
       pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
+        sessionId: e.session_id,
         reasoning: reasoning.length ? reasoning : undefined,
       });
       return state;
@@ -667,7 +669,9 @@ function reduceMessage(
   },
 ) {
   if (e.adapter_name === 'timer') {
-    pushTo(state, 'system', summarizeTimerEvent(e.content), e.timestamp);
+    pushTo(state, 'system', summarizeTimerEvent(e.content), e.timestamp, {
+      sessionId: e.session_id,
+    });
   } else if (e.adapter_name === 'background') {
     applyBackgroundHook(state, e.content);
   } else {
