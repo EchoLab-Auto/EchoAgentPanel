@@ -40,7 +40,16 @@
 
 * { box-sizing: border-box; }
 
-html, body, #app { height: 100%; margin: 0; }
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  /* 防止弹性滚动露出容器外背景（下拉时白色边框） */
+  overflow: hidden;
+}
+body {
+  background: var(--nm-bg-color, #141414);
+  overscroll-behavior: none;
+}
 
 /* ThemeProvider 渲染的根 div 需要撑满高度 */
 .nm-theme-provider { height: 100%; display: flex; flex-direction: column; }
@@ -567,7 +576,7 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 
 /* ── NeumorphismLayout 覆盖：sider 去背景/边框/阴影，折叠完全隐藏 ── */
 .panel-layout.nm-layout {
-  background: transparent;
+  background: var(--nm-bg-color, #141414);
 }
 .panel-layout .nm-layout__sider {
   background: transparent;
