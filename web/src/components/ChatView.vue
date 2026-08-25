@@ -252,7 +252,8 @@ function imagesOf(message: ChatMessage): string[] {
 }
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上；
-   半透明毛玻璃：低不透明度背景 + backdrop blur，透出下方滚动内容 */
+   半透明毛玻璃：更透的背景 + 高光 tint + 强 blur + 发光边框，
+   在深色主题下也能明显看出玻璃质感 */
 .chat-composer-float {
   position: absolute;
   left: 12px;
@@ -261,14 +262,21 @@ function imagesOf(message: ChatMessage): string[] {
   z-index: 5;
   padding: 10px 12px 12px;
   border-radius: 16px;
-  background: color-mix(in srgb, var(--nm-surface-raised) 55%, transparent);
-  backdrop-filter: blur(14px) saturate(1.4);
-  -webkit-backdrop-filter: blur(14px) saturate(1.4);
-  border: 1px solid color-mix(in srgb, var(--nm-border-subtle) 60%, transparent);
+  /* 双层背景：低透明表面 + 顶部白色高光渐变（玻璃高光） */
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, #ffffff 10%, transparent) 0%,
+      transparent 45%
+    ),
+    color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
   box-shadow:
-    0 8px 24px var(--nm-shadow-ambient-xl, rgba(0, 0, 0, 0.35)),
-    4px 4px 12px var(--nm-shadow-dark),
-    -2px -2px 8px var(--nm-shadow-light);
+    0 12px 32px rgba(0, 0, 0, 0.45),
+    0 0 0 0.5px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 /* 吸底跳转按钮上移，避免被悬浮输入框遮挡 */
