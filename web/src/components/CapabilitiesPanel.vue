@@ -247,6 +247,31 @@ const capabilityPluginOptions = computed(() =>
     .filter((p) => ['adapter', 'orchestration', 'management'].includes(p.kind))
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
+// 工具按 category 分组（内置工具 / 编排 / 自更新 / 运维），组名 + tag 展示
+const CATEGORY_LABEL: Record<string, string> = {
+  builtin: '内置工具',
+  '编排': '编排',
+  '自更新': '自更新',
+  '运维': '运维',
+};
+
+const capabilityToolGroups = computed(() => {
+  const groups = new Map<string, { key: string; label: string; cat: string }[]>();
+  for (const t of state.tools) {
+    const cat = t.category || 'builtin';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat)!.push({ key: t.name, label: t.name, cat });
+  }
+  return [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([cat, items]) => ({
+      cat,
+      title: CATEGORY_LABEL[cat] ?? cat,
+      items: items.sort((a, b) => a.label.localeCompare(b.label)),
+    }));
+});
+
+// 兼容旧引用：capabilityToolOptions 现在等价于全部工具平铺（含编排）
 const capabilityToolOptions = computed(() =>
   state.tools.map((t) => ({ key: t.name, label: t.name })),
 );
@@ -675,18 +700,24 @@ watch(
             </div>
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用工具">
-            <p class="muted caps-hint">勾选该人格可用的工具；全选 = 不限制（默认）。</p>
-            <div class="caps-checkbox-grid">
-              <NeumorphismCheckbox
-                v-for="opt in capabilityToolOptions"
-                :key="opt.key"
-                size="small"
-                :model-value="isWhitelisted(agentFormEnabledTools, opt.key)"
-                :label="opt.label"
-                @update:model-value="agentFormEnabledTools = toggleAllowlist(agentFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
-              />
-              <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
+            <p class="muted caps-hint">勾选该人格可用的工具（按分类分组，含编排/自更新/运维）；全选 = 不限制（默认）。</p>
+            <div v-for="group in capabilityToolGroups" :key="group.cat" class="caps-tool-group">
+              <div class="caps-tool-group__head">
+                {{ group.title }}
+                <NeumorphismTag size="small" variant="info">{{ group.items.length }}</NeumorphismTag>
+              </div>
+              <div class="caps-checkbox-grid">
+                <NeumorphismCheckbox
+                  v-for="opt in group.items"
+                  :key="opt.key"
+                  size="small"
+                  :model-value="isWhitelisted(agentFormEnabledTools, opt.key)"
+                  :label="opt.label"
+                  @update:model-value="agentFormEnabledTools = toggleAllowlist(agentFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
+                />
+              </div>
             </div>
+            <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用技能">
             <p class="muted caps-hint">勾选该人格激活的技能；全选 = 不限制（默认）。</p>
@@ -889,3 +920,16 @@ watch(
   );
 }
 </style>
+
+.caps-tool-group {
+  margin-bottom: 8px;
+}
+.caps-tool-group__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nm-text-secondary);
+  margin-bottom: 4px;
+}
