@@ -12,6 +12,7 @@ import {
   stageOrchestrationTool,
 } from './state_domains/orchestration';
 import { pushTo, finishToolMessage, loadTimeline } from './state_domains/timeline';
+import { sendCommand } from './connection';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
 //! 事件流从 `/ws` 进来，reducer 把它映射成 React 可渲染的状态。
@@ -515,6 +516,13 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       if (!state.tasks.some((t) => t.sessionId === e.session_id && t.kind === 'reply' && t.status === 'running')) {
         setPhase(state, e.session_id, 'completed', null);
       }
+      // 兜底：若该会话的最后一条显示消息仍是用户消息（回复缺失），
+      // 主动拉取时间线补齐，避免事件丢失导致"看不到回复"。
+      const trunk = state.trunk.filter((m) => m.sessionId === e.session_id || m.sessionId === undefined);
+      const last = trunk[trunk.length - 1];
+      if (last && last.role === 'user') {
+        sendCommand('RequestTrunkTimeline');
+      }
       return state;
     }
     case 'SessionUpdated': {
@@ -664,6 +672,7 @@ function reduceMessage(
     applyBackgroundHook(state, e.content);
   } else {
     pushTo(state, 'user', e.content, e.timestamp, {
+      sessionId: e.session_id,
       source: {
         adapter_name: e.adapter_name,
         platform: e.platform,
