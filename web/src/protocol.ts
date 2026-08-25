@@ -68,6 +68,9 @@ export interface AgentInfo {
   disabled_plugins?: string[];
   disabled_tools?: string[];
   disabled_skills?: string[];
+  enabled_plugins?: string[];
+  enabled_tools?: string[];
+  enabled_skills?: string[];
 }
 
 export interface PluginInfo {
@@ -202,6 +205,9 @@ export type BackendCommand =
         disabled_plugins?: string[];
         disabled_tools?: string[];
         disabled_skills?: string[];
+        enabled_plugins?: string[];
+        enabled_tools?: string[];
+        enabled_skills?: string[];
       };
     }
   | { DeleteAgent: { id: string } }

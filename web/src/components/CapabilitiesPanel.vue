@@ -216,6 +216,9 @@ const agentEditing = ref(false);
 const agentFormDisabledPlugins = ref<string[]>([]);
 const agentFormDisabledTools = ref<string[]>([]);
 const agentFormDisabledSkills = ref<string[]>([]);
+const agentFormEnabledPlugins = ref<string[]>([]);
+const agentFormEnabledTools = ref<string[]>([]);
+const agentFormEnabledSkills = ref<string[]>([]);
 /** 编辑已有人格时 ID 锁定；新建时 ID 可自由输入 */
 const agentFormIsEdit = ref(false);
 
@@ -228,6 +231,9 @@ const agentFormModel = computed(() => ({
   disabled_plugins: agentFormDisabledPlugins.value,
   disabled_tools: agentFormDisabledTools.value,
   disabled_skills: agentFormDisabledSkills.value,
+  enabled_plugins: agentFormEnabledPlugins.value,
+  enabled_tools: agentFormEnabledTools.value,
+  enabled_skills: agentFormEnabledSkills.value,
 }));
 
 // 能力列表（复选框）：插件 / 工具 / 技能
@@ -246,6 +252,12 @@ const capabilitySkillOptions = computed(() =>
 
 function toggleArrayItem(arr: string[], key: string): string[] {
   return arr.includes(key) ? arr.filter((k) => k !== key) : [...arr, key];
+}
+
+// 白名单勾选：current 为空表示"全部启用"；首次取消某项时以全量初始化再取消。
+function toggleAllowlist(current: string[], allKeys: string[], key: string): string[] {
+  const base = current.length ? current : [...allKeys];
+  return toggleArrayItem(base, key);
 }
 
 const agentFormRules = {
@@ -270,6 +282,9 @@ function startAgentCreate() {
   agentFormDisabledPlugins.value = [];
   agentFormDisabledTools.value = [];
   agentFormDisabledSkills.value = [];
+  agentFormEnabledPlugins.value = [];
+  agentFormEnabledTools.value = [];
+  agentFormEnabledSkills.value = [];
   selectedAgent.value = null;
 }
 
@@ -284,6 +299,9 @@ function startAgentEdit(agent: AgentInfo) {
   agentFormDisabledPlugins.value = agent.disabled_plugins ?? [];
   agentFormDisabledTools.value = agent.disabled_tools ?? [];
   agentFormDisabledSkills.value = agent.disabled_skills ?? [];
+  agentFormEnabledPlugins.value = agent.enabled_plugins ?? [];
+  agentFormEnabledTools.value = agent.enabled_tools ?? [];
+  agentFormEnabledSkills.value = agent.enabled_skills ?? [];
 }
 
 function cancelAgentEdit() {
@@ -303,6 +321,9 @@ function saveAgent() {
       disabled_plugins: agentFormDisabledPlugins.value,
       disabled_tools: agentFormDisabledTools.value,
       disabled_skills: agentFormDisabledSkills.value,
+      enabled_plugins: agentFormEnabledPlugins.value,
+      enabled_tools: agentFormEnabledTools.value,
+      enabled_skills: agentFormEnabledSkills.value,
     },
   });
   agentEditing.value = false;
@@ -565,6 +586,21 @@ watch(
           <pre class="content-pre">{{ selectedAgent.system_prompt || '（继承全局）' }}</pre>
         </div>
         <div class="detail-keywords">
+          <span class="muted">启用白名单：</span>
+          <template v-if="(selectedAgent.enabled_plugins?.length ?? 0) + (selectedAgent.enabled_tools?.length ?? 0) + (selectedAgent.enabled_skills?.length ?? 0) > 0">
+            <NeumorphismTag v-for="e in selectedAgent.enabled_plugins ?? []" :key="e" size="small" variant="primary">
+              {{ e }}
+            </NeumorphismTag>
+            <NeumorphismTag v-for="e in selectedAgent.enabled_tools ?? []" :key="e" size="small" variant="primary">
+              {{ e }}
+            </NeumorphismTag>
+            <NeumorphismTag v-for="e in selectedAgent.enabled_skills ?? []" :key="e" size="small" variant="primary">
+              {{ e }}
+            </NeumorphismTag>
+          </template>
+          <span v-else class="muted">全部可用</span>
+        </div>
+        <div class="detail-keywords">
           <span class="muted">禁用能力：</span>
           <template v-if="(selectedAgent.disabled_plugins?.length ?? 0) || (selectedAgent.disabled_tools?.length ?? 0) || (selectedAgent.disabled_skills?.length ?? 0)">
             <NeumorphismTag v-for="d in selectedAgent.disabled_plugins ?? []" :key="d" size="small" variant="error">
@@ -616,39 +652,42 @@ watch(
           <NeumorphismFormItem label="启用" name="enabled">
             <NeumorphismSwitch v-model="agentFormEnabled" size="small" />
           </NeumorphismFormItem>
-          <NeumorphismFormItem label="禁用插件">
+          <NeumorphismFormItem label="启用插件">
+            <p class="muted caps-hint">勾选该人格可用的插件；全选 = 不限制（默认）。取消勾选即限制为仅勾选项。</p>
             <div class="caps-checkbox-grid">
               <label v-for="opt in capabilityPluginOptions" :key="opt.key" class="caps-checkbox">
                 <input
                   type="checkbox"
-                  :checked="agentFormDisabledPlugins.includes(opt.key)"
-                  @change="agentFormDisabledPlugins = toggleArrayItem(agentFormDisabledPlugins, opt.key)"
+                  :checked="agentFormEnabledPlugins.length === 0 || agentFormEnabledPlugins.includes(opt.key)"
+                  @change="agentFormEnabledPlugins = toggleAllowlist(agentFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
                 />
                 <span>{{ opt.label }}</span>
               </label>
               <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
-          <NeumorphismFormItem label="禁用工具">
+          <NeumorphismFormItem label="启用工具">
+            <p class="muted caps-hint">勾选该人格可用的工具；全选 = 不限制（默认）。</p>
             <div class="caps-checkbox-grid">
               <label v-for="opt in capabilityToolOptions" :key="opt.key" class="caps-checkbox">
                 <input
                   type="checkbox"
-                  :checked="agentFormDisabledTools.includes(opt.key)"
-                  @change="agentFormDisabledTools = toggleArrayItem(agentFormDisabledTools, opt.key)"
+                  :checked="agentFormEnabledTools.length === 0 || agentFormEnabledTools.includes(opt.key)"
+                  @change="agentFormEnabledTools = toggleAllowlist(agentFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
                 />
                 <span>{{ opt.label }}</span>
               </label>
               <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
-          <NeumorphismFormItem label="禁用技能">
+          <NeumorphismFormItem label="启用技能">
+            <p class="muted caps-hint">勾选该人格激活的技能；全选 = 不限制（默认）。</p>
             <div class="caps-checkbox-grid">
               <label v-for="opt in capabilitySkillOptions" :key="opt.key" class="caps-checkbox">
                 <input
                   type="checkbox"
-                  :checked="agentFormDisabledSkills.includes(opt.key)"
-                  @change="agentFormDisabledSkills = toggleArrayItem(agentFormDisabledSkills, opt.key)"
+                  :checked="agentFormEnabledSkills.length === 0 || agentFormEnabledSkills.includes(opt.key)"
+                  @change="agentFormEnabledSkills = toggleAllowlist(agentFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
                 />
                 <span>{{ opt.label }}</span>
               </label>
@@ -822,4 +861,8 @@ watch(
   gap: 6px;
   font-size: 12px;
   cursor: pointer;
+}
+.caps-hint {
+  margin: 0 0 4px;
+  font-size: 11px;
 }
