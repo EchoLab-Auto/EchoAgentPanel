@@ -46,7 +46,11 @@ const activeAgentName = computed(() => {
   return a?.name || '默认';
 });
 
-function onAgentSelect(item: HeadlessMenuItem) {
+function onAgentSelect(item: HeadlessMenuItem | string | null) {
+  if (item === null || typeof item === 'string') {
+    activeAgentId.value = item || null;
+    return;
+  }
   activeAgentId.value = item.key === 'default' ? null : item.key;
 }
 
@@ -263,8 +267,10 @@ watch(
         <PanelSidebar
           :active-session-id="activeSessionId"
           :active-branch-id="activeBranchId"
+          :active-agent-id="activeAgentId"
           @select-session="selectSession"
           @select-branch="(id) => (activeBranchId = id)"
+          @select-agent="onAgentSelect"
         />
       </template>
 

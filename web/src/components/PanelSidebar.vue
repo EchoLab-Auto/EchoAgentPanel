@@ -13,21 +13,28 @@ import ChecklistSidebar from './ChecklistSidebar.vue';
 defineProps<{
   activeSessionId: string;
   activeBranchId: string | null;
+  activeAgentId: string | null;
 }>();
 
 const emit = defineEmits<{
   selectSession: [id: string];
   selectBranch: [id: string];
+  selectAgent: [id: string | null];
 }>();
 
-const cardOpen = ref<Record<'adapters' | 'branches' | 'sessions', boolean>>({
+const cardOpen = ref<Record<'agents' | 'adapters' | 'branches' | 'sessions', boolean>>({
+  agents: true,
   adapters: true,
   branches: true,
   sessions: true,
 });
 
-function toggleCard(key: 'adapters' | 'branches' | 'sessions') {
+function toggleCard(key: 'agents' | 'adapters' | 'branches' | 'sessions') {
   cardOpen.value[key] = !cardOpen.value[key];
+}
+
+function selectAgent(id: string) {
+  emit('selectAgent', id === 'default' ? null : id);
 }
 
 function truncateTask(task: string): string {
@@ -38,6 +45,25 @@ function truncateTask(task: string): string {
 
 <template>
   <div class="panel-sider">
+    <!-- 卡片：人格（切换对话对象，位于适配器上方） -->
+    <SidebarCard title="人格" :open="cardOpen.agents" @toggle="toggleCard('agents')">
+      <div v-if="state.agents.length === 0" class="muted">（未配置人格）</div>
+      <div
+        v-for="agent in state.agents"
+        :key="agent.id"
+        class="agent-item"
+        :class="{ 'agent-item--active': (activeAgentId || 'default') === agent.id }"
+        @click="selectAgent(agent.id)"
+      >
+        <NeumorphismStatusDot
+          :status="agent.enabled ? 'online' : 'offline'"
+          size="small"
+        />
+        <span class="agent-name">{{ agent.name }}</span>
+        <span v-if="!agent.enabled" class="muted agent-disabled">已禁用</span>
+      </div>
+    </SidebarCard>
+
     <!-- 卡片：适配器 -->
     <SidebarCard title="适配器" :open="cardOpen.adapters" @toggle="toggleCard('adapters')">
       <div v-if="state.adapters.length === 0" class="muted">（无适配器信息）</div>
@@ -109,3 +135,32 @@ function truncateTask(task: string): string {
     <ChecklistSidebar />
   </div>
 </template>
+
+<style scoped>
+.agent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.agent-item:hover {
+  background: var(--panel-hover, rgba(255, 255, 255, 0.06));
+}
+.agent-item--active {
+  background: color-mix(in srgb, var(--nm-primary-color, #5b8def) 18%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--nm-primary-color, #5b8def) 40%, transparent);
+}
+.agent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-disabled {
+  font-size: 11px;
+}
+</style>
