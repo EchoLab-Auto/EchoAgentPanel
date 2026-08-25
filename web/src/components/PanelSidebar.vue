@@ -13,28 +13,28 @@ import ChecklistSidebar from './ChecklistSidebar.vue';
 defineProps<{
   activeSessionId: string;
   activeBranchId: string | null;
-  activeAgentId: string | null;
+  activeTeamId: string | null;
 }>();
 
 const emit = defineEmits<{
   selectSession: [id: string];
   selectBranch: [id: string];
-  selectAgent: [id: string | null];
+  selectTeam: [id: string | null];
 }>();
 
-const cardOpen = ref<Record<'agents' | 'adapters' | 'branches' | 'sessions', boolean>>({
-  agents: true,
+const cardOpen = ref<Record<'teams' | 'adapters' | 'branches' | 'sessions', boolean>>({
+  teams: true,
   adapters: true,
   branches: true,
   sessions: true,
 });
 
-function toggleCard(key: 'agents' | 'adapters' | 'branches' | 'sessions') {
+function toggleCard(key: 'teams' | 'adapters' | 'branches' | 'sessions') {
   cardOpen.value[key] = !cardOpen.value[key];
 }
 
-function selectAgent(id: string) {
-  emit('selectAgent', id === 'default' ? null : id);
+function selectTeam(id: string) {
+  emit('selectTeam', id === 'default' ? null : id);
 }
 
 function truncateTask(task: string): string {
@@ -45,22 +45,22 @@ function truncateTask(task: string): string {
 
 <template>
   <div class="panel-sider">
-    <!-- 卡片：人格（切换对话对象，位于适配器上方） -->
-    <SidebarCard title="人格" :open="cardOpen.agents" @toggle="toggleCard('agents')">
-      <div v-if="state.agents.length === 0" class="muted">（未配置人格）</div>
+    <!-- 卡片：Team（切换对话对象，位于适配器上方） -->
+    <SidebarCard title="Team" :open="cardOpen.teams" @toggle="toggleCard('teams')">
+      <div v-if="state.teams.length === 0" class="muted">（未配置 Team 成员）</div>
       <div
-        v-for="agent in state.agents"
-        :key="agent.id"
+        v-for="team in state.teams"
+        :key="team.id"
         class="agent-item"
-        :class="{ 'agent-item--active': (activeAgentId || 'default') === agent.id }"
-        @click="selectAgent(agent.id)"
+        :class="{ 'agent-item--active': (activeTeamId || 'default') === team.id }"
+        @click="selectTeam(team.id)"
       >
         <NeumorphismStatusDot
-          :status="agent.enabled ? 'online' : 'offline'"
+          :status="team.enabled ? 'online' : 'offline'"
           size="small"
         />
-        <span class="agent-name">{{ agent.name }}</span>
-        <span v-if="!agent.enabled" class="muted agent-disabled">已禁用</span>
+        <span class="agent-name">{{ team.name }}</span>
+        <span v-if="!team.enabled" class="muted agent-disabled">已禁用</span>
       </div>
     </SidebarCard>
 

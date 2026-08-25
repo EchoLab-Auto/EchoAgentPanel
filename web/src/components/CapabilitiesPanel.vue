@@ -22,7 +22,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
-import type { AgentInfo, PluginInfo, SkillInfo, ToolInfo } from '../protocol';
+import type { PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
@@ -32,7 +32,7 @@ const TOOL_OTHER = '扩展工具';
 const selectedSkill = ref<SkillInfo | null>(null);
 const selectedTool = ref<ToolInfo | null>(null);
 const selectedPlugin = ref<PluginInfo | null>(null);
-const selectedAgent = ref<AgentInfo | null>(null);
+const selectedTeam = ref<TeamInfo | null>(null);
 const editing = ref(false);
 const creating = ref(false);
 
@@ -82,16 +82,16 @@ const KIND_LABEL_PLUGIN: Record<string, string> = {
   management: '管理面',
 };
 
-function agentMenuItems(): HeadlessMenuItem[] {
-  const list = state.agents.length
-    ? [...state.agents].sort((a, b) => a.id.localeCompare(b.id))
+function teamMenuItems(): HeadlessMenuItem[] {
+  const list = state.teams.length
+    ? [...state.teams].sort((a, b) => a.id.localeCompare(b.id))
     : [{ id: 'default', name: '默认', description: '', enabled: true, sessions: 0 }];
   return [
     {
-      key: 'group-agents',
-      label: '人格',
+      key: 'group-teams',
+      label: 'Team',
       children: list.map((a) => ({
-        key: `agent:${a.id}`,
+        key: `team:${a.id}`,
         label: a.enabled ? a.name : `${a.name}（已禁用）`,
       })),
     },
@@ -156,7 +156,7 @@ function toolMenuItems(): HeadlessMenuItem[] {
   ];
 }
 
-const menuItems = computed<HeadlessMenuItem[]>(() => [...skillMenuItems(), ...toolMenuItems(), ...pluginMenuItems(), ...agentMenuItems()]);
+const menuItems = computed<HeadlessMenuItem[]>(() => [...skillMenuItems(), ...toolMenuItems(), ...pluginMenuItems(), ...teamMenuItems()]);
 const defaultExpanded = ['group-skills', 'group-tools'];
 
 function onMenuSelect(item: HeadlessMenuItem) {
@@ -165,24 +165,24 @@ function onMenuSelect(item: HeadlessMenuItem) {
     const found = state.skills.find((s) => s.name === name);
     if (found) {
       selectedSkill.value = found;
-      selectedAgent.value = null;
+      selectedTeam.value = null;
       selectedPlugin.value = null;
       selectedTool.value = null;
       editing.value = false;
       creating.value = false;
     }
-  } else if (item.key.startsWith('agent:')) {
-    const id = item.key.slice('agent:'.length);
-    const found = state.agents.find((a) => a.id === id);
+  } else if (item.key.startsWith('team:')) {
+    const id = item.key.slice('team:'.length);
+    const found = state.teams.find((a) => a.id === id);
     if (found) {
-      selectedAgent.value = found;
+      selectedTeam.value = found;
       selectedSkill.value = null;
       selectedPlugin.value = null;
       selectedTool.value = null;
       editing.value = false;
       creating.value = false;
       // 直接进入编辑态（无需再点"编辑"按钮）
-      startAgentEdit(found);
+      startTeamEdit(found);
     }
   } else if (item.key.startsWith('plugin:')) {
     const id = item.key.slice('plugin:'.length);
@@ -190,7 +190,7 @@ function onMenuSelect(item: HeadlessMenuItem) {
     if (found) {
       selectedPlugin.value = found;
       selectedSkill.value = null;
-      selectedAgent.value = null;
+      selectedTeam.value = null;
       selectedTool.value = null;
       editing.value = false;
       creating.value = false;
@@ -201,7 +201,7 @@ function onMenuSelect(item: HeadlessMenuItem) {
     if (found) {
       selectedTool.value = found;
       selectedSkill.value = null;
-      selectedAgent.value = null;
+      selectedTeam.value = null;
       selectedPlugin.value = null;
       editing.value = false;
       creating.value = false;
@@ -209,34 +209,34 @@ function onMenuSelect(item: HeadlessMenuItem) {
   }
 }
 
-// ── 人格编辑（ui-frame 表单模型，NeumorphismForm 受控）──
-const agentFormId = ref('');
-const agentFormName = ref('');
-const agentFormDescription = ref('');
-const agentFormPrompt = ref('');
-const agentFormEnabled = ref(true);
-const agentEditing = ref(false);
-const agentFormDisabledPlugins = ref<string[]>([]);
-const agentFormDisabledTools = ref<string[]>([]);
-const agentFormDisabledSkills = ref<string[]>([]);
-const agentFormEnabledPlugins = ref<string[]>([]);
-const agentFormEnabledTools = ref<string[]>([]);
-const agentFormEnabledSkills = ref<string[]>([]);
-/** 编辑已有人格时 ID 锁定；新建时 ID 可自由输入 */
-const agentFormIsEdit = ref(false);
+// ── Team 成员编辑（ui-frame 表单模型，NeumorphismForm 受控）──
+const teamFormId = ref('');
+const teamFormName = ref('');
+const teamFormDescription = ref('');
+const teamFormPrompt = ref('');
+const teamFormEnabled = ref(true);
+const teamEditing = ref(false);
+const teamFormDisabledPlugins = ref<string[]>([]);
+const teamFormDisabledTools = ref<string[]>([]);
+const teamFormDisabledSkills = ref<string[]>([]);
+const teamFormEnabledPlugins = ref<string[]>([]);
+const teamFormEnabledTools = ref<string[]>([]);
+const teamFormEnabledSkills = ref<string[]>([]);
+/** 编辑已有成员时 ID 锁定；新建时 ID 可自由输入 */
+const teamFormIsEdit = ref(false);
 
-const agentFormModel = computed(() => ({
-  id: agentFormId.value,
-  name: agentFormName.value,
-  description: agentFormDescription.value,
-  system_prompt: agentFormPrompt.value,
-  enabled: agentFormEnabled.value,
-  disabled_plugins: agentFormDisabledPlugins.value,
-  disabled_tools: agentFormDisabledTools.value,
-  disabled_skills: agentFormDisabledSkills.value,
-  enabled_plugins: agentFormEnabledPlugins.value,
-  enabled_tools: agentFormEnabledTools.value,
-  enabled_skills: agentFormEnabledSkills.value,
+const teamFormModel = computed(() => ({
+  id: teamFormId.value,
+  name: teamFormName.value,
+  description: teamFormDescription.value,
+  system_prompt: teamFormPrompt.value,
+  enabled: teamFormEnabled.value,
+  disabled_plugins: teamFormDisabledPlugins.value,
+  disabled_tools: teamFormDisabledTools.value,
+  disabled_skills: teamFormDisabledSkills.value,
+  enabled_plugins: teamFormEnabledPlugins.value,
+  enabled_tools: teamFormEnabledTools.value,
+  enabled_skills: teamFormEnabledSkills.value,
 }));
 
 // 能力列表（复选框）：插件 / 工具 / 技能
@@ -275,10 +275,10 @@ const capabilityPackages = computed(() => {
 
 function isPackageFullyEnabled(pkg: { tools: string[]; skills: string[] }): boolean {
   // 全部允许 => 视为全选
-  const allToolsUnlimited = agentFormEnabledTools.value.length === 0;
-  const allSkillsUnlimited = agentFormEnabledSkills.value.length === 0;
-  const toolsOk = allToolsUnlimited || pkg.tools.every((t) => agentFormEnabledTools.value.includes(t));
-  const skillsOk = allSkillsUnlimited || pkg.skills.every((sk) => agentFormEnabledSkills.value.includes(sk));
+  const allToolsUnlimited = teamFormEnabledTools.value.length === 0;
+  const allSkillsUnlimited = teamFormEnabledSkills.value.length === 0;
+  const toolsOk = allToolsUnlimited || pkg.tools.every((t) => teamFormEnabledTools.value.includes(t));
+  const skillsOk = allSkillsUnlimited || pkg.skills.every((sk) => teamFormEnabledSkills.value.includes(sk));
   return toolsOk && skillsOk;
 }
 
@@ -286,16 +286,16 @@ function togglePackage(pkg: { tools: string[]; skills: string[] }) {
   const enabled = isPackageFullyEnabled(pkg);
   if (enabled) {
     // 取消整个包：从白名单去除包内成员
-    agentFormEnabledTools.value = agentFormEnabledTools.value.filter((t) => !pkg.tools.includes(t));
-    agentFormEnabledSkills.value = agentFormEnabledSkills.value.filter((sk) => !pkg.skills.includes(sk));
+    teamFormEnabledTools.value = teamFormEnabledTools.value.filter((t) => !pkg.tools.includes(t));
+    teamFormEnabledSkills.value = teamFormEnabledSkills.value.filter((sk) => !pkg.skills.includes(sk));
   } else {
     // 启用整个包：加入全部成员（保持其它白名单）
-    const tSet = new Set(agentFormEnabledTools.value);
+    const tSet = new Set(teamFormEnabledTools.value);
     for (const t of pkg.tools) tSet.add(t);
-    agentFormEnabledTools.value = [...tSet];
-    const sSet = new Set(agentFormEnabledSkills.value);
+    teamFormEnabledTools.value = [...tSet];
+    const sSet = new Set(teamFormEnabledSkills.value);
     for (const sk of pkg.skills) sSet.add(sk);
-    agentFormEnabledSkills.value = [...sSet];
+    teamFormEnabledSkills.value = [...sSet];
   }
 }
 
@@ -346,7 +346,7 @@ function isWhitelisted(current: string[], key: string): boolean {
   return current.length === 0 || current.includes(key);
 }
 
-const agentFormRules = {
+const teamFormRules = {
   id: [
     { required: true, message: '请输入 ID' },
     {
@@ -357,68 +357,68 @@ const agentFormRules = {
   name: [{ required: true, message: '请输入名称' }],
 };
 
-function startAgentCreate() {
-  agentEditing.value = true;
-  agentFormIsEdit.value = false;
-  agentFormId.value = '';
-  agentFormName.value = '';
-  agentFormDescription.value = '';
-  agentFormPrompt.value = '';
-  agentFormEnabled.value = true;
-  agentFormDisabledPlugins.value = [];
-  agentFormDisabledTools.value = [];
-  agentFormDisabledSkills.value = [];
-  agentFormEnabledPlugins.value = [];
-  agentFormEnabledTools.value = [];
-  agentFormEnabledSkills.value = [];
-  selectedAgent.value = null;
+function startTeamCreate() {
+  teamEditing.value = true;
+  teamFormIsEdit.value = false;
+  teamFormId.value = '';
+  teamFormName.value = '';
+  teamFormDescription.value = '';
+  teamFormPrompt.value = '';
+  teamFormEnabled.value = true;
+  teamFormDisabledPlugins.value = [];
+  teamFormDisabledTools.value = [];
+  teamFormDisabledSkills.value = [];
+  teamFormEnabledPlugins.value = [];
+  teamFormEnabledTools.value = [];
+  teamFormEnabledSkills.value = [];
+  selectedTeam.value = null;
 }
 
-function startAgentEdit(agent: AgentInfo) {
-  agentEditing.value = true;
-  agentFormIsEdit.value = true;
-  agentFormId.value = agent.id;
-  agentFormName.value = agent.name;
-  agentFormDescription.value = agent.description;
-  agentFormPrompt.value = agent.system_prompt ?? '';
-  agentFormEnabled.value = agent.enabled;
-  agentFormDisabledPlugins.value = agent.disabled_plugins ?? [];
-  agentFormDisabledTools.value = agent.disabled_tools ?? [];
-  agentFormDisabledSkills.value = agent.disabled_skills ?? [];
-  agentFormEnabledPlugins.value = agent.enabled_plugins ?? [];
-  agentFormEnabledTools.value = agent.enabled_tools ?? [];
-  agentFormEnabledSkills.value = agent.enabled_skills ?? [];
+function startTeamEdit(agent: TeamInfo) {
+  teamEditing.value = true;
+  teamFormIsEdit.value = true;
+  teamFormId.value = agent.id;
+  teamFormName.value = agent.name;
+  teamFormDescription.value = agent.description;
+  teamFormPrompt.value = agent.system_prompt ?? '';
+  teamFormEnabled.value = agent.enabled;
+  teamFormDisabledPlugins.value = agent.disabled_plugins ?? [];
+  teamFormDisabledTools.value = agent.disabled_tools ?? [];
+  teamFormDisabledSkills.value = agent.disabled_skills ?? [];
+  teamFormEnabledPlugins.value = agent.enabled_plugins ?? [];
+  teamFormEnabledTools.value = agent.enabled_tools ?? [];
+  teamFormEnabledSkills.value = agent.enabled_skills ?? [];
 }
 
-function cancelAgentEdit() {
-  agentEditing.value = false;
+function cancelTeamEdit() {
+  teamEditing.value = false;
 }
 
-function saveAgent() {
-  const id = agentFormId.value.trim() || agentFormName.value.trim();
-  if (!id || !agentFormName.value.trim()) return;
+function saveTeam() {
+  const id = teamFormId.value.trim() || teamFormName.value.trim();
+  if (!id || !teamFormName.value.trim()) return;
   sendCommand({
-    SaveAgent: {
+    SaveTeam: {
       id,
-      name: agentFormName.value.trim() || id,
-      description: agentFormDescription.value.trim(),
-      system_prompt: agentFormPrompt.value,
-      enabled: agentFormEnabled.value,
-      disabled_plugins: agentFormDisabledPlugins.value,
-      disabled_tools: agentFormDisabledTools.value,
-      disabled_skills: agentFormDisabledSkills.value,
-      enabled_plugins: agentFormEnabledPlugins.value,
-      enabled_tools: agentFormEnabledTools.value,
-      enabled_skills: agentFormEnabledSkills.value,
+      name: teamFormName.value.trim() || id,
+      description: teamFormDescription.value.trim(),
+      system_prompt: teamFormPrompt.value,
+      enabled: teamFormEnabled.value,
+      disabled_plugins: teamFormDisabledPlugins.value,
+      disabled_tools: teamFormDisabledTools.value,
+      disabled_skills: teamFormDisabledSkills.value,
+      enabled_plugins: teamFormEnabledPlugins.value,
+      enabled_tools: teamFormEnabledTools.value,
+      enabled_skills: teamFormEnabledSkills.value,
     },
   });
-  agentEditing.value = false;
+  teamEditing.value = false;
 }
 
-function deleteAgent(agent: AgentInfo) {
-  if (!window.confirm(`确定删除人格「${agent.name}」？该人格的记忆与系统提示词将被移除。`)) return;
-  sendCommand({ DeleteAgent: { id: agent.id } });
-  selectedAgent.value = null;
+function deleteTeam(team: TeamInfo) {
+  if (!window.confirm(`确定删除 Team 成员「${team.name}」？该成员的记忆与系统提示词将被移除。`)) return;
+  sendCommand({ DeleteTeam: { id: team.id } });
+  selectedTeam.value = null;
 }
 
 // ── 技能启停 ──
@@ -510,7 +510,7 @@ function refresh() {
   sendCommand('RequestSkillsList');
   sendCommand('RequestToolsList');
   sendCommand('RequestPluginsList');
-  sendCommand('RequestAgentsList');
+  sendCommand('RequestTeamsList');
 }
 
 onMounted(refresh);
@@ -550,7 +550,7 @@ watch(
       />
       <div class="caps-side-actions">
         <NeumorphismButton size="small" variant="flat" @click="startCreate">新建技能</NeumorphismButton>
-        <NeumorphismButton size="small" variant="flat" @click="startAgentCreate">新建人格</NeumorphismButton>
+        <NeumorphismButton size="small" variant="flat" @click="startTeamCreate">新建 Team</NeumorphismButton>
         <NeumorphismButton size="small" variant="flat" @click="refresh">刷新</NeumorphismButton>
       </div>
     </div>
@@ -558,8 +558,8 @@ watch(
     <div class="caps-main">
       <!-- 空态 -->
       <NeumorphismEmpty
-        v-if="!selectedSkill && !selectedTool && !selectedPlugin && !selectedAgent && !creating && !agentEditing"
-        description="在左侧菜单中选择技能、工具、插件或人格；也可点击“新建”"
+        v-if="!selectedSkill && !selectedTool && !selectedPlugin && !selectedTeam && !creating && !teamEditing"
+        description="在左侧菜单中选择技能、工具、插件或 Team；也可点击“新建”"
       />
 
       <!-- 技能详情 -->
@@ -634,50 +634,50 @@ watch(
         </div>
       </div>
 
-      <!-- 人格详情 / 编辑 -->
-      <div v-else-if="selectedAgent && !agentEditing" class="caps-detail">
+      <!-- Team 成员详情 / 编辑 -->
+      <div v-else-if="selectedTeam && !teamEditing" class="caps-detail">
         <div class="detail-head">
-          <h3>{{ selectedAgent.name }}</h3>
+          <h3>{{ selectedTeam.name }}</h3>
           <div class="detail-actions">
             <NeumorphismButton
               size="small"
               variant="flat"
-              v-if="state.agents.length > 1 && selectedAgent.id !== 'default' && selectedAgent.id !== 'alix'"
-              @click="deleteAgent(selectedAgent!)"
+              v-if="state.teams.length > 1 && selectedTeam.id !== 'default' && selectedTeam.id !== 'alix'"
+              @click="deleteTeam(selectedTeam!)"
             >
               删除
             </NeumorphismButton>
           </div>
         </div>
         <div class="detail-meta">
-          <NeumorphismTag v-if="selectedAgent.id === 'default' || selectedAgent.id === 'alix'" variant="warning" size="small">
+          <NeumorphismTag v-if="selectedTeam.id === 'default' || selectedTeam.id === 'alix'" variant="warning" size="small">
             主 Agent
           </NeumorphismTag>
-          <NeumorphismTag variant="info" size="small">{{ selectedAgent.sessions }} 会话</NeumorphismTag>
+          <NeumorphismTag variant="info" size="small">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
         </div>
         <div class="detail-field">
           <span>启用（禁用即卸载记忆，再次启用重新挂载）</span>
           <NeumorphismSwitch
-            :model-value="selectedAgent.enabled"
+            :model-value="selectedTeam.enabled"
             size="small"
-            @change="sendCommand({ ToggleAgent: { id: selectedAgent!.id, enabled: $event } })"
+            @change="sendCommand({ ToggleTeam: { id: selectedTeam!.id, enabled: $event } })"
           />
         </div>
-        <p class="muted">{{ selectedAgent.description || '（无描述）' }}</p>
+        <p class="muted">{{ selectedTeam.description || '（无描述）' }}</p>
         <div class="detail-content">
           <div class="muted content-title">系统提示词（留空 = 继承全局）</div>
-          <pre class="content-pre">{{ selectedAgent.system_prompt || '（继承全局）' }}</pre>
+          <pre class="content-pre">{{ selectedTeam.system_prompt || '（继承全局）' }}</pre>
         </div>
         <div class="detail-keywords">
           <span class="muted">启用白名单：</span>
-          <template v-if="(selectedAgent.enabled_plugins?.length ?? 0) + (selectedAgent.enabled_tools?.length ?? 0) + (selectedAgent.enabled_skills?.length ?? 0) > 0">
-            <NeumorphismTag v-for="e in selectedAgent.enabled_plugins ?? []" :key="e" size="small" variant="primary">
+          <template v-if="(selectedTeam.enabled_plugins?.length ?? 0) + (selectedTeam.enabled_tools?.length ?? 0) + (selectedTeam.enabled_skills?.length ?? 0) > 0">
+            <NeumorphismTag v-for="e in selectedTeam.enabled_plugins ?? []" :key="e" size="small" variant="primary">
               {{ e }}
             </NeumorphismTag>
-            <NeumorphismTag v-for="e in selectedAgent.enabled_tools ?? []" :key="e" size="small" variant="primary">
+            <NeumorphismTag v-for="e in selectedTeam.enabled_tools ?? []" :key="e" size="small" variant="primary">
               {{ e }}
             </NeumorphismTag>
-            <NeumorphismTag v-for="e in selectedAgent.enabled_skills ?? []" :key="e" size="small" variant="primary">
+            <NeumorphismTag v-for="e in selectedTeam.enabled_skills ?? []" :key="e" size="small" variant="primary">
               {{ e }}
             </NeumorphismTag>
           </template>
@@ -685,14 +685,14 @@ watch(
         </div>
         <div class="detail-keywords">
           <span class="muted">禁用能力：</span>
-          <template v-if="(selectedAgent.disabled_plugins?.length ?? 0) || (selectedAgent.disabled_tools?.length ?? 0) || (selectedAgent.disabled_skills?.length ?? 0)">
-            <NeumorphismTag v-for="d in selectedAgent.disabled_plugins ?? []" :key="d" size="small" variant="error">
+          <template v-if="(selectedTeam.disabled_plugins?.length ?? 0) || (selectedTeam.disabled_tools?.length ?? 0) || (selectedTeam.disabled_skills?.length ?? 0)">
+            <NeumorphismTag v-for="d in selectedTeam.disabled_plugins ?? []" :key="d" size="small" variant="error">
               {{ d }}
             </NeumorphismTag>
-            <NeumorphismTag v-for="d in selectedAgent.disabled_tools ?? []" :key="d" size="small" variant="error">
+            <NeumorphismTag v-for="d in selectedTeam.disabled_tools ?? []" :key="d" size="small" variant="error">
               {{ d }}
             </NeumorphismTag>
-            <NeumorphismTag v-for="d in selectedAgent.disabled_skills ?? []" :key="d" size="small" variant="error">
+            <NeumorphismTag v-for="d in selectedTeam.disabled_skills ?? []" :key="d" size="small" variant="error">
               {{ d }}
             </NeumorphismTag>
           </template>
@@ -700,34 +700,34 @@ watch(
         </div>
       </div>
 
-      <div v-else-if="agentEditing" class="caps-detail">
+      <div v-else-if="teamEditing" class="caps-detail">
         <div class="detail-head">
-          <h3>{{ agentFormIsEdit ? `配置：${agentFormName || '—'}` : '新建人格' }}</h3>
+          <h3>{{ teamFormIsEdit ? `配置：${teamFormName || '—'}` : '新建 Team' }}</h3>
         </div>
         <NeumorphismForm
-          :model="agentFormModel"
-          :rules="agentFormRules"
+          :model="teamFormModel"
+          :rules="teamFormRules"
           direction="vertical"
           label-width="96px"
-          @submit="saveAgent"
+          @submit="saveTeam"
         >
-          <NeumorphismFormItem label="ID" required name="id" :rules="agentFormRules.id">
+          <NeumorphismFormItem label="ID" required name="id" :rules="teamFormRules.id">
             <NeumorphismInput
-              v-model="agentFormId"
+              v-model="teamFormId"
               placeholder="my-agent"
-              :disabled="agentFormIsEdit"
+              :disabled="teamFormIsEdit"
             />
           </NeumorphismFormItem>
-          <NeumorphismFormItem label="名称" required name="name" :rules="agentFormRules.name">
-            <NeumorphismInput v-model="agentFormName" placeholder="写作助理" />
+          <NeumorphismFormItem label="名称" required name="name" :rules="teamFormRules.name">
+            <NeumorphismInput v-model="teamFormName" placeholder="写作助理" />
           </NeumorphismFormItem>
           <NeumorphismFormItem label="描述" name="description">
-            <NeumorphismInput v-model="agentFormDescription" placeholder="专注文档写作" />
+            <NeumorphismInput v-model="teamFormDescription" placeholder="专注文档写作" />
           </NeumorphismFormItem>
           <NeumorphismFormItem label="系统提示词" name="system_prompt">
             <template #default="{ }">
               <NeumorphismTextarea
-                v-model="agentFormPrompt"
+                v-model="teamFormPrompt"
                 rows="8"
                 auto-resize
                 placeholder="你是…（留空 = 继承全局提示词与技能）"
@@ -735,18 +735,18 @@ watch(
             </template>
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用" name="enabled">
-            <NeumorphismSwitch v-model="agentFormEnabled" size="small" />
+            <NeumorphismSwitch v-model="teamFormEnabled" size="small" />
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用插件">
-            <p class="muted caps-hint">勾选该人格可用的能力块（适配器/编排/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。</p>
+            <p class="muted caps-hint">勾选该 Team 成员可用的能力块（适配器/编排/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。</p>
             <div class="caps-checkbox-grid">
               <NeumorphismCheckbox
                 v-for="opt in capabilityPluginOptions"
                 :key="opt.key"
                 size="small"
-                :model-value="isWhitelisted(agentFormEnabledPlugins, opt.key)"
+                :model-value="isWhitelisted(teamFormEnabledPlugins, opt.key)"
                 :label="opt.label"
-                @update:model-value="agentFormEnabledPlugins = toggleAllowlist(agentFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
+                @update:model-value="teamFormEnabledPlugins = toggleAllowlist(teamFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
               />
               <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
             </div>
@@ -772,7 +772,7 @@ watch(
             <span v-if="capabilityPackages.length === 0" class="muted">（无包可勾选）</span>
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用工具">
-            <p class="muted caps-hint">勾选该人格可用的工具（按分类分组，含编排/自更新/运维）；全选 = 不限制（默认）。</p>
+            <p class="muted caps-hint">勾选该 Team 成员可用的工具（按分类分组，含编排/自更新/运维）；全选 = 不限制（默认）。</p>
             <div v-for="group in capabilityToolGroups" :key="group.cat" class="caps-tool-group">
               <div class="caps-tool-group__head">
                 {{ group.title }}
@@ -783,31 +783,31 @@ watch(
                   v-for="opt in group.items"
                   :key="opt.key"
                   size="small"
-                  :model-value="isWhitelisted(agentFormEnabledTools, opt.key)"
+                  :model-value="isWhitelisted(teamFormEnabledTools, opt.key)"
                   :label="opt.label"
-                  @update:model-value="agentFormEnabledTools = toggleAllowlist(agentFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
+                  @update:model-value="teamFormEnabledTools = toggleAllowlist(teamFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
                 />
               </div>
             </div>
             <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用技能">
-            <p class="muted caps-hint">勾选该人格激活的技能；全选 = 不限制（默认）。</p>
+            <p class="muted caps-hint">勾选该 Team 成员激活的技能；全选 = 不限制（默认）。</p>
             <div class="caps-checkbox-grid">
               <NeumorphismCheckbox
                 v-for="opt in capabilitySkillOptions"
                 :key="opt.key"
                 size="small"
-                :model-value="isWhitelisted(agentFormEnabledSkills, opt.key)"
+                :model-value="isWhitelisted(teamFormEnabledSkills, opt.key)"
                 :label="opt.label"
-                @update:model-value="agentFormEnabledSkills = toggleAllowlist(agentFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
+                @update:model-value="teamFormEnabledSkills = toggleAllowlist(teamFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
               />
               <span v-if="capabilitySkillOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
           <div class="form-actions form-actions--corner">
-            <NeumorphismButton variant="flat" @click="cancelAgentEdit">放弃更改</NeumorphismButton>
-            <NeumorphismButton variant="primary" @click="saveAgent">保存</NeumorphismButton>
+            <NeumorphismButton variant="flat" @click="cancelTeamEdit">放弃更改</NeumorphismButton>
+            <NeumorphismButton variant="primary" @click="saveTeam">保存</NeumorphismButton>
           </div>
         </NeumorphismForm>
       </div>

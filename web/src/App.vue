@@ -41,15 +41,17 @@ function loadView(): View {
   }
 }
 
-function onAgentSelect(item: HeadlessMenuItem | string | null) {
+function onTeamSelect(item: HeadlessMenuItem | string | null) {
   const next = (() => {
     if (item === null || typeof item === 'string') return item || null;
     return item.key === 'default' ? null : item.key;
   })();
-  activeAgentId.value = next;
-  // 切换人格 = 切换记忆：清空当前显示，加载该人格独立的 timeline。
+  activeTeamId.value = next;
+  // 切换 Team = 切换记忆（会话隔离）：清空当前显示，加载该成员独立的 timeline。
   state.trunk = [];
-  sendCommand({ RequestTrunkTimeline: { agent_id: next } });
+  sendCommand({ RequestTrunkTimeline: { team_id: next } });
+  // 会话列表也按 Team 过滤（SessionGroups 依据 activeTeamId）。
+  selectSession('local:tui::local_user');
 }
 
 function setView(next: View) {
@@ -65,8 +67,8 @@ function setView(next: View) {
 const activeSessionId = ref('local:tui::local_user');
 const showSettings = ref(false);
 const activeBranchId = ref<string | null>(null);
-// 当前人格（空 = 默认/default）。切换后发送自动带上 agent_id。
-const activeAgentId = ref<string | null>(null);
+// 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
+const activeTeamId = ref<string | null>(null);
 
 
 
@@ -78,7 +80,7 @@ function send(content: string, images: string[] = []) {
       session_id: target,
       content,
       images,
-      agent_id: activeAgentId.value || undefined,
+      team_id: activeTeamId.value || undefined,
     },
   });
 }
@@ -242,10 +244,10 @@ watch(
         <PanelSidebar
           :active-session-id="activeSessionId"
           :active-branch-id="activeBranchId"
-          :active-agent-id="activeAgentId"
+          :active-team-id="activeTeamId"
           @select-session="selectSession"
           @select-branch="(id) => (activeBranchId = id)"
-          @select-agent="onAgentSelect"
+          @select-team="onTeamSelect"
         />
       </template>
 

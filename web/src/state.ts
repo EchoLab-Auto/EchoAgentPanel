@@ -31,7 +31,7 @@ import type {
   TimelineMessage,
   ToolInfo,
   PluginInfo,
-  AgentInfo,
+  TeamInfo,
 } from './protocol';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -209,8 +209,8 @@ export interface AppState {
   tools: ToolInfo[];
   /** 已挂载插件列表 */
   plugins: PluginInfo[];
-  /** 多 agent 人格列表 */
-  agents: AgentInfo[];
+  /** Team 成员列表（多 agent） */
+  teams: TeamInfo[];
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
@@ -252,7 +252,7 @@ export function initialState(): AppState {
     skills: [],
     tools: [],
     plugins: [],
-    agents: [],
+    teams: [],
     context: null,
     branchTabs: {},
     pendingBackground: {},
@@ -523,7 +523,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const trunk = state.trunk.filter((m) => m.sessionId === e.session_id || m.sessionId === undefined);
       const last = trunk[trunk.length - 1];
       if (last && last.role === 'user') {
-        sendCommand({ RequestTrunkTimeline: { agent_id: null } });
+        sendCommand({ RequestTrunkTimeline: { team_id: null } });
       }
       return state;
     }
@@ -584,9 +584,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       state.plugins = e.plugins;
       return state;
     }
-    case 'AgentsList': {
-      const e = (event as { AgentsList: { agents: AgentInfo[] } }).AgentsList;
-      state.agents = e.agents;
+    case 'TeamsList': {
+      const e = (event as { TeamsList: { teams: TeamInfo[] } }).TeamsList;
+      state.teams = e.teams;
       return state;
     }
     case 'SystemPrompt': {

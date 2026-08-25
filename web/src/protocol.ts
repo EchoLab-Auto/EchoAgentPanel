@@ -20,7 +20,7 @@ export interface AdapterStatus {
 
 export interface SessionInfo {
   id: string;
-  agent_id?: string | null;
+  team_id?: string | null;
   platform: string;
   scope: string;
   user_id: string;
@@ -60,7 +60,7 @@ export interface ToolInfo {
   package?: string;
 }
 
-export interface AgentInfo {
+export interface TeamInfo {
   id: string;
   name: string;
   description: string;
@@ -159,7 +159,7 @@ export interface SudoPasswordSubmit {
 // ── BackendCommand（外部标签枚举）──────────────────────────────────────────
 
 export type BackendCommand =
-  | { SendMessage: { session_id: string; content: string; images?: string[]; agent_id?: string | null } }
+  | { SendMessage: { session_id: string; content: string; images?: string[]; team_id?: string | null } }
   | { SwitchModel: { model: string } }
   | { SwitchProvider: { provider: string } }
   | { SetSystemPrompt: { prompt: string } }
@@ -195,10 +195,10 @@ export type BackendCommand =
   | { DeleteSkill: { name: string } }
   | 'RequestPluginsList'
   | { TogglePlugin: { id: string; enabled: boolean } }
-  | 'RequestAgentsList'
-  | { ToggleAgent: { id: string; enabled: boolean } }
+  | 'RequestTeamsList'
+  | { ToggleTeam: { id: string; enabled: boolean } }
   | {
-      SaveAgent: {
+      SaveTeam: {
         id: string;
         name: string;
         description: string;
@@ -212,10 +212,10 @@ export type BackendCommand =
         enabled_skills?: string[];
       };
     }
-  | { DeleteAgent: { id: string } }
+  | { DeleteTeam: { id: string } }
   | 'RequestState'
   | 'RequestContext'
-  | { RequestTrunkTimeline: { agent_id?: string | null } }
+  | { RequestTrunkTimeline: { team_id?: string | null } }
   | 'ClearHistory'
   | { CancelRequestedWork: { session_id: string; all: boolean } }
   | { StartAdapter: { name: string } }
@@ -355,7 +355,7 @@ export type BackendEvent =
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
   | { PluginsList: { plugins: PluginInfo[] } }
-  | { AgentsList: { agents: AgentInfo[] } }
+  | { TeamsList: { teams: TeamInfo[] } }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
   | { AdapterList: { adapters: AdapterStatus[] } }
