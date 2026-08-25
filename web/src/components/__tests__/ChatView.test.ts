@@ -85,22 +85,21 @@ describe('ChatView 布局契约', () => {
     expect(scoped.find('.stub-list').attributes('data-count')).toBe('1');
   });
 
-  it('输入区占位（flex 子项）而非 absolute 遮挡：样式契约', () => {
-    // 解析 SFC 样式块，锁定布局实现方式。回归为 position:absolute / padding hack 时测试失败。
+  it('输入区吸底悬浮（absolute 叠层）：样式契约', () => {
+    // 解析 SFC 样式块，锁定布局实现方式。回归为 flex 占位（不再叠压）时测试失败。
     const raw = require('fs').readFileSync(
       require('path').resolve(__dirname, '../ChatView.vue'),
       'utf-8',
     );
     const styleBlock = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
     expect(styleBlock).toMatch(/\.chat-view\s*\{[^}]*display:\s*flex/s);
-    expect(styleBlock).toMatch(/\.chat-view\s*\{[^}]*flex-direction:\s*column/s);
+    expect(styleBlock).toMatch(/\.chat-view\s*\{[^}]*position:\s*relative/s);
     expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*flex:\s*1/s);
     expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*min-height:\s*0/s);
-    expect(styleBlock).toMatch(/\.chat-composer-float\s*\{[^}]*flex:\s*0\s*0\s*auto/s);
-    // 禁止回到 absolute 遮挡方案
-    expect(styleBlock).not.toMatch(/\.chat-composer-float\s*\{[^}]*position:\s*absolute/s);
-    // 不需要 padding-bottom hack 也能保证不遮挡
-    expect(styleBlock).not.toMatch(/padding-bottom:\s*(?!0)[0-9]+px\s*!important/);
+    // 输入框必须以 absolute 盖在消息列表上（叠层悬浮）
+    expect(styleBlock).toMatch(/\.chat-composer-float\s*\{[^}]*position:\s*absolute/s);
+    // 列表底部预留输入框高度，保证最后一条消息仍可滚出可见（不永久遮挡）
+    expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*padding-bottom:\s*\d+px/s);
   });
 
   it('提供图片附件按钮（SVG 图标，无 emoji）与发送按钮（#actions 契约）', () => {

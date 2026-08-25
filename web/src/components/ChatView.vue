@@ -229,29 +229,36 @@ function imagesOf(message: ChatMessage): string[] {
 <style scoped>
 /*
  * 布局契约（有对应测试，改动需同步更新 src/components/ChatView.test.ts）：
- * 1. .chat-view 是纵向 flex 容器，高度占满父级；
- * 2. .chat-view__list flex:1 + min-height:0 —— 滚动只在 ChatTray 内部发生；
- * 3. .chat-composer-float 是 flex 子项（flex:0 0 auto），占位而非 absolute 遮挡；
- *    消息列表因此永远在输入区上方，最后一条消息不会被遮住。
+ * 1. .chat-view 是纵向 flex 容器 + position:relative（定位上下文）；
+ * 2. .chat-view__list flex:1 + min-height:0 —— 滚动只在 ChatTray 内部发生，
+ *    内容可滚动到输入框之下（输入框悬浮在上层，毛玻璃透出下层消息）；
+ *    底部 padding-bottom 预留输入框高度，保证最后一条消息仍可滚出可见；
+ * 3. .chat-composer-float position:absolute 固定于底部（吸底悬浮），
+ *    z-index 高于消息列表；半透明毛玻璃背景透出滚过的消息。
  */
 .chat-view {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
 }
 
-/* ChatTray 需要定高父级才能出现滚动区 */
+/* ChatTray 需要定高父级才能出现滚动区；底部预留输入框高度 */
 .chat-view__list {
   flex: 1;
   min-height: 0;
+  padding-bottom: 170px;
 }
 
-/* 浮动输入区：占位子项（不是 absolute），视觉上悬浮；
-   半透明毛玻璃：低不透明度背景 + backdrop blur，透出下一层内容 */
+/* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上；
+   半透明毛玻璃：低不透明度背景 + backdrop blur，透出下方滚动内容 */
 .chat-composer-float {
-  flex: 0 0 auto;
-  margin: 0 12px 12px;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
   padding: 10px 12px 12px;
   border-radius: 16px;
   background: color-mix(in srgb, var(--nm-surface-raised) 55%, transparent);
@@ -262,6 +269,11 @@ function imagesOf(message: ChatMessage): string[] {
     0 8px 24px var(--nm-shadow-ambient-xl, rgba(0, 0, 0, 0.35)),
     4px 4px 12px var(--nm-shadow-dark),
     -2px -2px 8px var(--nm-shadow-light);
+}
+
+/* 吸底跳转按钮上移，避免被悬浮输入框遮挡 */
+.chat-view :deep(.nm-chat-tray__jump) {
+  bottom: 172px;
 }
 
 /* actions 行：图片按钮 + 发送按钮底对齐、间距统一 */
