@@ -180,6 +180,8 @@ function onMenuSelect(item: HeadlessMenuItem) {
       selectedTool.value = null;
       editing.value = false;
       creating.value = false;
+      // 直接进入编辑态（无需再点"编辑"按钮）
+      startAgentEdit(found);
     }
   } else if (item.key.startsWith('plugin:')) {
     const id = item.key.slice('plugin:'.length);
@@ -553,9 +555,6 @@ watch(
         <div class="detail-head">
           <h3>{{ selectedAgent.name }}</h3>
           <div class="detail-actions">
-            <NeumorphismButton size="small" variant="flat" @click="startAgentEdit(selectedAgent!)">
-              编辑
-            </NeumorphismButton>
             <NeumorphismButton
               size="small"
               variant="flat"
@@ -618,7 +617,9 @@ watch(
       </div>
 
       <div v-else-if="agentEditing" class="caps-detail">
-        <div class="detail-head"><h3>{{ agentFormIsEdit ? '编辑人格' : '新建人格' }}</h3></div>
+        <div class="detail-head">
+          <h3>{{ agentFormIsEdit ? `配置：${agentFormName || '—'}` : '新建人格' }}</h3>
+        </div>
         <NeumorphismForm
           :model="agentFormModel"
           :rules="agentFormRules"
@@ -694,9 +695,9 @@ watch(
               <span v-if="capabilitySkillOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
-          <div class="form-actions">
+          <div class="form-actions form-actions--corner">
+            <NeumorphismButton variant="flat" @click="cancelAgentEdit">放弃更改</NeumorphismButton>
             <NeumorphismButton variant="primary" @click="saveAgent">保存</NeumorphismButton>
-            <NeumorphismButton variant="flat" @click="cancelAgentEdit">取消</NeumorphismButton>
           </div>
         </NeumorphismForm>
       </div>
@@ -865,4 +866,17 @@ watch(
 .caps-hint {
   margin: 0 0 4px;
   font-size: 11px;
+}
+
+.form-actions--corner {
+  position: sticky;
+  bottom: -12px;
+  margin-top: 8px;
+  padding: 10px 0 4px;
+  justify-content: flex-end;
+  background: linear-gradient(
+    to top,
+    var(--nm-surface-raised, #1c1c1c) 60%,
+    transparent
+  );
 }
