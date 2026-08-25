@@ -42,11 +42,14 @@ function loadView(): View {
 }
 
 function onAgentSelect(item: HeadlessMenuItem | string | null) {
-  if (item === null || typeof item === 'string') {
-    activeAgentId.value = item || null;
-    return;
-  }
-  activeAgentId.value = item.key === 'default' ? null : item.key;
+  const next = (() => {
+    if (item === null || typeof item === 'string') return item || null;
+    return item.key === 'default' ? null : item.key;
+  })();
+  activeAgentId.value = next;
+  // 切换人格 = 切换记忆：清空当前显示，加载该人格独立的 timeline。
+  state.trunk = [];
+  sendCommand({ RequestTrunkTimeline: { agent_id: next } });
 }
 
 function setView(next: View) {

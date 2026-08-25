@@ -36,7 +36,7 @@ export function startConnection(): void {
       // Bootstrap the panel state on (re)connect.
       const bootstrap: BackendCommand[] = [
         'RequestState',
-        'RequestTrunkTimeline',
+        { RequestTrunkTimeline: { agent_id: null } },
         'RequestAdapterStatus',
         'RequestQqFilterConfig',
         'RequestAgentsList',

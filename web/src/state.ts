@@ -523,7 +523,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const trunk = state.trunk.filter((m) => m.sessionId === e.session_id || m.sessionId === undefined);
       const last = trunk[trunk.length - 1];
       if (last && last.role === 'user') {
-        sendCommand('RequestTrunkTimeline');
+        sendCommand({ RequestTrunkTimeline: { agent_id: null } });
       }
       return state;
     }

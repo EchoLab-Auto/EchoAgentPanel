@@ -201,7 +201,7 @@ export type BackendCommand =
   | { DeleteAgent: { id: string } }
   | 'RequestState'
   | 'RequestContext'
-  | 'RequestTrunkTimeline'
+  | { RequestTrunkTimeline: { agent_id?: string | null } }
   | 'ClearHistory'
   | { CancelRequestedWork: { session_id: string; all: boolean } }
   | { StartAdapter: { name: string } }
