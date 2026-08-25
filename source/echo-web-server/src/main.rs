@@ -106,8 +106,9 @@ async fn static_handler(uri: OriginalUri, State(state): State<proxy::AppState>) 
     // HTML 永不缓存（SPA shell 每次最新）；带 hash 的静态资源（js/css）
     // 允许短缓存并附带 ETag 校验，更新后浏览器自动取新版本。
     let is_html = file.extension().and_then(|e| e.to_str()) == Some("html");
+    // HTML（SPA shell）禁止任何缓存：no-store 避免浏览器启发式缓存旧壳。
     let cache_control = if is_html {
-        "no-cache"
+        "no-store, no-cache, must-revalidate"
     } else {
         "public, max-age=300"
     };
@@ -122,7 +123,7 @@ async fn static_handler(uri: OriginalUri, State(state): State<proxy::AppState>) 
             match tokio::fs::read(root.join("index.html")).await {
                 Ok(bytes) => Response::builder()
                     .header(CONTENT_TYPE, "text/html; charset=utf-8")
-                    .header(CACHE_CONTROL, "no-cache")
+                    .header(CACHE_CONTROL, "no-store, no-cache, must-revalidate")
                     .body(axum::body::Body::from(bytes))
                     .unwrap_or_else(|_| not_found()),
                 Err(_) => not_found(),
