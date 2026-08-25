@@ -240,11 +240,11 @@ const agentFormModel = computed(() => ({
 }));
 
 // 能力列表（复选框）：插件 / 工具 / 技能
-// 插件级勾选只保留"整类能力"（适配器/编排/管理面）；内置工具集
-// (kind=tool) 不作为插件出现——它的每个工具在下方"启用工具"单独勾选。
+// 插件级勾选只保留"整类能力"（适配器/管理面）；内置工具集(kind=tool)
+// 和编排(kind=orchestration) 不作为插件出现——它们由工具/包层面勾选。
 const capabilityPluginOptions = computed(() =>
   state.plugins
-    .filter((p) => ['adapter', 'orchestration', 'management'].includes(p.kind))
+    .filter((p) => ['adapter', 'management'].includes(p.kind))
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
