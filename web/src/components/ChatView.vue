@@ -247,14 +247,17 @@ function imagesOf(message: ChatMessage): string[] {
   min-height: 0;
 }
 
-/* 浮动输入区：占位子项（不是 absolute），视觉上悬浮 */
+/* 浮动输入区：占位子项（不是 absolute），视觉上悬浮；
+   半透明毛玻璃：低不透明度背景 + backdrop blur，透出下一层内容 */
 .chat-composer-float {
   flex: 0 0 auto;
   margin: 0 12px 12px;
   padding: 10px 12px 12px;
   border-radius: 16px;
-  background: var(--nm-surface-raised);
-  border: 1px solid var(--nm-border-subtle);
+  background: color-mix(in srgb, var(--nm-surface-raised) 55%, transparent);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid color-mix(in srgb, var(--nm-border-subtle) 60%, transparent);
   box-shadow:
     0 8px 24px var(--nm-shadow-ambient-xl, rgba(0, 0, 0, 0.35)),
     4px 4px 12px var(--nm-shadow-dark),
