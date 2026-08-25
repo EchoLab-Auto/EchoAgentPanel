@@ -9,6 +9,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
+  NeumorphismCheckbox,
   NeumorphismEmpty,
   NeumorphismForm,
   NeumorphismFormItem,
@@ -260,6 +261,11 @@ function toggleArrayItem(arr: string[], key: string): string[] {
 function toggleAllowlist(current: string[], allKeys: string[], key: string): string[] {
   const base = current.length ? current : [...allKeys];
   return toggleArrayItem(base, key);
+}
+
+// 每个选项的勾选态：允许列表为空 => 视为全部勾选（未限制）。
+function isWhitelisted(current: string[], key: string): boolean {
+  return current.length === 0 || current.includes(key);
 }
 
 const agentFormRules = {
@@ -656,42 +662,42 @@ watch(
           <NeumorphismFormItem label="启用插件">
             <p class="muted caps-hint">勾选该人格可用的插件；全选 = 不限制（默认）。取消勾选即限制为仅勾选项。</p>
             <div class="caps-checkbox-grid">
-              <label v-for="opt in capabilityPluginOptions" :key="opt.key" class="caps-checkbox">
-                <input
-                  type="checkbox"
-                  :checked="agentFormEnabledPlugins.length === 0 || agentFormEnabledPlugins.includes(opt.key)"
-                  @change="agentFormEnabledPlugins = toggleAllowlist(agentFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
-                />
-                <span>{{ opt.label }}</span>
-              </label>
+              <NeumorphismCheckbox
+                v-for="opt in capabilityPluginOptions"
+                :key="opt.key"
+                size="small"
+                :model-value="isWhitelisted(agentFormEnabledPlugins, opt.key)"
+                :label="opt.label"
+                @update:model-value="agentFormEnabledPlugins = toggleAllowlist(agentFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
+              />
               <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用工具">
             <p class="muted caps-hint">勾选该人格可用的工具；全选 = 不限制（默认）。</p>
             <div class="caps-checkbox-grid">
-              <label v-for="opt in capabilityToolOptions" :key="opt.key" class="caps-checkbox">
-                <input
-                  type="checkbox"
-                  :checked="agentFormEnabledTools.length === 0 || agentFormEnabledTools.includes(opt.key)"
-                  @change="agentFormEnabledTools = toggleAllowlist(agentFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
-                />
-                <span>{{ opt.label }}</span>
-              </label>
+              <NeumorphismCheckbox
+                v-for="opt in capabilityToolOptions"
+                :key="opt.key"
+                size="small"
+                :model-value="isWhitelisted(agentFormEnabledTools, opt.key)"
+                :label="opt.label"
+                @update:model-value="agentFormEnabledTools = toggleAllowlist(agentFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
+              />
               <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
           <NeumorphismFormItem label="启用技能">
             <p class="muted caps-hint">勾选该人格激活的技能；全选 = 不限制（默认）。</p>
             <div class="caps-checkbox-grid">
-              <label v-for="opt in capabilitySkillOptions" :key="opt.key" class="caps-checkbox">
-                <input
-                  type="checkbox"
-                  :checked="agentFormEnabledSkills.length === 0 || agentFormEnabledSkills.includes(opt.key)"
-                  @change="agentFormEnabledSkills = toggleAllowlist(agentFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
-                />
-                <span>{{ opt.label }}</span>
-              </label>
+              <NeumorphismCheckbox
+                v-for="opt in capabilitySkillOptions"
+                :key="opt.key"
+                size="small"
+                :model-value="isWhitelisted(agentFormEnabledSkills, opt.key)"
+                :label="opt.label"
+                @update:model-value="agentFormEnabledSkills = toggleAllowlist(agentFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
+              />
               <span v-if="capabilitySkillOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
@@ -849,12 +855,13 @@ watch(
   gap: 8px;
   margin-top: 4px;
 }
-</style>
-
 .caps-checkbox-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.caps-checkbox-grid :deep(.nm-checkbox) {
+  margin: 0;
 }
 .caps-checkbox {
   display: flex;
@@ -880,3 +887,4 @@ watch(
     transparent
   );
 }
+</style>
