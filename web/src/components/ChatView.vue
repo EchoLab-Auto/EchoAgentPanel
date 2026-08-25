@@ -433,8 +433,15 @@ function imagesOf(message: ChatMessage): string[] {
   padding: 0;
 }
 .chat-composer-float :deep(.nm-chat-composer__meta) {
-  min-height: 26px;
-  margin-bottom: 6px;
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  min-height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+.chat-composer-float :deep(.nm-chat-composer__meta .nm-chat-composer__cancel) {
+  pointer-events: auto;
 }
 .chat-composer-float :deep(.nm-chat-composer__cancel) {
   width: 74px;
