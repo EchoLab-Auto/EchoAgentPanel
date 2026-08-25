@@ -98,8 +98,11 @@ describe('ChatView 布局契约', () => {
     expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*min-height:\s*0/s);
     // 输入框必须以 absolute 盖在消息列表上（叠层悬浮）
     expect(styleBlock).toMatch(/\.chat-composer-float\s*\{[^}]*position:\s*absolute/s);
-    // 列表底部预留输入框高度，保证最后一条消息仍可滚出可见（不永久遮挡）
-    expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*padding-bottom:\s*\d+px/s);
+    // 预留空间必须在滚动区内部（nm-chat-tray__scroll）：外层 padding
+    // 会压缩滚动高度，消息将永远无法滚到输入框后方
+    expect(styleBlock).toMatch(/nm-chat-tray__scroll[^}]*padding-bottom:\s*\d+px/s);
+    // 外层不得出现 padding-bottom（避免压缩滚动区）
+    expect(styleBlock).not.toMatch(/\.chat-view__list\s*\{[^}]*padding-bottom/s);
   });
 
   it('提供图片附件按钮（SVG 图标，无 emoji）与发送按钮（#actions 契约）', () => {

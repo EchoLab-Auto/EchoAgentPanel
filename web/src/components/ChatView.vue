@@ -244,11 +244,19 @@ function imagesOf(message: ChatMessage): string[] {
   min-height: 0;
 }
 
-/* ChatTray 需要定高父级才能出现滚动区；底部预留输入框高度 */
+/* ChatTray 需要定高父级才能出现滚动区。
+   注意：预留空间必须加在*滚动区内部*（nm-chat-tray__scroll），
+   而不是本容器上——外层 padding 会压缩滚动区高度，消息永远
+   滚不到输入框后面；滚动区自身延伸到输入框后方，消息才能
+   从毛玻璃底下划过。 */
 .chat-view__list {
   flex: 1;
   min-height: 0;
-  padding-bottom: 170px;
+}
+
+/* 滚动区内部底部预留：输入框(162px) + 边距(12px) + 松量 */
+.chat-view__list :deep(.nm-chat-tray__scroll) {
+  padding-bottom: 190px;
 }
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上；
@@ -281,7 +289,7 @@ function imagesOf(message: ChatMessage): string[] {
 
 /* 吸底跳转按钮上移，避免被悬浮输入框遮挡 */
 .chat-view :deep(.nm-chat-tray__jump) {
-  bottom: 172px;
+  bottom: 180px;
 }
 
 /* actions 行：图片按钮 + 发送按钮底对齐、间距统一 */
