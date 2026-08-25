@@ -247,6 +247,58 @@ const capabilityPluginOptions = computed(() =>
     .filter((p) => ['adapter', 'orchestration', 'management'].includes(p.kind))
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
+// ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
+const PACKAGE_NAMES: Record<string, string> = {
+  'echo-agent.adapter.qq': 'QQ 适配器包',
+  'echo-agent.orchestration': '编排工具包',
+};
+
+const capabilityPackages = computed(() => {
+  const map = new Map<string, { tools: string[]; skills: string[] }>();
+  for (const t of state.tools) {
+    if (!t.package) continue;
+    if (!map.has(t.package)) map.set(t.package, { tools: [], skills: [] });
+    map.get(t.package)!.tools.push(t.name);
+  }
+  for (const sk of state.skills) {
+    if (!sk.package) continue;
+    if (!map.has(sk.package)) map.set(sk.package, { tools: [], skills: [] });
+    map.get(sk.package)!.skills.push(sk.name);
+  }
+  return [...map.entries()].map(([id, v]) => ({
+    id,
+    name: PACKAGE_NAMES[id] ?? id,
+    tools: v.tools,
+    skills: v.skills,
+  }));
+});
+
+function isPackageFullyEnabled(pkg: { tools: string[]; skills: string[] }): boolean {
+  // 全部允许 => 视为全选
+  const allToolsUnlimited = agentFormEnabledTools.value.length === 0;
+  const allSkillsUnlimited = agentFormEnabledSkills.value.length === 0;
+  const toolsOk = allToolsUnlimited || pkg.tools.every((t) => agentFormEnabledTools.value.includes(t));
+  const skillsOk = allSkillsUnlimited || pkg.skills.every((sk) => agentFormEnabledSkills.value.includes(sk));
+  return toolsOk && skillsOk;
+}
+
+function togglePackage(pkg: { tools: string[]; skills: string[] }) {
+  const enabled = isPackageFullyEnabled(pkg);
+  if (enabled) {
+    // 取消整个包：从白名单去除包内成员
+    agentFormEnabledTools.value = agentFormEnabledTools.value.filter((t) => !pkg.tools.includes(t));
+    agentFormEnabledSkills.value = agentFormEnabledSkills.value.filter((sk) => !pkg.skills.includes(sk));
+  } else {
+    // 启用整个包：加入全部成员（保持其它白名单）
+    const tSet = new Set(agentFormEnabledTools.value);
+    for (const t of pkg.tools) tSet.add(t);
+    agentFormEnabledTools.value = [...tSet];
+    const sSet = new Set(agentFormEnabledSkills.value);
+    for (const sk of pkg.skills) sSet.add(sk);
+    agentFormEnabledSkills.value = [...sSet];
+  }
+}
+
 // 工具按 category 分组（内置工具 / 编排 / 自更新 / 运维），组名 + tag 展示
 const CATEGORY_LABEL: Record<string, string> = {
   builtin: '内置工具',
@@ -699,6 +751,26 @@ watch(
               <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
             </div>
           </NeumorphismFormItem>
+          <NeumorphismFormItem label="启用包（Package）">
+            <p class="muted caps-hint">同一个包（如 QQ 适配器）的工具+技能作为一个整体，勾选/取消即同时开关包内所有成员。</p>
+            <div v-for="pkg in capabilityPackages" :key="pkg.id" class="caps-tool-group">
+              <div class="caps-tool-group__head">
+                <NeumorphismCheckbox
+                  size="small"
+                  :model-value="isPackageFullyEnabled(pkg)"
+                  :label="pkg.name"
+                  @update:model-value="togglePackage(pkg)"
+                />
+                <NeumorphismTag size="small" variant="info">
+                  {{ pkg.tools.length + pkg.skills.length }} 项
+                </NeumorphismTag>
+              </div>
+              <div class="muted caps-pkg-members">
+                工具：{{ pkg.tools.join('、') || '—' }}；技能：{{ pkg.skills.join('、') || '—' }}
+              </div>
+            </div>
+            <span v-if="capabilityPackages.length === 0" class="muted">（无包可勾选）</span>
+          </NeumorphismFormItem>
           <NeumorphismFormItem label="启用工具">
             <p class="muted caps-hint">勾选该人格可用的工具（按分类分组，含编排/自更新/运维）；全选 = 不限制（默认）。</p>
             <div v-for="group in capabilityToolGroups" :key="group.cat" class="caps-tool-group">
@@ -923,6 +995,10 @@ watch(
 
 .caps-tool-group {
   margin-bottom: 8px;
+}
+.caps-pkg-members {
+  font-size: 11px;
+  padding-left: 26px;
 }
 .caps-tool-group__head {
   display: flex;

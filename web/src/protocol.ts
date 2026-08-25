@@ -47,6 +47,7 @@ export interface SkillInfo {
   always: boolean;
   enabled: boolean;
   category: string;
+  package?: string;
   content: string;
 }
 
@@ -56,6 +57,7 @@ export interface ToolInfo {
   parameters: unknown;
   category: string;
   enabled: boolean;
+  package?: string;
 }
 
 export interface AgentInfo {
