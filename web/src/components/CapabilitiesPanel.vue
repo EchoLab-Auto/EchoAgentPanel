@@ -19,7 +19,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
-import type { PluginInfo, SkillInfo, ToolInfo } from '../protocol';
+import type { AgentInfo, PluginInfo, SkillInfo, ToolInfo } from '../protocol';
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
@@ -29,6 +29,7 @@ const TOOL_OTHER = '扩展工具';
 const selectedSkill = ref<SkillInfo | null>(null);
 const selectedTool = ref<ToolInfo | null>(null);
 const selectedPlugin = ref<PluginInfo | null>(null);
+const selectedAgent = ref<AgentInfo | null>(null);
 const editing = ref(false);
 const creating = ref(false);
 
@@ -77,6 +78,22 @@ const KIND_LABEL_PLUGIN: Record<string, string> = {
   orchestration: '编排',
   management: '管理面',
 };
+
+function agentMenuItems(): HeadlessMenuItem[] {
+  const list = state.agents.length
+    ? [...state.agents].sort((a, b) => a.id.localeCompare(b.id))
+    : [{ id: 'default', name: '默认', description: '', enabled: true, sessions: 0 }];
+  return [
+    {
+      key: 'group-agents',
+      label: '人格',
+      children: list.map((a) => ({
+        key: `agent:${a.id}`,
+        label: a.enabled ? a.name : `${a.name}（已禁用）`,
+      })),
+    },
+  ];
+}
 
 function pluginMenuItems(): HeadlessMenuItem[] {
   const groups = new Map<string, PluginInfo[]>();
@@ -136,7 +153,7 @@ function toolMenuItems(): HeadlessMenuItem[] {
   ];
 }
 
-const menuItems = computed<HeadlessMenuItem[]>(() => [...skillMenuItems(), ...toolMenuItems(), ...pluginMenuItems()]);
+const menuItems = computed<HeadlessMenuItem[]>(() => [...skillMenuItems(), ...toolMenuItems(), ...pluginMenuItems(), ...agentMenuItems()]);
 const defaultExpanded = ['group-skills', 'group-tools'];
 
 function onMenuSelect(item: HeadlessMenuItem) {
@@ -145,6 +162,18 @@ function onMenuSelect(item: HeadlessMenuItem) {
     const found = state.skills.find((s) => s.name === name);
     if (found) {
       selectedSkill.value = found;
+      selectedAgent.value = null;
+      selectedPlugin.value = null;
+      selectedTool.value = null;
+      editing.value = false;
+      creating.value = false;
+    }
+  } else if (item.key.startsWith('agent:')) {
+    const id = item.key.slice('agent:'.length);
+    const found = state.agents.find((a) => a.id === id);
+    if (found) {
+      selectedAgent.value = found;
+      selectedSkill.value = null;
       selectedPlugin.value = null;
       selectedTool.value = null;
       editing.value = false;
@@ -156,6 +185,7 @@ function onMenuSelect(item: HeadlessMenuItem) {
     if (found) {
       selectedPlugin.value = found;
       selectedSkill.value = null;
+      selectedAgent.value = null;
       selectedTool.value = null;
       editing.value = false;
       creating.value = false;
@@ -166,11 +196,64 @@ function onMenuSelect(item: HeadlessMenuItem) {
     if (found) {
       selectedTool.value = found;
       selectedSkill.value = null;
+      selectedAgent.value = null;
       selectedPlugin.value = null;
       editing.value = false;
       creating.value = false;
     }
   }
+}
+
+// ── 人格编辑 ──
+const agentFormId = ref('');
+const agentFormName = ref('');
+const agentFormDescription = ref('');
+const agentFormPrompt = ref('');
+const agentFormEnabled = ref(true);
+const agentEditing = ref(false);
+
+function startAgentCreate() {
+  agentEditing.value = true;
+  agentFormId.value = '';
+  agentFormName.value = '';
+  agentFormDescription.value = '';
+  agentFormPrompt.value = '';
+  agentFormEnabled.value = true;
+  selectedAgent.value = null;
+}
+
+function startAgentEdit(agent: AgentInfo) {
+  agentEditing.value = true;
+  agentFormId.value = agent.id;
+  agentFormName.value = agent.name;
+  agentFormDescription.value = agent.description;
+  agentFormPrompt.value = agent.system_prompt ?? '';
+  agentFormEnabled.value = agent.enabled;
+}
+
+function cancelAgentEdit() {
+  agentEditing.value = false;
+}
+
+function saveAgent() {
+  const id = agentFormId.value.trim() || agentFormName.value.trim();
+  if (!id) return;
+  sendCommand({
+    SaveAgent: {
+      id,
+      name: agentFormName.value.trim() || id,
+      description: agentFormDescription.value.trim(),
+      system_prompt: agentFormPrompt.value,
+      enabled: agentFormEnabled.value,
+    },
+  });
+  agentEditing.value = false;
+}
+
+function deleteAgent(agent: AgentInfo) {
+  if (!window.confirm(`确定删除人格「${agent.name}」？该人格的记忆与系统提示词将被移除。`)) return;
+  sendCommand({ DeleteAgent: { id: agent.id } });
+  selectedAgent.value = null;
 }
 
 // ── 技能启停 ──
@@ -262,6 +345,7 @@ function refresh() {
   sendCommand('RequestSkillsList');
   sendCommand('RequestToolsList');
   sendCommand('RequestPluginsList');
+  sendCommand('RequestAgentsList');
 }
 
 onMounted(refresh);
@@ -301,6 +385,7 @@ watch(
       />
       <div class="caps-side-actions">
         <NeumorphismButton size="small" variant="flat" @click="startCreate">新建技能</NeumorphismButton>
+        <NeumorphismButton size="small" variant="flat" @click="startAgentCreate">新建人格</NeumorphismButton>
         <NeumorphismButton size="small" variant="flat" @click="refresh">刷新</NeumorphismButton>
       </div>
     </div>
@@ -308,8 +393,8 @@ watch(
     <div class="caps-main">
       <!-- 空态 -->
       <NeumorphismEmpty
-        v-if="!selectedSkill && !selectedTool && !creating"
-        description="在左侧菜单中选择技能或工具，或点击“新建技能”"
+        v-if="!selectedSkill && !selectedTool && !selectedPlugin && !selectedAgent && !creating && !agentEditing"
+        description="在左侧菜单中选择技能、工具、插件或人格；也可点击“新建”"
       />
 
       <!-- 技能详情 -->
@@ -380,6 +465,67 @@ watch(
           <div class="form-actions">
             <NeumorphismButton variant="primary" @click="saveSkill">保存</NeumorphismButton>
             <NeumorphismButton variant="flat" @click="cancelEdit">取消</NeumorphismButton>
+          </div>
+        </div>
+      </div>
+
+      <!-- 人格详情 / 编辑 -->
+      <div v-else-if="selectedAgent && !agentEditing" class="caps-detail">
+        <div class="detail-head">
+          <h3>{{ selectedAgent.name }}</h3>
+          <div class="detail-actions">
+            <NeumorphismButton size="small" variant="flat" @click="startAgentEdit(selectedAgent!)">
+              编辑
+            </NeumorphismButton>
+            <NeumorphismButton
+              size="small"
+              variant="flat"
+              v-if="state.agents.length > 1 && selectedAgent.id !== 'default' && selectedAgent.id !== 'alix'"
+              @click="deleteAgent(selectedAgent!)"
+            >
+              删除
+            </NeumorphismButton>
+          </div>
+        </div>
+        <div class="detail-meta">
+          <NeumorphismTag v-if="selectedAgent.id === 'default' || selectedAgent.id === 'alix'" variant="warning" size="small">
+            主 Agent
+          </NeumorphismTag>
+          <NeumorphismTag variant="info" size="small">{{ selectedAgent.sessions }} 会话</NeumorphismTag>
+        </div>
+        <div class="detail-field">
+          <span>启用（禁用即卸载记忆，再次启用重新挂载）</span>
+          <NeumorphismSwitch
+            :model-value="selectedAgent.enabled"
+            size="small"
+            @change="sendCommand({ ToggleAgent: { id: selectedAgent!.id, enabled: $event } })"
+          />
+        </div>
+        <p class="muted">{{ selectedAgent.description || '（无描述）' }}</p>
+        <div class="detail-content">
+          <div class="muted content-title">系统提示词（留空 = 继承全局）</div>
+          <pre class="content-pre">{{ selectedAgent.system_prompt || '（继承全局）' }}</pre>
+        </div>
+      </div>
+
+      <div v-else-if="agentEditing" class="caps-detail">
+        <div class="detail-head"><h3>{{ agentFormId ? '编辑人格' : '新建人格' }}</h3></div>
+        <div class="caps-form">
+          <label>ID（唯一键，仅新建时可填）</label>
+          <NeumorphismInput v-model="agentFormId" :disabled="!!agentFormId" placeholder="my-agent" />
+          <label>名称</label>
+          <NeumorphismInput v-model="agentFormName" placeholder="写作助理" />
+          <label>描述</label>
+          <NeumorphismInput v-model="agentFormDescription" placeholder="专注文档写作" />
+          <label>系统提示词（留空 = 继承全局提示词与技能）</label>
+          <NeumorphismTextarea v-model="agentFormPrompt" rows="8" auto-resize placeholder="你是…" />
+          <div class="detail-field">
+            <span>启用</span>
+            <NeumorphismSwitch v-model="agentFormEnabled" size="small" />
+          </div>
+          <div class="form-actions">
+            <NeumorphismButton variant="primary" @click="saveAgent">保存</NeumorphismButton>
+            <NeumorphismButton variant="flat" @click="cancelAgentEdit">取消</NeumorphismButton>
           </div>
         </div>
       </div>

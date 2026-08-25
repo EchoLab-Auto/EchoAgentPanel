@@ -64,6 +64,7 @@ export interface AgentInfo {
   description: string;
   enabled: boolean;
   sessions: number;
+  system_prompt?: string;
 }
 
 export interface PluginInfo {
@@ -188,6 +189,16 @@ export type BackendCommand =
   | { TogglePlugin: { id: string; enabled: boolean } }
   | 'RequestAgentsList'
   | { ToggleAgent: { id: string; enabled: boolean } }
+  | {
+      SaveAgent: {
+        id: string;
+        name: string;
+        description: string;
+        system_prompt: string;
+        enabled: boolean;
+      };
+    }
+  | { DeleteAgent: { id: string } }
   | 'RequestState'
   | 'RequestContext'
   | 'RequestTrunkTimeline'
