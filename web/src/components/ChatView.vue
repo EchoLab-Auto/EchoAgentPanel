@@ -16,6 +16,7 @@ import { state } from '../store';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
+import QqPanel from './QqPanel.vue';
 
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{
@@ -31,6 +32,27 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const connected = computed(() => state.connected);
 const showContext = ref(false);
 const showChecklist = ref(false);
+const showAdapter = ref(false);
+const adapterBtnRef = ref<HTMLElement | null>(null);
+const adapterTop = ref(0);
+const adapterLeft = ref(0);
+
+function toggleAdapter() {
+  if (showAdapter.value) {
+    showAdapter.value = false;
+    return;
+  }
+  const btn = adapterBtnRef.value;
+  if (btn) {
+    const r = btn.getBoundingClientRect();
+    adapterTop.value = Math.round(window.innerHeight - r.top + 8);
+    const composer = composerFloatRef.value;
+    const cr = composer ? composer.getBoundingClientRect() : null;
+    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
+    adapterLeft.value = Math.round(centerX - 260);
+  }
+  showAdapter.value = true;
+}
 const checklistBtnRef = ref<HTMLElement | null>(null);
 const checklistBottom = ref(0);
 const checklistLeft = ref(0);
@@ -189,6 +211,29 @@ function imagesOf(message: ChatMessage): string[] {
         清单
         <span v-if="state.checklists.length" class="entry-badge">{{ state.checklists.length }}</span>
       </button>
+      <button
+        ref="adapterBtnRef"
+        class="ctx-entry"
+        title="平台适配器"
+        @click="toggleAdapter"
+      >
+        <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+          <path d="M3.27 6.96 12 12.01l8.73-5.05" />
+          <path d="M12 22.08V12" />
+        </svg>
+        适配器
+      </button>
+    </div>
+
+    <!-- 适配器：跟随适配器按钮上方 8px 的毛玻璃面板 -->
+    <div
+      v-if="showAdapter"
+      class="checklist-pop"
+      :style="{ bottom: adapterTop + 'px', left: adapterLeft + 'px' }"
+      @click.self="showAdapter = false"
+    >
+      <QqPanel />
     </div>
 
     <!-- 清单：跟随清单按钮下方 8px 的毛玻璃面板（无内层卡片） -->
