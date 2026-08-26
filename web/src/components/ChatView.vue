@@ -512,7 +512,7 @@ function imagesOf(message: ChatMessage): string[] {
   border-top-left-radius: 12px;
   border-bottom-left-radius: 12px;
 }
-</style>
+
 
 /* 上下文入口：位于输入框上方左侧，磨砂玻璃 */
 .ctx-entry {
@@ -577,3 +577,4 @@ function imagesOf(message: ChatMessage): string[] {
   overflow-y: auto;
   padding: 14px 18px;
 }
+</style>
