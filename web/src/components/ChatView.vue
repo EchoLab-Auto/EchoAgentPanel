@@ -31,6 +31,19 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const connected = computed(() => state.connected);
 const showContext = ref(false);
 const showChecklist = ref(false);
+const checklistBtnRef = ref<HTMLElement | null>(null);
+const checklistTop = ref(0);
+const checklistLeft = ref(0);
+
+function openChecklist() {
+  const btn = checklistBtnRef.value;
+  if (btn) {
+    const r = btn.getBoundingClientRect();
+    checklistTop.value = Math.round(r.bottom + 8);
+    checklistLeft.value = Math.round(r.left);
+  }
+  showChecklist.value = true;
+}
 // 入口按钮固定与输入框间距 12px：观察输入框高度变化（auto-resize），
 // bottom = composerHeight + 12(margin) + 12(gap)。
 const composerFloatRef = ref<HTMLElement | null>(null);
@@ -155,9 +168,10 @@ function imagesOf(message: ChatMessage): string[] {
         上下文
       </button>
       <button
+        ref="checklistBtnRef"
         class="ctx-entry"
         title="任务清单"
-        @click="showChecklist = true"
+        @click="openChecklist"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M9 11l3 3L22 4" />
@@ -168,16 +182,19 @@ function imagesOf(message: ChatMessage): string[] {
       </button>
     </div>
 
-    <!-- 清单：中置悬浮毛玻璃卡片 -->
-    <div v-if="showChecklist" class="checklist-pop" @click.self="showChecklist = false">
+    <!-- 清单：跟随清单按钮下方 8px 的毛玻璃面板（无内层卡片） -->
+    <div
+      v-if="showChecklist"
+      class="checklist-pop"
+      :style="{ top: checklistTop + 'px', left: checklistLeft + 'px' }"
+      @click.self="showChecklist = false"
+    >
       <div class="checklist-pop__close">
         <NeumorphismButton size="small" variant="flat" @click="showChecklist = false">
           × 关闭
         </NeumorphismButton>
       </div>
-      <div class="checklist-pop__body">
-        <ChecklistSidebar />
-      </div>
+      <ChecklistSidebar />
     </div>
 
     <!-- 上下文覆盖层：毛玻璃面板 -->
@@ -652,17 +669,10 @@ function imagesOf(message: ChatMessage): string[] {
 }
 
 
-/* 清单中置悬浮：磨砂玻璃卡片，垂直/水平居中 */
+/* 清单面板：跟随按钮下方 8px，磨砂玻璃本体（无内层卡片） */
 .checklist-pop {
   position: fixed;
-  inset: 0;
   z-index: 25;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.25);
-}
-.checklist-pop__body {
   width: min(520px, 82vw);
   max-height: 68vh;
   overflow-y: auto;
@@ -675,8 +685,8 @@ function imagesOf(message: ChatMessage): string[] {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 .checklist-pop__close {
-  position: absolute;
-  top: 18px;
-  right: 22px;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
 }
 </style>
