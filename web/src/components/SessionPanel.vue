@@ -1,14 +1,14 @@
 <script setup lang="ts">
-//! 会话中心主面板：左侧二级菜单（上下文 / 系统提示词 / 日志），右侧内嵌视图。
+//! 会话中心主面板：左侧二级菜单（上下文 / 日志），右侧内嵌视图。
+//! 系统提示词已由人格配置（资源 → 人格）管理，此处不再提供编辑入口。
 //! 取代原弹窗入口：点顶部「会话」标签后占据主区核心位置。
 
 import { ref } from 'vue';
 import { NeumorphismMenu, type HeadlessMenuItem } from '@echolab-auto/ui-frame';
 import ContextView from './ContextView.vue';
-import SystemPromptView from './SystemPromptView.vue';
 import LogView from './LogView.vue';
 
-type SubView = 'context' | 'prompt' | 'logs';
+type SubView = 'context' | 'logs';
 
 const sub = ref<SubView>('context');
 
@@ -20,7 +20,6 @@ const items: HeadlessMenuItem[] = [
 
 const viewOf: Record<string, SubView> = {
   context: 'context',
-  prompt: 'prompt',
   logs: 'logs',
 };
 
@@ -43,7 +42,6 @@ function onSelect(item: HeadlessMenuItem) {
     </div>
     <div class="session-main">
       <ContextView v-if="sub === 'context'" />
-      <SystemPromptView v-else-if="sub === 'prompt'" />
       <LogView v-else />
     </div>
   </div>
