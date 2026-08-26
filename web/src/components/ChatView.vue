@@ -41,8 +41,11 @@ function openChecklist() {
     const r = btn.getBoundingClientRect();
     // 弹窗底边 = 按钮顶边 - 8px（位于按钮上方，与按钮贴 8px）
     checklistBottom.value = Math.round(window.innerHeight - r.top + 8);
-    // 水平居中于按钮：left = 按钮中心 - 弹窗半宽
-    checklistLeft.value = Math.round(r.left + r.width / 2 - 260);
+    // 水平居中于输入框：left = composer 中心 - 弹窗半宽
+    const composer = composerFloatRef.value;
+    const cr = composer ? composer.getBoundingClientRect() : null;
+    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
+    checklistLeft.value = Math.round(centerX - 260);
   }
   showChecklist.value = true;
 }
