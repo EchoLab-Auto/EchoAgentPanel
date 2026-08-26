@@ -1,5 +1,5 @@
 <script setup lang="ts">
-//! 日志查看视图（内嵌于 SessionPanel，取代原 LogModal 弹窗）。
+//! 日志查看视图（一级菜单「日志」的独立视图，取代原会话面板与弹窗）。
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismSegmented } from '@echolab-auto/ui-frame';
@@ -60,7 +60,7 @@ watch([auto, kind], () => {
 </script>
 
 <template>
-  <div>
+  <div class="log-view-panel">
     <div class="log-head">
       <h2 class="log-title">日志查看器</h2>
       <NeumorphismSegmented v-model="kind" :options="KIND_OPTIONS" size="small" />
@@ -84,3 +84,10 @@ watch([auto, kind], () => {
   font-size: 16px;
 }
 </style>
+
+.log-view-panel {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
