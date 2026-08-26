@@ -3,9 +3,8 @@
 //! 折叠状态在组件内部维护；会话选择与分支选择冒泡给 App。
 
 import { ref } from 'vue';
-import { NeumorphismButton, NeumorphismStatusDot } from '@echolab-auto/ui-frame';
+import { NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
-import { sendCommand } from '../connection';
 import SidebarCard from './SidebarCard.vue';
 import SessionGroups from './SessionGroups.vue';
 
@@ -21,14 +20,13 @@ const emit = defineEmits<{
   selectTeam: [id: string | null];
 }>();
 
-const cardOpen = ref<Record<'teams' | 'adapters' | 'branches' | 'sessions', boolean>>({
+const cardOpen = ref<Record<'teams' | 'branches' | 'sessions', boolean>>({
   teams: true,
-  adapters: true,
   branches: true,
   sessions: true,
 });
 
-function toggleCard(key: 'teams' | 'adapters' | 'branches' | 'sessions') {
+function toggleCard(key: 'teams' | 'branches' | 'sessions') {
   cardOpen.value[key] = !cardOpen.value[key];
 }
 
@@ -61,44 +59,6 @@ function truncateTask(task: string): string {
         />
         <span class="agent-name">{{ team.name }}</span>
         <span v-if="!team.enabled" class="muted agent-disabled">已禁用</span>
-      </div>
-    </SidebarCard>
-
-    <!-- 卡片：适配器（含 QQ 管理面板展开入口） -->
-    <SidebarCard title="适配器" :open="cardOpen.adapters" @toggle="toggleCard('adapters')">
-      <div v-if="state.adapters.length === 0" class="muted">（无适配器信息）</div>
-      <div v-for="adapter in state.adapters" :key="adapter.name" class="adapter-item">
-        <NeumorphismStatusDot :status="adapter.running ? 'online' : 'offline'" size="small" />
-        <span class="adapter-name">{{ adapter.display_name || adapter.name }}</span>
-        <span v-if="adapter.self_id" class="adapter-id">{{ adapter.self_id }}</span>
-        <span class="adapter-actions">
-          <NeumorphismButton
-            v-if="adapter.running"
-            size="small"
-            variant="flat"
-            :disabled="!state.connected"
-            @click="sendCommand({ StopAdapter: { name: adapter.name } })"
-          >
-            停
-          </NeumorphismButton>
-          <NeumorphismButton
-            v-else
-            size="small"
-            variant="flat"
-            :disabled="!state.connected"
-            @click="sendCommand({ StartAdapter: { name: adapter.name } })"
-          >
-            启
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="flat"
-            :disabled="!state.connected"
-            @click="sendCommand({ RestartAdapter: { name: adapter.name } })"
-          >
-            重启
-          </NeumorphismButton>
-        </span>
       </div>
     </SidebarCard>
 

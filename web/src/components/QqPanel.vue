@@ -89,6 +89,34 @@ function toggleAllowGroup(id: number) {
       <NeumorphismButton size="small" variant="flat" @click="refreshLists">刷新列表</NeumorphismButton>
     </div>
 
+    <div class="panel-section">
+      <h3>适配器状态与启停</h3>
+      <div v-if="state.adapters.length === 0" class="muted">（无适配器信息）</div>
+      <div v-for="adapter in state.adapters" :key="adapter.name" class="adapter-manage-item">
+        <NeumorphismStatusDot :status="adapter.running ? 'online' : 'offline'" size="small" />
+        <span class="adapter-manage-name">{{ adapter.display_name || adapter.name }}</span>
+        <span v-if="adapter.self_id" class="adapter-manage-id">{{ adapter.self_id }}</span>
+        <span class="adapter-manage-actions">
+          <NeumorphismButton
+            size="small"
+            variant="flat"
+            :disabled="!state.connected"
+            @click="sendCommand(adapter.running ? { StopAdapter: { name: adapter.name } } : { StartAdapter: { name: adapter.name } })"
+          >
+            {{ adapter.running ? '停' : '启' }}
+          </NeumorphismButton>
+          <NeumorphismButton
+            size="small"
+            variant="flat"
+            :disabled="!state.connected"
+            @click="sendCommand({ RestartAdapter: { name: adapter.name } })"
+          >
+            重启
+          </NeumorphismButton>
+        </span>
+      </div>
+    </div>
+
     <QqLoginSection :adapter="qqAdapter" :owner="state.qqOwner" />
 
     <div class="panel-section">
