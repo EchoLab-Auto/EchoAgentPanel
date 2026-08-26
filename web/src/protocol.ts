@@ -214,7 +214,7 @@ export type BackendCommand =
     }
   | { DeleteTeam: { id: string } }
   | 'RequestState'
-  | 'RequestContext'
+  | { RequestContext: { team_id?: string | null } }
   | { RequestTrunkTimeline: { team_id?: string | null } }
   | 'ClearHistory'
   | { CancelRequestedWork: { session_id: string; all: boolean } }

@@ -31,7 +31,7 @@ const showMessages = ref(false);
 const confirmClear = ref(false);
 
 onMounted(() => {
-  sendCommand('RequestContext');
+  sendCommand({ RequestContext: { team_id: null } });
 });
 
 const snapshot = computed(() => state.context);
@@ -71,7 +71,7 @@ function handleClear() {
 }
 
 function refresh() {
-  sendCommand('RequestContext');
+  sendCommand({ RequestContext: { team_id: null } });
 }
 </script>
 
