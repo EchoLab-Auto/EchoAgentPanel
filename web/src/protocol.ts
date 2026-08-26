@@ -253,6 +253,7 @@ export type BackendEvent =
         timestamp: number;
         received_at_ms: number;
         message_sequence: number;
+        team_id?: string | null;
       };
     }
   | { AgentThinking: { session_id: string } }
@@ -317,10 +318,10 @@ export type BackendEvent =
         integrated_at_ms: number;
       };
     }
-  | { ToolCall: { session_id: string; tool_name: string; arguments: string; branch_id?: string } }
-  | { ToolResult: { session_id: string; tool_name: string; result: string; branch_id?: string } }
+  | { ToolCall: { session_id: string; tool_name: string; arguments: string; branch_id?: string; team_id?: string | null } }
+  | { ToolResult: { session_id: string; tool_name: string; result: string; branch_id?: string; team_id?: string | null } }
   | { ChecklistUpdated: { session_id: string; state: ChecklistState } }
-  | { AgentOutput: { session_id: string; content: string; branch_id: string | null } }
+  | { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }
   | { AgentCompleted: { session_id: string } }
   | { SessionUpdated: { session: SessionInfo } }
   | {

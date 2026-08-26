@@ -45,6 +45,7 @@ function onTeamSelect(item: HeadlessMenuItem | string | null) {
     return item.key === 'default' ? null : item.key;
   })();
   activeTeamId.value = next;
+  state.activeTeamId = next;
   // 切换 Team = 切换记忆（会话隔离）：清空当前显示，加载该成员独立的 timeline。
   state.trunk = [];
   sendCommand({ RequestTrunkTimeline: { team_id: next } });

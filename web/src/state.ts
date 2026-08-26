@@ -211,6 +211,8 @@ export interface AppState {
   plugins: PluginInfo[];
   /** Team 成员列表（多 agent） */
   teams: TeamInfo[];
+  /** 当前激活 team（null = default/未指定），用于实时事件隔离 */
+  activeTeamId: string | null;
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
@@ -253,6 +255,7 @@ export function initialState(): AppState {
     tools: [],
     plugins: [],
     teams: [],
+    activeTeamId: null,
     context: null,
     branchTabs: {},
     pendingBackground: {},
@@ -484,7 +487,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'AgentOutput': {
-      const e = (event as { AgentOutput: { session_id: string; content: string; branch_id: string | null } }).AgentOutput;
+      const e = (event as { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }).AgentOutput;
+      const owner = e.team_id ?? null;
+      if (state.activeTeamId !== owner) return state;
       if (e.branch_id) {
         const tab = state.branchTabs[e.branch_id];
         if (tab) {
