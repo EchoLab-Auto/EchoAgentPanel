@@ -623,7 +623,7 @@ function imagesOf(message: ChatMessage): string[] {
   overflow-y: auto;
   padding: 14px 18px;
 }
-</style>
+
 
 .entry-row {
   position: absolute;
@@ -652,3 +652,4 @@ function imagesOf(message: ChatMessage): string[] {
   font-size: 10px;
   padding: 0 4px;
 }
+</style>
