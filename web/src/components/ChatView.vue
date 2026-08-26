@@ -35,7 +35,11 @@ const checklistBtnRef = ref<HTMLElement | null>(null);
 const checklistBottom = ref(0);
 const checklistLeft = ref(0);
 
-function openChecklist() {
+function toggleChecklist() {
+  if (showChecklist.value) {
+    showChecklist.value = false;
+    return;
+  }
   const btn = checklistBtnRef.value;
   if (btn) {
     const r = btn.getBoundingClientRect();
@@ -176,7 +180,7 @@ function imagesOf(message: ChatMessage): string[] {
         ref="checklistBtnRef"
         class="ctx-entry"
         title="任务清单"
-        @click="openChecklist"
+        @click="toggleChecklist"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M9 11l3 3L22 4" />
@@ -194,11 +198,6 @@ function imagesOf(message: ChatMessage): string[] {
       :style="{ bottom: checklistBottom + 'px', left: checklistLeft + 'px' }"
       @click.self="showChecklist = false"
     >
-      <div class="checklist-pop__close">
-        <NeumorphismButton size="small" variant="flat" @click="showChecklist = false">
-          × 关闭
-        </NeumorphismButton>
-      </div>
       <ChecklistSidebar />
     </div>
 
@@ -688,10 +687,5 @@ function imagesOf(message: ChatMessage): string[] {
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
-}
-.checklist-pop__close {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 6px;
 }
 </style>
