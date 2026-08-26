@@ -8,7 +8,6 @@ import { state } from '../store';
 import { sendCommand } from '../connection';
 import SidebarCard from './SidebarCard.vue';
 import SessionGroups from './SessionGroups.vue';
-import ChecklistSidebar from './ChecklistSidebar.vue';
 
 defineProps<{
   activeSessionId: string;
@@ -131,8 +130,6 @@ function truncateTask(task: string): string {
       <SessionGroups :active-session-id="activeSessionId" @select="emit('selectSession', $event)" />
     </SidebarCard>
 
-    <!-- 悬浮清单 -->
-    <ChecklistSidebar />
   </div>
 </template>
 
