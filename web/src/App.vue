@@ -17,7 +17,6 @@ import { state } from './store';
 import { sendCommand, startConnection } from './connection';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
-import QqPanel from './components/QqPanel.vue';
 import TasksPanel from './components/TasksPanel.vue';
 import CapabilitiesPanel from './components/CapabilitiesPanel.vue';
 import LogView from './components/LogView.vue';import SettingsModal from './components/SettingsModal.vue';
@@ -27,14 +26,14 @@ import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'qq' | 'tasks' | 'caps' | 'logs';
+type View = 'chat' | 'tasks' | 'caps' | 'logs';
 
 const view = ref<View>(loadView());
 
 function loadView(): View {
   try {
     const saved = localStorage.getItem('echo-panel-view');
-    return (['chat', 'qq', 'tasks', 'caps', 'logs'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    return (['chat', 'tasks', 'caps', 'logs'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -194,14 +193,6 @@ watch(
           <NeumorphismButton
             size="small"
             variant="flat"
-            :pressed="view === 'qq'"
-            @click="setView('qq')"
-          >
-            QQ
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="flat"
             :pressed="view === 'tasks'"
             @click="setView('tasks')"
           >
@@ -258,7 +249,6 @@ watch(
           @send="send"
           @cancel="cancelWork"
         />
-        <QqPanel v-else-if="view === 'qq'" />
         <CapabilitiesPanel v-else-if="view === 'caps'" />
         <LogView v-else-if="view === 'logs'" />
         <TasksPanel v-else />

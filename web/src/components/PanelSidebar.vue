@@ -8,6 +8,7 @@ import { state } from '../store';
 import { sendCommand } from '../connection';
 import SidebarCard from './SidebarCard.vue';
 import SessionGroups from './SessionGroups.vue';
+import QqPanel from './QqPanel.vue';
 
 defineProps<{
   activeSessionId: string;
@@ -31,6 +32,9 @@ const cardOpen = ref<Record<'teams' | 'adapters' | 'branches' | 'sessions', bool
 function toggleCard(key: 'teams' | 'adapters' | 'branches' | 'sessions') {
   cardOpen.value[key] = !cardOpen.value[key];
 }
+
+// QQ 管理面板展开/收起（整合在适配器卡片内）
+const qqPanelOpen = ref(false);
 
 function selectTeam(id: string) {
   emit('selectTeam', id === 'default' ? null : id);
@@ -63,8 +67,20 @@ function truncateTask(task: string): string {
       </div>
     </SidebarCard>
 
-    <!-- 卡片：适配器 -->
+    <!-- 卡片：适配器（含 QQ 管理面板展开入口） -->
     <SidebarCard title="适配器" :open="cardOpen.adapters" @toggle="toggleCard('adapters')">
+      <div class="adapter-qq-actions">
+        <NeumorphismButton
+          size="small"
+          variant="flat"
+          @click="qqPanelOpen = !qqPanelOpen"
+        >
+          {{ qqPanelOpen ? '收起 QQ 管理' : 'QQ 管理' }}
+        </NeumorphismButton>
+      </div>
+      <div v-if="qqPanelOpen" class="adapter-qq-panel">
+        <QqPanel />
+      </div>
       <div v-if="state.adapters.length === 0" class="muted">（无适配器信息）</div>
       <div v-for="adapter in state.adapters" :key="adapter.name" class="adapter-item">
         <NeumorphismStatusDot :status="adapter.running ? 'online' : 'offline'" size="small" />
@@ -161,3 +177,14 @@ function truncateTask(task: string): string {
   font-size: 11px;
 }
 </style>
+
+.adapter-qq-actions {
+  margin-bottom: 6px;
+}
+.adapter-qq-panel {
+  border-top: 1px solid var(--nm-border-subtle);
+  padding-top: 8px;
+  margin-bottom: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
