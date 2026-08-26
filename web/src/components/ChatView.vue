@@ -14,6 +14,7 @@ import {
 } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
+import ContextView from './ContextView.vue';
 
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{
@@ -27,6 +28,7 @@ const attachments = ref<string[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
+const showContext = ref(false);
 
 // 当前会话是否在运行任务（用于显示"取消任务"按钮）
 const busy = computed(() => {
@@ -121,6 +123,32 @@ function imagesOf(message: ChatMessage): string[] {
 
 <template>
   <div class="chat-view" @paste="onPaste">
+    <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
+    <button
+      class="ctx-entry"
+      title="查看上下文占用（会话 → 上下文）"
+      @click="showContext = true"
+    >
+      <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 2a10 10 0 1 0 10 10" />
+        <path d="M12 2v10h10" />
+      </svg>
+      上下文
+    </button>
+
+    <!-- 上下文覆盖层：毛玻璃面板 -->
+    <div v-if="showContext" class="ctx-overlay" @click.self="showContext = false">
+      <div class="ctx-overlay__panel">
+        <div class="ctx-overlay__head">
+          <NeumorphismButton size="small" variant="flat" @click="showContext = false">
+            返回聊天
+          </NeumorphismButton>
+        </div>
+        <div class="ctx-overlay__body">
+          <ContextView />
+        </div>
+      </div>
+    </div>
     <!-- 消息列表：flex:1，内部 ChatTray 独立滚动 -->
     <ChatMessageList
       class="chat-view__list"
@@ -485,3 +513,67 @@ function imagesOf(message: ChatMessage): string[] {
   border-bottom-left-radius: 12px;
 }
 </style>
+
+/* 上下文入口：位于输入框上方左侧，磨砂玻璃 */
+.ctx-entry {
+  position: absolute;
+  left: 20px;
+  bottom: 176px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  color: var(--nm-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.ctx-entry:hover {
+  background: color-mix(in srgb, var(--nm-surface-raised) 65%, transparent);
+  transform: translateY(-1px);
+}
+.ctx-entry__icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* 上下文覆盖层 */
+.ctx-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+.ctx-overlay__panel {
+  flex: 1;
+  margin: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--nm-surface-raised) 55%, transparent);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.ctx-overlay__head {
+  padding: 10px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--nm-border-subtle) 50%, transparent);
+}
+.ctx-overlay__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px;
+}
