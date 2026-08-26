@@ -4,7 +4,7 @@
 //! IME 组合保护、Markdown、工具/思考/分支合并块），这里只做数据适配。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
@@ -15,6 +15,7 @@ import {
 import { state } from '../store';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import ContextView from './ContextView.vue';
+import ChecklistSidebar from './ChecklistSidebar.vue';
 
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{
@@ -29,6 +30,23 @@ const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
 const showContext = ref(false);
+const showChecklist = ref(false);
+// 入口按钮固定与输入框间距 12px：观察输入框高度变化（auto-resize），
+// bottom = composerHeight + 12(margin) + 12(gap)。
+const composerFloatRef = ref<HTMLElement | null>(null);
+const entryBottom = ref('170px');
+let ctxObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+  const target = composerFloatRef.value;
+  if (!target) return;
+  ctxObserver = new ResizeObserver(() => {
+    const h = target.getBoundingClientRect().height;
+    entryBottom.value = `${Math.round(h + 24)}px`;
+  });
+  ctxObserver.observe(target);
+});
+onBeforeUnmount(() => ctxObserver?.disconnect());
 
 // 当前会话是否在运行任务（用于显示"取消任务"按钮）
 const busy = computed(() => {
@@ -124,17 +142,45 @@ function imagesOf(message: ChatMessage): string[] {
 <template>
   <div class="chat-view" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
-    <button
-      class="ctx-entry"
-      title="查看上下文占用（会话 → 上下文）"
-      @click="showContext = true"
-    >
-      <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 2a10 10 0 1 0 10 10" />
-        <path d="M12 2v10h10" />
-      </svg>
-      上下文
-    </button>
+    <div class="entry-row">
+      <button
+        class="ctx-entry"
+        title="查看上下文占用"
+        @click="showContext = true"
+      >
+        <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2a10 10 0 1 0 10 10" />
+          <path d="M12 2v10h10" />
+        </svg>
+        上下文
+      </button>
+      <button
+        class="ctx-entry"
+        title="任务清单"
+        @click="showChecklist = true"
+      >
+        <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 11l3 3L22 4" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </svg>
+        清单
+        <span v-if="state.checklists.length" class="entry-badge">{{ state.checklists.length }}</span>
+      </button>
+    </div>
+
+    <!-- 清单覆盖层：毛玻璃面板 -->
+    <div v-if="showChecklist" class="ctx-overlay" @click.self="showChecklist = false">
+      <div class="ctx-overlay__panel ctx-overlay__panel--narrow">
+        <div class="ctx-overlay__head">
+          <NeumorphismButton size="small" variant="flat" @click="showChecklist = false">
+            返回聊天
+          </NeumorphismButton>
+        </div>
+        <div class="ctx-overlay__body">
+          <ChecklistSidebar />
+        </div>
+      </div>
+    </div>
 
     <!-- 上下文覆盖层：毛玻璃面板 -->
     <div v-if="showContext" class="ctx-overlay" @click.self="showContext = false">
@@ -171,7 +217,7 @@ function imagesOf(message: ChatMessage): string[] {
     </ChatMessageList>
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
-    <div class="chat-composer-float">
+    <div ref="composerFloatRef" class="chat-composer-float">
       <!-- 待发送图片预览 -->
       <div v-if="attachments.length" class="chat-view__attachments">
         <div v-for="(img, i) in attachments" :key="i" class="chat-view__attach">
@@ -518,7 +564,7 @@ function imagesOf(message: ChatMessage): string[] {
 .ctx-entry {
   position: absolute;
   left: 20px;
-  bottom: 170px; /* 输入框(约158px高) + 12px 固定间隔 */
+  bottom: v-bind(entryBottom); /* 与输入框固定 12px 间隔（ResizeObserver 动态） */
   z-index: 6;
   display: inline-flex;
   align-items: center;
@@ -578,3 +624,31 @@ function imagesOf(message: ChatMessage): string[] {
   padding: 14px 18px;
 }
 </style>
+
+.entry-row {
+  position: absolute;
+  left: 20px;
+  bottom: v-bind(entryBottom);
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+}
+.entry-row .ctx-entry {
+  position: static;
+}
+.ctx-overlay__panel--narrow {
+  max-width: 640px;
+  align-self: center;
+}
+.entry-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--nm-primary-color, #5b8def);
+  color: #fff;
+  font-size: 10px;
+  padding: 0 4px;
+}
