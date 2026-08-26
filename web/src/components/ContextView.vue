@@ -73,6 +73,16 @@ function handleClear() {
 function refresh() {
   sendCommand({ RequestContext: { team_id: null } });
 }
+
+function archiveHistory() {
+  if (!window.confirm('归档当前会话历史？将复制快照到 archives/ 并清空当前历史。')) return;
+  sendCommand({ ArchiveHistory: { team_id: null } });
+}
+
+function compactHistory() {
+  if (!window.confirm('压缩当前会话历史？早期事件将替换为规则摘要，保留最近 40 条。')) return;
+  sendCommand({ CompactHistory: { team_id: null, keep_recent: 40 } });
+}
 </script>
 
 <template>
@@ -93,6 +103,8 @@ function refresh() {
       >
         {{ confirmClear ? '确认清理？不可恢复' : '清理历史记忆' }}
       </button>
+      <NeumorphismButton variant="flat" size="small" @click="archiveHistory">归档</NeumorphismButton>
+      <NeumorphismButton variant="flat" size="small" @click="compactHistory">压缩</NeumorphismButton>
       <NeumorphismButton variant="flat" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
     </div>
 

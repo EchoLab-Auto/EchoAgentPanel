@@ -213,6 +213,8 @@ export type BackendCommand =
       };
     }
   | { DeleteTeam: { id: string } }
+  | { ArchiveHistory: { team_id?: string | null } }
+  | { CompactHistory: { team_id?: string | null; keep_recent?: number } }
   | 'RequestState'
   | { RequestContext: { team_id?: string | null } }
   | { RequestTrunkTimeline: { team_id?: string | null } }
