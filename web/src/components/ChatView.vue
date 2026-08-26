@@ -168,17 +168,15 @@ function imagesOf(message: ChatMessage): string[] {
       </button>
     </div>
 
-    <!-- 清单覆盖层：毛玻璃面板 -->
-    <div v-if="showChecklist" class="ctx-overlay" @click.self="showChecklist = false">
-      <div class="ctx-overlay__panel ctx-overlay__panel--narrow">
-        <div class="ctx-overlay__head">
-          <NeumorphismButton size="small" variant="flat" @click="showChecklist = false">
-            返回聊天
-          </NeumorphismButton>
-        </div>
-        <div class="ctx-overlay__body">
-          <ChecklistSidebar />
-        </div>
+    <!-- 清单：中置悬浮毛玻璃卡片 -->
+    <div v-if="showChecklist" class="checklist-pop" @click.self="showChecklist = false">
+      <div class="checklist-pop__close">
+        <NeumorphismButton size="small" variant="flat" @click="showChecklist = false">
+          × 关闭
+        </NeumorphismButton>
+      </div>
+      <div class="checklist-pop__body">
+        <ChecklistSidebar />
       </div>
     </div>
 
@@ -651,5 +649,34 @@ function imagesOf(message: ChatMessage): string[] {
   color: #fff;
   font-size: 10px;
   padding: 0 4px;
+}
+
+
+/* 清单中置悬浮：磨砂玻璃卡片，垂直/水平居中 */
+.checklist-pop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+.checklist-pop__body {
+  width: min(520px, 82vw);
+  max-height: 68vh;
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--nm-surface-raised) 52%, transparent);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.checklist-pop__close {
+  position: absolute;
+  top: 18px;
+  right: 22px;
 }
 </style>
