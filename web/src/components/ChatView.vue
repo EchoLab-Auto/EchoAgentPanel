@@ -281,7 +281,7 @@ function imagesOf(message: ChatMessage): string[] {
   bottom: 12px;
   z-index: 5;
   padding: 12px;
-  border-radius: 16px;
+  border-radius: 32px;
   /* 双层背景：低透明表面 + 顶部白色高光渐变（玻璃高光） */
   background:
     linear-gradient(
@@ -478,10 +478,10 @@ function imagesOf(message: ChatMessage): string[] {
 .chat-composer-float :deep(.nm-textarea) {
   margin-bottom: 0 !important;
 }
-/* 圆角同心：外框 16px、间距 12px → 内框（textarea）左侧圆角
-   = 16 - 12 = 4px，圆角曲线与外框平行（同心）。右侧保持库默认。 */
+/* 圆角同心：外框 32px、间距 12px → 内框（textarea）左侧圆角
+   = 32 - 12 = 20px，圆角曲线与外框平行（同心）。右侧保持库默认。 */
 .chat-composer-float :deep(.nm-textarea) {
-  border-top-left-radius: 4px;
-  border-bottom-left-radius: 4px;
+  border-top-left-radius: 20px;
+  border-bottom-left-radius: 20px;
 }
 </style>
