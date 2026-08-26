@@ -32,15 +32,17 @@ const connected = computed(() => state.connected);
 const showContext = ref(false);
 const showChecklist = ref(false);
 const checklistBtnRef = ref<HTMLElement | null>(null);
-const checklistTop = ref(0);
+const checklistBottom = ref(0);
 const checklistLeft = ref(0);
 
 function openChecklist() {
   const btn = checklistBtnRef.value;
   if (btn) {
     const r = btn.getBoundingClientRect();
-    checklistTop.value = Math.round(r.bottom + 8);
-    checklistLeft.value = Math.round(r.left);
+    // 弹窗底边 = 按钮顶边 - 8px（位于按钮上方，与按钮贴 8px）
+    checklistBottom.value = Math.round(window.innerHeight - r.top + 8);
+    // 水平居中于按钮：left = 按钮中心 - 弹窗半宽
+    checklistLeft.value = Math.round(r.left + r.width / 2 - 260);
   }
   showChecklist.value = true;
 }
@@ -186,7 +188,7 @@ function imagesOf(message: ChatMessage): string[] {
     <div
       v-if="showChecklist"
       class="checklist-pop"
-      :style="{ top: checklistTop + 'px', left: checklistLeft + 'px' }"
+      :style="{ bottom: checklistBottom + 'px', left: checklistLeft + 'px' }"
       @click.self="showChecklist = false"
     >
       <div class="checklist-pop__close">
