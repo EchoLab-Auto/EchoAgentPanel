@@ -28,6 +28,12 @@ const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
 
+// 当前会话是否在运行任务（用于显示"取消任务"按钮）
+const busy = computed(() => {
+  const a = state.activities[props.sessionId];
+  return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
+});
+
 // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
 const messages = computed<ChatMessage[]>(() => {
   const list =
@@ -152,17 +158,22 @@ function imagesOf(message: ChatMessage): string[] {
       <ChatComposer
         v-model="input"
         :disabled="!connected"
-        cancelable
+        :cancelable="false"
         :rows="2"
         :placeholder="placeholder"
         @send="onSend"
         @cancel="emit('cancel')"
       >
-        <template #meta>
-          <!-- 移除会话标识，meta 行仅保留右侧取消任务按钮 -->
-          <span></span>
-        </template>
         <template #actions="{ submit, canSubmit }">
+          <NeumorphismButton
+            v-if="busy"
+            class="chat-view__cancel"
+            size="small"
+            variant="flat"
+            @click="emit('cancel')"
+          >
+            取消任务
+          </NeumorphismButton>
           <button
             class="chat-view__attach-btn"
             title="添加图片（或直接粘贴截图）"
@@ -309,6 +320,11 @@ function imagesOf(message: ChatMessage): string[] {
   height: 17px;
   flex: 0 0 auto;
 }
+.chat-view__cancel {
+  flex: 0 0 auto;
+  height: 34px;
+  min-height: 34px;
+}
 
 /* 图片附件按钮：方形圆角，hover 渐变高亮 */
 .chat-view__attach-btn {
@@ -449,5 +465,23 @@ function imagesOf(message: ChatMessage): string[] {
 }
 .chat-composer-float :deep(.nm-chat-composer__row) {
   align-items: flex-end;
+}
+/* 视觉闭环修复：textarea 组件底部 footer（字数统计占位）导致
+   输入框可视底与 wrapper 底差 8px → 下间距(21px) > 左/上(13px)。
+   隐藏 footer 并消除 wrapper 底部空隙，使下间距=13px 与左右等宽。 */
+.chat-composer-float :deep(.nm-textarea__footer) {
+  display: none !important;
+}
+.chat-composer-float :deep(.nm-textarea__wrapper) {
+  padding-bottom: 0 !important;
+}
+.chat-composer-float :deep(.nm-textarea) {
+  margin-bottom: 0 !important;
+}
+/* 圆角同心：外框 16px、间距 12px → 内框（textarea）左侧圆角
+   = 16 - 12 = 4px，圆角曲线与外框平行（同心）。右侧保持库默认。 */
+.chat-composer-float :deep(.nm-textarea) {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
 }
 </style>
