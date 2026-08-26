@@ -518,7 +518,7 @@ function imagesOf(message: ChatMessage): string[] {
 .ctx-entry {
   position: absolute;
   left: 20px;
-  bottom: 176px;
+  bottom: 170px; /* 输入框(约158px高) + 12px 固定间隔 */
   z-index: 6;
   display: inline-flex;
   align-items: center;
