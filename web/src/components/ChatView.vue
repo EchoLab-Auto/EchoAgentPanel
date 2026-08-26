@@ -267,8 +267,10 @@ function imagesOf(message: ChatMessage): string[] {
           >
             取消任务
           </NeumorphismButton>
-          <button
+          <NeumorphismButton
             class="chat-view__attach-btn"
+            size="small"
+            variant="flat"
             title="添加图片（或直接粘贴截图）"
             aria-label="添加图片"
             @click="fileInput?.click()"
@@ -287,7 +289,7 @@ function imagesOf(message: ChatMessage): string[] {
               <circle cx="9" cy="9" r="2" />
               <path d="m21 15-4.5-4.5a2 2 0 0 0-2.83 0L5 19" />
             </svg>
-          </button>
+          </NeumorphismButton>
           <input
             ref="fileInput"
             type="file"
@@ -306,7 +308,6 @@ function imagesOf(message: ChatMessage): string[] {
             class="chat-view__send"
             size="small"
             variant="raised"
-            shape="pill"
             :disabled="!canSubmit"
             @click="submit"
           >
@@ -425,26 +426,12 @@ function imagesOf(message: ChatMessage): string[] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--nm-border-subtle);
-  border-radius: 10px;
-  background: var(--nm-surface-color);
-  color: var(--nm-text-secondary);
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease,
-    transform 0.15s ease;
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 12px !important; /* 与内框 textarea 圆角相等（12px） */
+  padding: 0;
 }
-.chat-view__attach-btn:hover {
-  color: var(--nm-text-primary);
-  background: var(--nm-surface-raised);
-  transform: translateY(-1px);
-}
-.chat-view__attach-btn:active {
-  transform: translateY(0);
-}
+
 
 /* 发送按钮：图标 + 文字内联 */
 .chat-view__send {
@@ -454,8 +441,11 @@ function imagesOf(message: ChatMessage): string[] {
   justify-content: center;
   gap: 6px;
   min-height: 34px;
-  height: 34px;
+  height: 34px !important;
   padding: 0 14px;
+  /* 与内框一致的 12px 圆角；右下角圆心与外框右下角(24px)同心：
+     24 - 12(padding) = 12 */
+  border-radius: 12px !important;
 }
 .chat-view__icon--btn {
   width: 15px;
