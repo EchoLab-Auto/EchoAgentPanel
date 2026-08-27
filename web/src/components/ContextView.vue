@@ -74,6 +74,12 @@ function refresh() {
   sendCommand({ RequestContext: { team_id: null } });
 }
 
+// 手动重载磁盘上的 SKILL.md：刷新技能注册表并重新拉取上下文快照。
+function reloadSkills() {
+  sendCommand('ReloadSkills');
+  refresh();
+}
+
 function archiveHistory() {
   if (!window.confirm('归档当前会话历史？将复制快照到 archives/ 并清空当前历史。')) return;
   sendCommand({ ArchiveHistory: { team_id: null } });
@@ -105,6 +111,7 @@ function compactHistory() {
       </button>
       <NeumorphismButton variant="flat" size="small" @click="archiveHistory">归档</NeumorphismButton>
       <NeumorphismButton variant="flat" size="small" @click="compactHistory">压缩</NeumorphismButton>
+      <NeumorphismButton variant="flat" size="small" title="重新发现技能目录中的 SKILL.md 并刷新注入" @click="reloadSkills">重载技能</NeumorphismButton>
       <NeumorphismButton variant="flat" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
     </div>
 

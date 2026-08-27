@@ -73,6 +73,8 @@ export interface TeamInfo {
   enabled_plugins?: string[];
   enabled_tools?: string[];
   enabled_skills?: string[];
+  memory_limit_tokens?: number | null;
+  context_window_tokens?: number | null;
 }
 
 export interface PluginInfo {
@@ -178,6 +180,7 @@ export type BackendCommand =
   | { SwitchApi: { name: string } }
   | { TestApi: { name: string } }
   | 'RequestSkillsList'
+  | 'ReloadSkills'
   | 'RequestToolsList'
   | { DeleteApi: { name: string } }
   | { ToggleSkill: { name: string; enabled: boolean } }
@@ -210,6 +213,8 @@ export type BackendCommand =
         enabled_plugins?: string[];
         enabled_tools?: string[];
         enabled_skills?: string[];
+        memory_limit_tokens?: number | null;
+        context_window_tokens?: number | null;
       };
     }
   | { DeleteTeam: { id: string } }
