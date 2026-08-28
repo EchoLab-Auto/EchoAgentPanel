@@ -291,12 +291,15 @@ body {
 }
 
 /* ── QQ 登录 ── */
-.qq-login { border: 1px solid var(--nm-border-color); border-radius: 10px; padding: 12px 14px; }
+.qq-login { border: 1px solid var(--nm-border-color); border-radius: 12px; padding: 12px 14px; background: var(--nm-surface-raised); }
 .qq-login-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .qq-login-head h3 { margin: 0; }
-.qq-login-status { margin: 6px 0; }
+.qq-login-status { margin: 6px 0; display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1.5; }
 .qq-login-online { color: var(--panel-ok); }
 .qq-login-offline { color: var(--panel-warn); }
+.qq-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
+.qq-dot--ok { background: var(--panel-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--panel-ok) 18%, transparent); }
+.qq-dot--warn { background: var(--panel-warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--panel-warn) 18%, transparent); }
 .qq-login-qr { margin: 10px 0; }
 .qr-img {
   width: 220px;

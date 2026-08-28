@@ -104,20 +104,25 @@ const webuiUrl = `http://${window.location.hostname}:6099`;
     </div>
 
     <div v-if="adapter?.connected" class="qq-login-status qq-login-online">
-      ✅ QQ 已连接：{{ adapter.self_id || '已连接' }}
+      <span class="qq-dot qq-dot--ok"></span>
+      <span>QQ 已连接：{{ adapter.self_id || '已连接' }}</span>
       <span v-if="status?.online"> · {{ status.nickname || '已登录' }}（{{ status.user_id }}）</span>
     </div>
     <div v-else-if="status?.online" class="qq-login-status qq-login-online">
-      ✅ QQ 已登录：{{ status.nickname || '未知昵称' }}（{{ status.user_id }}）
+      <span class="qq-dot qq-dot--ok"></span>
+      <span>QQ 已登录：{{ status.nickname || '未知昵称' }}（{{ status.user_id }}）</span>
     </div>
     <div v-else class="qq-login-status qq-login-offline">
-      {{
-        status === null
-          ? '正在检查登录状态…'
-          : adapter
-            ? `⚠️ QQ 未连接（适配器 ${adapter.running ? '运行中，无客户端' : '未启动'}），请使用手机 QQ 扫码登录`
-            : '⚠️ QQ 未登录，请使用手机 QQ 扫码登录'
-      }}
+      <span class="qq-dot qq-dot--warn"></span>
+      <span>
+        {{
+          status === null
+            ? '正在检查登录状态…'
+            : adapter
+              ? `QQ 未连接（适配器 ${adapter.running ? '运行中，无客户端' : '未启动'}），请使用手机 QQ 扫码登录`
+              : 'QQ 未登录，请使用手机 QQ 扫码登录'
+        }}
+      </span>
       <div v-if="status?.error" class="muted">登录状态接口暂不可用：{{ status.error }}</div>
     </div>
 
