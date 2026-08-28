@@ -1,6 +1,6 @@
 <script setup lang="ts">
 //! Agent 切换器：悬浮在输入框左侧的 Agent 卡片（头像 + 名字 + 下拉三角），
-//! 点击卡片向下拉出 Agent 列表，点击可切换当前对话的 Agent（team）。
+//! 点击卡片向上拉出 Agent 列表，点击可切换当前对话的 Agent（team）。
 //! 数据来自 state.teams（Core TeamsList 事件）；activeTeamId 为空时
 //! 显示第一个 team（Core 的 default_id = 配置的第一个 team）。
 
@@ -78,11 +78,12 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
         stroke-linejoin="round"
         aria-hidden="true"
       >
-        <path d="m6 9 6 6 6-6" />
+        <!-- 默认朝上（提示菜单向上弹出），打开时旋转 180° 朝下 -->
+        <path d="m6 15 6-6 6 6" />
       </svg>
     </button>
 
-    <!-- 下拉 Agent 列表：从卡片下方弹出 -->
+    <!-- 上拉 Agent 列表：从卡片上方弹出 -->
     <div v-if="open && current" class="agent-menu">
       <div v-if="state.teams.length === 0" class="agent-menu__empty">（未配置 Team 成员）</div>
       <div
@@ -179,14 +180,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   transform: rotate(180deg);
 }
 
-/* 下拉菜单：毛玻璃面板，位于卡片下方 */
+/* 上拉菜单：毛玻璃面板，位于卡片上方（卡片贴屏幕底部，向下会溢出视口） */
 .agent-menu {
   position: absolute;
-  top: calc(100% + 8px);
+  bottom: calc(100% + 8px);
   left: 0;
   z-index: 30;
   min-width: 220px;
-  max-height: 60vh;
+  max-height: min(60vh, calc(100vh - 200px));
   overflow-y: auto;
   padding: 6px;
   border-radius: 16px;

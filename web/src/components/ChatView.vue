@@ -467,32 +467,35 @@ function imagesOf(message: ChatMessage): string[] {
 }
 .chat-view__cancel {
   flex: 0 0 auto;
-  height: 34px;
-  min-height: 34px;
+  /* 与单行输入框内框等高，与发送/图片按钮保持同排同高 */
+  height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6);
+  min-height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6);
 }
 
-/* 图片附件按钮：方形圆角，hover 渐变高亮 */
+/* 图片附件按钮：方形圆角；高度与"初始 1 行时的输入框内框"等高
+   （10px*2 padding + 14px*1.6 行高 = 42px），且固定不随 textarea 动态调整 */
 .chat-view__attach-btn {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px !important;
-  height: 34px !important;
-  border-radius: 12px !important; /* 与内框 textarea 圆角相等（12px） */
+  width: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6) !important; /* 正方形：宽 = 高 */
+  height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6) !important;
+  border-radius: 12px !important; /* 与内框 textarea 圆角一致（12px） */
   padding: 0;
 }
 
 
-/* 发送按钮：图标 + 文字内联 */
+/* 发送按钮：图标 + 文字内联；高度与"初始 1 行时的输入框内框"等高（42px），
+   固定在输入框外框右下角（bottom 等距），不随 textarea 多行变高而移动 */
 .chat-view__send {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 34px;
-  height: 34px !important;
+  min-height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6);
+  height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6) !important;
   padding: 0 14px;
   /* 与内框一致的 12px 圆角；右下角圆心与外框右下角(24px)同心：
      24 - 12(padding) = 12 */
@@ -622,8 +625,9 @@ function imagesOf(message: ChatMessage): string[] {
 /* 圆角同心：外框 24px、间距 12px → 内框（textarea）左侧圆角
    = 24 - 12 = 12px，圆角曲线与外框平行（同心）。右侧保持库默认。 */
 .chat-composer-float :deep(.nm-textarea) {
-  border-top-left-radius: 12px;
-  border-bottom-left-radius: 12px;
+  /* 内框圆角整体统一 12px（库默认右 16px 会与按钮 12px 不一致）：
+     外框 24px - 12px padding = 12px，左右均与外框同心 */
+  border-radius: 12px;
 }
 
 
