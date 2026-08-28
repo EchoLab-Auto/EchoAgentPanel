@@ -129,6 +129,21 @@ function onLayoutCollapse(collapsed: boolean) {
   }
 }
 
+// ── Team 被删除后兜底：激活的 team 不存在时重置为默认并重载时间线 ──
+watch(
+  () => state.teams,
+  () => {
+    const id = activeTeamId.value;
+    if (id && !state.teams.some((t) => t.id === id)) {
+      activeTeamId.value = null;
+      state.activeTeamId = null;
+      state.trunk = [];
+      sendCommand({ RequestTrunkTimeline: { team_id: null } });
+      selectSession('local:tui::local_user');
+    }
+  },
+);
+
 // ── Toast 桥：state.toasts 只是转发队列，立刻泵进库 ToastProvider 并排空 ──
 const toastProvider = ref<InstanceType<typeof NeumorphismToastProvider> | null>(null);
 watch(

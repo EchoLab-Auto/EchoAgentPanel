@@ -85,7 +85,7 @@ const KIND_LABEL_PLUGIN: Record<string, string> = {
 function teamMenuItems(): HeadlessMenuItem[] {
   const list = state.teams.length
     ? [...state.teams].sort((a, b) => a.id.localeCompare(b.id))
-    : [{ id: 'default', name: '默认', description: '', enabled: true, sessions: 0 }];
+    : [{ id: 'default', name: '默认', description: '', enabled: true, sessions: 0, is_default: true }];
   return [
     {
       key: 'group-teams',
@@ -415,10 +415,19 @@ function saveTeam() {
   teamEditing.value = false;
 }
 
+function isPrimaryTeam(team: TeamInfo | null): boolean {
+  return !!team && (team.is_default === true || team.id === 'default');
+}
+
 function deleteTeam(team: TeamInfo) {
-  if (!window.confirm(`确定删除 Team 成员「${team.name}」？该成员的记忆与系统提示词将被移除。`)) return;
+  if (isPrimaryTeam(team)) {
+    window.alert('主 Agent 受保护，不能删除。');
+    return;
+  }
+  if (!window.confirm(`确定删除 Team 成员「${team.name}」？该成员的记忆与系统提示词将被移除，此操作不可恢复。`)) return;
   sendCommand({ DeleteTeam: { id: team.id } });
   selectedTeam.value = null;
+  teamEditing.value = false;
 }
 
 // ── 技能启停 ──
@@ -536,6 +545,15 @@ watch(
     }
   },
 );
+watch(
+  () => state.teams,
+  () => {
+    if (selectedTeam.value && !state.teams.some((t) => t.id === selectedTeam.value!.id)) {
+      selectedTeam.value = null;
+      teamEditing.value = false;
+    }
+  },
+);
 </script>
 
 <template>
@@ -642,7 +660,7 @@ watch(
             <NeumorphismButton
               size="small"
               variant="flat"
-              v-if="state.teams.length > 1 && selectedTeam.id !== 'default' && selectedTeam.id !== 'alix'"
+              v-if="!isPrimaryTeam(selectedTeam)"
               @click="deleteTeam(selectedTeam!)"
             >
               删除
@@ -650,7 +668,7 @@ watch(
           </div>
         </div>
         <div class="detail-meta">
-          <NeumorphismTag v-if="selectedTeam.id === 'default' || selectedTeam.id === 'alix'" variant="warning" size="small">
+          <NeumorphismTag v-if="isPrimaryTeam(selectedTeam)" variant="warning" size="small">
             主 Agent
           </NeumorphismTag>
           <NeumorphismTag variant="info" size="small">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
@@ -806,6 +824,14 @@ watch(
             </div>
           </NeumorphismFormItem>
           <div class="form-actions form-actions--corner">
+            <NeumorphismButton
+              v-if="teamFormIsEdit && selectedTeam && !isPrimaryTeam(selectedTeam)"
+              variant="flat"
+              class="caps-delete-btn"
+              @click="deleteTeam(selectedTeam)"
+            >
+              删除
+            </NeumorphismButton>
             <NeumorphismButton variant="flat" @click="cancelTeamEdit">放弃更改</NeumorphismButton>
             <NeumorphismButton variant="primary" @click="saveTeam">保存</NeumorphismButton>
           </div>
@@ -979,6 +1005,9 @@ watch(
   font-size: 11px;
 }
 
+.caps-delete-btn {
+  color: var(--nm-color-error, #ef5350) !important;
+}
 .form-actions--corner {
   position: sticky;
   bottom: -12px;

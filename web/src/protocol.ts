@@ -63,6 +63,8 @@ export interface ToolInfo {
 export interface TeamInfo {
   id: string;
   name: string;
+  /** 是否为主 agent（受保护，禁止删除） */
+  is_default?: boolean;
   description: string;
   enabled: boolean;
   sessions: number;
