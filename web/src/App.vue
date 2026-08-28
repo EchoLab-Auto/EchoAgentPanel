@@ -39,9 +39,33 @@ function loadView(): View {
   }
 }
 
+// ── 记住上次使用的 Agent（Team）：刷新/重连后恢复，避免回到默认 agent ──
+const ACTIVE_TEAM_KEY = 'echo-panel-active-team';
+
+function loadActiveTeam(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_TEAM_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveActiveTeam(id: string | null) {
+  try {
+    if (id) {
+      localStorage.setItem(ACTIVE_TEAM_KEY, id);
+    } else {
+      localStorage.removeItem(ACTIVE_TEAM_KEY);
+    }
+  } catch {
+    // ignore storage errors (private mode)
+  }
+}
+
 function onTeamSelect(next: string | null) {
   activeTeamId.value = next;
   state.activeTeamId = next;
+  saveActiveTeam(next);
   // 切换 Team = 切换记忆（会话隔离）：清空当前显示，加载该成员独立的 timeline。
   state.trunk = [];
   sendCommand({ RequestTrunkTimeline: { team_id: next } });
@@ -63,7 +87,8 @@ const activeSessionId = ref('local:tui::local_user');
 const showSettings = ref(false);
 const activeBranchId = ref<string | null>(null);
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
-const activeTeamId = ref<string | null>(null);
+// 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
+const activeTeamId = ref<string | null>(loadActiveTeam());
 
 
 
@@ -133,10 +158,13 @@ function onLayoutCollapse(collapsed: boolean) {
 watch(
   () => state.teams,
   () => {
+    // 列表尚未加载完成（空数组）时不校验，避免误清刚从 localStorage 恢复的 id。
+    if (!state.teams.length) return;
     const id = activeTeamId.value;
     if (id && !state.teams.some((t) => t.id === id)) {
       activeTeamId.value = null;
       state.activeTeamId = null;
+      saveActiveTeam(null);
       state.trunk = [];
       sendCommand({ RequestTrunkTimeline: { team_id: null } });
       selectSession('local:tui::local_user');

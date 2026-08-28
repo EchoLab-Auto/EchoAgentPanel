@@ -34,9 +34,16 @@ export function startConnection(): void {
       state.tasks = [];
       state.activities = {};
       // Bootstrap the panel state on (re)connect.
+      // Timeline 按上次使用的 Agent（localStorage）加载，刷新/重连后不跳回默认。
+      let savedTeam: string | null = null;
+      try {
+        savedTeam = localStorage.getItem('echo-panel-active-team');
+      } catch {
+        // ignore storage errors (private mode)
+      }
       const bootstrap: BackendCommand[] = [
         'RequestState',
-        { RequestTrunkTimeline: { team_id: null } },
+        { RequestTrunkTimeline: { team_id: savedTeam } },
         'RequestAdapterStatus',
         'RequestQqFilterConfig',
         'RequestTeamsList',
