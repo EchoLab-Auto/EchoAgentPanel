@@ -4,7 +4,7 @@
 //! IME 组合保护、Markdown、工具/思考/分支合并块），这里只做数据适配。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
@@ -93,6 +93,45 @@ onMounted(() => {
   ctxObserver.observe(target);
 });
 onBeforeUnmount(() => ctxObserver?.disconnect());
+
+// 适配器按钮显隐：仅当当前 Agent（team）启用了 adapter 类插件时显示。
+// 依据 TeamInfo 的 enabled_plugins（白名单）/ disabled_plugins（黑名单）判断，
+// 与 Core apply_capabilities 的过滤语义一致。
+const ADAPTER_PLUGIN_FALLBACK = ['echo-agent.adapter.qq'];
+
+const currentTeam = computed(() => {
+  if (!props.activeTeamId) return null;
+  return state.teams.find((t) => t.id === props.activeTeamId) ?? null;
+});
+
+/** 当前团队视角下的适配器插件 id 列表（无 plugins 数据时回退到内置 id） */
+const adapterPluginIds = computed<string[]>(() => {
+  const fromState = state.plugins.filter((p) => p.kind === 'adapter').map((p) => p.id);
+  return fromState.length ? fromState : ADAPTER_PLUGIN_FALLBACK;
+});
+
+/** 判断某插件是否被该团队配置启用（白名单为空=全部允许，黑名单优先） */
+function pluginEnabledForTeam(pluginId: string, team: { enabled_plugins?: string[]; disabled_plugins?: string[] } | null): boolean {
+  if (!team) return true; // 默认 agent / 未配置团队限制 → 启用
+  if (team.disabled_plugins?.includes(pluginId)) return false;
+  if (team.enabled_plugins && team.enabled_plugins.length > 0) {
+    return team.enabled_plugins.includes(pluginId);
+  }
+  return true;
+}
+
+/** 当前 Agent 是否启用了至少一个适配器插件（决定输入框上是否显示"适配器"按钮） */
+const adapterAvailable = computed(() =>
+  adapterPluginIds.value.some((id) => pluginEnabledForTeam(id, currentTeam.value)),
+);
+
+// 切换 Agent 时若适配器面板打开则关闭，避免残留禁用 agent 的面板
+watch(
+  () => props.activeTeamId,
+  () => {
+    showAdapter.value = false;
+  },
+);
 
 // 当前会话是否在运行任务（用于显示"取消任务"按钮）
 const busy = computed(() => {
@@ -218,6 +257,7 @@ function imagesOf(message: ChatMessage): string[] {
         <span v-if="state.checklists.length" class="entry-badge">{{ state.checklists.length }}</span>
       </button>
       <button
+        v-if="adapterAvailable"
         ref="adapterBtnRef"
         class="ctx-entry"
         title="平台适配器"
