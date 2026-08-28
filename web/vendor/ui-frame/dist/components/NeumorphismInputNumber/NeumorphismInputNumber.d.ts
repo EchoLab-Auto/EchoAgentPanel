@@ -1,0 +1,82 @@
+export type NumberInputSize = 'small' | 'medium' | 'large';
+export interface NeumorphismInputNumberProps {
+    /** v-model binding — current number value */
+    modelValue?: number;
+    /** Minimum allowed value */
+    min?: number;
+    /** Maximum allowed value */
+    max?: number;
+    /** Step increment for up/down */
+    step?: number;
+    /** Decimal precision */
+    precision?: number;
+    /** Whether the input is disabled */
+    disabled?: boolean;
+    /** Size variant */
+    size?: NumberInputSize;
+    /** Placeholder text */
+    placeholder?: string;
+    /** Show increment/decrement buttons */
+    controls?: boolean;
+    /** Label text */
+    label?: string;
+}
+declare const _default: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismInputNumberProps>, {
+    modelValue: undefined;
+    min: undefined;
+    max: undefined;
+    step: number;
+    precision: undefined;
+    disabled: boolean;
+    placeholder: string;
+    controls: boolean;
+    label: undefined;
+}>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {
+    "update:modelValue": (value: number | undefined) => void;
+    change: (value: number | undefined) => void;
+    focus: (event: FocusEvent) => void;
+    blur: (event: FocusEvent) => void;
+}, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismInputNumberProps>, {
+    modelValue: undefined;
+    min: undefined;
+    max: undefined;
+    step: number;
+    precision: undefined;
+    disabled: boolean;
+    placeholder: string;
+    controls: boolean;
+    label: undefined;
+}>>> & Readonly<{
+    onFocus?: ((event: FocusEvent) => any) | undefined;
+    onBlur?: ((event: FocusEvent) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: number | undefined) => any) | undefined;
+    onChange?: ((value: number | undefined) => any) | undefined;
+}>, {
+    step: number;
+    disabled: boolean;
+    label: string;
+    max: number;
+    placeholder: string;
+    modelValue: number;
+    min: number;
+    precision: number;
+    controls: boolean;
+}, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
+export default _default;
+type __VLS_NonUndefinedable<T> = T extends undefined ? never : T;
+type __VLS_TypePropsToRuntimeProps<T> = {
+    [K in keyof T]-?: {} extends Pick<T, K> ? {
+        type: import('vue').PropType<__VLS_NonUndefinedable<T[K]>>;
+    } : {
+        type: import('vue').PropType<T[K]>;
+        required: true;
+    };
+};
+type __VLS_WithDefaults<P, D> = {
+    [K in keyof Pick<P, keyof P>]: K extends keyof D ? __VLS_Prettify<P[K] & {
+        default: D[K];
+    }> : P[K];
+};
+type __VLS_Prettify<T> = {
+    [K in keyof T]: T[K];
+} & {};
