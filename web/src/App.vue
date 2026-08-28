@@ -39,11 +39,7 @@ function loadView(): View {
   }
 }
 
-function onTeamSelect(item: HeadlessMenuItem | string | null) {
-  const next = (() => {
-    if (item === null || typeof item === 'string') return item || null;
-    return item.key === 'default' ? null : item.key;
-  })();
+function onTeamSelect(next: string | null) {
   activeTeamId.value = next;
   state.activeTeamId = next;
   // 切换 Team = 切换记忆（会话隔离）：清空当前显示，加载该成员独立的 timeline。
@@ -235,10 +231,8 @@ watch(
         <PanelSidebar
           :active-session-id="activeSessionId"
           :active-branch-id="activeBranchId"
-          :active-team-id="activeTeamId"
           @select-session="selectSession"
           @select-branch="(id) => (activeBranchId = id)"
-          @select-team="onTeamSelect"
         />
       </template>
 
@@ -247,8 +241,10 @@ watch(
         <ChatView
           v-if="view === 'chat'"
           :session-id="activeSessionId"
+          :active-team-id="activeTeamId"
           @send="send"
           @cancel="cancelWork"
+          @select-team="onTeamSelect"
         />
         <CapabilitiesPanel v-else-if="view === 'caps'" />
         <LogView v-else-if="view === 'logs'" />

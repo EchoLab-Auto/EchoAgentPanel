@@ -1,9 +1,9 @@
 <script setup lang="ts">
-//! 侧边栏内容：三张折叠卡片（适配器 / 临时分支 / 会话）+ 悬浮清单。
+//! 侧边栏内容：两张折叠卡片（临时分支 / 会话）+ 悬浮清单。
 //! 折叠状态在组件内部维护；会话选择与分支选择冒泡给 App。
+//! Team（Agent）切换已迁至聊天输入框左侧的 AgentSwitcher 悬浮卡片。
 
 import { ref } from 'vue';
-import { NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import SidebarCard from './SidebarCard.vue';
 import SessionGroups from './SessionGroups.vue';
@@ -11,29 +11,22 @@ import SessionGroups from './SessionGroups.vue';
 defineProps<{
   activeSessionId: string;
   activeBranchId: string | null;
-  activeTeamId: string | null;
 }>();
 
 const emit = defineEmits<{
   selectSession: [id: string];
   selectBranch: [id: string];
-  selectTeam: [id: string | null];
 }>();
 
-const cardOpen = ref<Record<'teams' | 'branches' | 'sessions', boolean>>({
-  teams: true,
+const cardOpen = ref<Record<'branches' | 'sessions', boolean>>({
   branches: true,
   sessions: true,
 });
 
-function toggleCard(key: 'teams' | 'branches' | 'sessions') {
+function toggleCard(key: 'branches' | 'sessions') {
   cardOpen.value[key] = !cardOpen.value[key];
 }
 
-
-function selectTeam(id: string) {
-  emit('selectTeam', id === 'default' ? null : id);
-}
 
 function truncateTask(task: string): string {
   const oneLine = task.replace(/\s+/g, ' ').trim();
@@ -43,25 +36,6 @@ function truncateTask(task: string): string {
 
 <template>
   <div class="panel-sider">
-    <!-- 卡片：Team（切换对话对象，位于适配器上方） -->
-    <SidebarCard title="Team" :open="cardOpen.teams" @toggle="toggleCard('teams')">
-      <div v-if="state.teams.length === 0" class="muted">（未配置 Team 成员）</div>
-      <div
-        v-for="team in state.teams"
-        :key="team.id"
-        class="agent-item"
-        :class="{ 'agent-item--active': (activeTeamId || 'default') === team.id }"
-        @click="selectTeam(team.id)"
-      >
-        <NeumorphismStatusDot
-          :status="team.enabled ? 'online' : 'offline'"
-          size="small"
-        />
-        <span class="agent-name">{{ team.name }}</span>
-        <span v-if="!team.enabled" class="muted agent-disabled">已禁用</span>
-      </div>
-    </SidebarCard>
-
     <!-- 卡片：临时分支 -->
     <SidebarCard
       title="临时分支"
@@ -95,31 +69,5 @@ function truncateTask(task: string): string {
 </template>
 
 <style scoped>
-.agent-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.agent-item:hover {
-  background: var(--panel-hover, rgba(255, 255, 255, 0.06));
-}
-.agent-item--active {
-  background: color-mix(in srgb, var(--nm-primary-color, #5b8def) 18%, transparent);
-  outline: 1px solid color-mix(in srgb, var(--nm-primary-color, #5b8def) 40%, transparent);
-}
-.agent-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-disabled {
-  font-size: 11px;
-}
 </style>
 

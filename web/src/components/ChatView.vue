@@ -14,14 +14,16 @@ import {
 } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
+import AgentSwitcher from './AgentSwitcher.vue';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import QqPanel from './QqPanel.vue';
 
-const props = defineProps<{ sessionId: string }>();
+const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
 const emit = defineEmits<{
   send: [content: string, images: string[]];
   cancel: [];
+  selectTeam: [id: string | null];
 }>();
 
 const input = ref('');
@@ -187,6 +189,10 @@ function imagesOf(message: ChatMessage): string[] {
   <div class="chat-view" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
     <div class="entry-row">
+      <AgentSwitcher
+        :active-team-id="props.activeTeamId ?? null"
+        @select="emit('selectTeam', $event)"
+      />
       <button
         class="ctx-entry"
         title="查看上下文占用"
@@ -297,7 +303,7 @@ function imagesOf(message: ChatMessage): string[] {
         v-model="input"
         :disabled="!connected"
         :cancelable="false"
-        :rows="2"
+        :rows="1"
         :placeholder="placeholder"
         @send="onSend"
         @cancel="emit('cancel')"
@@ -405,7 +411,7 @@ function imagesOf(message: ChatMessage): string[] {
   min-height: 0;
 }
 
-/* 滚动区内部底部预留：输入框(162px) + 边距(12px) + 松量 */
+/* 滚动区内部底部预留：按输入框最大高度(5行,约156px) + 边距(12px) + 松量 */
 .chat-view__list :deep(.nm-chat-tray__scroll) {
   padding-bottom: 190px;
 }
@@ -606,6 +612,13 @@ function imagesOf(message: ChatMessage): string[] {
 .chat-composer-float :deep(.nm-textarea) {
   margin-bottom: 0 !important;
 }
+/* 默认 1 行，随内容自动扩展，最多 5 行：
+   5 × 1.6em(行高) + 上下 padding(10px × 2)；超过后内部滚动。
+   覆盖 auto-resize 的 overflow:hidden，使上限生效时可滚动。 */
+.chat-composer-float :deep(.nm-textarea__field) {
+  max-height: calc(8em + 20px);
+  overflow-y: auto;
+}
 /* 圆角同心：外框 24px、间距 12px → 内框（textarea）左侧圆角
    = 24 - 12 = 12px，圆角曲线与外框平行（同心）。右侧保持库默认。 */
 .chat-composer-float :deep(.nm-textarea) {
@@ -685,6 +698,7 @@ function imagesOf(message: ChatMessage): string[] {
   bottom: v-bind(entryBottom);
   z-index: 6;
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 .entry-row .ctx-entry {
