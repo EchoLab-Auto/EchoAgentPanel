@@ -316,20 +316,17 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { AgentReasoning: { session_id: string; branch_id: string; content: string } }).AgentReasoning;
       const content = e.content.trim();
       if (!content) return state;
-      const tab = state.branchTabs[e.branch_id];
-      if (tab) {
-        tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
-        return state;
-      }
-      // 主时间线（无分支 tab）：推理立即按真实时序插入——推理块会出现在
-      // 之前/之后的工具调用之间，而不是等回复完成后附加在末尾。
+      // 无论是否存在分支 tab：推理立即按真实时序插入主时间线——
+      // 推理块会出现在之前/之后的工具调用之间，而不是等回复完成
+      // 后附加在末尾（分支合并块因此不再需要在结束时归档）。
       pushTo(state, 'reasoning', content, Math.floor(Date.now() / 1000), {
         sessionId: e.session_id,
         animate: true,
       });
-      // 保留 pending 队列兼容旧时序（分支合并块归并时仍会消费）。
-      const key = `${e.session_id}:${e.branch_id}`;
-      (state.pendingReasoning[key] ??= []).push(content);
+      const tab = state.branchTabs[e.branch_id];
+      if (tab) {
+        tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
+      }
       return state;
     }
     case 'SubagentStarted': {
@@ -376,34 +373,15 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'ReplyBranchCompleted': {
       const e = (event as { ReplyBranchCompleted: { session_id: string; branch_id: string; success: boolean; cancelled: boolean; completed_at_ms: number } }).ReplyBranchCompleted;
-      if (e.success && !e.cancelled) {
-        (state.completedReasoning[e.session_id] ??= []);
-        if (!state.completedReasoning[e.session_id].includes(e.branch_id)) {
-          state.completedReasoning[e.session_id].push(e.branch_id);
-        }
-      } else {
-        const key = `${e.session_id}:${e.branch_id}`;
-        delete state.pendingReasoning[key];
-      }
       completeReplyBranch(state, e.branch_id, e.success, e.cancelled, e.completed_at_ms);
       if (!state.tasks.some((t) => t.sessionId === e.session_id && t.kind === 'reply' && t.status === 'running')) {
         setPhase(state, e.session_id, 'completed', null);
       }
-      // 分支结束：临时标签消失，主会话以折叠合并块形式出现。
+      // 分支结束：主时间线已实时展示推理/工具/回答（时序交错），
+      // 不再归档折叠合并块（避免重复内容）；仅清理临时标签。
       const tab = state.branchTabs[e.branch_id];
       if (tab) {
         tab.status = e.cancelled ? 'cancelled' : e.success ? 'completed' : 'failed';
-        const finalText = tab.finalContent ?? tab.msgs.filter((m) => m.kind === 'content').map((m) => m.text).join('\n');
-        const summary = truncate(oneLine(finalText || tab.task || '临时分支'), 96);
-        const shortId = e.branch_id.length > 8 ? e.branch_id.slice(0, 8) : e.branch_id;
-        pushTo(state, 'branch', `分支 ${shortId} · ${summary}`, Math.floor(e.completed_at_ms / 1000), {
-          sessionId: e.session_id,
-          branch: {
-            branchId: e.branch_id,
-            summary,
-            msgs: [...tab.msgs],
-          },
-        });
         delete state.branchTabs[e.branch_id];
       }
       return state;
@@ -433,9 +411,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; branch_id?: string } }).ToolCall;
       stageOrchestrationTool(state, e.session_id, e.tool_name, e.arguments);
       setPhase(state, e.session_id, e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
+      // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
       const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
+      pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
+        sessionId: e.session_id,
+        animate: true,
+        tool: { name: e.tool_name, input: summarizeArguments(e.arguments), output: null, status: 'running' },
+      });
       if (tab) {
-        // 分支运行期间：工具调用只进临时分支标签，不进主会话。
         tab.msgs.push({
           kind: 'tool',
           text: e.tool_name,
@@ -444,18 +427,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           input: summarizeArguments(e.arguments),
           status: 'running',
         });
-        return state;
       }
-      pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
-        sessionId: e.session_id,
-        animate: true,
-        tool: { name: e.tool_name, input: summarizeArguments(e.arguments), output: null, status: 'running' },
-      });
       return state;
     }
     case 'ToolResult': {
       const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; branch_id?: string } }).ToolResult;
+      // 工具结果实时回填主时间线（与 ToolCall 配对）；分支 tab 同步更新。
       const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
+      finishToolMessage(state, e.tool_name, e.result);
       if (tab) {
         const failed = e.result.trimStart().startsWith('error:');
         for (let i = tab.msgs.length - 1; i >= 0; i--) {
@@ -466,9 +445,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
             break;
           }
         }
-        return state;
       }
-      finishToolMessage(state, e.tool_name, e.result);
       const act = activity(state, e.session_id);
       if (e.tool_name !== 'run_subagent') act.toolsCompleted += 1;
       setPhase(state, e.session_id, 'thinking', null);
@@ -500,33 +477,23 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }).AgentOutput;
       const owner = e.team_id ?? null;
       if (state.activeTeamId !== owner) return state;
+      // 正式回答实时进主时间线（推理已按序穿插，无需再附加尾巴）。
+      pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
+        sessionId: e.session_id,
+        animate: true,
+      });
       if (e.branch_id) {
         const tab = state.branchTabs[e.branch_id];
         if (tab) {
-          // 分支运行期间：输出只进临时标签，绝不写入主会话；
-          // 由 ReplyBranchCompleted 在结束后以折叠合并块形式归档。
           tab.finalContent = e.content;
           tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
-          const act = state.activities[e.session_id];
-          if (act && act.phase !== 'completed' && act.phase !== 'failed') {
-            act.phase = 'completed';
-            act.detail = null;
-          }
-          return state;
         }
-        // tab 已不存在（如重连后状态清空）：回退到主会话输出，避免丢失。
       }
       const act = state.activities[e.session_id];
       if (act && act.phase !== 'completed' && act.phase !== 'failed') {
         act.phase = 'completed';
         act.detail = null;
       }
-      // 推理已按时序穿插插入主时间线（见 AgentReasoning 分支）：
-      // 正式回答不再追加尾巴，避免重复显示。
-      pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
-        sessionId: e.session_id,
-        animate: true,
-      });
       return state;
     }
     case 'AgentCompleted': {

@@ -71,6 +71,15 @@ export function loadTimeline(state: AppState, messages: TimelineMessage[]) {
       });
       continue;
     }
+    if (message.kind === 'reasoning') {
+      // 后端新投影：推理为独立条目（按到达顺序，与工具交错）
+      converted.push({
+        ...base,
+        role: 'reasoning' as const,
+        content: message.content,
+      });
+      continue;
+    }
     if (message.kind === 'tool') {
       const tool = message.tool;
       converted.push({
