@@ -103,6 +103,10 @@ const activeBranchId = ref<string | null>(null);
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
 // 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
 const activeTeamId = ref<string | null>(loadActiveTeam());
+// ⚠️ 关键：刷新时同步 state.activeTeamId（reducer 与 SessionGroups 都读它）。
+// 若不同步，state.activeTeamId 保持 null → 会话列表按"主 agent"过滤，
+// 会串显 alix 的会话（此前只在 onTeamSelect 里赋值，刷新即丢失）。
+state.activeTeamId = activeTeamId.value;
 
 
 
