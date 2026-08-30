@@ -345,7 +345,7 @@ export type BackendEvent =
         limit_tokens: number;
       };
     }
-  | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number } }
+  | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null } }
   | {
       ApiConfigUpdated: {
         provider: string;

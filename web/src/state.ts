@@ -479,25 +479,33 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'TrunkTimeline': {
-      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number } }).TrunkTimeline;
+      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null } }).TrunkTimeline;
+      // ⚠️ 响应归属由后端标注（team_id = 请求值），绝不能拿当前
+      // activeTeamId 猜测：其他 agent 的兜底请求若按当前视图路由会
+      // 污染 trunk（串显 alix 会话/误清空 self-coding 内容）。
+      const teamKey = String(e.team_id ?? '');
       const seq = e.seq ?? 0;
-      const teamKey = String(state.activeTeamId ?? '');
       const cached = state.teamTimelines[teamKey];
       // 增量：有缓存且 seq 单调递增 → 仅追加新条目（不重建全量渲染）。
-      if (cached && seq > cached.seq && e.messages.length > 0) {
-        const appended = e.messages.map(toDisplayMessage);
-        cached.msgs.push(...appended);
-        cached.seq = seq;
-        // 若 trunk 正展示该 team，同步追加。
-        if (state.trunkTeamId === teamKey) {
-          state.trunk.push(...appended);
+      if (cached && seq > cached.seq) {
+        if (e.messages.length > 0) {
+          const appended = e.messages.map(toDisplayMessage);
+          cached.msgs.push(...appended);
+          if (state.trunkTeamId === teamKey) {
+            state.trunk.push(...appended);
+          }
         }
+        cached.seq = seq;
         return state;
       }
-      // 全量（首载/回退/seq 相同但内容被 ClearHistory 等重置）：重建缓存。
+      // 旧后端（无 team_id）：回退按 activeTeamId 路由（兼容期内仍按
+      // 当前视图处理，避免新前端 + 旧核心组合时功能缺失）。
+      const fallbackKey = String(state.activeTeamId ?? '');
+      const effectiveKey = e.team_id !== undefined ? teamKey : fallbackKey;
+      // 全量（首载/seq 回退/ClearHistory 等）：重建对应缓存。
       const converted = toDisplayMessages(e.messages);
-      state.teamTimelines[teamKey] = { seq, msgs: converted };
-      state.trunkTeamId = teamKey;
+      state.teamTimelines[effectiveKey] = { seq, msgs: converted };
+      state.trunkTeamId = effectiveKey;
       state.trunk = converted;
       return state;
     }
@@ -535,7 +543,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const trunk = state.trunk.filter((m) => m.sessionId === e.session_id || m.sessionId === undefined);
       const last = trunk[trunk.length - 1];
       if (!last || (last.role !== 'backend' && last.role !== 'branch')) {
-        sendCommand({ RequestTrunkTimeline: { team_id: null } });
+        // ⚠️ 兜底请求必须带当前 team_id：team_id: null 会拉回主 agent 的
+        // timeline 并污染当前视图（self-coding 下串显 alix 会话）。
+        sendCommand({ RequestTrunkTimeline: { team_id: state.activeTeamId } });
       }
       return state;
     }
