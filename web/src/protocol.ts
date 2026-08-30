@@ -81,6 +81,8 @@ export interface TeamInfo {
   reply_branches_enabled?: boolean;
   /** 全局会话视图是否启用（后端按 enabled_plugins 白名单推导；false 时侧边栏不显示"全局"） */
   global_session_enabled?: boolean;
+  /** Chatbot 会话系统是否启用（后端按 enabled_plugins 白名单推导；false 时侧边栏不显示会话/临时分支卡片） */
+  chat_sessions_enabled?: boolean;
 }
 
 export interface PluginInfo {

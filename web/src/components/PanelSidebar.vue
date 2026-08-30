@@ -13,12 +13,19 @@ defineProps<{
   activeBranchId: string | null;
 }>();
 
-// 临时分支卡仅对启用了回执分支能力的 Agent 显示。
-// 当前 team = state.activeTeamId（null = 主/默认 agent）。
-// 后端按 TeamInfo.reply_branches_enabled 推导（enabled_plugins 白名单）。
-const replyBranchesVisible = computed(() => {
+// Chatbot 会话系统总开关：当前 agent 未启用时侧边栏隐藏「会话」与
+// 「临时分支」两张卡片（后端按 TeamInfo.chat_sessions_enabled 推导）。
+const chatSessionsVisible = computed(() => {
   const team = state.teams.find((t) => t.id === state.activeTeamId);
   if (!team) return true; // 主/默认 agent：未配置限定时默认启用
+  return team.chat_sessions_enabled !== false;
+});
+
+// 临时分支卡还需回执分支能力启用（会话系统开关下再细分）。
+const replyBranchesVisible = computed(() => {
+  if (!chatSessionsVisible.value) return false;
+  const team = state.teams.find((t) => t.id === state.activeTeamId);
+  if (!team) return true;
   return team.reply_branches_enabled !== false;
 });
 
@@ -70,8 +77,13 @@ function truncateTask(task: string): string {
       </div>
     </SidebarCard>
 
-    <!-- 卡片：会话 -->
-    <SidebarCard title="会话" :open="cardOpen.sessions" @toggle="toggleCard('sessions')">
+    <!-- 卡片：会话（Chatbot 会话系统禁用时整卡隐藏） -->
+    <SidebarCard
+      v-if="chatSessionsVisible"
+      title="会话"
+      :open="cardOpen.sessions"
+      @toggle="toggleCard('sessions')"
+    >
       <SessionGroups :active-session-id="activeSessionId" @select="emit('selectSession', $event)" />
     </SidebarCard>
 
