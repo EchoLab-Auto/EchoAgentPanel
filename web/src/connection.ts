@@ -54,6 +54,7 @@ export function startConnection(): void {
         'RequestAdapterStatus',
         'RequestQqFilterConfig',
         'RequestTeamsList',
+        'RequestShellSessions',
       ];
       for (const command of bootstrap) {
         ws.send(serializeCommand(command));

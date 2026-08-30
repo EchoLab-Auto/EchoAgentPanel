@@ -235,6 +235,10 @@ export interface AppState {
   teams: TeamInfo[];
   /** 当前激活 team（null = default/未指定），用于实时事件隔离 */
   activeTeamId: string | null;
+  /** 后台 shell 会话列表（Shell 面板） */
+  shellSessions: import('./protocol').ShellSessionInfo[];
+  /** 每会话的终端条目（seq → entry），Shell 面板流式输出 */
+  shellTerminals: Record<string, import('./protocol').ShellTerminalEntry[]>;
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
@@ -285,6 +289,8 @@ export function initialState(): AppState {
     plugins: [],
     teams: [],
     activeTeamId: null,
+    shellSessions: [],
+    shellTerminals: {},
     context: null,
     branchTabs: {},
     teamTimelines: {},
@@ -661,6 +667,52 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'TeamsList': {
       const e = (event as { TeamsList: { teams: TeamInfo[] } }).TeamsList;
       state.teams = e.teams;
+      return state;
+    }
+    case 'ShellSessionsList': {
+      const e = (event as { ShellSessionsList: { sessions: import('./protocol').ShellSessionInfo[] } }).ShellSessionsList;
+      state.shellSessions = e.sessions;
+      // 清理已不存在的会话的终端
+      for (const sid of Object.keys(state.shellTerminals)) {
+        if (!e.sessions.some((s) => s.session_id === sid)) delete state.shellTerminals[sid];
+      }
+      return state;
+    }
+    case 'ShellSessionStarted': {
+      const e = (event as { ShellSessionStarted: { session: import('./protocol').ShellSessionInfo } }).ShellSessionStarted;
+      const idx = state.shellSessions.findIndex((s) => s.session_id === e.session.session_id);
+      if (idx >= 0) state.shellSessions[idx] = e.session;
+      else state.shellSessions.push(e.session);
+      state.shellTerminals[e.session.session_id] ??= [];
+      return state;
+    }
+    case 'ShellExecStarted': {
+      const e = (event as { ShellExecStarted: { session_id: string; seq: number; command: string } }).ShellExecStarted;
+      const entries = (state.shellTerminals[e.session_id] ??= []);
+      entries.push({ seq: e.seq, command: e.command, status: 'running', output: '' });
+      return state;
+    }
+    case 'ShellExecOutput': {
+      const e = (event as { ShellExecOutput: { session_id: string; seq: number; chunk: string } }).ShellExecOutput;
+      const entries = state.shellTerminals[e.session_id];
+      if (!entries) return state;
+      const entry = entries.find((t) => t.seq === e.seq);
+      if (entry) entry.output += e.chunk;
+      return state;
+    }
+    case 'ShellExecDone': {
+      const e = (event as { ShellExecDone: { session_id: string; seq: number; success: boolean; elapsed_ms: number } }).ShellExecDone;
+      const entries = state.shellTerminals[e.session_id];
+      const entry = entries?.find((t) => t.seq === e.seq);
+      if (entry) {
+        entry.status = entry.output.includes('timeout after') ? 'timeout' : e.success ? 'done' : 'failed';
+        entry.elapsed_ms = e.elapsed_ms;
+      }
+      return state;
+    }
+    case 'ShellSessionClosed': {
+      const e = (event as { ShellSessionClosed: { session_id: string; reason: string } }).ShellSessionClosed;
+      state.shellSessions = state.shellSessions.filter((s) => s.session_id !== e.session_id);
       return state;
     }
     case 'SystemPrompt': {

@@ -85,6 +85,26 @@ export interface TeamInfo {
   chat_sessions_enabled?: boolean;
 }
 
+/** 后台 shell 会话摘要（Shell 面板终端可视化） */
+export interface ShellSessionInfo {
+  session_id: string;
+  workdir: string;
+  created_at_ms: number;
+  last_active_ms: number;
+  exec_count: number;
+  running: boolean;
+  last_output?: string | null;
+}
+
+/** 单条命令在终端中的条目（回显 + 流式输出） */
+export interface ShellTerminalEntry {
+  seq: number;
+  command: string;
+  status: 'running' | 'done' | 'failed' | 'timeout';
+  output: string;
+  elapsed_ms?: number;
+}
+
 export interface PluginInfo {
   id: string;
   name: string;
@@ -237,6 +257,10 @@ export type BackendCommand =
   | 'RequestState'
   | { RequestContext: { team_id?: string | null } }
   | { RequestTrunkTimeline: { team_id?: string | null; since_seq?: number } }
+  | 'RequestShellSessions'
+  | { ShellStart: { workdir?: string | null } }
+  | { ShellExec: { session_id: string; command: string; timeout_secs?: number } }
+  | { ShellStop: { session_id: string } }
   | 'ClearHistory'
   | { CancelRequestedWork: { session_id: string; all: boolean } }
   | { StartAdapter: { name: string } }
@@ -352,6 +376,12 @@ export type BackendEvent =
       };
     }
   | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }
+  | { ShellSessionsList: { sessions: ShellSessionInfo[] } }
+  | { ShellSessionStarted: { session: ShellSessionInfo } }
+  | { ShellExecStarted: { session_id: string; seq: number; command: string } }
+  | { ShellExecOutput: { session_id: string; seq: number; chunk: string } }
+  | { ShellExecDone: { session_id: string; seq: number; success: boolean; elapsed_ms: number } }
+  | { ShellSessionClosed: { session_id: string; reason: string } }
   | {
       ApiConfigUpdated: {
         provider: string;

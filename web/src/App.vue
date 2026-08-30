@@ -19,21 +19,22 @@ import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import TasksPanel from './components/TasksPanel.vue';
 import CapabilitiesPanel from './components/CapabilitiesPanel.vue';
-import LogView from './components/LogView.vue';import SettingsModal from './components/SettingsModal.vue';
+import LogView from './components/LogView.vue';
+import ShellPanel from './components/ShellPanel.vue';import SettingsModal from './components/SettingsModal.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'tasks' | 'caps' | 'logs';
+type View = 'chat' | 'tasks' | 'caps' | 'logs' | 'shell';
 
 const view = ref<View>(loadView());
 
 function loadView(): View {
   try {
     const saved = localStorage.getItem('echo-panel-view');
-    return (['chat', 'tasks', 'caps', 'logs'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    return (['chat', 'tasks', 'caps', 'logs', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -291,6 +292,14 @@ watch(
           >
             日志
           </NeumorphismButton>
+          <NeumorphismButton
+            size="small"
+            variant="flat"
+            :pressed="view === 'shell'"
+            @click="setView('shell')"
+          >
+            Shell
+          </NeumorphismButton>
           <NeumorphismDropdown trigger="click" position="bottom">
             <NeumorphismButton size="small" variant="flat">设置 ▾</NeumorphismButton>
             <template #items>
@@ -328,6 +337,7 @@ watch(
         />
         <CapabilitiesPanel v-else-if="view === 'caps'" />
         <LogView v-else-if="view === 'logs'" />
+        <ShellPanel v-else-if="view === 'shell'" />
         <TasksPanel v-else />
       </div>
     </NeumorphismLayout>
