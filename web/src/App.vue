@@ -188,7 +188,7 @@ watch(
 </script>
 
 <template>
-  <ThemeProvider default-theme="dark" storage-key="echo-panel-theme">
+  <ThemeProvider default-theme="auto" storage-key="echo-panel-theme">
     <NeumorphismLayout
       show-header
       show-sider
