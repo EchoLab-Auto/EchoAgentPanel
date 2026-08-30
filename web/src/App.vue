@@ -157,6 +157,17 @@ function onLayoutCollapse(collapsed: boolean) {
   }
 }
 
+// ── 全局会话被禁用兜底：当前 agent 无全局视图时若停留在 global 则回退 local ──
+watch(
+  [() => state.teams, () => activeTeamId.value],
+  () => {
+    const team = state.teams.find((t) => t.id === activeTeamId.value);
+    if (activeSessionId.value === 'global' && team && team.global_session_enabled === false) {
+      selectSession('local:tui::local_user');
+    }
+  },
+);
+
 // ── Team 被删除后兜底：激活的 team 不存在时重置为默认并重载时间线 ──
 watch(
   () => state.teams,

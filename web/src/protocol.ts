@@ -79,6 +79,8 @@ export interface TeamInfo {
   context_window_tokens?: number | null;
   /** 临时回复分支能力是否启用（后端按 enabled_plugins 白名单推导） */
   reply_branches_enabled?: boolean;
+  /** 全局会话视图是否启用（后端按 enabled_plugins 白名单推导；false 时侧边栏不显示"全局"） */
+  global_session_enabled?: boolean;
 }
 
 export interface PluginInfo {

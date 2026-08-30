@@ -41,14 +41,25 @@ const SESSION_GROUP_LABEL: Record<string, string> = {
   other: '其他',
 };
 
+// 「全局会话」是否启用：由当前 agent（team）的 global_session_enabled 决定。
+// 后端按 persona enabled_plugins 白名单推导；当前 agent 未显式配置时默认启用。
+const globalSessionEnabled = computed(() => {
+  const team = state.teams.find((t) => t.id === state.activeTeamId);
+  if (!team) return true; // 主/默认 agent：未配置限定时默认启用
+  return team.global_session_enabled !== false;
+});
+
 const groups = computed(() => {
-  const result: Array<{ key: string; label: string; sessions: SessionInfo[] }> = [
-    { key: 'global', label: SESSION_GROUP_LABEL.global, sessions: [] },
+  const result: Array<{ key: string; label: string; sessions: SessionInfo[] }> = [];
+  if (globalSessionEnabled.value) {
+    result.push({ key: 'global', label: SESSION_GROUP_LABEL.global, sessions: [] });
+  }
+  result.push(
     { key: 'local', label: SESSION_GROUP_LABEL.local, sessions: [] },
     { key: 'qq-dm', label: SESSION_GROUP_LABEL['qq-dm'], sessions: [] },
     { key: 'qq-group', label: SESSION_GROUP_LABEL['qq-group'], sessions: [] },
     { key: 'other', label: SESSION_GROUP_LABEL.other, sessions: [] },
-  ];
+  );
   for (const session of state.sessions) {
     const tag = sessionTag(session);
     const group = result.find((g) => g.key === tag.group) ?? result[result.length - 1];
