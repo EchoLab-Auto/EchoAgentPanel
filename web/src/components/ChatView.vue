@@ -15,6 +15,7 @@ import {
 import { state } from '../store';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
+import ReasoningBlock from './ReasoningBlock.vue';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import QqPanel from './QqPanel.vue';
@@ -139,6 +140,22 @@ const busy = computed(() => {
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
 });
 
+// 活动指示浮条：思考/调用工具/子代理 的实时状态，让用户知道 agent 在干什么
+const activityText = computed(() => {
+  if (!busy.value) return '';
+  const a = state.activities[props.sessionId];
+  switch (a?.phase) {
+    case 'thinking':
+      return a.detail ? `正在思考：${a.detail}…` : '正在思考…';
+    case 'tool':
+      return `正在调用工具 ${a.detail ?? ''}…`;
+    case 'subagent':
+      return '子代理工作中…';
+    default:
+      return '';
+  }
+});
+
 // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
 const messages = computed<ChatMessage[]>(() => {
   const list =
@@ -228,6 +245,10 @@ function imagesOf(message: ChatMessage): string[] {
   <div class="chat-view" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
     <div class="entry-row">
+      <div v-if="activityText" class="chat-activity">
+        <span class="chat-activity__spinner" />
+        <span class="chat-activity__text">{{ activityText }}</span>
+      </div>
       <AgentSwitcher
         :active-team-id="props.activeTeamId ?? null"
         @select="emit('selectTeam', $event)"
@@ -313,16 +334,28 @@ function imagesOf(message: ChatMessage): string[] {
       :empty-text="emptyText"
     >
       <template #message="slot">
-        <div v-if="imagesOf(slot.message).length" class="chat-view__images">
-          <img
-            v-for="(img, i) in imagesOf(slot.message)"
-            :key="i"
-            :src="img"
-            class="chat-view__image"
-            alt=""
-          />
+        <!-- 推理：面板扩展角色，由 ReasoningBlock 渲染（打字机动画）；时序穿插 -->
+        <ReasoningBlock
+          v-if="(slot.message as { role: string }).role === 'reasoning'"
+          :text="slot.message.content"
+          :animate="(slot.message as ChatMessageWithImages).animate !== false"
+        />
+        <div
+          v-else
+          class="chat-view__item"
+          :class="{ 'chat-view__item--enter': (slot.message as ChatMessageWithImages).animate }"
+        >
+          <div v-if="imagesOf(slot.message).length" class="chat-view__images">
+            <img
+              v-for="(img, i) in imagesOf(slot.message)"
+              :key="i"
+              :src="img"
+              class="chat-view__image"
+              alt=""
+            />
+          </div>
+          <ChatMessageItem :message="slot.message" :format-time="formatTime" />
         </div>
-        <ChatMessageItem :message="slot.message" :format-time="formatTime" />
       </template>
     </ChatMessageList>
 
@@ -780,5 +813,48 @@ function imagesOf(message: ChatMessage): string[] {
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* ── 实时消息入场动画（历史回放不播） ── */
+.chat-view__item--enter {
+  animation: msg-enter 0.28s ease-out both;
+}
+@keyframes msg-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 活动指示浮条：思考中 / 调用工具 / 子代理 ── */
+.chat-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  background: color-mix(in srgb, var(--nm-surface-raised) 48%, transparent);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+.chat-activity__spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--panel-accent) 30%, transparent);
+  border-top-color: var(--panel-accent);
+  animation: activity-spin 0.8s linear infinite;
+}
+.chat-activity__text {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes activity-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

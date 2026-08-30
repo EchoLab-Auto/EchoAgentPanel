@@ -25,14 +25,19 @@ function mergeReasoning(msgs: BranchMsg[]): ChatBranchEntry[] {
 
 export interface ChatMessageWithImages extends ChatMessage {
   images?: string[];
+  /** 实时消息标记（渲染层据此播放场动画/打字机；历史回放不播放） */
+  animate?: boolean;
 }
 
 export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
   return {
     id: m.key, // 'm{N}' → id
-    role: m.role === 'backend' ? 'agent' : m.role, // 唯一的角色改名
+    // backend → agent（库的角色命名）；reasoning 为面板扩展角色，由
+    // ChatView 的 #message slot 拦截渲染（库 ChatRole 无该角色）。
+    role: (m.role === 'backend' ? 'agent' : m.role) as ChatMessage['role'],
     content: m.content,
     time: m.time, // 双方都是秒级 Unix 时间戳，无需换算
+    animate: m.animate,
     images: m.images,
     reasoning: m.reasoning,
     tool: m.tool && {

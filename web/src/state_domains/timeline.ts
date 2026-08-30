@@ -36,32 +36,44 @@ export function finishToolMessage(state: AppState, toolName: string, result: str
 }
 
 export function loadTimeline(state: AppState, messages: TimelineMessage[]) {
-  const converted: DisplayMessage[] = messages.map((message) => {
+  const converted: DisplayMessage[] = [];
+  for (const message of messages) {
     const base = {
       key: nextKey(state),
       time: message.time,
       sessionId: message.session_id || undefined,
+      // 历史回放：不播放入场/打字机动画，避免整屏滚动特效。
+      animate: false,
     };
     if (message.kind === 'user') {
-      return {
+      converted.push({
         ...base,
         role: 'user' as const,
         content: message.content,
         source: message.source ?? null,
         images: message.images && message.images.length ? message.images : undefined,
-      };
+      });
+      continue;
     }
     if (message.kind === 'backend') {
-      return {
+      // 时序还原：推理先于回答插入（与实时路径一致），回答不再带尾巴。
+      for (const reasoning of message.reasoning ?? []) {
+        converted.push({
+          ...base,
+          role: 'reasoning' as const,
+          content: reasoning,
+        });
+      }
+      converted.push({
         ...base,
         role: 'backend' as const,
         content: message.content,
-        reasoning: message.reasoning && message.reasoning.length ? message.reasoning : undefined,
-      };
+      });
+      continue;
     }
     if (message.kind === 'tool') {
       const tool = message.tool;
-      return {
+      converted.push({
         ...base,
         role: 'tool' as const,
         content: tool ? tool.name : message.content,
@@ -73,10 +85,11 @@ export function loadTimeline(state: AppState, messages: TimelineMessage[]) {
               status: tool.failed ? ('failed' as const) : ('succeeded' as const),
             }
           : undefined,
-      };
+      });
+      continue;
     }
-    return { ...base, role: 'system' as const, content: message.content };
-  });
+    converted.push({ ...base, role: 'system' as const, content: message.content });
+  }
   state.trunk = converted;
 }
 

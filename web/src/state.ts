@@ -36,7 +36,7 @@ import type {
 
 export const TRUNK_SESSION_ID = 'trunk';
 
-export type MsgRole = 'user' | 'backend' | 'tool' | 'system' | 'branch';
+export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch';
 export type ToolStatus = 'running' | 'succeeded' | 'failed';
 
 export interface ToolMsg {
@@ -51,6 +51,8 @@ export interface DisplayMessage {
   role: MsgRole;
   content: string;
   time: number;
+  /** 实时到达的消息打上标记：渲染层对这类消息播放入场动画（历史回放不播）。 */
+  animate?: boolean;
   /** 归属会话 key（空 = 全局/未知） */
   sessionId?: string;
   reasoning?: string[];
@@ -319,6 +321,13 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
         return state;
       }
+      // 主时间线（无分支 tab）：推理立即按真实时序插入——推理块会出现在
+      // 之前/之后的工具调用之间，而不是等回复完成后附加在末尾。
+      pushTo(state, 'reasoning', content, Math.floor(Date.now() / 1000), {
+        sessionId: e.session_id,
+        animate: true,
+      });
+      // 保留 pending 队列兼容旧时序（分支合并块归并时仍会消费）。
       const key = `${e.session_id}:${e.branch_id}`;
       (state.pendingReasoning[key] ??= []).push(content);
       return state;
@@ -439,6 +448,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       }
       pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
         sessionId: e.session_id,
+        animate: true,
         tool: { name: e.tool_name, input: summarizeArguments(e.arguments), output: null, status: 'running' },
       });
       return state;
@@ -511,10 +521,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         act.phase = 'completed';
         act.detail = null;
       }
-      const reasoning = takeReasoning(state, e.session_id, e.branch_id);
+      // 推理已按时序穿插插入主时间线（见 AgentReasoning 分支）：
+      // 正式回答不再追加尾巴，避免重复显示。
       pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
         sessionId: e.session_id,
-        reasoning: reasoning.length ? reasoning : undefined,
+        animate: true,
       });
       return state;
     }
@@ -737,31 +748,6 @@ function applyBackgroundHook(state: AppState, content: string) {
         : 'failed';
     if (typeof delivery['result'] === 'string') branch.result = bounded(delivery['result'], 4000);
   }
-}
-
-function takeReasoning(state: AppState, sessionId: string, branchId: string | null): string[] {
-  if (branchId) {
-    const completed = state.completedReasoning[sessionId];
-    if (completed) {
-      const index = completed.indexOf(branchId);
-      if (index >= 0) completed.splice(index, 1);
-    }
-    const key = `${sessionId}:${branchId}`;
-    const reasoning = state.pendingReasoning[key];
-    delete state.pendingReasoning[key];
-    return reasoning ?? [];
-  }
-  const completed = state.completedReasoning[sessionId];
-  if (completed) {
-    while (completed.length) {
-      const id = completed.shift()!;
-      const key = `${sessionId}:${id}`;
-      const reasoning = state.pendingReasoning[key];
-      delete state.pendingReasoning[key];
-      if (reasoning && reasoning.length) return reasoning;
-    }
-  }
-  return [];
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {
