@@ -11,7 +11,7 @@ import {
   integrateBackgroundTask,
   stageOrchestrationTool,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, loadTimeline } from './state_domains/timeline';
+import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages } from './state_domains/timeline';
 import { sendCommand } from './connection';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
@@ -218,6 +218,14 @@ export interface AppState {
   context: ContextSnapshotData | null;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
+  /**
+   * 按 team 缓存的 timeline 全量快照（team_id → { seq, msgs }）。
+   * 切换 agent 时先用缓存渲染（消除白屏/网络等待），再后台增量刷新。
+   * key: null 表示主/默认 agent。
+   */
+  teamTimelines: Record<string, { seq: number; msgs: DisplayMessage[] }>;
+  /** 当前 state.trunk 归属的 team（null = 主/默认），用于校验缓存一致性 */
+  trunkTeamId: string | null;
   pendingBackground: Record<
     string,
     { kind: OrchKind; objective: string; branches: BranchActivity[] }
@@ -260,6 +268,8 @@ export function initialState(): AppState {
     activeTeamId: null,
     context: null,
     branchTabs: {},
+    teamTimelines: {},
+    trunkTeamId: null,
     pendingBackground: {},
     pendingReasoning: {},
     completedReasoning: {},
@@ -469,8 +479,26 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'TrunkTimeline': {
-      const e = (event as { TrunkTimeline: { messages: TimelineMessage[] } }).TrunkTimeline;
-      loadTimeline(state, e.messages);
+      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number } }).TrunkTimeline;
+      const seq = e.seq ?? 0;
+      const teamKey = String(state.activeTeamId ?? '');
+      const cached = state.teamTimelines[teamKey];
+      // 增量：有缓存且 seq 单调递增 → 仅追加新条目（不重建全量渲染）。
+      if (cached && seq > cached.seq && e.messages.length > 0) {
+        const appended = e.messages.map(toDisplayMessage);
+        cached.msgs.push(...appended);
+        cached.seq = seq;
+        // 若 trunk 正展示该 team，同步追加。
+        if (state.trunkTeamId === teamKey) {
+          state.trunk.push(...appended);
+        }
+        return state;
+      }
+      // 全量（首载/回退/seq 相同但内容被 ClearHistory 等重置）：重建缓存。
+      const converted = toDisplayMessages(e.messages);
+      state.teamTimelines[teamKey] = { seq, msgs: converted };
+      state.trunkTeamId = teamKey;
+      state.trunk = converted;
       return state;
     }
     case 'AgentOutput': {

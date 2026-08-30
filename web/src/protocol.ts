@@ -230,7 +230,7 @@ export type BackendCommand =
   | { CompactHistory: { team_id?: string | null; keep_recent?: number } }
   | 'RequestState'
   | { RequestContext: { team_id?: string | null } }
-  | { RequestTrunkTimeline: { team_id?: string | null } }
+  | { RequestTrunkTimeline: { team_id?: string | null; since_seq?: number } }
   | 'ClearHistory'
   | { CancelRequestedWork: { session_id: string; all: boolean } }
   | { StartAdapter: { name: string } }
@@ -345,7 +345,7 @@ export type BackendEvent =
         limit_tokens: number;
       };
     }
-  | { TrunkTimeline: { messages: TimelineMessage[] } }
+  | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number } }
   | {
       ApiConfigUpdated: {
         provider: string;

@@ -66,12 +66,23 @@ function onTeamSelect(next: string | null) {
   activeTeamId.value = next;
   state.activeTeamId = next;
   saveActiveTeam(next);
-  // 切换 Team = 切换记忆（会话隔离）：清空当前显示，加载该成员独立的 timeline。
-  state.trunk = [];
   // 分支 tab 属于上一个 agent 的运行期状态：切换后清空，避免在
   // 未启用回执分支的 agent（侧边栏无分支卡）下残留/串显。
   state.branchTabs = {};
-  sendCommand({ RequestTrunkTimeline: { team_id: next } });
+  // 切换 Team = 切换记忆（会话隔离）。
+  // 1) 有缓存：立刻用缓存渲染（消除白屏/网络等待），再后台增量拉取；
+  // 2) 无缓存：全量拉取（先清空避免串显上一 agent 内容）。
+  const teamKey = String(next ?? '');
+  const cached = state.teamTimelines[teamKey];
+  if (cached) {
+    state.trunk = cached.msgs;
+    state.trunkTeamId = teamKey;
+    sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
+  } else {
+    state.trunk = [];
+    state.trunkTeamId = teamKey;
+    sendCommand({ RequestTrunkTimeline: { team_id: next } });
+  }
   // 会话列表也按 Team 过滤（SessionGroups 依据 activeTeamId）。
   selectSession('local:tui::local_user');
 }
@@ -179,8 +190,14 @@ watch(
       activeTeamId.value = null;
       state.activeTeamId = null;
       saveActiveTeam(null);
-      state.trunk = [];
-      sendCommand({ RequestTrunkTimeline: { team_id: null } });
+      const cached = state.teamTimelines[''];
+      if (cached) {
+        state.trunk = cached.msgs;
+        sendCommand({ RequestTrunkTimeline: { team_id: null, since_seq: cached.seq } });
+      } else {
+        state.trunk = [];
+        sendCommand({ RequestTrunkTimeline: { team_id: null } });
+      }
       selectSession('local:tui::local_user');
     }
   },

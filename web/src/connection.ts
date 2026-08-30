@@ -43,6 +43,8 @@ export function startConnection(): void {
       }
       const bootstrap: BackendCommand[] = [
         'RequestState',
+        // 刷新前会话缓存不可用（内存态），这里仍走全量；切换后的增量
+        // 由 onTeamSelect 缓存逻辑负责。
         { RequestTrunkTimeline: { team_id: savedTeam } },
         'RequestAdapterStatus',
         'RequestQqFilterConfig',
