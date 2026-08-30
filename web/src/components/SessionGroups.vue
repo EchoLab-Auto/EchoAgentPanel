@@ -49,7 +49,23 @@ const globalSessionEnabled = computed(() => {
   return team.global_session_enabled !== false;
 });
 
+/** 会话是否属于当前激活 team（null = 主/默认 agent）。
+ * SessionInfo.team_id 由后端 annotate（主 agent 为其 id，如 alix）；
+ * Panel 的 activeTeamId 用 null 表示主 agent，因此需要归一化匹配。 */
+function sessionBelongsToActiveTeam(session: SessionInfo, activeTeamId: string | null): boolean {
+  const owner = session.team_id ?? null;
+  if (activeTeamId === null) {
+    if (owner === null) return true;
+    const primary = state.teams.find((t) => t.is_default);
+    return primary ? owner === primary.id : state.teams.length === 0;
+  }
+  return owner === activeTeamId;
+}
+
 const groups = computed(() => {
+  const visibleSessions = state.sessions.filter((s) =>
+    sessionBelongsToActiveTeam(s, state.activeTeamId),
+  );
   const result: Array<{ key: string; label: string; sessions: SessionInfo[] }> = [];
   if (globalSessionEnabled.value) {
     result.push({ key: 'global', label: SESSION_GROUP_LABEL.global, sessions: [] });
@@ -60,7 +76,7 @@ const groups = computed(() => {
     { key: 'qq-group', label: SESSION_GROUP_LABEL['qq-group'], sessions: [] },
     { key: 'other', label: SESSION_GROUP_LABEL.other, sessions: [] },
   );
-  for (const session of state.sessions) {
+  for (const session of visibleSessions) {
     const tag = sessionTag(session);
     const group = result.find((g) => g.key === tag.group) ?? result[result.length - 1];
     group.sessions.push(session);
