@@ -10,35 +10,54 @@ export function pushMessage(state: AppState, msg: DisplayMessage) {
   }
 }
 
-export function nextKey(state?: AppState): string {
-  if (state) {
-    state.msgSeq += 1;
-    return `m${state.msgSeq}`;
-  }
-  // 模块级序号：无 state 上下文时（如 toDisplayMessage 单条转换）也保证唯一。
+let globalSeq = 0;
+
+/** 模块级单调计数器：跨 trunk 重建 / team 切换永不清零，保证 Vue keyed
+ * v-for 的 key 全局唯一。
+ * （旧版 state.msgSeq 与 globalSeq 双计数器都从 0 开始，同一列表里会出现
+ * 重复 key，Vue 复用错误组件导致显示错乱。） */
+export function nextKey(): string {
   globalSeq += 1;
   return `m${globalSeq}`;
 }
-let globalSeq = 0;
 
 export function pushTo(state: AppState, role: MsgRole, content: string, time: number, extra?: Partial<DisplayMessage>) {
-  pushMessage(state, { key: nextKey(state), role, content, time, ...extra });
+  pushMessage(state, { key: nextKey(), role, content, time, ...extra });
 }
 
-export function finishToolMessage(state: AppState, toolName: string, result: string) {
-  const failed = result.trimStart().startsWith('error:');
+/** 工具结果回填：优先按 toolCallId 精确配对（同名并行调用不再配错对）；
+ * id 为空（旧 core）时回退为按名字匹配最新的 running 条目。
+ * timedOut（外圈超时守卫中止）与 error: 前缀一样渲染为失败。 */
+export function finishToolMessage(state: AppState, toolName: string, result: string, toolCallId?: string, timedOut?: boolean) {
+  const failed = timedOut === true || result.trimStart().startsWith('error:');
   for (let i = state.trunk.length - 1; i >= 0; i--) {
     const msg = state.trunk[i];
-    if (msg.role === 'tool' && msg.tool && msg.tool.name === toolName && msg.tool.status === 'running') {
-      msg.tool.output = bounded(result, 4000);
-      msg.tool.status = failed ? 'failed' : 'succeeded';
-      return;
-    }
+    if (msg.role !== 'tool' || !msg.tool || msg.tool.status !== 'running') continue;
+    const matched = toolCallId
+      ? msg.tool.toolCallId === toolCallId
+      : msg.tool.name === toolName;
+    if (!matched) continue;
+    msg.tool.output = bounded(result, 4000);
+    msg.tool.status = failed ? 'failed' : 'succeeded';
+    return;
   }
   // No running entry (e.g. restored timeline): append a completed entry.
   pushTo(state, 'tool', toolName, Math.floor(Date.now() / 1000), {
-    tool: { name: toolName, input: '', output: bounded(result, 4000), status: failed ? 'failed' : 'succeeded' },
+    tool: {
+      name: toolName,
+      input: '',
+      output: bounded(result, 4000),
+      status: failed ? 'failed' : 'succeeded',
+      toolCallId: toolCallId || undefined,
+    },
   });
+}
+
+/** TimelineTool（持久化条目）→ 前端 ToolMsg 状态映射。
+ * output 为 null 且未失败 = 仍在运行（旧版误恢复为 succeeded）。 */
+function toolStatusOf(tool: { output: string | null; failed: boolean; timed_out?: boolean }): 'running' | 'succeeded' | 'failed' {
+  if (tool.failed || tool.timed_out === true) return 'failed';
+  return tool.output == null ? 'running' : 'succeeded';
 }
 
 /** 单条 TimelineMessage → DisplayMessage（供全量重建与增量追加共用） */
@@ -78,7 +97,8 @@ export function toDisplayMessage(message: TimelineMessage): DisplayMessage {
             name: tool.name,
             input: tool.input,
             output: tool.output,
-            status: tool.failed ? ('failed' as const) : ('succeeded' as const),
+            status: toolStatusOf(tool),
+            toolCallId: tool.tool_call_id || undefined,
           }
         : undefined,
     };
@@ -108,72 +128,23 @@ export function toDisplayMessages(messages: TimelineMessage[]): DisplayMessage[]
   return out;
 }
 
-export function loadTimeline(state: AppState, messages: TimelineMessage[]) {
-  const converted: DisplayMessage[] = [];
-  for (const message of messages) {
-    const base = {
-      key: nextKey(state),
-      time: message.time,
-      sessionId: message.session_id || undefined,
-      // 历史回放：不播放入场/打字机动画，避免整屏滚动特效。
-      animate: false,
-    };
-    if (message.kind === 'user') {
-      converted.push({
-        ...base,
-        role: 'user' as const,
-        content: message.content,
-        source: message.source ?? null,
-        images: message.images && message.images.length ? message.images : undefined,
-      });
-      continue;
+/** 增量投递的就地修补：core 对运行中的工具条目做就地更新后会带新 seq
+ * 重新投递完成态；若条目已存在于列表中（按 tool_call_id 匹配），原地更新
+ * 而不是追加，避免重复行。返回 true 表示已修补。 */
+export function patchToolMessage(list: DisplayMessage[], incoming: DisplayMessage): boolean {
+  const tool = incoming.tool;
+  if (!tool?.toolCallId) return false;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const existing = list[i];
+    if (existing.role === 'tool' && existing.tool?.toolCallId === tool.toolCallId) {
+      existing.tool = { ...tool };
+      existing.content = incoming.content;
+      return true;
     }
-    if (message.kind === 'backend') {
-      // 时序还原：推理先于回答插入（与实时路径一致），回答不再带尾巴。
-      for (const reasoning of message.reasoning ?? []) {
-        converted.push({
-          ...base,
-          role: 'reasoning' as const,
-          content: reasoning,
-        });
-      }
-      converted.push({
-        ...base,
-        role: 'backend' as const,
-        content: message.content,
-      });
-      continue;
-    }
-    if (message.kind === 'reasoning') {
-      // 后端新投影：推理为独立条目（按到达顺序，与工具交错）
-      converted.push({
-        ...base,
-        role: 'reasoning' as const,
-        content: message.content,
-      });
-      continue;
-    }
-    if (message.kind === 'tool') {
-      const tool = message.tool;
-      converted.push({
-        ...base,
-        role: 'tool' as const,
-        content: tool ? tool.name : message.content,
-        tool: tool
-          ? {
-              name: tool.name,
-              input: tool.input,
-              output: tool.output,
-              status: tool.failed ? ('failed' as const) : ('succeeded' as const),
-            }
-          : undefined,
-      });
-      continue;
-    }
-    converted.push({ ...base, role: 'system' as const, content: message.content });
   }
-  state.trunk = converted;
+  return false;
 }
 
-// ── main reducer ───────────────────────────────────────────────────────────
-
+export function loadTimeline(state: AppState, messages: TimelineMessage[]) {
+  state.trunk = toDisplayMessages(messages);
+}

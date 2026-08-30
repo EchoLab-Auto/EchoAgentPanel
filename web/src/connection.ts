@@ -33,6 +33,11 @@ export function startConnection(): void {
       state.branchTabs = {};
       state.tasks = [];
       state.activities = {};
+      // 时间线缓存一并清空：断连期间错过的实时事件/就地更新无法对齐，
+      // 全量重建是唯一可靠的恢复方式（响应带 full 标志，直接替换）。
+      state.trunk = [];
+      state.teamTimelines = {};
+      state.trunkTeamId = null;
       // Bootstrap the panel state on (re)connect.
       // Timeline 按上次使用的 Agent（localStorage）加载，刷新/重连后不跳回默认。
       let savedTeam: string | null = null;

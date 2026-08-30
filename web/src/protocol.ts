@@ -139,6 +139,10 @@ export interface TimelineTool {
   input: string;
   output: string | null;
   failed: boolean;
+  /** 工具调用精确配对 id（新 core 提供；旧 core 无此字段，回退按名配对） */
+  tool_call_id?: string;
+  /** 执行被外圈超时守卫中止 */
+  timed_out?: boolean;
 }
 
 export interface TimelineMessage {
@@ -150,6 +154,8 @@ export interface TimelineMessage {
   reasoning?: string[] | null;
   tool?: TimelineTool | null;
   images?: string[];
+  /** 条目级单调序号（新 core 提供；就地更新的工具条目带新 seq 重新投递） */
+  seq?: number;
 }
 
 export interface ChecklistState {
@@ -331,8 +337,8 @@ export type BackendEvent =
         integrated_at_ms: number;
       };
     }
-  | { ToolCall: { session_id: string; tool_name: string; arguments: string; branch_id?: string; team_id?: string | null } }
-  | { ToolResult: { session_id: string; tool_name: string; result: string; branch_id?: string; team_id?: string | null } }
+  | { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null } }
+  | { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null } }
   | { ChecklistUpdated: { session_id: string; state: ChecklistState } }
   | { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }
   | { AgentCompleted: { session_id: string } }
@@ -345,7 +351,7 @@ export type BackendEvent =
         limit_tokens: number;
       };
     }
-  | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null } }
+  | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }
   | {
       ApiConfigUpdated: {
         provider: string;

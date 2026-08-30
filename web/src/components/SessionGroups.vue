@@ -57,7 +57,9 @@ function sessionBelongsToActiveTeam(session: SessionInfo, activeTeamId: string |
   if (activeTeamId === null) {
     if (owner === null) return true;
     const primary = state.teams.find((t) => t.is_default);
-    return primary ? owner === primary.id : state.teams.length === 0;
+    // TeamsList 尚未到达时不放行他属会话：避免非默认 team 的会话在启动
+    // 瞬间闪现到主 agent 分组再消失。
+    return primary ? owner === primary.id : false;
   }
   return owner === activeTeamId;
 }
@@ -80,6 +82,10 @@ const groups = computed(() => {
     const tag = sessionTag(session);
     const group = result.find((g) => g.key === tag.group) ?? result[result.length - 1];
     group.sessions.push(session);
+  }
+  // 组内按最近活跃倒序：有活动的会话上浮，列表顺序稳定可读。
+  for (const group of result) {
+    group.sessions.sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0));
   }
   return result;
 });

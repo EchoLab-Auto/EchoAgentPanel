@@ -75,7 +75,9 @@ function onTeamSelect(next: string | null) {
   const teamKey = String(next ?? '');
   const cached = state.teamTimelines[teamKey];
   if (cached) {
-    state.trunk = cached.msgs;
+    // 副本渲染：trunk 与缓存解除数组别名，实时推送不再污染缓存
+    // （否则切换回来后增量同步会把缓存里已有的实时消息再投递一遍）。
+    state.trunk = [...cached.msgs];
     state.trunkTeamId = teamKey;
     sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
   } else {

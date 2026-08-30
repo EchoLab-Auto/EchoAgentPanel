@@ -46,27 +46,51 @@ async fn bridge(browser: WebSocket, state: AppState) {
     let (mut browser_tx, mut browser_rx) = browser.split();
     let (mut core_tx, mut core_rx) = core.split();
 
+    // 心跳保活 + Ping/Pong 透传：Core 服务端的心跳 Ping 经本中继转发给
+    // 浏览器（浏览器内核自动回 Pong，再经本中继转回 Core）；本中继自身也
+    // 每 30s 向两侧各发一次 Ping，空闲连接不会被中间层（NAT/反代）悄悄
+    // 断开。注意 tungstenite 在 split 后自动回的 Pong 不保证及时 flush，
+    // 因此显式透传而不是依赖隐式应答。
+    let mut up_heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+    up_heartbeat.tick().await; // 首次 tick 立即返回，跳过
+    let mut down_heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+    down_heartbeat.tick().await;
+
     // Browser → Core: commands and sudo-password frames, verbatim.
     let to_core = async {
-        while let Some(message) = browser_rx.next().await {
-            let message = match message {
-                Ok(message) => message,
-                Err(_) => break,
-            };
-            match message {
-                BrowserMessage::Text(text) => {
-                    let text: String = text.to_string();
+        loop {
+            tokio::select! {
+                message = browser_rx.next() => {
+                    let message = match message {
+                        Some(Ok(message)) => message,
+                        _ => break,
+                    };
+                    let forward = match message {
+                        BrowserMessage::Text(text) => {
+                            tokio_tungstenite::tungstenite::Message::Text(text.to_string().into())
+                        }
+                        BrowserMessage::Ping(payload) => {
+                            tokio_tungstenite::tungstenite::Message::Ping(payload.to_vec().into())
+                        }
+                        BrowserMessage::Pong(payload) => {
+                            tokio_tungstenite::tungstenite::Message::Pong(payload.to_vec().into())
+                        }
+                        // Binary frames are not part of the protocol; drop the link.
+                        BrowserMessage::Binary(_) | BrowserMessage::Close(_) => break,
+                    };
+                    if core_tx.send(forward).await.is_err() {
+                        break;
+                    }
+                }
+                _ = up_heartbeat.tick() => {
                     if core_tx
-                        .send(tokio_tungstenite::tungstenite::Message::Text(text))
+                        .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new().into()))
                         .await
                         .is_err()
                     {
                         break;
                     }
                 }
-                // Binary frames are not part of the protocol; drop the link.
-                BrowserMessage::Binary(_) | BrowserMessage::Close(_) => break,
-                _ => {}
             }
         }
         let _ = core_tx.close().await;
@@ -74,25 +98,40 @@ async fn bridge(browser: WebSocket, state: AppState) {
 
     // Core → Browser: events, verbatim.
     let to_browser = async {
-        while let Some(message) = core_rx.next().await {
-            let message = match message {
-                Ok(message) => message,
-                Err(_) => break,
-            };
-            match message {
-                tokio_tungstenite::tungstenite::Message::Text(text) => {
-                    let text: String = text.to_string();
+        loop {
+            tokio::select! {
+                message = core_rx.next() => {
+                    let message = match message {
+                        Some(Ok(message)) => message,
+                        _ => break,
+                    };
+                    let forward = match message {
+                        tokio_tungstenite::tungstenite::Message::Text(text) => {
+                            BrowserMessage::Text(text.to_string().into())
+                        }
+                        tokio_tungstenite::tungstenite::Message::Ping(payload) => {
+                            BrowserMessage::Ping(payload.to_vec().into())
+                        }
+                        tokio_tungstenite::tungstenite::Message::Pong(payload) => {
+                            BrowserMessage::Pong(payload.to_vec().into())
+                        }
+                        tokio_tungstenite::tungstenite::Message::Binary(_)
+                        | tokio_tungstenite::tungstenite::Message::Close(_) => break,
+                        _ => continue,
+                    };
+                    if browser_tx.send(forward).await.is_err() {
+                        break;
+                    }
+                }
+                _ = down_heartbeat.tick() => {
                     if browser_tx
-                        .send(BrowserMessage::Text(text.into()))
+                        .send(BrowserMessage::Ping(Vec::new().into()))
                         .await
                         .is_err()
                     {
                         break;
                     }
                 }
-                tokio_tungstenite::tungstenite::Message::Binary(_)
-                | tokio_tungstenite::tungstenite::Message::Close(_) => break,
-                _ => {}
             }
         }
         let _ = browser_tx.close().await;

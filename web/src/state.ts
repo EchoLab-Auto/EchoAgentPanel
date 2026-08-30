@@ -11,7 +11,7 @@ import {
   integrateBackgroundTask,
   stageOrchestrationTool,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages } from './state_domains/timeline';
+import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage } from './state_domains/timeline';
 import { sendCommand } from './connection';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
@@ -36,6 +36,23 @@ import type {
 
 export const TRUNK_SESSION_ID = 'trunk';
 
+/** 实时事件是否属于当前显示的 team 时间线。
+ * Panel 的 activeTeamId 用 null 表示主/默认 agent；core 端 team_id 为
+ * null 或默认 team id 都归一化为主 agent（与 SessionGroups 的
+ * sessionBelongsToActiveTeam 同一套归一化）。事件未带 team_id（旧 core）
+ * 或 TeamsList 尚未到达时不过滤。 */
+export function belongsToActiveTeam(state: AppState, teamId: string | null | undefined): boolean {
+  if (teamId === undefined) return true;
+  if (state.teams.length === 0) return true;
+  const active = state.activeTeamId;
+  if (active === null) {
+    if (teamId == null) return true;
+    const primary = state.teams.find((t) => t.is_default);
+    return primary ? teamId === primary.id : true;
+  }
+  return teamId === active;
+}
+
 export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch';
 export type ToolStatus = 'running' | 'succeeded' | 'failed';
 
@@ -44,6 +61,8 @@ export interface ToolMsg {
   input: string;
   output: string | null;
   status: ToolStatus;
+  /** 工具调用精确配对 id（新 core 提供；同名并行调用据此配对） */
+  toolCallId?: string;
 }
 
 export interface DisplayMessage {
@@ -81,6 +100,7 @@ export interface BranchMsg {
   text: string;
   time: number;
   toolName?: string;
+  toolCallId?: string;
   input?: string;
   output?: string;
   status?: ToolStatus;
@@ -233,7 +253,6 @@ export interface AppState {
   pendingReasoning: Record<string, string[]>;
   completedReasoning: Record<string, string[]>;
   nextSubagentSeq: number;
-  msgSeq: number;
 }
 
 export function initialState(): AppState {
@@ -274,7 +293,6 @@ export function initialState(): AppState {
     pendingReasoning: {},
     completedReasoning: {},
     nextSubagentSeq: 0,
-    msgSeq: 0,
   };
 }
 
@@ -323,16 +341,19 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'AgentReasoning': {
-      const e = (event as { AgentReasoning: { session_id: string; branch_id: string; content: string } }).AgentReasoning;
+      const e = (event as { AgentReasoning: { session_id: string; branch_id: string; content: string; team_id?: string | null } }).AgentReasoning;
       const content = e.content.trim();
       if (!content) return state;
       // 无论是否存在分支 tab：推理立即按真实时序插入主时间线——
       // 推理块会出现在之前/之后的工具调用之间，而不是等回复完成
       // 后附加在末尾（分支合并块因此不再需要在结束时归档）。
-      pushTo(state, 'reasoning', content, Math.floor(Date.now() / 1000), {
-        sessionId: e.session_id,
-        animate: true,
-      });
+      // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
+      if (belongsToActiveTeam(state, e.team_id)) {
+        pushTo(state, 'reasoning', content, Math.floor(Date.now() / 1000), {
+          sessionId: e.session_id,
+          animate: true,
+        });
+      }
       const tab = state.branchTabs[e.branch_id];
       if (tab) {
         tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
@@ -418,22 +439,32 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ToolCall': {
-      const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; branch_id?: string } }).ToolCall;
+      const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null } }).ToolCall;
       stageOrchestrationTool(state, e.session_id, e.tool_name, e.arguments);
       setPhase(state, e.session_id, e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
       // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
+      // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
       const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
-      pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
-        sessionId: e.session_id,
-        animate: true,
-        tool: { name: e.tool_name, input: summarizeArguments(e.arguments), output: null, status: 'running' },
-      });
+      if (belongsToActiveTeam(state, e.team_id)) {
+        pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
+          sessionId: e.session_id,
+          animate: true,
+          tool: {
+            name: e.tool_name,
+            input: summarizeArguments(e.arguments),
+            output: null,
+            status: 'running',
+            toolCallId: e.tool_call_id || undefined,
+          },
+        });
+      }
       if (tab) {
         tab.msgs.push({
           kind: 'tool',
           text: e.tool_name,
           time: Math.floor(Date.now() / 1000),
           toolName: e.tool_name,
+          toolCallId: e.tool_call_id || undefined,
           input: summarizeArguments(e.arguments),
           status: 'running',
         });
@@ -441,19 +472,24 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ToolResult': {
-      const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; branch_id?: string } }).ToolResult;
-      // 工具结果实时回填主时间线（与 ToolCall 配对）；分支 tab 同步更新。
+      const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null } }).ToolResult;
+      // 工具结果实时回填主时间线（与 ToolCall 精确配对）；分支 tab 同步更新。
       const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
-      finishToolMessage(state, e.tool_name, e.result);
+      if (belongsToActiveTeam(state, e.team_id)) {
+        finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out);
+      }
       if (tab) {
-        const failed = e.result.trimStart().startsWith('error:');
+        const failed = e.timed_out === true || e.result.trimStart().startsWith('error:');
         for (let i = tab.msgs.length - 1; i >= 0; i--) {
           const msg = tab.msgs[i];
-          if (msg.kind === 'tool' && msg.toolName === e.tool_name && msg.status === 'running') {
-            msg.output = bounded(e.result, 4000);
-            msg.status = failed ? 'failed' : 'succeeded';
-            break;
-          }
+          if (msg.kind !== 'tool' || msg.status !== 'running') continue;
+          const matched = e.tool_call_id
+            ? msg.toolCallId === e.tool_call_id
+            : msg.toolName === e.tool_name;
+          if (!matched) continue;
+          msg.output = bounded(e.result, 4000);
+          msg.status = failed ? 'failed' : 'succeeded';
+          break;
         }
       }
       const act = activity(state, e.session_id);
@@ -479,46 +515,62 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'TrunkTimeline': {
-      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null } }).TrunkTimeline;
+      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }).TrunkTimeline;
       // ⚠️ 响应归属由后端标注（team_id = 请求值），绝不能拿当前
       // activeTeamId 猜测：其他 agent 的兜底请求若按当前视图路由会
       // 污染 trunk（串显 alix 会话/误清空 self-coding 内容）。
       const teamKey = String(e.team_id ?? '');
       const seq = e.seq ?? 0;
-      const cached = state.teamTimelines[teamKey];
-      // 增量：有缓存且 seq 单调递增 → 仅追加新条目（不重建全量渲染）。
-      if (cached && seq > cached.seq) {
-        if (e.messages.length > 0) {
-          const appended = e.messages.map(toDisplayMessage);
-          cached.msgs.push(...appended);
-          if (state.trunkTeamId === teamKey) {
-            state.trunk.push(...appended);
-          }
-        }
-        cached.seq = seq;
+      // 旧 core（无 team_id 标注）沿用旧路由：按当前视图处理。
+      const key = e.team_id !== undefined ? teamKey : String(state.activeTeamId ?? '');
+      const cached = state.teamTimelines[key];
+
+      if (e.full === undefined && cached && seq === cached.seq && e.messages.length === 0) {
+        // 旧 core 空增量：仅游标对齐（无变化）。旧版误当全量重建会清空聊天。
         return state;
       }
-      // 旧后端（无 team_id）：回退按 activeTeamId 路由（兼容期内仍按
-      // 当前视图处理，避免新前端 + 旧核心组合时功能缺失）。
-      const fallbackKey = String(state.activeTeamId ?? '');
-      const effectiveKey = e.team_id !== undefined ? teamKey : fallbackKey;
-      // 全量（首载/seq 回退/ClearHistory 等）：重建对应缓存。
+      const isFull = e.full !== undefined ? e.full : !(cached && seq > cached.seq);
+
+      if (!isFull && cached) {
+        // 增量：追加新条目。core 对运行中工具条目的就地更新会带新 seq
+        // 重新投递完成态——按 tool_call_id 原地修补，不追加重复行。
+        for (const message of e.messages) {
+          const display = toDisplayMessage(message);
+          if (!patchToolMessage(cached.msgs, display)) cached.msgs.push(display);
+          if (state.trunkTeamId === key) {
+            // 两个列表各持一份副本（独立 key/对象），避免跨列表别名。
+            const forTrunk = toDisplayMessage(message);
+            if (!patchToolMessage(state.trunk, forTrunk)) state.trunk.push(forTrunk);
+          }
+        }
+        cached.seq = Math.max(seq, cached.seq);
+        return state;
+      }
+
+      // 全量（首载/full 标志/seq 回退/ClearHistory 等）：重建对应缓存。
       const converted = toDisplayMessages(e.messages);
-      state.teamTimelines[effectiveKey] = { seq, msgs: converted };
-      state.trunkTeamId = effectiveKey;
-      state.trunk = converted;
+      state.teamTimelines[key] = { seq, msgs: converted };
+      // 仅当响应对应的正是当前查看的 team 时才替换实时视图；其他 team 的
+      // 兜底响应只更新缓存。trunk 与缓存解除数组别名（[...converted]），
+      // 否则实时推送会污染缓存、切换回来后经增量再投递一次（重复）。
+      if (key === String(state.activeTeamId ?? '')) {
+        state.trunkTeamId = key;
+        state.trunk = [...converted];
+      }
       return state;
     }
     case 'AgentOutput': {
       const e = (event as { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }).AgentOutput;
-      // 正式回答不做 team 过滤：主时间线按会话显示，agent 切换场景下
-      // 过滤曾导致回答被丢弃（只能靠刷新回放）。实时性优先，归属由
-      // session 隔离体现。
-      // 正式回答实时进主时间线（推理已按序穿插，无需再附加尾巴）。
-      pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
-        sessionId: e.session_id,
-        animate: true,
-      });
+      // 正式回答仅当属于当前 team 时进主时间线（跨 agent 不串显）。
+      // 回答丢失的历史问题由 AgentCompleted 的兜底拉取补齐（core 的
+      // full 标志 + 条目级 seq 使兜底拉取不再重复/串显）。
+      if (belongsToActiveTeam(state, e.team_id)) {
+        // 正式回答实时进主时间线（推理已按序穿插，无需再附加尾巴）。
+        pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
+          sessionId: e.session_id,
+          animate: true,
+        });
+      }
       if (e.branch_id) {
         const tab = state.branchTabs[e.branch_id];
         if (tab) {
@@ -688,8 +740,12 @@ function reduceMessage(
     timestamp: number;
     received_at_ms: number;
     message_sequence: number;
+    team_id?: string | null;
   },
 ) {
+  // 其他 team 的实时消息不进当前主时间线（跨 agent 不串显）；
+  // 其历史会在切换到对应 team 时由增量/全量同步补齐。
+  if (!belongsToActiveTeam(state, e.team_id)) return state;
   if (e.adapter_name === 'timer') {
     pushTo(state, 'system', summarizeTimerEvent(e.content), e.timestamp, {
       sessionId: e.session_id,
