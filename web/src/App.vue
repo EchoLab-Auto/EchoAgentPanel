@@ -68,6 +68,9 @@ function onTeamSelect(next: string | null) {
   saveActiveTeam(next);
   // 切换 Team = 切换记忆（会话隔离）：清空当前显示，加载该成员独立的 timeline。
   state.trunk = [];
+  // 分支 tab 属于上一个 agent 的运行期状态：切换后清空，避免在
+  // 未启用回执分支的 agent（侧边栏无分支卡）下残留/串显。
+  state.branchTabs = {};
   sendCommand({ RequestTrunkTimeline: { team_id: next } });
   // 会话列表也按 Team 过滤（SessionGroups 依据 activeTeamId）。
   selectSession('local:tui::local_user');

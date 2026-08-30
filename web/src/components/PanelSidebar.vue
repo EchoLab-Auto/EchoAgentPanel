@@ -3,7 +3,7 @@
 //! 折叠状态在组件内部维护；会话选择与分支选择冒泡给 App。
 //! Team（Agent）切换已迁至聊天输入框左侧的 AgentSwitcher 悬浮卡片。
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { state } from '../store';
 import SidebarCard from './SidebarCard.vue';
 import SessionGroups from './SessionGroups.vue';
@@ -12,6 +12,15 @@ defineProps<{
   activeSessionId: string;
   activeBranchId: string | null;
 }>();
+
+// 临时分支卡仅对启用了回执分支能力的 Agent 显示。
+// 当前 team = state.activeTeamId（null = 主/默认 agent）。
+// 后端按 TeamInfo.reply_branches_enabled 推导（enabled_plugins 白名单）。
+const replyBranchesVisible = computed(() => {
+  const team = state.teams.find((t) => t.id === state.activeTeamId);
+  if (!team) return true; // 主/默认 agent：未配置限定时默认启用
+  return team.reply_branches_enabled !== false;
+});
 
 const emit = defineEmits<{
   selectSession: [id: string];
@@ -36,8 +45,9 @@ function truncateTask(task: string): string {
 
 <template>
   <div class="panel-sider">
-    <!-- 卡片：临时分支 -->
+    <!-- 卡片：临时分支（当前 Agent 未启用回执分支时整卡隐藏） -->
     <SidebarCard
+      v-if="replyBranchesVisible"
       title="临时分支"
       :open="cardOpen.branches"
       :count="Object.keys(state.branchTabs).length"

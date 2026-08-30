@@ -77,6 +77,8 @@ export interface TeamInfo {
   enabled_skills?: string[];
   memory_limit_tokens?: number | null;
   context_window_tokens?: number | null;
+  /** 临时回复分支能力是否启用（后端按 enabled_plugins 白名单推导） */
+  reply_branches_enabled?: boolean;
 }
 
 export interface PluginInfo {
