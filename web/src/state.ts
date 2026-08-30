@@ -228,24 +228,6 @@ export interface AppState {
   msgSeq: number;
 }
 
-/** 实时事件是否属于当前激活 team。
- *
- * 后端 annotate_team 会把所有携带 session 的事件注入 team_id（包括主 agent，
- * 如 alix 的 team_id = "alix"）；而 Panel 用 null 表示"主/默认 agent"。
- * 因此 activeTeamId 为 null 时，必须同时接受 team_id 为 null 或主 agent id，
- * 否则主 agent 的实时回复会被过滤掉（只有刷新加载 timeline 才看得到）。
- */
-function eventBelongsToActiveTeam(state: AppState, teamId: string | null | undefined): boolean {
-  const owner = teamId ?? null;
-  if (state.activeTeamId === null) {
-    // 主 agent 视角：接受无标注（本地路径）或主 agent 自身 id。
-    if (owner === null) return true;
-    const primary = state.teams.find((t) => t.is_default);
-    return primary ? owner === primary.id : state.teams.length === 0;
-  }
-  return owner === state.activeTeamId;
-}
-
 export function initialState(): AppState {
   return {
     connected: false,
