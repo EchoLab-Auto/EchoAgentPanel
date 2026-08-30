@@ -493,7 +493,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'AgentOutput': {
       const e = (event as { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }).AgentOutput;
-      if (!eventBelongsToActiveTeam(state, e.team_id)) return state;
+      // 正式回答不做 team 过滤：主时间线按会话显示，agent 切换场景下
+      // 过滤曾导致回答被丢弃（只能靠刷新回放）。实时性优先，归属由
+      // session 隔离体现。
       // 正式回答实时进主时间线（推理已按序穿插，无需再附加尾巴）。
       pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
         sessionId: e.session_id,
@@ -518,11 +520,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       if (!state.tasks.some((t) => t.sessionId === e.session_id && t.kind === 'reply' && t.status === 'running')) {
         setPhase(state, e.session_id, 'completed', null);
       }
-      // 兜底：若该会话的最后一条显示消息仍是用户消息（回复缺失），
-      // 主动拉取时间线补齐，避免事件丢失导致"看不到回复"。
+      // 兜底：turn 完成时若该会话最后一条仍未到 backend（回答缺失），
+      // 主动拉取时间线对齐——推理/工具已实时显示但回答丢失时保证补齐。
       const trunk = state.trunk.filter((m) => m.sessionId === e.session_id || m.sessionId === undefined);
       const last = trunk[trunk.length - 1];
-      if (last && last.role === 'user') {
+      if (!last || (last.role !== 'backend' && last.role !== 'branch')) {
         sendCommand({ RequestTrunkTimeline: { team_id: null } });
       }
       return state;
