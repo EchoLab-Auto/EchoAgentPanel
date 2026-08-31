@@ -2,7 +2,7 @@
 //! Agent 配置悬浮弹层：在会话区上方打开的轻量配置卡片，
 //! 对应资源页的 Team 编辑（系统提示词 / 启用 / 能力白名单）。
 
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
@@ -14,6 +14,14 @@ const props = defineProps<{
   bottomOffset?: number;
 }>();
 const emit = defineEmits<{ close: [] }>();
+
+// 弹层每次打开都会重新挂载（v-if）：挂载时拉取能力列表，
+// 确保工具/技能/插件表格有数据（未进过资源页时 state 为空）。
+onMounted(() => {
+  sendCommand('RequestSkillsList');
+  sendCommand('RequestToolsList');
+  sendCommand('RequestPluginsList');
+});
 
 // ── 表单字段（打开时从 team 初始化） ──
 const name = ref('');
