@@ -44,24 +44,92 @@ watch(
   { immediate: true },
 );
 
-// ── 能力选项（与资源页同源） ──
-const pluginOptions = computed(() =>
+// ── 包（pkg）名称映射：同 pkg 的工具/技能视作一个整体分组 ──
+const PACKAGE_NAMES: Record<string, string> = {
+  'echo-agent.adapter.qq': 'QQ 适配器包',
+  'echo-agent.orchestration': '编排工具包',
+  'echo-agent.tools.builtin': '内置工具集',
+  'echo-agent.skills.dir': '技能目录',
+};
+
+interface GroupedItem {
+  key: string;
+  name: string;
+  description: string;
+  /** 所属分组（pkg 名或类别/空 = 未分组） */
+  group?: string;
+}
+
+/** 工具：按 package 分组（无 package 按 category） */
+const toolItems = computed<GroupedItem[]>(() =>
+  state.tools.map((t) => ({
+    key: t.name,
+    name: t.name,
+    description: t.description || '（无描述）',
+    group: t.package ? (PACKAGE_NAMES[t.package] ?? t.package) : t.category || undefined,
+  })),
+);
+/** 技能：按 package 分组（无 package 按 category） */
+const skillItems = computed<GroupedItem[]>(() =>
+  state.skills.map((sk) => ({
+    key: sk.name,
+    name: sk.name,
+    description: sk.description || '（无描述）',
+    group: sk.package ? (PACKAGE_NAMES[sk.package] ?? sk.package) : sk.category || undefined,
+  })),
+);
+/** 插件：管理/适配器类（无 pkg 概念，按 kind 分组展示） */
+const pluginItems = computed<GroupedItem[]>(() =>
   state.plugins
     .filter((p) => ['adapter', 'management'].includes(p.kind))
-    .map((p) => ({ key: p.id, label: p.name })),
+    .map((p) => ({
+      key: p.id,
+      name: p.name,
+      description: p.description || '（无描述）',
+      group: p.kind === 'adapter' ? '适配器' : '管理面',
+    })),
 );
-const toolOptions = computed(() => state.tools.map((t) => ({ key: t.name, label: t.name })));
-const skillOptions = computed(() => state.skills.map((s) => ({ key: s.name, label: s.name })));
 
-function toggle(list: string[], key: string): string[] {
-  return list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
+/** 按分组聚合成表格模型（组名 + 成员；无分组归入「其他」） */
+interface GroupedTable {
+  group: string;
+  items: GroupedItem[];
 }
-function isOn(list: string[], key: string): boolean {
+function groupBy(items: GroupedItem[]): GroupedTable[] {
+  const map = new Map<string, GroupedItem[]>();
+  for (const item of items) {
+    const g = item.group ?? '其他';
+    if (!map.has(g)) map.set(g, []);
+    map.get(g)!.push(item);
+  }
+  return [...map.entries()]
+    .map(([group, list]) => ({ group, items: list.sort((a, b) => a.name.localeCompare(b.name)) }))
+    .sort((a, b) => a.group.localeCompare(b.group));
+}
+const toolGroups = computed(() => groupBy(toolItems.value));
+const skillGroups = computed(() => groupBy(skillItems.value));
+const pluginGroups = computed(() => groupBy(pluginItems.value));
+
+/** 白名单语义：列表为空 = 全部启用（全选状态） */
+function isItemOn(list: string[], key: string): boolean {
   return list.length === 0 || list.includes(key);
 }
-function toggleAllow(list: string[], all: string[], key: string): string[] {
+/** 组内全部启用？ */
+function isGroupOn(list: string[], group: GroupedTable): boolean {
+  return list.length === 0 || group.items.every((i) => list.includes(i.key));
+}
+/** 切换单项（白名单为空时先以全量初始化再切换） */
+function toggleItem(list: string[], all: string[], key: string): string[] {
   const base = list.length ? list : [...all];
-  return toggle(base, key);
+  return base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
+}
+/** 切换整组 */
+function toggleGroup(list: string[], all: string[], group: GroupedTable): string[] {
+  const base = list.length ? list : [...all];
+  const keys = group.items.map((i) => i.key);
+  const on = group.items.every((i) => base.includes(i.key));
+  if (on) return base.filter((k) => !keys.includes(k));
+  return [...new Set([...base, ...keys])];
 }
 
 const bottomPx = computed(() => `${props.bottomOffset ?? 42}px`);
@@ -122,52 +190,106 @@ function save() {
 
         <div class="agent-config__group">
           <div class="agent-config__group-title">启用插件</div>
-          <div class="agent-config__chips">
-            <button
-              v-for="opt in pluginOptions"
-              :key="opt.key"
-              type="button"
-              class="agent-config__chip"
-              :class="{ 'is-on': isOn(enabledPlugins, opt.key) }"
-              @click="enabledPlugins = toggleAllow(enabledPlugins, pluginOptions.map((o) => o.key), opt.key)"
-            >
-              {{ isOn(enabledPlugins, opt.key) ? '✓ ' : '' }}{{ opt.label }}
-            </button>
-            <span v-if="!pluginOptions.length" class="muted">（无）</span>
+          <div v-if="!pluginGroups.length" class="muted">（无）</div>
+          <div v-for="g in pluginGroups" :key="g.group" class="agent-config__pkg">
+            <div class="agent-config__pkg-head">
+              <label class="agent-config__pkg-check">
+                <input
+                  type="checkbox"
+                  :checked="isGroupOn(enabledPlugins, g)"
+                  @change="enabledPlugins = toggleGroup(enabledPlugins, pluginItems.map((i) => i.key), g)"
+                />
+                <span>{{ g.group }}（{{ g.items.length }}）</span>
+              </label>
+            </div>
+            <table class="agent-config__table">
+              <thead>
+                <tr><th class="agent-config__th-name">名称</th><th>介绍</th><th class="agent-config__th-check">启用</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in g.items" :key="item.key">
+                  <td class="agent-config__td-name">{{ item.name }}</td>
+                  <td class="agent-config__td-desc">{{ item.description }}</td>
+                  <td class="agent-config__td-check">
+                    <input
+                      type="checkbox"
+                      :checked="isItemOn(enabledPlugins, item.key)"
+                      @change="enabledPlugins = toggleItem(enabledPlugins, pluginItems.map((i) => i.key), item.key)"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
         <div class="agent-config__group">
-          <div class="agent-config__group-title">启用工具</div>
-          <div class="agent-config__chips">
-            <button
-              v-for="opt in toolOptions"
-              :key="opt.key"
-              type="button"
-              class="agent-config__chip"
-              :class="{ 'is-on': isOn(enabledTools, opt.key) }"
-              @click="enabledTools = toggleAllow(enabledTools, toolOptions.map((o) => o.key), opt.key)"
-            >
-              {{ isOn(enabledTools, opt.key) ? '✓ ' : '' }}{{ opt.label }}
-            </button>
-            <span v-if="!toolOptions.length" class="muted">（无）</span>
+          <div class="agent-config__group-title">启用工具（按 pkg 分组）</div>
+          <div v-if="!toolGroups.length" class="muted">（无）</div>
+          <div v-for="g in toolGroups" :key="g.group" class="agent-config__pkg">
+            <div class="agent-config__pkg-head">
+              <label class="agent-config__pkg-check">
+                <input
+                  type="checkbox"
+                  :checked="isGroupOn(enabledTools, g)"
+                  @change="enabledTools = toggleGroup(enabledTools, toolItems.map((i) => i.key), g)"
+                />
+                <span>{{ g.group }}（{{ g.items.length }}）</span>
+              </label>
+            </div>
+            <table class="agent-config__table">
+              <thead>
+                <tr><th class="agent-config__th-name">名称</th><th>介绍</th><th class="agent-config__th-check">启用</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in g.items" :key="item.key">
+                  <td class="agent-config__td-name">{{ item.name }}</td>
+                  <td class="agent-config__td-desc">{{ item.description }}</td>
+                  <td class="agent-config__td-check">
+                    <input
+                      type="checkbox"
+                      :checked="isItemOn(enabledTools, item.key)"
+                      @change="enabledTools = toggleItem(enabledTools, toolItems.map((i) => i.key), item.key)"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
         <div class="agent-config__group">
-          <div class="agent-config__group-title">启用技能</div>
-          <div class="agent-config__chips">
-            <button
-              v-for="opt in skillOptions"
-              :key="opt.key"
-              type="button"
-              class="agent-config__chip"
-              :class="{ 'is-on': isOn(enabledSkills, opt.key) }"
-              @click="enabledSkills = toggleAllow(enabledSkills, skillOptions.map((o) => o.key), opt.key)"
-            >
-              {{ isOn(enabledSkills, opt.key) ? '✓ ' : '' }}{{ opt.label }}
-            </button>
-            <span v-if="!skillOptions.length" class="muted">（无）</span>
+          <div class="agent-config__group-title">启用技能（按 pkg 分组）</div>
+          <div v-if="!skillGroups.length" class="muted">（无）</div>
+          <div v-for="g in skillGroups" :key="g.group" class="agent-config__pkg">
+            <div class="agent-config__pkg-head">
+              <label class="agent-config__pkg-check">
+                <input
+                  type="checkbox"
+                  :checked="isGroupOn(enabledSkills, g)"
+                  @change="enabledSkills = toggleGroup(enabledSkills, skillItems.map((i) => i.key), g)"
+                />
+                <span>{{ g.group }}（{{ g.items.length }}）</span>
+              </label>
+            </div>
+            <table class="agent-config__table">
+              <thead>
+                <tr><th class="agent-config__th-name">名称</th><th>介绍</th><th class="agent-config__th-check">启用</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in g.items" :key="item.key">
+                  <td class="agent-config__td-name">{{ item.name }}</td>
+                  <td class="agent-config__td-desc">{{ item.description }}</td>
+                  <td class="agent-config__td-check">
+                    <input
+                      type="checkbox"
+                      :checked="isItemOn(enabledSkills, item.key)"
+                      @change="enabledSkills = toggleItem(enabledSkills, skillItems.map((i) => i.key), item.key)"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -253,22 +375,61 @@ function save() {
 .agent-config__switch input:checked + .agent-config__switch-track { background: var(--panel-accent); }
 .agent-config__switch input:checked + .agent-config__switch-track::after { transform: translateX(18px); }
 .agent-config__group-title { font-size: 12px; font-weight: 600; color: var(--nm-text-secondary); margin-bottom: 6px; }
-.agent-config__chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.agent-config__chip {
-  border: 1px solid var(--nm-border-color);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--nm-text-secondary);
-  font-size: 12px;
-  padding: 3px 10px;
-  cursor: pointer;
-  font-family: inherit;
+/* pkg 分组块 */
+.agent-config__pkg {
+  border: 1px solid var(--nm-border-subtle);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
 }
-.agent-config__chip.is-on {
-  border-color: var(--panel-accent);
-  background: var(--panel-accent-soft);
-  color: var(--panel-accent);
+.agent-config__pkg-head {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+  background: color-mix(in srgb, var(--nm-text-primary) 5%, transparent);
+  border-bottom: 1px solid var(--nm-border-subtle);
+}
+.agent-config__pkg-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--nm-text-primary);
+  cursor: pointer;
+}
+.agent-config__pkg-check input { accent-color: var(--panel-accent); }
+/* 表格 */
+.agent-config__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.agent-config__table th {
+  text-align: left;
+  padding: 5px 10px;
+  color: var(--nm-text-secondary);
   font-weight: 600;
+  font-size: 11px;
+  border-bottom: 1px solid var(--nm-border-subtle);
+  background: color-mix(in srgb, var(--nm-text-primary) 3%, transparent);
+}
+.agent-config__table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--nm-border-subtle) 50%, transparent);
+  vertical-align: top;
+}
+.agent-config__table tr:last-child td { border-bottom: none; }
+.agent-config__th-name, .agent-config__td-name { width: 170px; font-weight: 600; white-space: nowrap; }
+.agent-config__th-check, .agent-config__td-check { width: 44px; text-align: center; }
+.agent-config__td-check input { accent-color: var(--panel-accent); }
+.agent-config__td-desc {
+  color: var(--nm-text-secondary);
+  line-height: 1.5;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .agent-config__foot {
   display: flex;
