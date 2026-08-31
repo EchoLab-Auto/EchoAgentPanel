@@ -406,7 +406,19 @@ function save() {
   color: var(--nm-text-primary);
   cursor: pointer;
 }
-.agent-config__pkg-check input { accent-color: var(--panel-accent); }
+.agent-config__pkg-check input,
+.agent-config__td-check input {
+  /* ui-frame base.css 把 input 设为 appearance:none——原生 checkbox
+     在无外观时没有默认方框尺寸（0×0）。这里显式恢复外观并给尺寸。 */
+  -webkit-appearance: auto;
+  -moz-appearance: auto;
+  appearance: auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--panel-accent);
+}
 /* 表格 */
 .agent-config__table {
   width: 100%;
@@ -430,7 +442,7 @@ function save() {
 .agent-config__table tr:last-child td { border-bottom: none; }
 .agent-config__th-name, .agent-config__td-name { width: 170px; font-weight: 600; white-space: nowrap; }
 .agent-config__th-check, .agent-config__td-check { width: 44px; text-align: center; }
-.agent-config__td-check input { accent-color: var(--panel-accent); }
+
 .agent-config__td-desc {
   color: var(--nm-text-secondary);
   line-height: 1.5;
