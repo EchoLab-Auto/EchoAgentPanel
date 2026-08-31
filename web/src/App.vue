@@ -14,13 +14,15 @@ import {
   type HeadlessMenuItem,
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
+import type { TeamInfo } from './protocol';
 import { sendCommand, startConnection } from './connection';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import TasksPanel from './components/TasksPanel.vue';
 import CapabilitiesPanel from './components/CapabilitiesPanel.vue';
 import LogView from './components/LogView.vue';
-import ShellPanel from './components/ShellPanel.vue';import SettingsModal from './components/SettingsModal.vue';
+import ShellPanel from './components/ShellPanel.vue';
+import AgentConfigModal from './components/AgentConfigModal.vue';import SettingsModal from './components/SettingsModal.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
@@ -97,6 +99,20 @@ function setView(next: View) {
   } catch {
     // ignore storage errors (private mode)
   }
+}
+
+// ── 当前 Agent 配置入口：从聊天的"配置"按钮唤起 ──
+// 在会话区上方打开悬浮配置弹层（不改视图、不跳资源页）。
+const configAgent = ref<TeamInfo | null>(null);
+
+function openAgentConfig() {
+  // 当前显示的 team：activeTeamId 或第一个 team（默认主 agent）
+  const current = state.teams.find((t) => t.id === activeTeamId.value) ?? state.teams[0];
+  configAgent.value = current ?? null;
+}
+
+function closeAgentConfig() {
+  configAgent.value = null;
 }
 
 // 当前对话目标会话；'global' = 全局上下文（显示全部消息）。默认 local user 会话。
@@ -334,6 +350,7 @@ watch(
           @send="send"
           @cancel="cancelWork"
           @select-team="onTeamSelect"
+          @open-config="openAgentConfig"
         />
         <CapabilitiesPanel v-else-if="view === 'caps'" />
         <LogView v-else-if="view === 'logs'" />
@@ -349,6 +366,9 @@ watch(
       @close="activeBranchId = null"
     />
     <SudoModal v-if="state.sudoPrompt" :prompt="state.sudoPrompt" />
+
+    <!-- Agent 配置悬浮弹层：会话区上方，不离开聊天 -->
+    <AgentConfigModal v-if="configAgent" :team="configAgent" @close="closeAgentConfig" />
 
     <NeumorphismToastProvider ref="toastProvider" position="top-right" :max-count="8" />
   </ThemeProvider>

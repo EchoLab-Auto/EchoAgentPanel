@@ -24,6 +24,8 @@ import { state } from '../store';
 import { sendCommand } from '../connection';
 import type { PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 
+
+
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
 const TOOL_OTHER = '扩展工具';
