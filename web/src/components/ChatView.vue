@@ -15,6 +15,7 @@ import {
 import { state } from '../store';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
+import AgentConfigModal from './AgentConfigModal.vue';
 import ReasoningBlock from './ReasoningBlock.vue';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
@@ -25,7 +26,6 @@ const emit = defineEmits<{
   send: [content: string, images: string[]];
   cancel: [];
   selectTeam: [id: string | null];
-  openConfig: [];
 }>();
 
 const input = ref('');
@@ -139,6 +139,21 @@ watch(
 const busy = computed(() => {
   const a = state.activities[props.sessionId];
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
+});
+
+// ── Agent 配置悬浮弹层（会话区内） ──
+const configOpen = ref(false);
+const configTeam = computed(() => {
+  const teams = state.teams;
+  if (!teams.length) return null;
+  const active = props.activeTeamId ? teams.find((t) => t.id === props.activeTeamId) : undefined;
+  return active ?? teams[0];
+});
+// 弹层 bottom 偏移：入口行（含配置按钮，高约 30px）之上 12px
+// entryBottom 为入口行距底部的 CSS 值（px 字符串），换算数值：
+const configBottomOffset = computed(() => {
+  const m = entryBottom.value.match(/(\d+)/);
+  return (m ? parseInt(m[1], 10) : 170) + 30 + 12;
 });
 
 // 活动指示浮条：思考/调用工具/子代理 的实时状态，让用户知道 agent 在干什么
@@ -258,7 +273,7 @@ function imagesOf(message: ChatMessage): string[] {
       <button
         class="ctx-entry"
         title="配置当前 Agent（系统提示词 / 能力白名单 / 禁用工具等）"
-        @click="emit('openConfig')"
+        @click="configOpen = true"
       >
         <svg
           class="ctx-entry__icon"
@@ -380,6 +395,14 @@ function imagesOf(message: ChatMessage): string[] {
         </div>
       </template>
     </ChatMessageList>
+
+    <!-- Agent 配置悬浮弹层：覆盖会话区（上/左/右 12px，底距配置按钮 12px） -->
+    <AgentConfigModal
+      v-if="configOpen && configTeam"
+      :team="configTeam"
+      :bottom-offset="configBottomOffset"
+      @close="configOpen = false"
+    />
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
     <div ref="composerFloatRef" class="chat-composer-float">

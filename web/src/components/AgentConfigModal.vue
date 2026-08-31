@@ -8,7 +8,11 @@ import { state } from '../store';
 import { sendCommand } from '../connection';
 import type { TeamInfo } from '../protocol';
 
-const props = defineProps<{ team: TeamInfo }>();
+const props = defineProps<{
+  team: TeamInfo;
+  /** 卡片底部距视图底部的偏移（px），用于避开输入区/配置按钮 */
+  bottomOffset?: number;
+}>();
 const emit = defineEmits<{ close: [] }>();
 
 // ── 表单字段（打开时从 team 初始化） ──
@@ -59,6 +63,8 @@ function toggleAllow(list: string[], all: string[], key: string): string[] {
   const base = list.length ? list : [...all];
   return toggle(base, key);
 }
+
+const bottomPx = computed(() => `${props.bottomOffset ?? 42}px`);
 
 function save() {
   if (!name.value.trim()) return;
@@ -176,23 +182,36 @@ function save() {
 
 <style scoped>
 .agent-config-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
+  z-index: 50;
 }
+/* 磨砂玻璃卡片：距会话框 上/左/右 12px，下边框距配置按钮上边框 12px */
 .agent-config {
-  width: min(560px, 92vw);
-  max-height: 84vh;
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  bottom: v-bind(bottomPx);
   display: flex;
   flex-direction: column;
-  border-radius: 18px;
-  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
-  background: var(--nm-surface-raised);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 0.5px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+/* 头部/脚部随玻璃面半透明处理 */
+.agent-config__head {
+  background: linear-gradient(
+    color-mix(in srgb, #ffffff 6%, transparent),
+    transparent
+  );
 }
 .agent-config__head {
   display: flex;
