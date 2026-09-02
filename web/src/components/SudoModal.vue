@@ -41,7 +41,7 @@ onMounted(() => {
       <p class="muted">密码只通过专用通道提交，不会进入日志或对话；Enter 授权，Esc 拒绝。</p>
       <NeumorphismInput v-model="input" type="password" placeholder="输入 sudo 密码" />
       <div class="form-actions">
-        <NeumorphismButton variant="flat" @click="submit(null)">拒绝 (Esc)</NeumorphismButton>
+        <NeumorphismButton variant="glass" @click="submit(null)">拒绝 (Esc)</NeumorphismButton>
         <NeumorphismButton variant="primary" @click="submit(input)">授权 (Enter)</NeumorphismButton>
       </div>
     </div>

@@ -569,9 +569,9 @@ watch(
         @select="onMenuSelect"
       />
       <div class="caps-side-actions">
-        <NeumorphismButton size="small" variant="flat" @click="startCreate">新建技能</NeumorphismButton>
-        <NeumorphismButton size="small" variant="flat" @click="startTeamCreate">新建 Team</NeumorphismButton>
-        <NeumorphismButton size="small" variant="flat" @click="refresh">刷新</NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" @click="startCreate">新建技能</NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" @click="startTeamCreate">新建 Team</NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" @click="refresh">刷新</NeumorphismButton>
       </div>
     </div>
 
@@ -587,8 +587,8 @@ watch(
         <div class="detail-head">
           <h3>{{ selectedSkill.name }}</h3>
           <div class="detail-actions">
-            <NeumorphismButton size="small" variant="flat" @click="startEdit">编辑</NeumorphismButton>
-            <NeumorphismButton size="small" variant="flat" @click="deleteSkill(selectedSkill)">
+            <NeumorphismButton size="small" variant="glass" @click="startEdit">编辑</NeumorphismButton>
+            <NeumorphismButton size="small" variant="glass" @click="deleteSkill(selectedSkill)">
               删除
             </NeumorphismButton>
           </div>
@@ -649,7 +649,7 @@ watch(
           />
           <div class="form-actions">
             <NeumorphismButton variant="primary" @click="saveSkill">保存</NeumorphismButton>
-            <NeumorphismButton variant="flat" @click="cancelEdit">取消</NeumorphismButton>
+            <NeumorphismButton variant="glass" @click="cancelEdit">取消</NeumorphismButton>
           </div>
         </div>
       </div>
@@ -661,7 +661,7 @@ watch(
           <div class="detail-actions">
             <NeumorphismButton
               size="small"
-              variant="flat"
+              variant="glass"
               v-if="!isPrimaryTeam(selectedTeam)"
               @click="deleteTeam(selectedTeam!)"
             >
@@ -828,13 +828,13 @@ watch(
           <div class="form-actions form-actions--corner">
             <NeumorphismButton
               v-if="teamFormIsEdit && selectedTeam && !isPrimaryTeam(selectedTeam)"
-              variant="flat"
+              variant="glass"
               class="caps-delete-btn"
               @click="deleteTeam(selectedTeam)"
             >
               删除
             </NeumorphismButton>
-            <NeumorphismButton variant="flat" @click="cancelTeamEdit">放弃更改</NeumorphismButton>
+            <NeumorphismButton variant="glass" @click="cancelTeamEdit">放弃更改</NeumorphismButton>
             <NeumorphismButton variant="primary" @click="saveTeam">保存</NeumorphismButton>
           </div>
         </NeumorphismForm>

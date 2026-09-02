@@ -44,9 +44,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     "onUpdate:mode"?: ((value: PixelLogoMode) => any) | undefined;
     "onMode-change"?: ((value: PixelLogoMode) => any) | undefined;
 }>, {
+    goo: boolean;
     ariaLabel: string;
     floating: boolean;
-    goo: boolean;
     autoplay: boolean;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;

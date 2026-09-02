@@ -89,7 +89,7 @@ function toggleDenyGroup(id: number) {
         <h2>适配器管理</h2>
         <p class="qq-head__sub">连接状态 · 门控策略 · 名单配置</p>
       </div>
-      <NeumorphismButton size="small" variant="flat" :disabled="!state.connected" @click="refreshLists">
+      <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="refreshLists">
         刷新列表
       </NeumorphismButton>
     </div>
@@ -106,7 +106,7 @@ function toggleDenyGroup(id: number) {
       <span class="adapter-row__actions">
         <NeumorphismButton
           size="small"
-          variant="flat"
+          variant="glass"
           :disabled="!state.connected"
           @click="sendCommand(adapter.running ? { StopAdapter: { name: adapter.name } } : { StartAdapter: { name: adapter.name } })"
         >
@@ -114,7 +114,7 @@ function toggleDenyGroup(id: number) {
         </NeumorphismButton>
         <NeumorphismButton
           size="small"
-          variant="flat"
+          variant="glass"
           :disabled="!state.connected"
           @click="sendCommand({ RestartAdapter: { name: adapter.name } })"
         >

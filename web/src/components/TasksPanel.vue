@@ -122,7 +122,7 @@ function cancel(sessionId: string) {
         <NeumorphismButton
           v-if="isActive(task.status) && task.sessionId"
           size="small"
-          variant="flat"
+          variant="glass"
           @click="cancel(task.sessionId)"
         >
           取消

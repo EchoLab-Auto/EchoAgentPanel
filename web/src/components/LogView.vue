@@ -64,7 +64,7 @@ watch([auto, kind], () => {
     <div class="log-head">
       <h2 class="log-title">日志查看器</h2>
       <NeumorphismSegmented v-model="kind" :options="KIND_OPTIONS" size="small" />
-      <NeumorphismButton variant="flat" size="small" @click="auto = !auto">
+      <NeumorphismButton variant="glass" size="small" @click="auto = !auto">
         {{ auto ? '自动刷新中' : '手动刷新' }}
       </NeumorphismButton>
     </div>

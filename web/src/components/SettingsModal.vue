@@ -300,7 +300,7 @@ function saveAsNewProfile() {
         <NeumorphismButton
           v-if="editingProfile"
           size="small"
-          variant="flat"
+          variant="glass"
           @click="cancelEdit"
         >
           取消编辑
@@ -345,7 +345,7 @@ function saveAsNewProfile() {
       </div>
       <div class="form-actions">
         <NeumorphismButton
-          variant="flat"
+          variant="glass"
           :loading="testing === (editingProfile ?? '')"
           :disabled="testing !== null && testing !== (editingProfile ?? '')"
           @click="runTest(editingProfile ?? '')"
@@ -386,7 +386,7 @@ function saveAsNewProfile() {
         <span class="profile-actions">
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             :loading="testing === profile.name"
             :disabled="testing !== null && testing !== profile.name"
             @click="runTest(profile.name)"
@@ -395,21 +395,21 @@ function saveAsNewProfile() {
           </NeumorphismButton>
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             @click="editProfile(profile)"
           >
             编辑
           </NeumorphismButton>
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             @click="sendCommand({ SwitchApi: { name: profile.name } })"
           >
             切换
           </NeumorphismButton>
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             @click="sendCommand({ DeleteApi: { name: profile.name } })"
           >
             删除

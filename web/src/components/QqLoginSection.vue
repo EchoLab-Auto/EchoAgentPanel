@@ -98,7 +98,7 @@ const webuiUrl = `http://${window.location.hostname}:6099`;
   <div class="panel-section qq-login">
     <div class="qq-login-head">
       <h3>QQ 登录</h3>
-      <NeumorphismButton size="small" variant="flat" :disabled="loading" @click="loadQr">
+      <NeumorphismButton size="small" variant="glass" :disabled="loading" @click="loadQr">
         {{ loading ? '读取中…' : '获取登录二维码' }}
       </NeumorphismButton>
     </div>

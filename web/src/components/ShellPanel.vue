@@ -78,7 +78,7 @@ watch(
           @keyup.enter="startSession"
         />
         <NeumorphismButton size="small" variant="primary" @click="startSession">新建会话</NeumorphismButton>
-        <NeumorphismButton size="small" variant="flat" @click="refresh">刷新</NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" @click="refresh">刷新</NeumorphismButton>
       </div>
     </div>
 
@@ -98,7 +98,7 @@ watch(
         <span class="shell-card__meta">{{ session.workdir }}</span>
         <span class="shell-card__meta">{{ fmtTime(session.created_at_ms) }} · {{ session.exec_count }} 条命令</span>
         <span class="shell-card__spacer" />
-        <NeumorphismButton size="small" variant="flat" @click="stopSession(session.session_id)">
+        <NeumorphismButton size="small" variant="glass" @click="stopSession(session.session_id)">
           停止
         </NeumorphismButton>
       </div>

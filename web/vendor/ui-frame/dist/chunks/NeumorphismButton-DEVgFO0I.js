@@ -78,7 +78,7 @@ import '../NeumorphismButton.css';const x = ["type", "form", "disabled", "aria-l
       ], 2)
     ], 10, x));
   }
-}), V = /* @__PURE__ */ w(N, [["__scopeId", "data-v-2e3cdbf0"]]);
+}), V = /* @__PURE__ */ w(N, [["__scopeId", "data-v-7f2c0fbc"]]);
 export {
   V as N
 };

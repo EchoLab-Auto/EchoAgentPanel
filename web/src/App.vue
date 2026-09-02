@@ -263,7 +263,7 @@ watch(
         <div class="topbar-actions">
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             :pressed="view === 'chat'"
             @click="setView('chat')"
           >
@@ -271,7 +271,7 @@ watch(
           </NeumorphismButton>
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             :pressed="view === 'tasks'"
             @click="setView('tasks')"
           >
@@ -279,7 +279,7 @@ watch(
           </NeumorphismButton>
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             :pressed="view === 'caps'"
             @click="setView('caps')"
           >
@@ -287,7 +287,7 @@ watch(
           </NeumorphismButton>
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             :pressed="view === 'logs'"
             @click="setView('logs')"
           >
@@ -295,14 +295,14 @@ watch(
           </NeumorphismButton>
           <NeumorphismButton
             size="small"
-            variant="flat"
+            variant="glass"
             :pressed="view === 'shell'"
             @click="setView('shell')"
           >
             Shell
           </NeumorphismButton>
           <NeumorphismDropdown trigger="click" position="bottom">
-            <NeumorphismButton size="small" variant="flat">设置 ▾</NeumorphismButton>
+            <NeumorphismButton size="small" variant="glass">设置 ▾</NeumorphismButton>
             <template #items>
               <NeumorphismMenu
                 :items="settingsMenuItems"

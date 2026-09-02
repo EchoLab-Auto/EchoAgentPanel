@@ -1,4 +1,4 @@
-export type ButtonVariant = 'raised' | 'flat' | 'pressed' | 'primary' | 'glow';
+export type ButtonVariant = 'raised' | 'pressed' | 'primary' | 'glow' | 'glass' | 'glass-raised';
 export type ButtonSize = 'small' | 'medium' | 'large';
 export type ButtonShape = 'rounded' | 'pill' | 'circle';
 export interface NeumorphismButtonProps {

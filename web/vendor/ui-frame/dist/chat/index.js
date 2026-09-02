@@ -1,13 +1,13 @@
-import { defineComponent as x, computed as u, openBlock as t, createElementBlock as l, withModifiers as U, unref as v, normalizeClass as V, toDisplayString as c, renderSlot as k, createElementVNode as g, createBlock as b, createCommentVNode as f, ref as P, onMounted as G, nextTick as W, withCtx as _, createTextVNode as S, createVNode as N, Fragment as I, renderList as z } from "vue";
+import { defineComponent as x, computed as u, openBlock as t, createElementBlock as l, withModifiers as U, unref as v, normalizeClass as V, toDisplayString as c, renderSlot as k, createElementVNode as g, createBlock as _, createCommentVNode as f, ref as P, onMounted as G, nextTick as W, withCtx as b, createTextVNode as S, createVNode as N, Fragment as I, renderList as z } from "vue";
 import { useClipboard as q } from "../composables/useClipboard.js";
 import { useLocale as w } from "../composables/useLocale.js";
 import { _ as T } from "../chunks/_plugin-vue_export-helper-CHgC5LLL.js";
 import { u as A } from "../chunks/createComponent-jnXBYqCm.js";
 import { useChatScroll as H } from "../composables/useChatScroll.js";
 import { N as Q } from "../chunks/NeumorphismTextarea-CSZ2VWdh.js";
-import { N as E } from "../chunks/NeumorphismButton-6BjLxZWQ.js";
+import { N as E } from "../chunks/NeumorphismButton-DEVgFO0I.js";
 import { useChatInput as X } from "../composables/useChatInput.js";
-import { _ as Y } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-BGgdJmiI.js";
+import { _ as Y } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-Cn1n06gM.js";
 import { N as M } from "../chunks/NeumorphismTag-S0FZZ2i6.js";
 import { N as Z } from "../chunks/NeumorphismSpinner-CecIG42-.js";
 import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ x({
@@ -42,7 +42,7 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
       s.$slots.head || e.copyText ? (t(), l("div", ae, [
         k(s.$slots, "head", {}, void 0, !0),
         a[0] || (a[0] = g("span", { class: "nm-chat-bubble__head-spacer" }, null, -1)),
-        e.copyText ? (t(), b(D, {
+        e.copyText ? (t(), _(D, {
           key: 0,
           class: "nm-chat-bubble__copy",
           text: e.copyText
@@ -165,7 +165,7 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
 }), F = /* @__PURE__ */ T(pe, [["__scopeId", "data-v-6dab9779"]]), ve = {
   key: 0,
   class: "nm-chat-composer__meta"
-}, be = { class: "nm-chat-composer__row" }, _e = /* @__PURE__ */ x({
+}, _e = { class: "nm-chat-composer__row" }, be = /* @__PURE__ */ x({
   __name: "ChatComposer",
   props: {
     modelValue: { default: "" },
@@ -193,21 +193,20 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
     }, [
       y.$slots.meta || e.cancelable ? (t(), l("div", ve, [
         k(y.$slots, "meta", {}, void 0, !0),
-        e.cancelable ? (t(), b(E, {
+        e.cancelable ? (t(), _(E, {
           key: 0,
           class: "nm-chat-composer__cancel",
           size: "small",
-          variant: "flat",
           disabled: e.disabled,
           onClick: B[0] || (B[0] = (L) => m("cancel"))
         }, {
-          default: _(() => [
+          default: b(() => [
             S(c(o.value), 1)
           ]),
           _: 1
         }, 8, ["disabled"])) : f("", !0)
       ])) : f("", !0),
-      g("div", be, [
+      g("div", _e, [
         N(Q, {
           class: "nm-chat-composer__field",
           "model-value": e.modelValue,
@@ -230,7 +229,7 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
             disabled: e.disabled || !v($),
             onClick: v(h)
           }, {
-            default: _(() => [
+            default: b(() => [
               S(c(n.value), 1)
             ]),
             _: 1
@@ -239,7 +238,7 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
       ])
     ], 2));
   }
-}), lt = /* @__PURE__ */ T(_e, [["__scopeId", "data-v-7a5d56ba"]]), ge = { class: "nm-chat-reasoning__title" }, ye = {
+}), lt = /* @__PURE__ */ T(be, [["__scopeId", "data-v-80c4268a"]]), ge = { class: "nm-chat-reasoning__title" }, ye = {
   key: 0,
   class: "nm-chat-reasoning__time"
 }, ke = /* @__PURE__ */ x({
@@ -251,15 +250,15 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
   },
   setup(e) {
     const s = e, { t: a } = w(), m = u(() => a("chatReasoning", { count: s.parts.length }));
-    return (r, i) => (t(), b(F, {
+    return (r, i) => (t(), _(F, {
       "default-open": e.defaultOpen,
       class: "nm-chat-reasoning"
     }, {
-      head: _(() => [
+      head: b(() => [
         g("span", ge, c(m.value), 1),
         e.time ? (t(), l("span", ye, "· " + c(e.time), 1)) : f("", !0)
       ]),
-      default: _(() => [
+      default: b(() => [
         (t(!0), l(I, null, z(e.parts, (n, o) => (t(), l("p", {
           key: o,
           class: "nm-chat-reasoning__part"
@@ -291,45 +290,45 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
   },
   setup(e) {
     const s = e, { t: a } = w(), m = u(() => s.input ?? ""), r = u(() => s.output ?? ""), i = u(() => m.value.length + r.value.length), n = u(() => s.status === "running" ? a("chatToolRunning") : s.status === "succeeded" ? a("chatToolSucceeded") : s.status === "failed" ? a("chatToolFailed") : ""), o = u(() => s.status === "succeeded" ? "success" : s.status === "failed" ? "error" : "info");
-    return (p, d) => (t(), b(F, {
+    return (p, d) => (t(), _(F, {
       expandable: i.value > 0,
       class: "nm-chat-tool"
     }, {
-      head: _(({ open: h }) => [
+      head: b(({ open: h }) => [
         N(M, {
           size: "small",
           variant: "info"
         }, {
-          default: _(() => [
+          default: b(() => [
             S(c(v(a)("chatRoleTool")), 1)
           ]),
           _: 1
         }),
         g("span", $e, c(e.name), 1),
-        e.status === "running" ? (t(), b(Z, {
+        e.status === "running" ? (t(), _(Z, {
           key: 0,
           size: "small"
         })) : f("", !0),
         e.time ? (t(), l("span", Ce, c(e.time), 1)) : f("", !0),
-        e.status ? (t(), b(M, {
+        e.status ? (t(), _(M, {
           key: 2,
           size: "small",
           variant: o.value
         }, {
-          default: _(() => [
+          default: b(() => [
             S(c(n.value), 1)
           ]),
           _: 1
         }, 8, ["variant"])) : f("", !0),
         i.value > 0 ? (t(), l("span", xe, c(h ? v(a)("chatToolCollapse") : v(a)("chatToolDetails", { count: i.value })), 1)) : f("", !0)
       ]),
-      actions: _(() => [
-        r.value ? (t(), b(D, {
+      actions: b(() => [
+        r.value ? (t(), _(D, {
           key: 0,
           text: r.value
         }, null, 8, ["text"])) : f("", !0)
       ]),
-      default: _(() => [
+      default: b(() => [
         m.value ? (t(), l("pre", Te, c(m.value), 1)) : f("", !0),
         r.value ? (t(), l("pre", Be, c(r.value), 1)) : f("", !0)
       ]),
@@ -362,13 +361,13 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
     ), n = u(
       () => a("chatBranchStats", { tools: r.value, reasonings: i.value })
     );
-    return (o, p) => (t(), b(F, {
+    return (o, p) => (t(), _(F, {
       sunk: !1,
       class: "nm-chat-branch"
     }, {
-      head: _(({ open: d }) => [
+      head: b(({ open: d }) => [
         N(M, { size: "small" }, {
-          default: _(() => [
+          default: b(() => [
             S(c(v(a)("chatBranchMerge")), 1)
           ]),
           _: 1
@@ -377,20 +376,20 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
         e.time ? (t(), l("span", Ne, c(e.time), 1)) : f("", !0),
         g("span", Ie, c(d ? v(a)("chatCollapse") : n.value), 1)
       ]),
-      subhead: _(() => [
+      subhead: b(() => [
         g("div", Le, c(e.branch.summary), 1)
       ]),
-      default: _(() => [
+      default: b(() => [
         g("div", Re, [
           e.branch.entries.length === 0 ? (t(), l("div", Ve, c(v(a)("chatBranchEmpty")), 1)) : f("", !0),
           (t(!0), l(I, null, z(e.branch.entries, (d) => (t(), l(I, { key: d }, [
-            d.kind === "tool" ? (t(), b(K, {
+            d.kind === "tool" ? (t(), _(K, {
               key: 0,
               name: d.toolName ?? d.text,
               input: d.input,
               output: d.output,
               status: d.status
-            }, null, 8, ["name", "input", "output", "status"])) : d.kind === "reasoning" ? (t(), b(J, {
+            }, null, 8, ["name", "input", "output", "status"])) : d.kind === "reasoning" ? (t(), _(J, {
               key: 1,
               parts: [d.text]
             }, null, 8, ["parts"])) : d.kind === "content" ? (t(), l("div", Me, c(d.text), 1)) : (t(), l("div", ze, c(d.text), 1))
@@ -435,29 +434,29 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
       const h = s.message.time;
       return h ? s.formatTime ? s.formatTime(h) : new Date(h * 1e3).toLocaleTimeString(void 0, { hour12: !1 }) : "";
     }), d = u(() => i.value && s.message.role === "agent");
-    return (h, $) => e.message.role === "tool" && e.message.tool ? (t(), b(K, {
+    return (h, $) => e.message.role === "tool" && e.message.tool ? (t(), _(K, {
       key: 0,
       name: e.message.tool.name,
       input: e.message.tool.input,
       output: e.message.tool.output,
       status: e.message.tool.status,
       time: p.value
-    }, null, 8, ["name", "input", "output", "status", "time"])) : e.message.role === "branch" && e.message.branch ? (t(), b(Oe, {
+    }, null, 8, ["name", "input", "output", "status", "time"])) : e.message.role === "branch" && e.message.branch ? (t(), _(Oe, {
       key: 1,
       branch: e.message.branch,
       time: p.value
-    }, null, 8, ["branch", "time"])) : e.message.role === "system" ? (t(), b(j, {
+    }, null, 8, ["branch", "time"])) : e.message.role === "system" ? (t(), _(j, {
       key: 2,
       align: "center",
       tone: "plain",
       role: "note"
     }, {
-      default: _(() => [
+      default: b(() => [
         g("span", Ee, c(e.message.content), 1),
         p.value ? (t(), l("span", je, c(p.value), 1)) : f("", !0)
       ]),
       _: 1
-    })) : (t(), b(j, {
+    })) : (t(), _(j, {
       key: 3,
       align: n.value ? "end" : "start",
       tone: n.value ? "primary" : "default",
@@ -465,18 +464,18 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
       role: "article",
       "aria-label": n.value ? v(a)("chatRoleUser") : v(a)("chatRoleAgent")
     }, {
-      head: _(() => [
+      head: b(() => [
         n.value ? f("", !0) : (t(), l("span", Pe, c(v(a)("chatRoleAgent")), 1)),
         o.value ? (t(), l("span", Ae, c(o.value), 1)) : f("", !0),
         p.value ? (t(), l("span", De, c(p.value), 1)) : f("", !0)
       ]),
-      default: _(() => [
-        e.message.reasoning && e.message.reasoning.length > 0 ? (t(), b(J, {
+      default: b(() => [
+        e.message.reasoning && e.message.reasoning.length > 0 ? (t(), _(J, {
           key: 0,
           parts: e.message.reasoning
         }, null, 8, ["parts"])) : f("", !0),
         g("div", Je, [
-          d.value ? (t(), b(Y, {
+          d.value ? (t(), _(Y, {
             key: 0,
             content: e.message.content,
             "show-toc": !1
@@ -514,12 +513,12 @@ import '../index2.css';const ee = ["aria-label", "title"], te = /* @__PURE__ */ 
         (d = n == null ? void 0 : n.branch) == null ? void 0 : d.entries.length
       ];
     };
-    return (n, o) => (t(), b(ue, {
+    return (n, o) => (t(), _(ue, {
       "auto-scroll": e.autoScroll,
       "scroll-threshold": e.scrollThreshold,
       "watch-source": i
     }, {
-      default: _(() => [
+      default: b(() => [
         e.messages.length === 0 ? (t(), l("div", Ge, [
           k(n.$slots, "empty", {}, () => [
             S(c(m.value), 1)

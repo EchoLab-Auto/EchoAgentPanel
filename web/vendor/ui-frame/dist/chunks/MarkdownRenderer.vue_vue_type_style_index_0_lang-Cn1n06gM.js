@@ -1,4 +1,4 @@
-import { defineComponent as we, computed as X, openBlock as A, createElementBlock as B, normalizeClass as ae, createElementVNode as P, unref as q, toDisplayString as ee, createCommentVNode as le, Fragment as ie, renderList as ce, createBlock as _e, ref as Q, watch as de, nextTick as ue, onBeforeUnmount as Ne, createVNode as ve, withCtx as Ce, normalizeStyle as Te, toRef as Ae, onMounted as Ye, getCurrentInstance as ze, render as ye, Transition as Ue, withModifiers as Ke, h as Ie } from "vue";
+import { defineComponent as we, computed as X, openBlock as A, createElementBlock as B, normalizeClass as ae, createElementVNode as P, unref as G, toDisplayString as ee, createCommentVNode as le, Fragment as ie, renderList as ce, createBlock as _e, ref as Q, watch as de, nextTick as ue, onBeforeUnmount as Ne, createVNode as ve, withCtx as Ce, normalizeStyle as Te, toRef as Ae, onMounted as Ye, getCurrentInstance as ze, render as ye, Transition as Ue, withModifiers as Ke, h as Ie } from "vue";
 import { marked as Se } from "marked";
 import { N as Fe } from "./NeumorphismCard-Bc1QAxUh.js";
 import { escapeHtml as te, generateId as We, slugify as Be } from "../utils/index.js";
@@ -15,15 +15,15 @@ import '../MarkdownRenderer.css';const Je = { class: "toc-item-row" }, Qe = ["ar
   },
   emits: ["toggle", "select"],
   setup(o, { emit: l }) {
-    const t = o, w = l, { t: C } = Ee(), M = X(() => t.activeHeading === t.node.id), $ = X(() => t.node.children.length > 0), p = X(() => t.collapsedGroups.has(t.node.id));
-    function E(_) {
+    const t = o, w = l, { t: C } = Ee(), E = X(() => t.activeHeading === t.node.id), $ = X(() => t.node.children.length > 0), p = X(() => t.collapsedGroups.has(t.node.id));
+    function T(_) {
       _.stopPropagation(), w("toggle", t.node.id);
     }
     function b(_) {
       _.preventDefault(), w("select", t.node.id);
     }
     return (_, k) => (A(), B("li", {
-      class: ae(["neumorphism-toc-item", { "has-children": $.value, active: M.value }]),
+      class: ae(["neumorphism-toc-item", { "has-children": $.value, active: E.value }]),
       role: "listitem"
     }, [
       P("div", Je, [
@@ -33,8 +33,8 @@ import '../MarkdownRenderer.css';const Je = { class: "toc-item-row" }, Qe = ["ar
           class: "toc-toggle",
           "aria-expanded": !p.value,
           "aria-controls": `toc-list-${o.node.id}`,
-          "aria-label": p.value ? q(C)("markdownTocExpand") : q(C)("markdownTocCollapse"),
-          onClick: E
+          "aria-label": p.value ? G(C)("markdownTocExpand") : G(C)("markdownTocCollapse"),
+          onClick: T
         }, [
           P("span", et, ee(p.value ? "▸" : "▾"), 1)
         ], 8, Qe)) : le("", !0),
@@ -42,7 +42,7 @@ import '../MarkdownRenderer.css';const Je = { class: "toc-item-row" }, Qe = ["ar
           href: "#",
           "data-toc-id": o.node.id,
           role: "button",
-          "aria-current": M.value ? "location" : void 0,
+          "aria-current": E.value ? "location" : void 0,
           onClick: b
         }, [
           P("span", nt, ee(o.node.text), 1)
@@ -71,21 +71,21 @@ function Re() {
 }
 function st(o) {
   const { content: l } = o, t = o.headingSelector ?? "h1, h2, h3", w = Q("");
-  let C = !1, M = null;
+  let C = !1, E = null;
   function $(f) {
     var L;
     const v = l.value;
     if (!v) return null;
-    const T = (L = o.scrollContainer) == null ? void 0 : L.value;
-    return T instanceof HTMLElement ? T : typeof T == "string" ? v.closest(T) : v.closest(".nm-layout__content");
+    const S = (L = o.scrollContainer) == null ? void 0 : L.value;
+    return S instanceof HTMLElement ? S : typeof S == "string" ? v.closest(S) : v.closest(".nm-layout__content");
   }
   function p(f) {
     const v = f ?? $();
     if (!v) return 64;
-    const T = v.closest(".nm-layout"), L = T == null ? void 0 : T.querySelector(".nm-layout__header");
+    const S = v.closest(".nm-layout"), L = S == null ? void 0 : S.querySelector(".nm-layout__header");
     return L ? L.getBoundingClientRect().height : 64;
   }
-  function E(f) {
+  function T(f) {
     var v;
     f !== w.value && (w.value = f, (v = o.onActiveChange) == null || v.call(o, f));
   }
@@ -95,25 +95,25 @@ function st(o) {
     if (!f) return;
     const v = (N = l.value) == null ? void 0 : N.querySelectorAll(t);
     if (!v) return;
-    const T = p(f) + 20;
+    const S = p(f) + 20;
     let L = "";
     for (const s of v) {
       const y = s.getBoundingClientRect(), x = f.getBoundingClientRect();
-      if (y.top - x.top <= T)
+      if (y.top - x.top <= S)
         L = s.id;
       else
         break;
     }
-    E(L);
+    T(L);
   }
   function _() {
-    C = !1, M && (clearTimeout(M), M = null), b();
+    C = !1, E && (clearTimeout(E), E = null), b();
   }
   function k(f) {
-    var T, L;
-    M && clearTimeout(M), C = !0, w.value = f, (T = o.onActiveChange) == null || T.call(o, f);
+    var S, L;
+    E && clearTimeout(E), C = !0, w.value = f, (S = o.onActiveChange) == null || S.call(o, f);
     const v = (L = l.value) == null ? void 0 : L.querySelector(`[id="${f}"]`);
-    v && v.scrollIntoView({ behavior: Re() }), M = setTimeout(_, 800);
+    v && v.scrollIntoView({ behavior: Re() }), E = setTimeout(_, 800);
   }
   let c = null, h = null, i = -1;
   function a() {
@@ -125,8 +125,8 @@ function st(o) {
     if (!f || !l.value) return;
     const v = p(f);
     i = v;
-    const T = Array.from(l.value.querySelectorAll(t));
-    if (T.length === 0) return;
+    const S = Array.from(l.value.querySelectorAll(t));
+    if (S.length === 0) return;
     const L = /* @__PURE__ */ new Map();
     c = new IntersectionObserver(
       (y) => {
@@ -136,7 +136,7 @@ function st(o) {
         let x = "", I = -1 / 0;
         for (const [R, O] of L)
           O > I && (I = O, x = R.id);
-        x && E(x);
+        x && T(x);
       },
       {
         root: f,
@@ -144,7 +144,7 @@ function st(o) {
         threshold: 0
       }
     );
-    for (const y of T)
+    for (const y of S)
       c.observe(y);
     const N = f.closest(".nm-layout"), s = N == null ? void 0 : N.querySelector(".nm-layout__header");
     s && typeof ResizeObserver < "u" && (h = new ResizeObserver(() => {
@@ -157,7 +157,7 @@ function st(o) {
       u(), b();
     }) : a();
   }), Ne(() => {
-    a(), M && clearTimeout(M);
+    a(), E && clearTimeout(E);
   }), { activeHeading: w, scrollToHeading: k, syncActiveHeading: b };
 }
 const at = ["aria-label"], rt = { class: "neumorphism-toc-header" }, lt = {
@@ -178,14 +178,14 @@ const at = ["aria-label"], rt = { class: "neumorphism-toc-header" }, lt = {
   },
   emits: ["select", "update:collapsedGroups"],
   setup(o, { expose: l, emit: t }) {
-    const w = o, C = t, { t: M } = Ee(), $ = X(() => w.title || M("markdownTocLabel")), p = Q(null), E = Q(/* @__PURE__ */ new Set()), b = X(() => w.collapsedGroups ?? E.value);
+    const w = o, C = t, { t: E } = Ee(), $ = X(() => w.title || E("markdownTocLabel")), p = Q(null), T = Q(/* @__PURE__ */ new Set()), b = X(() => w.collapsedGroups ?? T.value);
     function _(i) {
-      w.collapsedGroups !== void 0 ? C("update:collapsedGroups", i) : E.value = i;
+      w.collapsedGroups !== void 0 ? C("update:collapsedGroups", i) : T.value = i;
     }
     de(
       () => w.items,
       () => {
-        w.collapsedGroups === void 0 && (E.value = /* @__PURE__ */ new Set());
+        w.collapsedGroups === void 0 && (T.value = /* @__PURE__ */ new Set());
       }
     );
     function k(i) {
@@ -196,10 +196,10 @@ const at = ["aria-label"], rt = { class: "neumorphism-toc-header" }, lt = {
       if (!p.value || window.innerWidth <= 1100) return;
       const a = p.value, u = a.querySelector(`[data-toc-id="${CSS.escape(i)}"]`);
       if (!u) return;
-      const f = a.getBoundingClientRect(), v = u.closest(".neumorphism-toc-item"), T = Array.from((v == null ? void 0 : v.children) ?? []).find(
+      const f = a.getBoundingClientRect(), v = u.closest(".neumorphism-toc-item"), S = Array.from((v == null ? void 0 : v.children) ?? []).find(
         (N) => N.classList.contains("neumorphism-toc-list")
       );
-      if (T && T.getBoundingClientRect().bottom <= f.bottom + 10)
+      if (S && S.getBoundingClientRect().bottom <= f.bottom + 10)
         return;
       const L = u.getBoundingClientRect().top - f.top + a.scrollTop;
       a.scrollTo({
@@ -211,8 +211,8 @@ const at = ["aria-label"], rt = { class: "neumorphism-toc-header" }, lt = {
       if (!p.value || window.innerWidth <= 1100) return;
       const i = p.value, a = i.querySelector(".neumorphism-toc-item.active");
       if (!a) return;
-      const u = i.getBoundingClientRect(), f = a.getBoundingClientRect(), v = u.top + u.height * 0.25, T = u.top + u.height * 0.75;
-      if (f.top >= v && f.bottom <= T)
+      const u = i.getBoundingClientRect(), f = a.getBoundingClientRect(), v = u.top + u.height * 0.25, S = u.top + u.height * 0.75;
+      if (f.top >= v && f.bottom <= S)
         return;
       const N = f.top - u.top + i.scrollTop - f.height / 2 - u.height / 2;
       i.scrollTo({
@@ -316,8 +316,8 @@ function _t(o, l) {
   if (!l || l === "text" || l === "plain")
     return te(o);
   let t = te(o);
-  const w = [], C = (M) => ($) => (w.push(`<span class="${M}">${$}</span>`), bt(w.length - 1));
-  return t = t.replace(gt, C("token-string")), t = t.replace(pt(l), C("token-comment")), t = t.replace(vt, '<span class="token-keyword">$1</span>'), t = t.replace(wt, '<span class="token-function">$1</span>'), t = t.replace(xt, '<span class="token-number">$1</span>'), t = t.replace(yt, '<span class="token-type">$1</span>'), t = t.replace($t, (M, $) => w[kt($)]), t;
+  const w = [], C = (E) => ($) => (w.push(`<span class="${E}">${$}</span>`), bt(w.length - 1));
+  return t = t.replace(gt, C("token-string")), t = t.replace(pt(l), C("token-comment")), t = t.replace(vt, '<span class="token-keyword">$1</span>'), t = t.replace(wt, '<span class="token-function">$1</span>'), t = t.replace(xt, '<span class="token-number">$1</span>'), t = t.replace(yt, '<span class="token-type">$1</span>'), t = t.replace($t, (E, $) => w[kt($)]), t;
 }
 const Ct = { class: "code-block-wrapper doc-code-block" }, Mt = { class: "code-block-header" }, Et = { class: "code-lang" }, Tt = { class: "code-lines" }, St = ["aria-label"], Lt = { class: "code-block-body" }, Rt = {
   key: 0,
@@ -331,18 +331,18 @@ const Ct = { class: "code-block-wrapper doc-code-block" }, Mt = { class: "code-b
     showLineNumbers: { type: Boolean, default: !0 }
   },
   setup(o) {
-    const l = o, { t } = Ee(), { copied: w, copy: C } = Ve({ resetDelay: 1500 }), M = X(() => l.lang || "text"), $ = X(() => _t(l.code, l.lang)), p = X(() => l.code.split(`
-`).length), E = X(() => w.value ? t("markdownCodeCopied") : t("markdownCodeCopy"));
+    const l = o, { t } = Ee(), { copied: w, copy: C } = Ve({ resetDelay: 1500 }), E = X(() => l.lang || "text"), $ = X(() => _t(l.code, l.lang)), p = X(() => l.code.split(`
+`).length), T = X(() => w.value ? t("markdownCodeCopied") : t("markdownCodeCopy"));
     return (b, _) => (A(), B("div", Ct, [
       P("div", Mt, [
-        P("span", Et, ee(M.value), 1),
+        P("span", Et, ee(E.value), 1),
         P("span", Tt, ee(p.value) + " lines", 1),
         P("button", {
           type: "button",
-          class: ae(["code-copy-btn", { copied: q(w) }]),
-          "aria-label": E.value,
-          onClick: _[0] || (_[0] = (k) => q(C)(o.code))
-        }, ee(E.value), 11, St)
+          class: ae(["code-copy-btn", { copied: G(w) }]),
+          "aria-label": T.value,
+          onClick: _[0] || (_[0] = (k) => G(C)(o.code))
+        }, ee(T.value), 11, St)
       ]),
       P("div", Lt, [
         o.showLineNumbers ? (A(), B("div", Rt, [
@@ -353,7 +353,7 @@ const Ct = { class: "code-block-wrapper doc-code-block" }, Mt = { class: "code-b
         ])) : le("", !0),
         P("pre", null, [
           P("code", {
-            class: ae(`language-${M.value}`),
+            class: ae(`language-${E.value}`),
             innerHTML: $.value
           }, null, 10, Nt)
         ])
@@ -361,31 +361,31 @@ const Ct = { class: "code-block-wrapper doc-code-block" }, Mt = { class: "code-b
     ]));
   }
 }), De = 44, He = 96, $e = 280, It = 16, Bt = 14, Pt = 8, Dt = 90, Oe = 28, se = 48, Ht = 4, be = 28, J = 20, Ot = /[぀-ヿ㐀-鿿豈-﫿￠-￦⺀-�＀-￯]/;
-function Gt(o) {
+function qt(o) {
   let l = 0;
   for (const t of o)
     l += Ot.test(t) ? Bt : Pt;
   return l;
 }
-function qt(o) {
-  const l = Gt(o.label) + It * 2;
+function Gt(o) {
+  const l = qt(o.label) + It * 2;
   if (o.shape === "diamond") {
     const t = Math.min(Math.max(l * 1.5 + 32, He * 1.4), $e * 1.4);
     return { w: t, h: Math.max(64, t * 0.55) };
   }
   return l > $e ? { w: $e, h: De + 20 } : { w: Math.min(Math.max(l, He), $e), h: De };
 }
-function Ge(o, l = Ht) {
-  const { nodes: t, edges: w, direction: C } = o, M = { nodes: /* @__PURE__ */ new Map(), edges: [], width: 0, height: 0 };
-  if (t.length === 0) return M;
+function qe(o, l = Ht) {
+  const { nodes: t, edges: w, direction: C } = o, E = { nodes: /* @__PURE__ */ new Map(), edges: [], width: 0, height: 0 };
+  if (t.length === 0) return E;
   const $ = {};
-  for (const e of t) $[e.id] = qt(e);
-  const p = /* @__PURE__ */ new Map(), E = /* @__PURE__ */ new Map();
+  for (const e of t) $[e.id] = Gt(e);
+  const p = /* @__PURE__ */ new Map(), T = /* @__PURE__ */ new Map();
   for (const e of t)
-    p.set(e.id, []), E.set(e.id, 0);
+    p.set(e.id, []), T.set(e.id, 0);
   for (const e of w)
-    !p.has(e.from) || !E.has(e.to) || (p.get(e.from).push(e.to), E.set(e.to, E.get(e.to) + 1));
-  const b = /* @__PURE__ */ new Map(), _ = /* @__PURE__ */ new Set(), k = t.filter((e) => (E.get(e.id) ?? 0) === 0).map((e) => e.id), c = new Map(E);
+    !p.has(e.from) || !T.has(e.to) || (p.get(e.from).push(e.to), T.set(e.to, T.get(e.to) + 1));
+  const b = /* @__PURE__ */ new Map(), _ = /* @__PURE__ */ new Set(), k = t.filter((e) => (T.get(e.id) ?? 0) === 0).map((e) => e.id), c = new Map(T);
   for (; k.length > 0; ) {
     const e = k.shift(), n = b.get(e) ?? 0;
     b.set(e, n);
@@ -415,7 +415,7 @@ function Ge(o, l = Ht) {
   const v = /* @__PURE__ */ new Map();
   for (const e of w)
     v.has(e.to) || v.set(e.to, []), v.get(e.to).push(e.from);
-  function T(e, n, r) {
+  function S(e, n, r) {
     const g = (r.get(e) ?? []).filter((D) => n.has(D));
     return g.length === 0 ? u.get(e) : g.reduce((D, F) => D + (u.get(F) ?? 0), 0) / g.length;
   }
@@ -423,14 +423,14 @@ function Ge(o, l = Ht) {
     for (let n = 1; n < i.length; n++) {
       const r = new Set(i[n - 1]);
       i[n].sort((g, H) => {
-        const D = T(g, r, v), F = T(H, r, v);
+        const D = S(g, r, v), F = S(H, r, v);
         return D !== F ? D - F : u.get(g) - u.get(H);
       }), f();
     }
     for (let n = i.length - 2; n >= 0; n--) {
       const r = new Set(i[n + 1]);
       i[n].sort((g, H) => {
-        const D = T(g, r, p), F = T(H, r, p);
+        const D = S(g, r, p), F = S(H, r, p);
         return D !== F ? D - F : u.get(g) - u.get(H);
       }), f();
     }
@@ -496,7 +496,7 @@ function Ge(o, l = Ht) {
       (_.has(r) || g >= 2) && d.set(r, e++);
     });
   }
-  const S = [];
+  const M = [];
   if (w.forEach((e, n) => {
     const r = R.get(e.from), g = R.get(e.to);
     if (!r || !g) return;
@@ -505,36 +505,36 @@ function Ge(o, l = Ht) {
     if (D !== void 0) {
       const z = b.get(e.from) ?? 0, U = b.get(e.to) ?? 0;
       if (L) {
-        const K = r.x + r.w / 2, V = N ? r.y : r.y + r.h, ne = g.x + g.w / 2, oe = N ? g.y : g.y + g.h, j = N ? pe[z] - J : m[z] + J, Z = N ? pe[U] - J : m[U] + J, G = xe + be + D * J;
-        F = `M ${K},${V} L ${K},${j} L ${G},${j} L ${G},${Z} L ${ne},${Z} L ${ne},${oe}`, W = { x: G, y: (j + Z) / 2 };
+        const K = r.x + r.w / 2, V = N ? r.y : r.y + r.h, ne = g.x + g.w / 2, oe = N ? g.y : g.y + g.h, j = N ? pe[z] - J : m[z] + J, Z = N ? pe[U] - J : m[U] + J, q = xe + be + D * J;
+        F = `M ${K},${V} L ${K},${j} L ${q},${j} L ${q},${Z} L ${ne},${Z} L ${ne},${oe}`, W = { x: q, y: (j + Z) / 2 };
       } else {
-        const K = N ? r.x : r.x + r.w, V = r.y + r.h / 2, ne = N ? g.x : g.x + g.w, oe = g.y + g.h / 2, j = N ? he[z] - J : me[z] + J, Z = N ? he[U] - J : me[U] + J, G = fe + be + D * J;
-        F = `M ${K},${V} L ${j},${V} L ${j},${G} L ${Z},${G} L ${Z},${oe} L ${ne},${oe}`, W = { x: (j + Z) / 2, y: G };
+        const K = N ? r.x : r.x + r.w, V = r.y + r.h / 2, ne = N ? g.x : g.x + g.w, oe = g.y + g.h / 2, j = N ? he[z] - J : me[z] + J, Z = N ? he[U] - J : me[U] + J, q = fe + be + D * J;
+        F = `M ${K},${V} L ${j},${V} L ${j},${q} L ${Z},${q} L ${Z},${oe} L ${ne},${oe}`, W = { x: (j + Z) / 2, y: q };
       }
     } else {
       let z, U, K, V, ne, oe, j, Z;
       if (L) {
-        const G = N ? -1 : 1;
-        z = r.x + r.w / 2, U = r.y + (G > 0 ? r.h : 0), K = g.x + g.w / 2, V = g.y + (G > 0 ? 0 : g.h);
+        const q = N ? -1 : 1;
+        z = r.x + r.w / 2, U = r.y + (q > 0 ? r.h : 0), K = g.x + g.w / 2, V = g.y + (q > 0 ? 0 : g.h);
         const ge = Math.max(40, Math.abs(V - U) / 2);
-        ne = z, oe = U + ge * G, j = K, Z = V - ge * G;
+        ne = z, oe = U + ge * q, j = K, Z = V - ge * q;
       } else {
-        const G = N ? -1 : 1;
-        z = r.x + (G > 0 ? r.w : 0), U = r.y + r.h / 2, K = g.x + (G > 0 ? 0 : g.w), V = g.y + g.h / 2;
+        const q = N ? -1 : 1;
+        z = r.x + (q > 0 ? r.w : 0), U = r.y + r.h / 2, K = g.x + (q > 0 ? 0 : g.w), V = g.y + g.h / 2;
         const ge = Math.max(40, Math.abs(K - z) / 2);
-        ne = z + ge * G, oe = U, j = K - ge * G, Z = V;
+        ne = z + ge * q, oe = U, j = K - ge * q, Z = V;
       }
       F = `M ${z},${U} C ${ne},${oe} ${j},${Z} ${K},${V}`, W = {
         x: (z + 3 * ne + 3 * j + K) / 8,
         y: (U + 3 * oe + 3 * Z + V) / 8
       };
     }
-    S.push({ from: e.from, to: e.to, label: e.label, path: F, labelPos: W, isBackEdge: H });
+    M.push({ from: e.from, to: e.to, label: e.label, path: F, labelPos: W, isBackEdge: H });
   }), d.size > 0) {
     const e = d.size - 1;
     L ? O = Math.max(O, xe + be + e * J + se) : Y = Math.max(Y, fe + be + e * J + se);
   }
-  return { nodes: R, edges: S, width: O, height: Y };
+  return { nodes: R, edges: M, width: O, height: Y };
 }
 const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Yt = ["d", "marker-end"], zt = ["role", "tabindex", "aria-label", "onPointerdown", "onClick", "onKeydown"], Ut = { class: "nm-flow__node-inner" }, Kt = { class: "nm-flow__node-text" }, Vt = {
   key: 0,
@@ -550,14 +550,14 @@ const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Y
   },
   emits: ["navigate", "nodeMove"],
   setup(o, { emit: l }) {
-    const t = o, w = l, C = Q(), M = We("nm-flow-arrow"), $ = Q(null), p = X(() => {
+    const t = o, w = l, C = Q(), E = We("nm-flow-arrow"), $ = Q(null), p = X(() => {
       const s = $.value;
-      if (!s) return Ge(t.graph);
+      if (!s) return qe(t.graph);
       const y = t.graph.nodes.map(
         (x) => x.id === s.id ? { ...x, x: s.x, y: s.y } : x
       );
-      return Ge({ ...t.graph, nodes: y });
-    }), E = X(() => {
+      return qe({ ...t.graph, nodes: y });
+    }), T = X(() => {
       const s = new Map(t.graph.nodes.map((y) => [y.id, y]));
       return [...p.value.nodes.values()].map((y) => {
         var x, I, R;
@@ -591,10 +591,10 @@ const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Y
     }
     const c = Q(null), h = Q(null);
     function i() {
-      window.addEventListener("pointermove", f), window.addEventListener("pointerup", T), window.addEventListener("pointercancel", L);
+      window.addEventListener("pointermove", f), window.addEventListener("pointerup", S), window.addEventListener("pointercancel", L);
     }
     function a() {
-      window.removeEventListener("pointermove", f), window.removeEventListener("pointerup", T), window.removeEventListener("pointercancel", L);
+      window.removeEventListener("pointermove", f), window.removeEventListener("pointerup", S), window.removeEventListener("pointercancel", L);
     }
     function u(s, y) {
       var R;
@@ -628,7 +628,7 @@ const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Y
         y: Math.round(s.baseY + x)
       });
     }
-    function T() {
+    function S() {
       a();
       const s = h.value;
       h.value = null, s != null && s.raf && cancelAnimationFrame(s.raf);
@@ -676,7 +676,7 @@ const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Y
             }, [
               P("defs", null, [
                 P("marker", {
-                  id: q(M),
+                  id: G(E),
                   viewBox: "0 0 10 10",
                   refX: "9",
                   refY: "5",
@@ -694,7 +694,7 @@ const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Y
                 key: I,
                 d: x.path,
                 class: ae(["nm-flow__edge", { "nm-flow__edge--back": x.isBackEdge }]),
-                "marker-end": `url(#${q(M)})`
+                "marker-end": `url(#${G(E)})`
               }, null, 10, Yt))), 128))
             ], 8, Wt)),
             (A(!0), B(ie, null, ce(b.value, (x, I) => (A(), B("div", {
@@ -702,7 +702,7 @@ const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Y
               class: "nm-flow__edge-label",
               style: Te({ left: `${x.labelPos.x}px`, top: `${x.labelPos.y}px` })
             }, ee(x.label), 5))), 128)),
-            (A(!0), B(ie, null, ce(E.value, (x) => (A(), B("div", {
+            (A(!0), B(ie, null, ce(T.value, (x) => (A(), B("div", {
               key: x.id,
               class: ae(["nm-flow__node", [`nm-flow__node--${x.shape}`, { "nm-flow__node--link": x.docPath }]]),
               style: Te({
@@ -730,7 +730,7 @@ const Ft = { class: "nm-flow-canvas" }, Wt = ["width", "height"], Xt = ["id"], Y
       }, 8, ["height", "show-grid"])
     ]));
   }
-}), Zt = /* @__PURE__ */ Ze(jt, [["__scopeId", "data-v-7c7a074c"]]), Jt = /^graph\s+(LR|RL|TB|BT)\s*$/i, re = /([A-Za-z_][\w-]*)\s*(\[[^\]]*\]|\{[^}]*\}|\([^)]*\))?/y, ke = /-->\s*(?:\|([^|]*)\|)?/y, qe = /@\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/y, Qt = /^(\/|\.\/|\.\.\/)[^\s]*\.md$/, Me = /^```prodoc-flow\s*\n([\s\S]*?)^```/gm;
+}), Zt = /* @__PURE__ */ Ze(jt, [["__scopeId", "data-v-7c7a074c"]]), Jt = /^graph\s+(LR|RL|TB|BT)\s*$/i, re = /([A-Za-z_][\w-]*)\s*(\[[^\]]*\]|\{[^}]*\}|\([^)]*\))?/y, ke = /-->\s*(?:\|([^|]*)\|)?/y, Ge = /@\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/y, Qt = /^(\/|\.\/|\.\.\/)[^\s]*\.md$/, Me = /^```prodoc-flow\s*\n([\s\S]*?)^```/gm;
 function $n(o) {
   const l = [];
   Me.lastIndex = 0;
@@ -739,13 +739,13 @@ function $n(o) {
     l.push(t[1]);
   return l;
 }
-function bn(o, l, t, w, C, M) {
+function bn(o, l, t, w, C, E) {
   Me.lastIndex = 0;
   const $ = l.replace(/\r\n/g, `
 `).trim();
-  let p, E = -1;
+  let p, T = -1;
   for (; (p = Me.exec(o)) !== null; ) {
-    if (E++, M !== void 0 && E !== M) continue;
+    if (T++, E !== void 0 && T !== E) continue;
     const b = p[1];
     if (b.replace(/\r\n/g, `
 `).trim() !== $) continue;
@@ -755,9 +755,9 @@ function bn(o, l, t, w, C, M) {
 `);
     let c = !1;
     for (let a = 0; a < k.length; a++) {
-      const u = k[a].indexOf("%%"), f = u >= 0 ? k[a].slice(0, u) : k[a], v = u >= 0 ? k[a].slice(u) : "", T = f.trim();
-      if (T.includes("-->") || !_.test(T)) continue;
-      const L = T.replace(/\s*@\s*-?[\d.]+\s*,\s*-?[\d.]+\s*$/, "");
+      const u = k[a].indexOf("%%"), f = u >= 0 ? k[a].slice(0, u) : k[a], v = u >= 0 ? k[a].slice(u) : "", S = f.trim();
+      if (S.includes("-->") || !_.test(S)) continue;
+      const L = S.replace(/\s*@\s*-?[\d.]+\s*,\s*-?[\d.]+\s*$/, "");
       k[a] = `${L} @ ${w}, ${C}${v ? `  ${v}` : ""}`, c = !0;
       break;
     }
@@ -789,12 +789,12 @@ function tn(o) {
 }
 function nn(o) {
   const l = [], t = /* @__PURE__ */ new Map(), w = /* @__PURE__ */ new Set(), C = [];
-  let M = "LR", $ = !1;
+  let E = "LR", $ = !1;
   function p(c, h) {
     const { shape: i, text: a } = en(h), { label: u, docPath: f } = h ? tn(a) : { label: c, docPath: void 0 }, v = t.get(c);
     v ? h && (v.label = u, v.shape = i, f !== void 0 && (v.docPath = f)) : t.set(c, { id: c, label: u, shape: i, docPath: f });
   }
-  function E(c, h, i) {
+  function T(c, h, i) {
     const a = t.get(c);
     a && (a.x = h, a.y = i);
   }
@@ -809,7 +809,7 @@ function nn(o) {
     if (a) {
       if (!$) {
         const u = Jt.exec(a);
-        u ? M = u[1].toUpperCase() : (l.push({
+        u ? E = u[1].toUpperCase() : (l.push({
           line: h,
           source: _[c].trim(),
           message: "缺少方向声明 graph LR|RL|TB|BT，已按 LR 处理"
@@ -831,23 +831,23 @@ function nn(o) {
       for (; a < c.length && /\s/.test(c[a]); ) a++;
       if (a >= c.length) break;
       if (c[a] === "@") {
-        qe.lastIndex = a;
-        const s = qe.exec(c);
-        return s && s.index === a ? (E(f, parseFloat(s[1]), parseFloat(s[2])), !0) : (l.push({
+        Ge.lastIndex = a;
+        const s = Ge.exec(c);
+        return s && s.index === a ? (T(f, parseFloat(s[1]), parseFloat(s[2])), !0) : (l.push({
           line: h,
           source: i,
           message: "无法识别的排版标注（应为行尾 @ x, y）"
         }), !1);
       }
       ke.lastIndex = a;
-      const T = ke.exec(c);
-      if (!T || T.index !== a)
+      const S = ke.exec(c);
+      if (!S || S.index !== a)
         return l.push({
           line: h,
           source: i,
           message: `无法识别的内容: "${c.slice(a)}"`
         }), !1;
-      const L = ((v = T[1]) == null ? void 0 : v.trim()) || void 0;
+      const L = ((v = S[1]) == null ? void 0 : v.trim()) || void 0;
       for (a = ke.lastIndex; a < c.length && /\s/.test(c[a]); ) a++;
       if (re.lastIndex = a, u = re.exec(c), !u || u.index !== a)
         return l.push({ line: h, source: i, message: "箭头后缺少目标节点" }), !1;
@@ -857,7 +857,7 @@ function nn(o) {
     return !0;
   }
   return {
-    direction: M,
+    direction: E,
     nodes: [...t.values()],
     edges: C,
     errors: l
@@ -875,16 +875,16 @@ function on(o) {
     return `${l}-${Be($)}`;
   }
   function w($) {
-    const p = [], E = /* @__PURE__ */ new Set(), b = Se.lexer($);
+    const p = [], T = /* @__PURE__ */ new Set(), b = Se.lexer($);
     for (const _ of b)
       if (_.type === "heading") {
         const k = Xe(_.tokens);
         let c = Be(k);
         c || (c = "heading");
         let h = `${l}-${c}`, i = 1;
-        for (; E.has(h); )
+        for (; T.has(h); )
           h = `${l}-${c}-${i}`, i++;
-        E.add(h), p.push({
+        T.add(h), p.push({
           level: _.depth,
           text: k,
           id: h
@@ -892,17 +892,17 @@ function on(o) {
       }
     return p;
   }
-  const C = X(() => w(o.value)), M = X(() => {
-    const $ = C.value, p = [], E = [];
+  const C = X(() => w(o.value)), E = X(() => {
+    const $ = C.value, p = [], T = [];
     for (const b of $) {
       const _ = { level: b.level, text: b.text, id: b.id, children: [] };
-      for (; E.length > 0 && E[E.length - 1].level >= _.level; )
-        E.pop();
-      E.length === 0 ? p.push(_) : E[E.length - 1].children.push(_), E.push(_);
+      for (; T.length > 0 && T[T.length - 1].level >= _.level; )
+        T.pop();
+      T.length === 0 ? p.push(_) : T[T.length - 1].children.push(_), T.push(_);
     }
     return p;
   });
-  return { toc: C, tocTree: M, makeUniqueId: t };
+  return { toc: C, tocTree: E, makeUniqueId: t };
 }
 const sn = { class: "neumorphism-markdown-body" }, an = {
   key: 0,
@@ -919,18 +919,18 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
   },
   emits: ["docLink", "flowNodeMove"],
   setup(o, { emit: l }) {
-    const t = o, w = l, C = Q(null), M = Q(!1), { t: $ } = Ee(), { toc: p, tocTree: E, makeUniqueId: b } = on(Ae(t, "content"));
+    const t = o, w = l, C = Q(null), E = Q(!1), { t: $ } = Ee(), { toc: p, tocTree: T, makeUniqueId: b } = on(Ae(t, "content"));
     function _(m) {
-      N(m), M.value = !1;
+      N(m), E.value = !1;
     }
     const k = new Se.Renderer();
-    k.code = ({ text: m, lang: d }) => d === "mermaid" ? `<div class="mermaid-diagram" data-mermaid="${te(m)}"><pre><code>${te(m)}</code></pre></div>` : d === "prodoc-flow" ? `<div class="prodoc-flow-diagram"><pre><code>${te(m)}</code></pre></div>` : `<div class="doc-code-block-mount" data-lang="${te(d || "text")}"><pre><code>${te(m)}</code></pre></div>`, k.codespan = ({ text: m }) => `<code class="inline-code">${te(m)}</code>`, k.image = ({ href: m, title: d, text: S }) => `<img src="${m}" alt="${te(S)}" title="${te(d || "")}" loading="lazy" />`, k.listitem = function({ tokens: m, task: d, checked: S }) {
+    k.code = ({ text: m, lang: d }) => d === "mermaid" ? `<div class="mermaid-diagram" data-mermaid="${te(m)}"><pre><code>${te(m)}</code></pre></div>` : d === "prodoc-flow" ? `<div class="prodoc-flow-diagram"><pre><code>${te(m)}</code></pre></div>` : `<div class="doc-code-block-mount" data-lang="${te(d || "text")}"><pre><code>${te(m)}</code></pre></div>`, k.codespan = ({ text: m }) => `<code class="inline-code">${te(m)}</code>`, k.image = ({ href: m, title: d, text: M }) => `<img src="${m}" alt="${te(M)}" title="${te(d || "")}" loading="lazy" />`, k.listitem = function({ tokens: m, task: d, checked: M }) {
       if (d) {
         const e = this.parser.parse(m.slice(1));
         return `
       <li class="task-list-item">
         <label class="task-checkbox">
-          <input type="checkbox" ${S ? "checked" : ""} disabled />
+          <input type="checkbox" ${M ? "checked" : ""} disabled />
           <span class="checkmark"></span>
           <span class="task-text">${e}</span>
         </label>
@@ -944,7 +944,7 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
     function f() {
       a || (a = !0, import("dompurify").then((m) => {
         const d = m == null ? void 0 : m.default;
-        d && typeof d.sanitize == "function" && (i = (S) => d.sanitize(S, {
+        d && typeof d.sanitize == "function" && (i = (M) => d.sanitize(M, {
           // Preserve the data-* hooks emitted by this renderer.
           ADD_ATTR: ["data-mermaid", "data-code", "data-heading-id", "data-lang", "target"]
         }), v());
@@ -959,26 +959,26 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
       try {
         const m = p.value.map((n) => n.id);
         let d = 0;
-        const S = Object.create(k);
-        S.heading = ({ tokens: n, depth: r }) => {
-          const g = T(n), H = m[d++] ?? b(g);
+        const M = Object.create(k);
+        M.heading = ({ tokens: n, depth: r }) => {
+          const g = S(n), H = m[d++] ?? b(g);
           return `<h${r} id="${H}"><a href="#" data-heading-id="${H}" class="heading-anchor" aria-hidden="true">#</a>${g}</h${r}>`;
         };
         const e = Se.parse(t.content, {
           async: !1,
           gfm: !0,
           breaks: !1,
-          renderer: S
+          renderer: M
         });
         h.value = i ? i(e) : e;
       } catch (m) {
         c.value = m.message || "Unknown error rendering markdown", h.value = "";
       }
     }
-    function T(m) {
+    function S(m) {
       return m.map((d) => {
-        const S = d;
-        return S.text ? String(S.text) : S.tokens ? T(S.tokens) : "";
+        const M = d;
+        return M.text ? String(M.text) : M.tokens ? S(M.tokens) : "";
       }).join("");
     }
     f(), de(() => t.content, v, { immediate: !0 });
@@ -1000,9 +1000,16 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
         try {
           const d = await import("mermaid").catch(() => null);
           if (!(d != null && d.default)) return;
-          await d.default.run({
-            nodes: Array.from(m)
-          });
+          let M = 0;
+          for (const e of Array.from(m)) {
+            const n = e.getAttribute("data-mermaid") ?? e.textContent ?? "";
+            if (n.trim())
+              try {
+                const { svg: r } = await d.default.render(`nm-mermaid-${Date.now()}-${M++}`, n);
+                e.innerHTML = r, e.setAttribute("data-processed", "true");
+              } catch {
+              }
+          }
         } catch {
         }
     }
@@ -1017,8 +1024,8 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
     function Y() {
       const m = /* @__PURE__ */ new Map();
       for (const d of I) {
-        const S = m.get(d.key) ?? [];
-        S.push({ rootEl: d.rootEl, ownerContainer: d.ownerContainer }), m.set(d.key, S);
+        const M = m.get(d.key) ?? [];
+        M.push({ rootEl: d.rootEl, ownerContainer: d.ownerContainer }), m.set(d.key, M);
       }
       I = [], R = m;
     }
@@ -1030,7 +1037,7 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
         R = null;
       }
     }
-    function fe(m, d, S) {
+    function fe(m, d, M) {
       const e = R == null ? void 0 : R.get(d), n = e == null ? void 0 : e.shift();
       if (e && e.length === 0 && (R == null || R.delete(d)), m.innerHTML = "", n) {
         m.appendChild(n.rootEl), I.push({
@@ -1040,14 +1047,14 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
         });
         return;
       }
-      const r = S();
+      const r = M();
       r.appContext = (O == null ? void 0 : O.appContext) ?? null, ye(r, m);
       const g = m.firstElementChild;
       g && I.push({ key: d, rootEl: g, ownerContainer: m });
     }
     function he() {
       if (!C.value) return;
-      C.value.querySelectorAll(".prodoc-flow-diagram").forEach((d, S) => {
+      C.value.querySelectorAll(".prodoc-flow-diagram").forEach((d, M) => {
         var r;
         const e = ((r = d.querySelector("pre code")) == null ? void 0 : r.textContent) ?? d.textContent ?? "", n = nn(e);
         n.nodes.length !== 0 && fe(
@@ -1058,7 +1065,7 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
             height: "420px",
             editable: t.flowEditable,
             onNavigate: (g) => w("docLink", g),
-            onNodeMove: (g) => w("flowNodeMove", { ...g, source: e, blockIndex: S })
+            onNodeMove: (g) => w("flowNodeMove", { ...g, source: e, blockIndex: M })
           })
         );
       });
@@ -1067,15 +1074,15 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
       var d;
       if (!C.value) return;
       const m = C.value.querySelectorAll(".doc-code-block-mount");
-      for (const S of m) {
-        const e = ((d = S.querySelector("pre code")) == null ? void 0 : d.textContent) ?? S.textContent ?? "", n = S.dataset.lang || "text";
-        fe(S, `code:${n}:${e}`, () => Ie(At, { code: e, lang: n }));
+      for (const M of m) {
+        const e = ((d = M.querySelector("pre code")) == null ? void 0 : d.textContent) ?? M.textContent ?? "", n = M.dataset.lang || "text";
+        fe(M, `code:${n}:${e}`, () => Ie(At, { code: e, lang: n }));
       }
     }
     function pe(m) {
-      const d = m.target, S = d.closest(".heading-anchor");
-      if (S) {
-        const n = S.dataset.headingId;
+      const d = m.target, M = d.closest(".heading-anchor");
+      if (M) {
+        const n = M.dataset.headingId;
         n && (m.preventDefault(), N(n));
         return;
       }
@@ -1110,26 +1117,26 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
           innerHTML: h.value
         }, null, 8, ln))
       ]),
-      o.showToc && q(p).length > 0 ? (A(), _e(Pe, {
+      o.showToc && G(p).length > 0 ? (A(), _e(Pe, {
         key: 0,
         "collapsed-groups": s.value,
-        "onUpdate:collapsedGroups": d[0] || (d[0] = (S) => s.value = S),
-        items: q(E),
-        "active-id": q(L),
-        onSelect: q(N)
+        "onUpdate:collapsedGroups": d[0] || (d[0] = (M) => s.value = M),
+        items: G(T),
+        "active-id": G(L),
+        onSelect: G(N)
       }, null, 8, ["collapsed-groups", "items", "active-id", "onSelect"])) : le("", !0),
-      o.showToc && q(p).length > 0 ? (A(), B("button", {
+      o.showToc && G(p).length > 0 ? (A(), B("button", {
         key: 1,
-        class: ae(["neumorphism-toc-mobile-btn", { active: M.value }]),
-        "aria-label": q($)("markdownTocToggle"),
-        onClick: d[1] || (d[1] = (S) => M.value = !M.value)
+        class: ae(["neumorphism-toc-mobile-btn", { active: E.value }]),
+        "aria-label": G($)("markdownTocToggle"),
+        onClick: d[1] || (d[1] = (M) => E.value = !E.value)
       }, " 📑 ", 10, cn)) : le("", !0),
       ve(Ue, { name: "neumorphism-toc-drawer" }, {
         default: Ce(() => [
-          o.showToc && q(p).length > 0 && M.value ? (A(), B("div", {
+          o.showToc && G(p).length > 0 && E.value ? (A(), B("div", {
             key: 0,
             class: "neumorphism-toc-mobile-overlay",
-            onClick: d[4] || (d[4] = Ke((S) => M.value = !1, ["self"]))
+            onClick: d[4] || (d[4] = Ke((M) => E.value = !1, ["self"]))
           }, [
             ve(Fe, {
               elevation: 0,
@@ -1137,18 +1144,18 @@ const sn = { class: "neumorphism-markdown-body" }, an = {
             }, {
               default: Ce(() => [
                 P("div", dn, [
-                  P("span", un, "📑 " + ee(q($)("markdownTocLabel")), 1),
+                  P("span", un, "📑 " + ee(G($)("markdownTocLabel")), 1),
                   P("button", {
                     class: "neumorphism-toc-mobile-close",
-                    "aria-label": q($)("markdownTocClose"),
-                    onClick: d[2] || (d[2] = (S) => M.value = !1)
+                    "aria-label": G($)("markdownTocClose"),
+                    onClick: d[2] || (d[2] = (M) => E.value = !1)
                   }, " ✕ ", 8, fn)
                 ]),
                 ve(Pe, {
                   "collapsed-groups": s.value,
-                  "onUpdate:collapsedGroups": d[3] || (d[3] = (S) => s.value = S),
-                  items: q(E),
-                  "active-id": q(L),
+                  "onUpdate:collapsedGroups": d[3] || (d[3] = (M) => s.value = M),
+                  items: G(T),
+                  "active-id": G(L),
                   framed: !1,
                   onSelect: _
                 }, null, 8, ["collapsed-groups", "items", "active-id"])
@@ -1172,7 +1179,7 @@ export {
   $n as e,
   Re as g,
   _t as h,
-  Ge as l,
+  qe as l,
   nn as p,
   on as u,
   bn as w

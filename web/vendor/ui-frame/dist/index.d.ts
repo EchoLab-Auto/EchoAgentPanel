@@ -21,6 +21,7 @@ export type { ChartInteractionSeries, ChartTooltipRow, ChartTooltipState, UseCha
 export { useSelect } from './composables/useSelect';
 export type { UseSelectOptions, UseSelectReturn, SelectOption, SelectGroup, SelectModelValue, } from './composables/useSelect';
 export { usePixelLogoAnimation } from './composables/usePixelLogoAnimation';
+export { useArtRenderer } from './composables/useArtRenderer';
 export type { UsePixelLogoAnimationOptions, UsePixelLogoAnimationReturn, } from './composables/usePixelLogoAnimation';
 export { useReducedMotion, prefersReducedMotion } from './composables/useReducedMotion';
 export type { UseReducedMotionReturn } from './composables/useReducedMotion';

@@ -171,7 +171,7 @@ function save() {
           <h3>配置 Agent：{{ props.team.name }}</h3>
           <span class="agent-config__id">{{ props.team.id }}</span>
         </div>
-        <NeumorphismButton size="small" variant="flat" @click="emit('close')">✕</NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" @click="emit('close')">✕</NeumorphismButton>
       </div>
 
       <div class="agent-config__body">
@@ -303,7 +303,7 @@ function save() {
       </div>
 
       <div class="agent-config__foot">
-        <NeumorphismButton size="small" variant="flat" @click="emit('close')">取消</NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" @click="emit('close')">取消</NeumorphismButton>
         <NeumorphismButton size="small" variant="primary" @click="save">保存</NeumorphismButton>
       </div>
     </div>

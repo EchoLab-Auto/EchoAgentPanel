@@ -354,7 +354,7 @@ function imagesOf(message: ChatMessage): string[] {
     <div v-if="showContext" class="ctx-overlay" @click.self="showContext = false">
       <div class="ctx-overlay__panel">
         <div class="ctx-overlay__head">
-          <NeumorphismButton size="small" variant="flat" @click="showContext = false">
+          <NeumorphismButton size="small" variant="glass" @click="showContext = false">
             返回聊天
           </NeumorphismButton>
         </div>
@@ -431,7 +431,7 @@ function imagesOf(message: ChatMessage): string[] {
             v-if="busy"
             class="chat-view__cancel"
             size="small"
-            variant="flat"
+            variant="glass"
             @click="emit('cancel')"
           >
             取消任务
@@ -439,7 +439,7 @@ function imagesOf(message: ChatMessage): string[] {
           <NeumorphismButton
             class="chat-view__attach-btn"
             size="small"
-            variant="flat"
+            variant="glass"
             title="添加图片（或直接粘贴截图）"
             aria-label="添加图片"
             @click="fileInput?.click()"

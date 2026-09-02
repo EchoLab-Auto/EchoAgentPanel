@@ -18,6 +18,8 @@ const e = {
   canvasFullscreen: "进入全屏",
   canvasExitFullscreen: "退出全屏",
   canvasLabel: "画布视口,方向键平移,加减键缩放,0 重置",
+  artLabel: "动态效果画布",
+  asciiArtLabel: "字符画",
   // Tree
   treeExpandAll: "全部展开",
   treeCollapseAll: "全部折叠",
@@ -187,6 +189,8 @@ const e = {
   canvasFullscreen: "Enter fullscreen",
   canvasExitFullscreen: "Exit fullscreen",
   canvasLabel: "Canvas viewport, arrow keys to pan, plus/minus to zoom, 0 to reset",
+  artLabel: "Generative art canvas",
+  asciiArtLabel: "ASCII art",
   // Tree
   treeExpandAll: "Expand all",
   treeCollapseAll: "Collapse all",

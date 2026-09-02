@@ -109,10 +109,10 @@ function compactHistory() {
       >
         {{ confirmClear ? '确认清理？不可恢复' : '清理历史记忆' }}
       </button>
-      <NeumorphismButton variant="flat" size="small" @click="archiveHistory">归档</NeumorphismButton>
-      <NeumorphismButton variant="flat" size="small" @click="compactHistory">压缩</NeumorphismButton>
-      <NeumorphismButton variant="flat" size="small" title="重新发现技能目录中的 SKILL.md 并刷新注入" @click="reloadSkills">重载技能</NeumorphismButton>
-      <NeumorphismButton variant="flat" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
+      <NeumorphismButton variant="glass" size="small" @click="archiveHistory">归档</NeumorphismButton>
+      <NeumorphismButton variant="glass" size="small" @click="compactHistory">压缩</NeumorphismButton>
+      <NeumorphismButton variant="glass" size="small" title="重新发现技能目录中的 SKILL.md 并刷新注入" @click="reloadSkills">重载技能</NeumorphismButton>
+      <NeumorphismButton variant="glass" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
     </div>
 
     <div v-if="!snapshot" class="muted">（暂无快照，可在聊天中发送 /context 获取）</div>

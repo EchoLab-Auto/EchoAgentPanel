@@ -1,9 +1,9 @@
 import { ref as F, computed as H, watch as J, onBeforeUnmount as re, defineComponent as ne, openBlock as N, createElementBlock as P, normalizeClass as X, createVNode as u, withCtx as r, unref as p, Fragment as le, createElementVNode as f, toDisplayString as U, createBlock as j, createTextVNode as b, createCommentVNode as G, Transition as we, isRef as Q, renderList as Ce, nextTick as ee } from "vue";
 import { useTheme as _e } from "../composables/useTheme.js";
-import { e as Ne, p as be, _ as de, D as Te } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-BGgdJmiI.js";
-import { a as It, b as Mt, c as Ht, g as Ft, h as Kt, l as At, u as Ut, d as qt, w as Ot } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-BGgdJmiI.js";
+import { e as Ne, p as be, _ as de, D as Te } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-Cn1n06gM.js";
+import { a as It, b as Mt, c as Ht, g as Ft, h as Kt, l as At, u as Ut, d as qt, w as Ot } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-Cn1n06gM.js";
 import { N as ue } from "../chunks/NeumorphismLayout-GEx80IRW.js";
-import { N as L } from "../chunks/NeumorphismButton-6BjLxZWQ.js";
+import { N as L } from "../chunks/NeumorphismButton-DEVgFO0I.js";
 import { N as Y } from "../chunks/NeumorphismCard-Bc1QAxUh.js";
 import { N as ce } from "../chunks/NeumorphismThemeToggle-Z1Q61lr6.js";
 import { N as me } from "../chunks/NeumorphismTree-DKdQqI-G.js";
@@ -32,15 +32,15 @@ function Le(l) {
   const n = /* @__PURE__ */ new Map();
   function o(c) {
     n.set(c.path, c);
-    for (const a of c.children)
-      o(a);
+    for (const i of c.children)
+      o(i);
   }
   o(l);
-  const i = /* @__PURE__ */ new Map();
+  const a = /* @__PURE__ */ new Map();
   function h(c) {
-    i.set(c.id, c);
-    for (const a of c.children)
-      h(a);
+    a.set(c.id, c);
+    for (const i of c.children)
+      h(i);
   }
   return h(l), {
     root: l,
@@ -49,34 +49,34 @@ function Le(l) {
       return n.get(c);
     },
     findById(c) {
-      return i.get(c);
+      return a.get(c);
     }
   };
 }
 function Lt(l) {
   const n = [];
-  function o(i) {
-    n.push(i);
-    for (const h of i.children)
+  function o(a) {
+    n.push(a);
+    for (const h of a.children)
       o(h);
   }
   return o(l), n;
 }
 function Pt(l, n) {
   const o = [];
-  function i(h, c, a) {
+  function a(h, c, i) {
     if (h.id === c)
-      return o.push(...a), !0;
+      return o.push(...i), !0;
     for (const d of h.children)
-      if (i(d, c, [...a, h]))
+      if (a(d, c, [...i, h]))
         return !0;
     return !1;
   }
-  return i(n, l.id, []), o;
+  return a(n, l.id, []), o;
 }
 function ve(l) {
   var g;
-  const { root: n, initialPath: o } = l, i = typeof window < "u", h = l.syncUrlHash !== !1 && i, c = i ? window.location.hash.slice(1) : "", a = o || c || ((g = n.children[0]) == null ? void 0 : g.path) || "", d = F(a), e = F([]), { theme: T, setTheme: S } = _e(), _ = H({
+  const { root: n, initialPath: o } = l, a = typeof window < "u", h = l.syncUrlHash !== !1 && a, c = a ? window.location.hash.slice(1) : "", i = o || c || ((g = n.children[0]) == null ? void 0 : g.path) || "", d = F(i), e = F([]), { theme: T, setTheme: S } = _e(), _ = H({
     get: () => T.value,
     set: (k) => S(k)
   }), D = H(() => n.children.map(fe)), V = F(d.value ? [d.value] : []);
@@ -140,24 +140,24 @@ function ve(l) {
     handleSearchSelect: t
   };
 }
-const ae = "__hier_root";
+const ie = "__hier_root";
 function Pe(l) {
   const n = [
     {
-      id: ae,
+      id: ie,
       label: l.title,
       shape: "stadium",
       docPath: l.path || void 0
     }
   ], o = [];
-  for (const i of l.children)
+  for (const a of l.children)
     n.push({
-      id: i.id,
-      label: i.title,
+      id: a.id,
+      label: a.title,
       // 有子级 = 可继续钻取（圆角），叶子 = 矩形
-      shape: i.children.length > 0 ? "rounded" : "rect",
-      docPath: i.path
-    }), o.push({ from: ae, to: i.id });
+      shape: a.children.length > 0 ? "rounded" : "rect",
+      docPath: a.path
+    }), o.push({ from: ie, to: a.id });
   return {
     // 子项较多时纵向排布更可读
     direction: l.children.length <= 5 ? "LR" : "TB",
@@ -166,7 +166,7 @@ function Pe(l) {
     errors: []
   };
 }
-function ie(l) {
+function ae(l) {
   for (const n of Ne(l.body)) {
     const o = be(n);
     if (o.nodes.length > 0) return o;
@@ -198,10 +198,10 @@ const ze = {
   },
   emits: ["docLink"],
   setup(l, { emit: n }) {
-    const o = l, i = n, {
+    const o = l, a = n, {
       selectedPath: h,
       selectedKeys: c,
-      expandedKeys: a,
+      expandedKeys: i,
       treeData: d,
       displayNode: e,
       themeModel: T,
@@ -213,17 +213,17 @@ const ze = {
       handleSearchSelect: q
     } = ve({ root: o.root, initialPath: o.initialPath });
     function K(m) {
-      z(i, m);
+      z(a, m);
     }
     const $ = F("doc"), B = H(
-      () => e.value ? ie(e.value) : null
+      () => e.value ? ae(e.value) : null
     );
     J(e, () => {
       $.value = "doc";
     });
     function E(m) {
       const t = D.value.findByPath(m) ?? D.value.findByPath(`/${m}`) ?? D.value.findByPath(m.replace(/^\//, ""));
-      t && (z(i, t.path), ie(t) || ($.value = "doc"));
+      t && (z(a, t.path), ae(t) || ($.value = "doc"));
     }
     return (m, t) => (N(), P("div", {
       class: X(`neumorphism-doc-viewer ${o.className}`)
@@ -241,7 +241,7 @@ const ze = {
           f("div", ze, [
             u(L, {
               size: "small",
-              variant: $.value === "doc" ? "raised" : "flat",
+              variant: $.value === "doc" ? "pressed" : "raised",
               role: "tab",
               "aria-selected": $.value === "doc",
               onClick: t[0] || (t[0] = (y) => $.value = "doc")
@@ -253,7 +253,7 @@ const ze = {
             }, 8, ["variant", "aria-selected"]),
             u(L, {
               size: "small",
-              variant: $.value === "canvas" ? "raised" : "flat",
+              variant: $.value === "canvas" ? "pressed" : "raised",
               role: "tab",
               "aria-selected": $.value === "canvas",
               disabled: !B.value,
@@ -298,8 +298,8 @@ const ze = {
             u(me, {
               "selected-keys": p(c),
               "onUpdate:selectedKeys": t[4] || (t[4] = (g) => Q(c) ? c.value = g : null),
-              "expanded-keys": p(a),
-              "onUpdate:expandedKeys": t[5] || (t[5] = (g) => Q(a) ? a.value = g : null),
+              "expanded-keys": p(i),
+              "onUpdate:expandedKeys": t[5] || (t[5] = (g) => Q(i) ? i.value = g : null),
               data: p(d),
               "show-search": "",
               "search-placeholder": "搜索文档...",
@@ -405,7 +405,7 @@ const ze = {
       })
     ], 2));
   }
-}), zt = /* @__PURE__ */ se(We, [["__scopeId", "data-v-36899681"]]), je = { class: "neumorphism-editor-toolbar" }, Ge = { class: "neumorphism-editor-toolbar-left" }, Qe = { class: "neumorphism-editor-toolbar-right" }, Xe = { class: "editor-stat" }, Ye = /* @__PURE__ */ ne({
+}), zt = /* @__PURE__ */ se(We, [["__scopeId", "data-v-96a62bb1"]]), je = { class: "neumorphism-editor-toolbar" }, Ge = { class: "neumorphism-editor-toolbar-left" }, Qe = { class: "neumorphism-editor-toolbar-right" }, Xe = { class: "editor-stat" }, Ye = /* @__PURE__ */ ne({
   __name: "MarkdownEditor",
   props: {
     value: {},
@@ -415,11 +415,11 @@ const ze = {
   },
   emits: ["change", "docLink"],
   setup(l, { emit: n }) {
-    const o = l, i = n, h = F("split");
+    const o = l, a = n, h = F("split");
     function c(v) {
-      i("docLink", v);
+      a("docLink", v);
     }
-    const a = [
+    const i = [
       { key: "edit", label: "✏️ 编辑" },
       { key: "split", label: "⬌ 分栏" },
       { key: "preview", label: "👁 预览" }
@@ -434,7 +434,7 @@ const ze = {
       const C = D();
       if (!C) return;
       const I = C.selectionStart, O = C.selectionEnd, M = C.value.slice(I, O) || w, W = C.value.slice(0, I) + v + M + s + C.value.slice(O);
-      i("change", W), ee(() => {
+      a("change", W), ee(() => {
         C.focus();
         const A = I + v.length;
         C.setSelectionRange(A, A + M.length);
@@ -447,7 +447,7 @@ const ze = {
 `) ? `
 ` : ""}${v} ${s}
 `, te = I + A + O;
-      i("change", te), ee(() => {
+      a("change", te), ee(() => {
         w.focus();
         const oe = C + A.length - s.length - 2;
         w.setSelectionRange(oe, oe + s.length);
@@ -485,7 +485,7 @@ const ze = {
 `, s = D();
       if (!s) return;
       const w = s.selectionStart, C = s.value.slice(0, w) + v + s.value.slice(s.selectionEnd);
-      i("change", C), ee(() => {
+      a("change", C), ee(() => {
         s.focus(), s.setSelectionRange(w + 3, w + 3);
       });
     }
@@ -499,7 +499,7 @@ const ze = {
         const M = D();
         if (!M) return;
         const W = M.selectionStart, A = `![${C}](${w.result})`, te = M.value.slice(0, W) + A + M.value.slice(W);
-        i("change", te), ee(() => {
+        a("change", te), ee(() => {
           M.focus(), M.setSelectionRange(W + A.length, W + A.length);
         });
       }, w.readAsDataURL(s);
@@ -511,7 +511,7 @@ const ze = {
     let R = null;
     function ye() {
       o.autoSave && (R && clearTimeout(R), R = setTimeout(() => {
-        i("change", o.value);
+        a("change", o.value);
       }, o.autoSaveInterval));
     }
     J(
@@ -548,7 +548,6 @@ const ze = {
       f("div", je, [
         f("div", Ge, [
           u(L, {
-            variant: "flat",
             size: "small",
             title: "粗体 (Ctrl+B)",
             onClick: q
@@ -559,7 +558,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "斜体 (Ctrl+I)",
             onClick: K
@@ -570,7 +568,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "标题",
             onClick: $
@@ -581,7 +578,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "链接",
             onClick: B
@@ -592,7 +588,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "图片",
             onClick: E
@@ -603,7 +598,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "行内代码",
             onClick: m
@@ -614,7 +608,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "代码块",
             onClick: t
@@ -625,7 +618,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "无序列表",
             onClick: y
@@ -636,7 +628,6 @@ const ze = {
             _: 1
           }),
           u(L, {
-            variant: "flat",
             size: "small",
             title: "表格",
             onClick: g
@@ -651,7 +642,7 @@ const ze = {
           u(De, {
             modelValue: h.value,
             "onUpdate:modelValue": s[0] || (s[0] = (w) => h.value = w),
-            tabs: a,
+            tabs: i,
             size: "small",
             class: "neumorphism-editor-mode-tabs"
           }, null, 8, ["modelValue"]),
@@ -681,7 +672,7 @@ const ze = {
                 placeholder: "在此输入 Markdown...",
                 "auto-resize": !1,
                 "show-count": !1,
-                "onUpdate:modelValue": s[1] || (s[1] = (w) => i("change", w))
+                "onUpdate:modelValue": s[1] || (s[1] = (w) => a("change", w))
               }, null, 8, ["model-value"])
             ]),
             _: 1
@@ -711,7 +702,7 @@ const ze = {
       ], 2)
     ], 2));
   }
-}), Je = /* @__PURE__ */ se(Ye, [["__scopeId", "data-v-39e119b0"]]), Ze = { class: "neumorphism-editor-actions" }, et = {
+}), Je = /* @__PURE__ */ se(Ye, [["__scopeId", "data-v-3eeb7d86"]]), Ze = { class: "neumorphism-editor-actions" }, et = {
   key: 0,
   class: "neumorphism-editor-sider"
 }, tt = {
@@ -720,7 +711,7 @@ const ze = {
 }, nt = {
   key: 0,
   class: "neumorphism-editor-layout"
-}, st = { class: "neumorphism-editor-header" }, ot = { class: "neumorphism-editor-title" }, lt = { class: "neumorphism-editor-meta" }, at = { class: "neumorphism-editor-body" }, it = {
+}, st = { class: "neumorphism-editor-header" }, ot = { class: "neumorphism-editor-title" }, lt = { class: "neumorphism-editor-meta" }, it = { class: "neumorphism-editor-body" }, at = {
   key: 1,
   class: "neumorphism-editor-empty"
 }, rt = 50, dt = /* @__PURE__ */ ne({
@@ -732,10 +723,10 @@ const ze = {
   },
   emits: ["save", "docLink"],
   setup(l, { emit: n }) {
-    const o = l, i = n, {
+    const o = l, a = n, {
       selectedPath: h,
       selectedKeys: c,
-      expandedKeys: a,
+      expandedKeys: i,
       treeData: d,
       displayNode: e,
       themeModel: T,
@@ -756,10 +747,10 @@ const ze = {
       e.value && V(e.value.path, m);
     }
     function K() {
-      e.value && i("save", e.value.path, z(e.value));
+      e.value && a("save", e.value.path, z(e.value));
     }
     function $(m) {
-      h.value = m, i("docLink", m);
+      h.value = m, a("docLink", m);
     }
     const B = H(() => {
       if (!e.value) return !1;
@@ -819,8 +810,8 @@ const ze = {
             u(me, {
               "selected-keys": p(c),
               "onUpdate:selectedKeys": t[1] || (t[1] = (g) => Q(c) ? c.value = g : null),
-              "expanded-keys": p(a),
-              "onUpdate:expandedKeys": t[2] || (t[2] = (g) => Q(a) ? a.value = g : null),
+              "expanded-keys": p(i),
+              "onUpdate:expandedKeys": t[2] || (t[2] = (g) => Q(i) ? i.value = g : null),
               data: p(d),
               "show-search": "",
               "search-placeholder": "搜索文档...",
@@ -881,14 +872,14 @@ const ze = {
                       }, 8, ["disabled"])
                     ]),
                     u(he),
-                    f("div", at, [
+                    f("div", it, [
                       u(Je, {
                         value: z(p(e)),
                         onChange: q,
                         onDocLink: $
                       }, null, 8, ["value"])
                     ])
-                  ])) : (N(), P("div", it, [
+                  ])) : (N(), P("div", at, [
                     u(Y, {
                       elevation: 2,
                       hoverable: "bulge",
@@ -930,16 +921,16 @@ function ct(l) {
   const n = l.match(ut);
   if (!n)
     return { meta: {}, body: l };
-  const o = n[1], i = l.slice(n[0].length), h = {};
+  const o = n[1], a = l.slice(n[0].length), h = {};
   for (const c of o.split(`
 `)) {
-    const a = c.indexOf(":");
-    if (a === -1) continue;
-    const d = c.slice(0, a).trim();
-    let e = c.slice(a + 1).trim();
+    const i = c.indexOf(":");
+    if (i === -1) continue;
+    const d = c.slice(0, i).trim();
+    let e = c.slice(i + 1).trim();
     /^-?\d+$/.test(e) ? e = parseInt(e, 10) : /^-?\d+\.\d+$/.test(e) ? e = parseFloat(e) : e === "true" ? e = !0 : e === "false" ? e = !1 : (e.startsWith('"') && e.endsWith('"') || e.startsWith("'") && e.endsWith("'")) && (e = e.slice(1, -1)), h[d] = e;
   }
-  return { meta: h, body: i };
+  return { meta: h, body: a };
 }
 function mt(l) {
   return l.replace(/\.md$/i, "").replace(/\//g, "-").replace(/\\/g, "-");
@@ -951,13 +942,13 @@ function ht(l, n) {
   return o ? o[1].trim() : "Untitled";
 }
 function pt(l, n) {
-  const { meta: o, body: i } = ct(n), h = ht(i, o), c = typeof o.order == "number" ? o.order : 9999;
+  const { meta: o, body: a } = ct(n), h = ht(a, o), c = typeof o.order == "number" ? o.order : 9999;
   return {
     id: mt(l),
     title: h,
     path: l,
     content: n,
-    body: i,
+    body: a,
     meta: o,
     children: [],
     order: c
@@ -965,35 +956,35 @@ function pt(l, n) {
 }
 function Vt(l) {
   const n = /* @__PURE__ */ new Map();
-  for (const [a, d] of Object.entries(l)) {
-    if (!a.endsWith(".md")) continue;
-    const e = pt(a, d);
-    n.set(a, e);
+  for (const [i, d] of Object.entries(l)) {
+    if (!i.endsWith(".md")) continue;
+    const e = pt(i, d);
+    n.set(i, e);
   }
-  const o = [], i = Array.from(n.keys()).sort();
-  for (const a of i) {
-    const d = a.split("/");
+  const o = [], a = Array.from(n.keys()).sort();
+  for (const i of a) {
+    const d = i.split("/");
     if (d.length === 1) {
-      o.push(a);
+      o.push(i);
       continue;
     }
     let e = null;
     const S = `${d.slice(0, -1).join("/")}/index.md`;
-    if (n.has(S) && S !== a)
+    if (n.has(S) && S !== i)
       e = S;
     else {
       const _ = d.slice(0, -1).join("/") + ".md";
       n.has(_) && (e = _);
     }
     if (e && n.has(e)) {
-      const _ = n.get(e), D = n.get(a);
+      const _ = n.get(e), D = n.get(i);
       _.children.push(D);
     } else
-      o.push(a);
+      o.push(i);
   }
-  for (const a of n.values())
-    a.children.sort((d, e) => d.order - e.order || d.title.localeCompare(e.title));
-  const h = o.map((a) => n.get(a)).sort((a, d) => a.order - d.order || a.title.localeCompare(d.title));
+  for (const i of n.values())
+    i.children.sort((d, e) => d.order - e.order || d.title.localeCompare(e.title));
+  const h = o.map((i) => n.get(i)).sort((i, d) => i.order - d.order || i.title.localeCompare(d.title));
   return {
     id: "root",
     title: "Root",
@@ -1030,7 +1021,7 @@ export {
   ct as parseFrontmatter,
   be as parseProDocFlow,
   mt as pathToId,
-  ie as resolveCanvasGraph,
+  ae as resolveCanvasGraph,
   ve as useDocLayout,
   Ut as useMarkdownToc,
   qt as useScrollSpy,
