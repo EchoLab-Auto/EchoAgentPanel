@@ -128,7 +128,16 @@ function send(content: string, images: string[] = []) {
 }
 
 function cancelWork() {
-  sendCommand({ CancelRequestedWork: { session_id: activeSessionId.value, all: false } });
+  // 取消必须路由到 turn 实际所在的 agent：self-coding 的消息在
+  // self-coding 的 Agent 中执行，不带 team_id 会路由到默认 agent，
+  // 永远取消 0 个任务。
+  sendCommand({
+    CancelRequestedWork: {
+      session_id: activeSessionId.value,
+      all: false,
+      team_id: activeTeamId.value || undefined,
+    },
+  });
 }
 
 // ── 顶部设置菜单 ──
