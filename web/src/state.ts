@@ -329,7 +329,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return reduceMessage(state, e);
     }
     case 'AgentThinking': {
-      const e = (event as { AgentThinking: { session_id: string } }).AgentThinking;
+      const e = (event as { AgentThinking: { session_id: string; team_id?: string | null } }).AgentThinking;
+      if (!belongsToActiveTeam(state, e.team_id)) return state;
       activity(state, e.session_id);
       return state;
     }
