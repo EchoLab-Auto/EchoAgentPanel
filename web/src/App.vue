@@ -14,6 +14,7 @@ import {
   type HeadlessMenuItem,
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
+import { cancelSessionWork } from './state';
 import { sendCommand, startConnection } from './connection';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
@@ -128,6 +129,8 @@ function send(content: string, images: string[] = []) {
 }
 
 function cancelWork() {
+  // 乐观中断：立即结束动画/任务/工具运行态（不等后端确认）
+  cancelSessionWork(state, activeSessionId.value);
   // 取消必须路由到 turn 实际所在的 agent：self-coding 的消息在
   // self-coding 的 Agent 中执行，不带 team_id 会路由到默认 agent，
   // 永远取消 0 个任务。

@@ -865,6 +865,49 @@ function applyBackgroundHook(state: AppState, content: string) {
   }
 }
 
+/** 乐观取消：立即中断当前会话的活动动画/任务/工具运行态，
+ * 不等后端确认（后端随后会发 AgentCompleted/ReplyBranchCompleted 对齐）。 */
+export function cancelSessionWork(state: AppState, sessionId: string) {
+  // 1) 活动 phase → completed：活动浮条/取消按钮立即消失
+  const act = state.activities[sessionId];
+  if (act && act.phase !== 'completed' && act.phase !== 'failed') {
+    act.phase = 'completed';
+    act.detail = null;
+  }
+  // 2) 运行中的任务（reply/后台/子代理）→ cancelled
+  for (const task of state.tasks) {
+    if (task.sessionId === sessionId && task.status === 'running') {
+      task.status = 'cancelled';
+      task.completedAtMs = Date.now();
+      for (const b of task.branches) {
+        if (b.status === 'running') {
+          b.status = 'cancelled';
+          b.completedAtMs = Date.now();
+        }
+      }
+    }
+  }
+  // 3) 主时间线 running 工具卡 → failed + “已取消”
+  for (const msg of state.trunk) {
+    if (msg.sessionId === sessionId && msg.tool && msg.tool.status === 'running') {
+      msg.tool.status = 'failed';
+      msg.tool.output = '（已取消）';
+    }
+  }
+  // 4) 分支 tab 同步标记
+  for (const tab of Object.values(state.branchTabs)) {
+    if (tab.sessionId === sessionId && tab.status === 'running') {
+      tab.status = 'cancelled';
+      for (const m of tab.msgs) {
+        if (m.kind === 'tool' && m.status === 'running') {
+          m.status = 'failed';
+          m.output = '（已取消）';
+        }
+      }
+    }
+  }
+}
+
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {
   state.toasts.push({ id: Date.now() + Math.random(), text: truncate(text, 512), kind });
   if (state.toasts.length > 8) {

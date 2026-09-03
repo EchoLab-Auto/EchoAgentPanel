@@ -4,6 +4,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismTag } from '@echolab-auto/ui-frame';
 import { state } from '../store';
+import { cancelSessionWork } from '../state';
 import { sendCommand } from '../connection';
 
 const KIND_LABEL: Record<string, string> = {
@@ -93,6 +94,7 @@ function isActive(status: string): boolean {
 }
 
 function cancel(sessionId: string) {
+  cancelSessionWork(state, sessionId);
   sendCommand({
     CancelRequestedWork: {
       session_id: sessionId,
