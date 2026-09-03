@@ -93,7 +93,13 @@ function isActive(status: string): boolean {
 }
 
 function cancel(sessionId: string) {
-  sendCommand({ CancelRequestedWork: { session_id: sessionId, all: false } });
+  sendCommand({
+    CancelRequestedWork: {
+      session_id: sessionId,
+      all: false,
+      team_id: state.activeTeamId || undefined,
+    },
+  });
 }
 </script>
 
