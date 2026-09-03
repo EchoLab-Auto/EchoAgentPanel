@@ -447,6 +447,40 @@ function toggleTool(tool: ToolInfo, enabled: boolean) {
   sendCommand({ ToggleTool: { name: tool.name, enabled } });
 }
 
+// ── 外部 Git 来源 skill 管理 ──
+const gitFormOpen = ref(false);
+const gitUrl = ref('');
+const gitName = ref('');
+const gitBranch = ref('');
+
+function installGitSkill() {
+  if (!gitUrl.value.trim()) return;
+  sendCommand({
+    InstallSkillFromGit: {
+      url: gitUrl.value.trim(),
+      name: gitName.value.trim() || null,
+      branch: gitBranch.value.trim() || null,
+    },
+  });
+  gitUrl.value = '';
+  gitName.value = '';
+  gitBranch.value = '';
+  // 稍后由 SkillsList 事件刷新
+}
+
+function updateGitSkill(skill: SkillInfo) {
+  sendCommand({ UpdateSkillFromGit: { name: skill.name } });
+}
+
+function shortUrl(url: string): string {
+  return url.length > 42 ? url.slice(0, 40) + '…' : url;
+}
+
+function removeGitSource(skill: SkillInfo) {
+  if (!window.confirm(`移除 ${skill.name} 的 Git 来源记录？（目录保留，可手动删除）`)) return;
+  sendCommand({ RemoveSkillSource: { name: skill.name } });
+}
+
 // ── 新建 / 编辑 / 保存 / 删除 ──
 function startCreate() {
   creating.value = true;
@@ -572,6 +606,18 @@ watch(
         <NeumorphismButton size="small" variant="glass" @click="startCreate">新建技能</NeumorphismButton>
         <NeumorphismButton size="small" variant="glass" @click="startTeamCreate">新建 Team</NeumorphismButton>
         <NeumorphismButton size="small" variant="glass" @click="refresh">刷新</NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" @click="gitFormOpen = !gitFormOpen">
+          {{ gitFormOpen ? '收起安装' : 'Git 安装' }}
+        </NeumorphismButton>
+      </div>
+      <div v-if="gitFormOpen" class="git-install-form">
+        <div class="git-install-form__title">从 Git 仓库安装技能</div>
+        <NeumorphismInput v-model="gitUrl" placeholder="仓库 URL（https/ssh/本地路径）" size="small" />
+        <div class="git-install-form__row">
+          <NeumorphismInput v-model="gitName" placeholder="安装目录名（默认仓库名）" size="small" />
+          <NeumorphismInput v-model="gitBranch" placeholder="分支（默认仓库默认）" size="small" />
+        </div>
+        <NeumorphismButton size="small" variant="primary" @click="installGitSkill">安装</NeumorphismButton>
       </div>
     </div>
 
@@ -587,6 +633,14 @@ watch(
         <div class="detail-head">
           <h3>{{ selectedSkill.name }}</h3>
           <div class="detail-actions">
+            <template v-if="selectedSkill.source">
+              <NeumorphismButton size="small" variant="glass" @click="updateGitSkill(selectedSkill)">
+                更新
+              </NeumorphismButton>
+              <NeumorphismButton size="small" variant="glass" @click="removeGitSource(selectedSkill)">
+                移除来源
+              </NeumorphismButton>
+            </template>
             <NeumorphismButton size="small" variant="glass" @click="startEdit">编辑</NeumorphismButton>
             <NeumorphismButton size="small" variant="glass" @click="deleteSkill(selectedSkill)">
               删除
@@ -594,6 +648,14 @@ watch(
           </div>
         </div>
         <div class="detail-meta">
+          <NeumorphismTag
+            v-if="selectedSkill.source"
+            size="small"
+            variant="info"
+            :title="`${selectedSkill.source.url} @ ${selectedSkill.source.rev}`"
+          >
+            Git · {{ shortUrl(selectedSkill.source.url) }}
+          </NeumorphismTag>
           <NeumorphismTag v-if="selectedSkill.category" size="small">{{ selectedSkill.category }}</NeumorphismTag>
           <NeumorphismTag v-if="selectedSkill.always" variant="warning" size="small">常驻</NeumorphismTag>
           <span class="muted">{{ selectedSkill.description || '（无描述）' }}</span>
@@ -1022,6 +1084,31 @@ watch(
     transparent
   );
 }
+
+/* Git 安装表单 */
+.git-install-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--nm-border-color);
+  border-radius: 10px;
+  margin-top: 8px;
+  background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
+}
+.git-install-form__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nm-text-secondary);
+}
+.git-install-form__row {
+  display: flex;
+  gap: 8px;
+}
+.git-install-form__row > * {
+  flex: 1;
+}
+
 </style>
 
 .caps-tool-group {

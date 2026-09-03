@@ -49,6 +49,8 @@ export interface SkillInfo {
   category: string;
   package?: string;
   content: string;
+  /** 外部 Git 来源（安装的 skill；内置为 undefined） */
+  source?: { url: string; rev: string; branch?: string; installed_at?: string } | null;
 }
 
 export interface ToolInfo {
@@ -257,6 +259,9 @@ export type BackendCommand =
   | 'RequestState'
   | { RequestContext: { team_id?: string | null } }
   | { RequestTrunkTimeline: { team_id?: string | null; since_seq?: number } }
+  | { InstallSkillFromGit: { url: string; name?: string | null; branch?: string | null } }
+  | { UpdateSkillFromGit: { name: string } }
+  | { RemoveSkillSource: { name: string } }
   | 'RequestShellSessions'
   | { ShellStart: { workdir?: string | null } }
   | { ShellExec: { session_id: string; command: string; timeout_secs?: number } }
