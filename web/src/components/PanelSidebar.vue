@@ -5,6 +5,7 @@
 
 import { computed, ref } from 'vue';
 import { state } from '../store';
+import { orchestrationModeOf } from '../protocol';
 import SidebarCard from './SidebarCard.vue';
 import SessionGroups from './SessionGroups.vue';
 
@@ -13,21 +14,15 @@ defineProps<{
   activeBranchId: string | null;
 }>();
 
-// Chatbot 会话系统总开关：当前 agent 未启用时侧边栏隐藏「会话」与
-// 「临时分支」两张卡片（后端按 TeamInfo.chat_sessions_enabled 推导）。
+// 会话管理 UI 总开关：仅 chatbot 编排模式显示「会话」与「临时分支」两张
+// 卡片（single 模式隐藏；后端按 TeamInfo.orchestration_mode 推导）。
 const chatSessionsVisible = computed(() => {
   const team = state.teams.find((t) => t.id === state.activeTeamId);
-  if (!team) return true; // 主/默认 agent：未配置限定时默认启用
-  return team.chat_sessions_enabled !== false;
+  return orchestrationModeOf(team) === 'chatbot';
 });
 
-// 临时分支卡还需回执分支能力启用（会话系统开关下再细分）。
-const replyBranchesVisible = computed(() => {
-  if (!chatSessionsVisible.value) return false;
-  const team = state.teams.find((t) => t.id === state.activeTeamId);
-  if (!team) return true;
-  return team.reply_branches_enabled !== false;
-});
+// 临时分支卡与会话卡同属 chatbot 模式的会话管理 UI（合并后不再单独细分）。
+const replyBranchesVisible = chatSessionsVisible;
 
 const emit = defineEmits<{
   selectSession: [id: string];

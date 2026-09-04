@@ -3,10 +3,11 @@
 //! 对应资源页的 Team 编辑（系统提示词 / 启用 / 能力白名单）。
 
 import { computed, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import { NeumorphismButton, NeumorphismSegmented } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
-import type { TeamInfo } from '../protocol';
+import type { OrchestrationMode, TeamInfo } from '../protocol';
+import { applyMode, deriveMode, stripLegacyModeIds } from '../orchestration-mode';
 
 const props = defineProps<{
   team: TeamInfo;
@@ -142,6 +143,20 @@ function toggleGroup(list: string[], all: string[], group: GroupedTable): string
 
 const bottomPx = computed(() => `${props.bottomOffset ?? 42}px`);
 
+// ── 编排模式分段单选（互斥子插件，写入 enabled_plugins 白名单） ──
+const MODE_OPTIONS = [
+  { label: '单任务编排', value: 'single' },
+  { label: '多任务并行编排', value: 'chatbot' },
+];
+const orchestrationMode = computed(() => deriveMode(enabledPlugins.value));
+function setOrchestrationMode(value: string | number | (string | number)[] | undefined) {
+  enabledPlugins.value = applyMode(
+    enabledPlugins.value,
+    String(value ?? 'chatbot') as OrchestrationMode,
+    state.plugins.map((p) => p.id),
+  );
+}
+
 function save() {
   if (!name.value.trim()) return;
   sendCommand({
@@ -151,10 +166,10 @@ function save() {
       description: description.value.trim(),
       system_prompt: systemPrompt.value,
       enabled: enabled.value,
-      disabled_plugins: disabledPlugins.value,
+      disabled_plugins: stripLegacyModeIds(disabledPlugins.value),
       disabled_tools: disabledTools.value,
       disabled_skills: disabledSkills.value,
-      enabled_plugins: enabledPlugins.value,
+      enabled_plugins: stripLegacyModeIds(enabledPlugins.value),
       enabled_tools: enabledTools.value,
       enabled_skills: enabledSkills.value,
     },
@@ -194,6 +209,19 @@ function save() {
             <input v-model="enabled" type="checkbox" />
             <span class="agent-config__switch-track" />
           </label>
+        </div>
+
+        <div class="agent-config__group">
+          <div class="agent-config__group-title">编排模式</div>
+          <p class="muted agent-config__hint">
+            多任务并行 = 会话列表 / 全局会话 / 可见回执分支；单任务 = 无会话管理 UI（互斥，单任务为兜底）。
+          </p>
+          <NeumorphismSegmented
+            :model-value="orchestrationMode"
+            :options="MODE_OPTIONS"
+            size="small"
+            @update:model-value="setOrchestrationMode"
+          />
         </div>
 
         <div class="agent-config__group">
@@ -383,6 +411,7 @@ function save() {
 .agent-config__switch input:checked + .agent-config__switch-track { background: var(--panel-accent); }
 .agent-config__switch input:checked + .agent-config__switch-track::after { transform: translateX(18px); }
 .agent-config__group-title { font-size: 12px; font-weight: 600; color: var(--nm-text-secondary); margin-bottom: 6px; }
+.agent-config__hint { margin: 0 0 6px; font-size: 11px; }
 /* pkg 分组块 */
 .agent-config__pkg {
   border: 1px solid var(--nm-border-subtle);

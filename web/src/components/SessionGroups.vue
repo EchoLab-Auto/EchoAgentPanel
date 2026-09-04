@@ -2,7 +2,7 @@
 //! 会话分组列表：全局 / Local / QQ 私聊 / QQ 群 / 其他。
 
 import { computed } from 'vue';
-import type { SessionInfo } from '../protocol';
+import { orchestrationModeOf, type SessionInfo } from '../protocol';
 import { state } from '../store';
 
 const props = defineProps<{ activeSessionId: string }>();
@@ -41,12 +41,11 @@ const SESSION_GROUP_LABEL: Record<string, string> = {
   other: '其他',
 };
 
-// 「全局会话」是否启用：由当前 agent（team）的 global_session_enabled 决定。
-// 后端按 persona enabled_plugins 白名单推导；当前 agent 未显式配置时默认启用。
+// 「全局会话」分组是否显示：仅 chatbot 编排模式（single 模式该 agent
+// 只保留与具体来源绑定的独立会话；后端按 TeamInfo.orchestration_mode 推导）。
 const globalSessionEnabled = computed(() => {
   const team = state.teams.find((t) => t.id === state.activeTeamId);
-  if (!team) return true; // 主/默认 agent：未配置限定时默认启用
-  return team.global_session_enabled !== false;
+  return orchestrationModeOf(team) === 'chatbot';
 });
 
 /** 会话是否属于当前激活 team（null = 主/默认 agent）。

@@ -13,6 +13,7 @@ import {
 import { state } from './store';
 import { cancelSessionWork } from './state';
 import { sendCommand, startConnection } from './connection';
+import { orchestrationModeOf } from './protocol';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import TasksPanel from './components/TasksPanel.vue';
@@ -176,12 +177,12 @@ function onLayoutCollapse(collapsed: boolean) {
   }
 }
 
-// ── 全局会话被禁用兜底：当前 agent 无全局视图时若停留在 global 则回退 local ──
+// ── 全局会话被禁用兜底：当前 agent 非 chatbot 编排模式时若停留在 global 则回退 local ──
 watch(
   [() => state.teams, () => activeTeamId.value],
   () => {
     const team = state.teams.find((t) => t.id === activeTeamId.value);
-    if (activeSessionId.value === 'global' && team && team.global_session_enabled === false) {
+    if (activeSessionId.value === 'global' && team && orchestrationModeOf(team) !== 'chatbot') {
       selectSession('local:tui::local_user');
     }
   },

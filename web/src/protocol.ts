@@ -79,13 +79,30 @@ export interface TeamInfo {
   enabled_skills?: string[];
   memory_limit_tokens?: number | null;
   context_window_tokens?: number | null;
-  /** 临时回复分支能力是否启用（后端按 enabled_plugins 白名单推导） */
-  reply_branches_enabled?: boolean;
-  /** 全局会话视图是否启用（后端按 enabled_plugins 白名单推导；false 时侧边栏不显示"全局"） */
-  global_session_enabled?: boolean;
-  /** Chatbot 会话系统是否启用（后端按 enabled_plugins 白名单推导；false 时侧边栏不显示会话/临时分支卡片） */
-  chat_sessions_enabled?: boolean;
+  /**
+   * 编排模式（互斥子插件推导）：single = 单任务编排（无会话管理 UI、
+   * 回执分支不可见）；chatbot = 多任务并行编排（会话卡/全局分组/可见分支）。
+   * 缺省视为 chatbot（对齐旧三布尔 default_true 语义）。
+   */
+  orchestration_mode?: OrchestrationMode;
 }
+
+export type OrchestrationMode = 'single' | 'chatbot';
+
+/** 编排模式读取（TeamInfo 缺字段时按 chatbot——旧 core 消息兼容）。 */
+export function orchestrationModeOf(team?: TeamInfo | null): OrchestrationMode {
+  return team?.orchestration_mode ?? 'chatbot';
+}
+
+/** 编排模式子插件 id（编辑器写入 enabled_plugins 白名单用） */
+export const ORCHESTRATION_SINGLE_PLUGIN_ID = 'echo-agent.orchestration.single';
+export const ORCHESTRATION_CHATBOT_PLUGIN_ID = 'echo-agent.orchestration.chatbot';
+/** 旧特性插件 id（保存防御：从白名单中剔除，core 会迁移映射） */
+export const LEGACY_MODE_PLUGIN_IDS = [
+  'echo-agent.branch.reply',
+  'echo-agent.session.global',
+  'echo-agent.chatbot.sessions',
+];
 
 /** 后台 shell 会话摘要（Shell 面板终端可视化） */
 export interface ShellSessionInfo {

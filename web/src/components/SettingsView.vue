@@ -21,13 +21,16 @@ import {
   NeumorphismForm,
   NeumorphismFormItem,
   NeumorphismInput,
+  NeumorphismSegmented,
   NeumorphismSwitch,
   NeumorphismTag,
   NeumorphismTextarea,
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
-import type { PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
+import type { OrchestrationMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
+import { orchestrationModeOf } from '../protocol';
+import { applyMode, deriveMode, stripLegacyModeIds } from '../orchestration-mode';
 import ApiSettings from './ApiSettings.vue';
 import LogView from './LogView.vue';
 
@@ -373,6 +376,20 @@ const teamFormRules = {
   name: [{ required: true, message: '请输入名称' }],
 };
 
+// ── 编排模式分段单选（互斥子插件，写入 enabled_plugins 白名单） ──
+const MODE_OPTIONS = [
+  { label: '单任务编排', value: 'single' },
+  { label: '多任务并行编排', value: 'chatbot' },
+];
+const teamOrchestrationMode = computed(() => deriveMode(teamFormEnabledPlugins.value));
+function setTeamOrchestrationMode(value: string | number) {
+  teamFormEnabledPlugins.value = applyMode(
+    teamFormEnabledPlugins.value,
+    String(value ?? 'chatbot') as OrchestrationMode,
+    state.plugins.map((p) => p.id),
+  );
+}
+
 function startTeamCreate() {
   activeCategory.value = 'team';
   teamEditing.value = true;
@@ -421,10 +438,10 @@ function saveTeam() {
       description: teamFormDescription.value.trim(),
       system_prompt: teamFormPrompt.value,
       enabled: teamFormEnabled.value,
-      disabled_plugins: teamFormDisabledPlugins.value,
+      disabled_plugins: stripLegacyModeIds(teamFormDisabledPlugins.value),
       disabled_tools: teamFormDisabledTools.value,
       disabled_skills: teamFormDisabledSkills.value,
-      enabled_plugins: teamFormEnabledPlugins.value,
+      enabled_plugins: stripLegacyModeIds(teamFormEnabledPlugins.value),
       enabled_tools: teamFormEnabledTools.value,
       enabled_skills: teamFormEnabledSkills.value,
     },
@@ -909,6 +926,9 @@ watch(
                 主 Agent
               </NeumorphismTag>
               <NeumorphismTag variant="info" size="small">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
+              <NeumorphismTag size="small">
+                {{ orchestrationModeOf(selectedTeam) === 'chatbot' ? '多任务并行编排' : '单任务编排' }}
+              </NeumorphismTag>
             </div>
             <div class="detail-field">
               <span>启用（禁用即卸载记忆，再次启用重新挂载）</span>
@@ -992,6 +1012,15 @@ watch(
               </NeumorphismFormItem>
               <NeumorphismFormItem label="启用" name="enabled">
                 <NeumorphismSwitch v-model="teamFormEnabled" size="small" />
+              </NeumorphismFormItem>
+              <NeumorphismFormItem label="编排模式">
+                <p class="muted caps-hint">多任务并行 = 会话列表 / 全局会话 / 可见回执分支；单任务 = 无会话管理 UI（互斥，单任务为兜底）。</p>
+                <NeumorphismSegmented
+                  :model-value="teamOrchestrationMode"
+                  :options="MODE_OPTIONS"
+                  size="small"
+                  @update:model-value="setTeamOrchestrationMode"
+                />
               </NeumorphismFormItem>
               <NeumorphismFormItem label="启用插件">
                 <p class="muted caps-hint">勾选该智能体可用的能力块（适配器/编排/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。</p>
