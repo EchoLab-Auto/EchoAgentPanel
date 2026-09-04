@@ -1,11 +1,11 @@
 <script setup lang="ts">
-//! API 设置弹窗：快速模板、Provider 表单、Profiles 管理（新建/编辑/切换/删除）。
+//! API 设置页（设置视图的工作区面板）：快速模板、Provider 表单、Profiles 管理。
+//! 由设置视图整页渲染（原为 SettingsModal 弹窗）；样式类复用 styles.css 全局定义。
 
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismInput,
-  NeumorphismModal,
   NeumorphismSelect,
   NeumorphismTag,
 } from '@echolab-auto/ui-frame';
@@ -98,8 +98,6 @@ const REASONING_OPTIONS = [
   { label: 'max', value: 'max' },
 ];
 
-const visible = defineModel<boolean>({ required: true });
-
 const api = computed(() => state.api);
 
 const provider = ref('');
@@ -115,13 +113,6 @@ const editingProfile = ref<string | null>(null);
 const testing = ref<string | null>(null);
 /** 测试结果缓存（name → 结果），运行时覆盖 state.apiTests 便于显示 */
 const testResults = ref<Record<string, { ok: boolean; message: string; latencyMs: number }>>({});
-
-// 打开弹窗时清空旧测试结果
-watch(visible, (open) => {
-  if (open) {
-    testResults.value = {};
-  }
-});
 
 function testResultOf(name: string) {
   return testResults.value[name] ?? state.apiTests[name] ?? null;
@@ -159,10 +150,13 @@ function initFromApi() {
   apiKey.value = '';
 }
 
-// 打开时与 api 更新（含保存后的回播）时重置表单 —— 与 React 版 useEffect([api]) 对齐。
-watch([visible, api], ([open]) => {
-  if (open) initFromApi();
+// 进入页面（挂载）时初始化表单并清空旧测试结果；
+// api 更新（含保存后的回播）时重置表单 —— 与原弹窗"打开时"语义对齐。
+onMounted(() => {
+  testResults.value = {};
+  initFromApi();
 });
+watch(api, () => initFromApi());
 
 function applyTemplate(t: ApiTemplate) {
   fillForm(t);
@@ -268,178 +262,172 @@ function saveAsNewProfile() {
 </script>
 
 <template>
-  <NeumorphismModal
-    v-model="visible"
-    title="API 设置"
-    size="large"
-    :footer="false"
-    :mask-closable="false"
-    @keydown.esc.stop
-  >
-    <div class="settings-form">
-      <label>快速模板</label>
-      <div class="template-grid">
-        <button
-          v-for="t in TEMPLATES"
-          :key="t.key"
-          class="template-item"
-          :title="t.hint"
-          @click="applyTemplate(t)"
-        >
-          <span class="template-name">{{ t.label }}</span>
-          <span class="template-hint">{{ t.hint }}</span>
-        </button>
-      </div>
-
-      <!-- 表单标题 + 编辑模式指示 -->
-      <div class="form-title-row">
-        <h3 class="form-title">{{ formTitle }}</h3>
-        <NeumorphismTag v-if="editingProfile" variant="warning" size="small">
-          编辑中
-        </NeumorphismTag>
-        <NeumorphismButton
-          v-if="editingProfile"
-          size="small"
-          variant="glass"
-          @click="cancelEdit"
-        >
-          取消编辑
-        </NeumorphismButton>
-      </div>
-
-      <label>Provider</label>
-      <NeumorphismSelect
-        :model-value="providerSelectValue"
-        :options="providerSelectOptions"
-        @change="applyProviderPreset"
-      />
-      <label>Model</label>
-      <NeumorphismInput v-model="model" placeholder="deepseek-v4-flash" />
-      <label>Base URL</label>
-      <NeumorphismInput
-        v-model="baseUrl"
-        :placeholder="
-          provider === 'third-party'
-            ? 'https://你的网关/v1（OpenAI 兼容，如 one-api / new-api）'
-            : 'https://api.deepseek.com/anthropic'
-        "
-      />
-      <div v-if="provider === 'third-party'" class="muted field-hint">
-        第三方服务需为 OpenAI 兼容接口；若网关提供 /anthropic 端点也会自动识别。
-      </div>
-      <label>API Key {{ api?.api_key_set ? '（已设置，留空保持不变）' : '（未设置）' }}</label>
-      <NeumorphismInput
-        v-model="apiKey"
-        type="password"
-        :placeholder="api?.api_key_set ? '••••••••' : '输入 API Key'"
-      />
-      <div class="form-row">
-        <div>
-          <label>思考模式</label>
-          <NeumorphismSelect v-model="thinking" :options="THINKING_OPTIONS" />
-        </div>
-        <div>
-          <label>推理强度</label>
-          <NeumorphismSelect v-model="reasoning" :options="REASONING_OPTIONS" />
-        </div>
-      </div>
-      <div class="form-actions">
-        <NeumorphismButton
-          variant="glass"
-          :loading="testing === (editingProfile ?? '')"
-          :disabled="testing !== null && testing !== (editingProfile ?? '')"
-          @click="runTest(editingProfile ?? '')"
-        >
-          测试连接
-        </NeumorphismButton>
-        <NeumorphismButton variant="primary" @click="saveTopLevel">
-          {{ saveDefaultLabel }}
-        </NeumorphismButton>
-      </div>
-      <div v-if="testResultOf(editingProfile ?? '')" class="api-test-result" :class="testResultOf(editingProfile ?? '')!.ok ? 'ok' : 'fail'">
-        <span class="api-test-badge">{{ testResultOf(editingProfile ?? '')!.ok ? '✓ 连通' : '✗ 失败' }}</span>
-        <span class="api-test-message">{{ testResultOf(editingProfile ?? '')!.message }}</span>
-        <span class="api-test-latency">{{ testResultOf(editingProfile ?? '')!.latencyMs }}ms</span>
-      </div>
-
-      <hr />
-      <h3>API Profiles</h3>
-      <div v-if="!api?.profiles || api.profiles.length === 0" class="muted">（暂无 profile）</div>
-      <div
-        v-for="profile in api?.profiles"
-        :key="profile.name"
-        class="profile-item"
-        :class="{ 'profile-item--editing': editingProfile === profile.name }"
+  <div class="settings-form api-settings-page">
+    <label>快速模板</label>
+    <div class="template-grid">
+      <button
+        v-for="t in TEMPLATES"
+        :key="t.key"
+        class="template-item"
+        :title="t.hint"
+        @click="applyTemplate(t)"
       >
-        <span class="profile-name">
-          {{ profile.name }}
-          <NeumorphismTag v-if="api?.active_api === profile.name" variant="success" size="small">
-            激活
-          </NeumorphismTag>
-          <NeumorphismTag v-if="editingProfile === profile.name" variant="warning" size="small">
-            编辑中
-          </NeumorphismTag>
-        </span>
-        <span class="muted">
-          {{ profile.provider }} / {{ profile.model }}{{ profile.api_key_set ? ' · key ✓' : ' · 无 key' }}
-        </span>
-        <span class="profile-actions">
-          <NeumorphismButton
-            size="small"
-            variant="glass"
-            :loading="testing === profile.name"
-            :disabled="testing !== null && testing !== profile.name"
-            @click="runTest(profile.name)"
-          >
-            测试
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
-            @click="editProfile(profile)"
-          >
-            编辑
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
-            @click="sendCommand({ SwitchApi: { name: profile.name } })"
-          >
-            切换
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
-            @click="sendCommand({ DeleteApi: { name: profile.name } })"
-          >
-            删除
-          </NeumorphismButton>
-        </span>
-        <span
-          v-if="testResultOf(profile.name)"
-          class="profile-test"
-          :class="testResultOf(profile.name)!.ok ? 'ok' : 'fail'"
-        >
-          {{ testResultOf(profile.name)!.ok ? '✓' : '✗' }}
-          {{ testResultOf(profile.name)!.latencyMs }}ms
-          <span class="profile-test-msg">{{ testResultOf(profile.name)!.message }}</span>
-        </span>
+        <span class="template-name">{{ t.label }}</span>
+        <span class="template-hint">{{ t.hint }}</span>
+      </button>
+    </div>
+
+    <!-- 表单标题 + 编辑模式指示 -->
+    <div class="form-title-row">
+      <h3 class="form-title">{{ formTitle }}</h3>
+      <NeumorphismTag v-if="editingProfile" variant="warning" size="small">
+        编辑中
+      </NeumorphismTag>
+      <NeumorphismButton
+        v-if="editingProfile"
+        size="small"
+        variant="glass"
+        @click="cancelEdit"
+      >
+        取消编辑
+      </NeumorphismButton>
+    </div>
+
+    <label>Provider</label>
+    <NeumorphismSelect
+      :model-value="providerSelectValue"
+      :options="providerSelectOptions"
+      @change="applyProviderPreset"
+    />
+    <label>Model</label>
+    <NeumorphismInput v-model="model" placeholder="deepseek-v4-flash" />
+    <label>Base URL</label>
+    <NeumorphismInput
+      v-model="baseUrl"
+      :placeholder="
+        provider === 'third-party'
+          ? 'https://你的网关/v1（OpenAI 兼容，如 one-api / new-api）'
+          : 'https://api.deepseek.com/anthropic'
+      "
+    />
+    <div v-if="provider === 'third-party'" class="muted field-hint">
+      第三方服务需为 OpenAI 兼容接口；若网关提供 /anthropic 端点也会自动识别。
+    </div>
+    <label>API Key {{ api?.api_key_set ? '（已设置，留空保持不变）' : '（未设置）' }}</label>
+    <NeumorphismInput
+      v-model="apiKey"
+      type="password"
+      :placeholder="api?.api_key_set ? '••••••••' : '输入 API Key'"
+    />
+    <div class="form-row">
+      <div>
+        <label>思考模式</label>
+        <NeumorphismSelect v-model="thinking" :options="THINKING_OPTIONS" />
       </div>
-      <div class="form-row profile-new">
-        <NeumorphismInput v-model="profileName" placeholder="新 profile 名称" />
-        <NeumorphismButton
-          size="small"
-          :disabled="!profileName.trim()"
-          @click="saveAsNewProfile"
-        >
-          保存为新 profile
-        </NeumorphismButton>
+      <div>
+        <label>推理强度</label>
+        <NeumorphismSelect v-model="reasoning" :options="REASONING_OPTIONS" />
       </div>
     </div>
-  </NeumorphismModal>
+    <div class="form-actions">
+      <NeumorphismButton
+        variant="glass"
+        :loading="testing === (editingProfile ?? '')"
+        :disabled="testing !== null && testing !== (editingProfile ?? '')"
+        @click="runTest(editingProfile ?? '')"
+      >
+        测试连接
+      </NeumorphismButton>
+      <NeumorphismButton variant="primary" @click="saveTopLevel">
+        {{ saveDefaultLabel }}
+      </NeumorphismButton>
+    </div>
+    <div v-if="testResultOf(editingProfile ?? '')" class="api-test-result" :class="testResultOf(editingProfile ?? '')!.ok ? 'ok' : 'fail'">
+      <span class="api-test-badge">{{ testResultOf(editingProfile ?? '')!.ok ? '✓ 连通' : '✗ 失败' }}</span>
+      <span class="api-test-message">{{ testResultOf(editingProfile ?? '')!.message }}</span>
+      <span class="api-test-latency">{{ testResultOf(editingProfile ?? '')!.latencyMs }}ms</span>
+    </div>
+
+    <hr />
+    <h3>API Profiles</h3>
+    <div v-if="!api?.profiles || api.profiles.length === 0" class="muted">（暂无 profile）</div>
+    <div
+      v-for="profile in api?.profiles"
+      :key="profile.name"
+      class="profile-item"
+      :class="{ 'profile-item--editing': editingProfile === profile.name }"
+    >
+      <span class="profile-name">
+        {{ profile.name }}
+        <NeumorphismTag v-if="api?.active_api === profile.name" variant="success" size="small">
+          激活
+        </NeumorphismTag>
+        <NeumorphismTag v-if="editingProfile === profile.name" variant="warning" size="small">
+          编辑中
+        </NeumorphismTag>
+      </span>
+      <span class="muted">
+        {{ profile.provider }} / {{ profile.model }}{{ profile.api_key_set ? ' · key ✓' : ' · 无 key' }}
+      </span>
+      <span class="profile-actions">
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          :loading="testing === profile.name"
+          :disabled="testing !== null && testing !== profile.name"
+          @click="runTest(profile.name)"
+        >
+          测试
+        </NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          @click="editProfile(profile)"
+        >
+          编辑
+        </NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          @click="sendCommand({ SwitchApi: { name: profile.name } })"
+        >
+          切换
+        </NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          @click="sendCommand({ DeleteApi: { name: profile.name } })"
+        >
+          删除
+        </NeumorphismButton>
+      </span>
+      <span
+        v-if="testResultOf(profile.name)"
+        class="profile-test"
+        :class="testResultOf(profile.name)!.ok ? 'ok' : 'fail'"
+      >
+        {{ testResultOf(profile.name)!.ok ? '✓' : '✗' }}
+        {{ testResultOf(profile.name)!.latencyMs }}ms
+        <span class="profile-test-msg">{{ testResultOf(profile.name)!.message }}</span>
+      </span>
+    </div>
+    <div class="form-row profile-new">
+      <NeumorphismInput v-model="profileName" placeholder="新 profile 名称" />
+      <NeumorphismButton
+        size="small"
+        :disabled="!profileName.trim()"
+        @click="saveAsNewProfile"
+      >
+        保存为新 profile
+      </NeumorphismButton>
+    </div>
+  </div>
 </template>
 
 <style scoped>
+.api-settings-page {
+  max-width: 720px;
+}
 .form-title-row {
   display: flex;
   align-items: center;

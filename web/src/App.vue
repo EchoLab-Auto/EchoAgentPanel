@@ -4,14 +4,11 @@
 import { computed, ref, watch } from 'vue';
 import {
   NeumorphismButton,
-  NeumorphismDropdown,
   NeumorphismLayout,
-  NeumorphismMenu,
   NeumorphismStatusDot,
   NeumorphismTag,
   NeumorphismToastProvider,
   ThemeProvider,
-  type HeadlessMenuItem,
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
 import { cancelSessionWork } from './state';
@@ -19,24 +16,25 @@ import { sendCommand, startConnection } from './connection';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import TasksPanel from './components/TasksPanel.vue';
-import CapabilitiesPanel from './components/CapabilitiesPanel.vue';
+import SettingsView from './components/SettingsView.vue';
 import LogView from './components/LogView.vue';
 import ShellPanel from './components/ShellPanel.vue';
-import SettingsModal from './components/SettingsModal.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'tasks' | 'caps' | 'logs' | 'shell';
+type View = 'chat' | 'tasks' | 'settings' | 'logs' | 'shell';
 
 const view = ref<View>(loadView());
 
 function loadView(): View {
   try {
     const saved = localStorage.getItem('echo-panel-view');
-    return (['chat', 'tasks', 'caps', 'logs', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    // 旧视图名迁移：资源视图已合并进设置视图
+    if (saved === 'caps') return 'settings';
+    return (['chat', 'tasks', 'settings', 'logs', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -103,7 +101,6 @@ function setView(next: View) {
 
 // 当前对话目标会话；'global' = 全局上下文（显示全部消息）。默认 local user 会话。
 const activeSessionId = ref('local:tui::local_user');
-const showSettings = ref(false);
 const activeBranchId = ref<string | null>(null);
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
 // 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
@@ -143,15 +140,7 @@ function cancelWork() {
   });
 }
 
-// ── 顶部设置菜单 ──
-const settingsMenuItems: HeadlessMenuItem[] = [
-  { key: 'showSettings', label: 'API 设置' },
-];
-
-function onSettingsMenuSelect(item: HeadlessMenuItem) {
-  if (item.key === 'showSettings') showSettings.value = true;
-}
-
+// ── 顶栏状态 ──
 const busyCount = computed(
   () =>
     Object.values(state.activities).filter((a) =>
@@ -292,14 +281,6 @@ watch(
           <NeumorphismButton
             size="small"
             variant="glass"
-            :pressed="view === 'caps'"
-            @click="setView('caps')"
-          >
-            资源
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
             :pressed="view === 'logs'"
             @click="setView('logs')"
           >
@@ -313,17 +294,14 @@ watch(
           >
             Shell
           </NeumorphismButton>
-          <NeumorphismDropdown trigger="click" position="bottom">
-            <NeumorphismButton size="small" variant="glass">设置 ▾</NeumorphismButton>
-            <template #items>
-              <NeumorphismMenu
-                :items="settingsMenuItems"
-                mode="vertical"
-                size="small"
-                @select="onSettingsMenuSelect"
-              />
-            </template>
-          </NeumorphismDropdown>
+          <NeumorphismButton
+            size="small"
+            variant="glass"
+            :pressed="view === 'settings'"
+            @click="setView('settings')"
+          >
+            设置
+          </NeumorphismButton>
           <ThemeToggleButton />
         </div>
       </template>
@@ -348,14 +326,13 @@ watch(
           @cancel="cancelWork"
           @select-team="onTeamSelect"
         />
-        <CapabilitiesPanel v-else-if="view === 'caps'" />
+        <SettingsView v-else-if="view === 'settings'" />
         <LogView v-else-if="view === 'logs'" />
         <ShellPanel v-else-if="view === 'shell'" />
         <TasksPanel v-else />
       </div>
     </NeumorphismLayout>
 
-    <SettingsModal v-model="showSettings" />
     <BranchModal
       v-if="activeBranchId"
       :branch-id="activeBranchId"
