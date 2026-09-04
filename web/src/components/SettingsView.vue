@@ -1,13 +1,15 @@
 <script setup lang="ts">
-//! 设置视图：API 配置 + 资源管理（技能 / 工具 / 插件 / 智能体）的统一面板。
+//! 设置视图：API 配置 + 资源管理（技能/工具/插件/智能体）+ 运行日志的统一面板。
 //!
-//! 布局：左侧一级菜单（API 设置 + 四类资源，带计数徽标），右侧为当前分类的工作区——
-//! API 为整页表单（ApiSettings）；资源类为 工具条 + 条目列表（分组可折叠）+ 详情/编辑面板。
+//! 布局：左侧一级菜单（API 设置 + 四类资源 + 日志，带计数徽标），右侧为当前分类的工作区——
+//! API 为整页表单（ApiSettings）；日志为整页查看器（LogView）；
+//! 资源类为 工具条 + 条目列表（分组可折叠）+ 详情/编辑面板。
 //! - API：快速模板 / 表单 / 测试连接 / Profiles（UpdateApiConfig / TestApi / SwitchApi / DeleteApi）
 //! - 技能：启停、编辑（SaveSkill）、新建、删除（DeleteSkill）、Git 安装/更新/移除来源
 //! - 工具：启停（ToggleTool）、参数 Schema 浏览
 //! - 插件：启停（TogglePlugin）
 //! - 智能体：选中即进编辑态（SaveTeam）、启停（ToggleTeam）、删除（DeleteTeam）
+//! - 日志：Core/Panel 分段、5s 自动刷新（HTTP /api/logs/{core,panel}）
 //! 数据来自后端 SkillsList / ToolsList / PluginsList / TeamsList 事件，打开时主动拉取；
 //! API 配置随 state.api 事件更新。
 
@@ -27,21 +29,24 @@ import { state } from '../store';
 import { sendCommand } from '../connection';
 import type { PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import ApiSettings from './ApiSettings.vue';
+import LogView from './LogView.vue';
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
 const TOOL_OTHER = '扩展工具';
 
 // ── 一级菜单：当前分类 ──
-type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team';
+type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
 
+// count 为 null 的分类不显示计数徽标（日志无条目概念）
 const categories = computed(() => [
-  { key: 'api' as const, label: 'API 设置', count: state.api?.profiles?.length ?? 0 },
-  { key: 'skill' as const, label: '技能', count: state.skills.length },
-  { key: 'tool' as const, label: '工具', count: state.tools.length },
-  { key: 'plugin' as const, label: '插件', count: state.plugins.length },
-  { key: 'team' as const, label: '智能体', count: state.teams.length },
+  { key: 'api' as const, label: 'API 设置', count: (state.api?.profiles?.length ?? 0) as number | null },
+  { key: 'skill' as const, label: '技能', count: state.skills.length as number | null },
+  { key: 'tool' as const, label: '工具', count: state.tools.length as number | null },
+  { key: 'plugin' as const, label: '插件', count: state.plugins.length as number | null },
+  { key: 'team' as const, label: '智能体', count: state.teams.length as number | null },
+  { key: 'logs' as const, label: '日志', count: null as number | null },
 ]);
 const currentCategory = computed(
   () => categories.value.find((c) => c.key === activeCategory.value)!,
@@ -49,6 +54,7 @@ const currentCategory = computed(
 const disabledCount = computed(() => {
   switch (activeCategory.value) {
     case 'api':
+    case 'logs':
       return 0;
     case 'skill':
       return state.skills.filter((s) => !s.enabled).length;
@@ -61,12 +67,15 @@ const disabledCount = computed(() => {
   }
 });
 
-/** 工具条副标题：API 显示当前生效配置；资源类显示计数统计 */
+/** 工具条副标题：API 显示当前生效配置；日志显示来源说明；资源类显示计数统计 */
 const toolbarSubtitle = computed(() => {
   if (activeCategory.value === 'api') {
     const a = state.api;
     if (!a) return '配置尚未加载';
     return `当前：${a.provider || '—'} / ${a.model || '—'}${a.active_api ? ` · Profile「${a.active_api}」` : ''}`;
+  }
+  if (activeCategory.value === 'logs') {
+    return 'Core / Panel 运行日志 · 自动刷新 5s';
   }
   return `共 ${currentCategory.value.count} 项${disabledCount.value ? ` · ${disabledCount.value} 已禁用` : ''}`;
 });
@@ -198,10 +207,12 @@ const EMPTY_HINT: Record<CategoryKey, string> = {
   tool: '在左侧列表选择工具，查看参数 Schema 与启停',
   plugin: '在左侧列表选择插件查看详情与启停',
   team: '在左侧列表选择智能体进行配置；或点右上角「新建智能体」',
+  logs: '',
 };
 const showEmpty = computed(() => {
   switch (activeCategory.value) {
     case 'api':
+    case 'logs':
       return false;
     case 'skill':
       return !selectedSkill.value && !editing.value && !creating.value;
@@ -617,7 +628,7 @@ watch(
         @click="switchCategory(cat.key)"
       >
         <span class="caps-nav-label">{{ cat.label }}</span>
-        <span class="caps-count">{{ cat.count }}</span>
+        <span v-if="cat.count !== null" class="caps-count">{{ cat.count }}</span>
       </div>
       <div class="caps-nav-spacer" />
       <NeumorphismButton size="small" variant="glass" @click="refresh">刷新</NeumorphismButton>
@@ -665,6 +676,13 @@ watch(
       <div v-if="activeCategory === 'api'" class="caps-workspace">
         <div class="caps-detail-pane">
           <ApiSettings />
+        </div>
+      </div>
+
+      <!-- 日志工作区：整页查看器（无条目列表；切走即卸载并停止轮询） -->
+      <div v-else-if="activeCategory === 'logs'" class="caps-workspace">
+        <div class="caps-detail-pane">
+          <LogView />
         </div>
       </div>
 

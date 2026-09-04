@@ -1,5 +1,6 @@
 <script setup lang="ts">
-//! 日志查看视图（一级菜单「日志」的独立视图，取代原会话面板与弹窗）。
+//! 日志查看面板（设置视图「日志」分类的工作区，原为独立视图）。
+//! Core/Panel 双来源，5s 自动刷新；挂载/卸载随分类切换，定时器随卸载清理。
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismSegmented } from '@echolab-auto/ui-frame';
@@ -62,32 +63,26 @@ watch([auto, kind], () => {
 <template>
   <div class="log-view-panel">
     <div class="log-head">
-      <h2 class="log-title">日志查看器</h2>
       <NeumorphismSegmented v-model="kind" :options="KIND_OPTIONS" size="small" />
       <NeumorphismButton variant="glass" size="small" @click="auto = !auto">
         {{ auto ? '自动刷新中' : '手动刷新' }}
       </NeumorphismButton>
+      <NeumorphismButton variant="glass" size="small" @click="load(kind)">刷新</NeumorphismButton>
     </div>
     <pre class="log-viewer">{{ text }}</pre>
   </div>
 </template>
 
 <style scoped>
+.log-view-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .log-head {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
 }
-.log-title {
-  margin: 0;
-  font-size: 16px;
-}
 </style>
-
-.log-view-panel {
-  height: 100%;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 16px;
-}

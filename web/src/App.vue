@@ -17,7 +17,6 @@ import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import TasksPanel from './components/TasksPanel.vue';
 import SettingsView from './components/SettingsView.vue';
-import LogView from './components/LogView.vue';
 import ShellPanel from './components/ShellPanel.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
@@ -25,16 +24,16 @@ import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'tasks' | 'settings' | 'logs' | 'shell';
+type View = 'chat' | 'tasks' | 'settings' | 'shell';
 
 const view = ref<View>(loadView());
 
 function loadView(): View {
   try {
     const saved = localStorage.getItem('echo-panel-view');
-    // 旧视图名迁移：资源视图已合并进设置视图
-    if (saved === 'caps') return 'settings';
-    return (['chat', 'tasks', 'settings', 'logs', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    // 旧视图名迁移：资源/日志视图已合并进设置视图
+    if (saved === 'caps' || saved === 'logs') return 'settings';
+    return (['chat', 'tasks', 'settings', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -281,14 +280,6 @@ watch(
           <NeumorphismButton
             size="small"
             variant="glass"
-            :pressed="view === 'logs'"
-            @click="setView('logs')"
-          >
-            日志
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
             :pressed="view === 'shell'"
             @click="setView('shell')"
           >
@@ -327,7 +318,6 @@ watch(
           @select-team="onTeamSelect"
         />
         <SettingsView v-else-if="view === 'settings'" />
-        <LogView v-else-if="view === 'logs'" />
         <ShellPanel v-else-if="view === 'shell'" />
         <TasksPanel v-else />
       </div>
