@@ -453,7 +453,17 @@ function toggleSkill(skill: SkillInfo, enabled: boolean) {
 }
 
 // ── 插件启停 ──
+// 管理面插件承载 Panel ↔ Core 的 management 通道：core 拒绝经 TogglePlugin
+// 禁用它（防自锁），这里在 UI 侧提前明示，避免误以为操作生效。
+const MANAGEMENT_PANEL_PLUGIN_ID = 'echo-agent.management.panel';
+
 function togglePlugin(plugin: PluginInfo, enabled: boolean) {
+  if (!enabled && plugin.id === MANAGEMENT_PANEL_PLUGIN_ID) {
+    window.alert(
+      '「管理面」插件承载 Panel 与 Core 的通信通道，禁用即断连自锁（无法经界面恢复），已被保护。\n如需禁用请编辑 core.toml 的 disabled_plugins 后重启 Core。',
+    );
+    return;
+  }
   sendCommand({ TogglePlugin: { id: plugin.id, enabled } });
 }
 
