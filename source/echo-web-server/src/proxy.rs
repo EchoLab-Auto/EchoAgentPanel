@@ -5,15 +5,42 @@
 //! 命令队列完全隔离，只在中继管道里经过。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::ws::{Message as BrowserMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
+use tokio::time::Instant;
 use tokio_tungstenite::connect_async;
 use tracing::warn;
 
 use crate::config::QqSection;
+
+/// 心跳间隔：每 30s 向两侧各发一次 Ping。
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+/// 收割阈值：一侧超过 3 个心跳周期（90s）没有任何帧（含 Pong）→ 判定半死，
+/// 断开整条链路。设备休眠/网络闪断留下的僵尸连接（对端收不到 FIN 就永远
+/// 挂在 ESTABLISHED）因此被清理，客户端唤醒后重连拿到的是干净状态。
+const REAP_AFTER: Duration = Duration::from_secs(90);
+
+// 测试可用 ECHO_RELAY_HEARTBEAT_MS / ECHO_RELAY_REAP_AFTER_MS 缩短周期
+//（暂停时钟下运行时 idle 自动推进与真实 I/O 存在竞争，集成测试走真实时间）。
+fn heartbeat_interval() -> Duration {
+    std::env::var("ECHO_RELAY_HEARTBEAT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(HEARTBEAT_INTERVAL)
+}
+
+fn reap_after() -> Duration {
+    std::env::var("ECHO_RELAY_REAP_AFTER_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(REAP_AFTER)
+}
 
 /// Shared server state handed to handlers.
 #[derive(Clone)]
@@ -46,15 +73,19 @@ async fn bridge(browser: WebSocket, state: AppState) {
     let (mut browser_tx, mut browser_rx) = browser.split();
     let (mut core_tx, mut core_rx) = core.split();
 
-    // 心跳保活 + Ping/Pong 透传：Core 服务端的心跳 Ping 经本中继转发给
-    // 浏览器（浏览器内核自动回 Pong，再经本中继转回 Core）；本中继自身也
-    // 每 30s 向两侧各发一次 Ping，空闲连接不会被中间层（NAT/反代）悄悄
-    // 断开。注意 tungstenite 在 split 后自动回的 Pong 不保证及时 flush，
+    // 心跳保活 + Ping/Pong 透传 + 半死收割：Core 服务端的心跳 Ping 经本中继
+    // 转发给浏览器（浏览器内核自动回 Pong，再经本中继转回 Core）；本中继自身
+    // 也每 30s 向两侧各发一次 Ping，空闲连接不会被中间层（NAT/反代）悄悄
+    // 断开。一侧超过 REAP_AFTER 没有任何帧（含 Pong）即判半死、断开链路。
+    // 注意 tungstenite 在 split 后自动回的 Pong 不保证及时 flush，
     // 因此显式透传而不是依赖隐式应答。
-    let mut up_heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+    let mut up_heartbeat = tokio::time::interval(heartbeat_interval());
     up_heartbeat.tick().await; // 首次 tick 立即返回，跳过
-    let mut down_heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+    let mut down_heartbeat = tokio::time::interval(heartbeat_interval());
     down_heartbeat.tick().await;
+    let reap_after = reap_after();
+    let mut last_browser_frame = Instant::now();
+    let mut last_core_frame = Instant::now();
 
     // Browser → Core: commands and sudo-password frames, verbatim.
     let to_core = async {
@@ -65,6 +96,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         Some(Ok(message)) => message,
                         _ => break,
                     };
+                    last_browser_frame = Instant::now();
                     let forward = match message {
                         BrowserMessage::Text(text) => {
                             tokio_tungstenite::tungstenite::Message::Text(text.to_string().into())
@@ -83,6 +115,10 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     }
                 }
                 _ = up_heartbeat.tick() => {
+                    if last_browser_frame.elapsed() > reap_after {
+                        warn!("browser side silent > {reap_after:?}, reaping relay link");
+                        break;
+                    }
                     if core_tx
                         .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new().into()))
                         .await
@@ -105,6 +141,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         Some(Ok(message)) => message,
                         _ => break,
                     };
+                    last_core_frame = Instant::now();
                     let forward = match message {
                         tokio_tungstenite::tungstenite::Message::Text(text) => {
                             BrowserMessage::Text(text.to_string().into())
@@ -124,6 +161,10 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     }
                 }
                 _ = down_heartbeat.tick() => {
+                    if last_core_frame.elapsed() > reap_after {
+                        warn!("core side silent > {reap_after:?}, reaping relay link");
+                        break;
+                    }
                     if browser_tx
                         .send(BrowserMessage::Ping(Vec::new().into()))
                         .await
