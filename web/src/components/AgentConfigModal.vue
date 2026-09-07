@@ -98,6 +98,18 @@ const pluginItems = computed<GroupedItem[]>(() =>
       group: p.kind === 'adapter' ? '适配器' : '管理面',
     })),
 );
+/** 可禁用（黑名单）插件：包维度门控插件 */
+const DISABLEABLE_PLUGIN_KEYS = [
+  'echo-agent.tools.builtin',
+  'echo-agent.skills.dir',
+  'echo-agent.adapter.qq',
+  'echo-agent.management.panel',
+];
+const disableablePlugins = computed(() =>
+  state.plugins
+    .filter((p) => DISABLEABLE_PLUGIN_KEYS.includes(p.id))
+    .map((p) => ({ key: p.id, name: p.name })),
+);
 
 /** 按分组聚合成表格模型（组名 + 成员；无分组归入「其他」） */
 interface GroupedTable {
@@ -132,6 +144,10 @@ function toggleItem(list: string[], all: string[], key: string): string[] {
   const base = list.length ? list : [...all];
   return base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
 }
+function toggleDisabled(list: string[], key: string): string[] {
+  return list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
+}
+
 /** 切换整组 */
 function toggleGroup(list: string[], all: string[], group: GroupedTable): string[] {
   const base = list.length ? list : [...all];
@@ -256,6 +272,22 @@ function save() {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div class="agent-config__group">
+          <div class="agent-config__group-title">禁用插件（黑名单）</div>
+          <div class="agent-config__chips">
+            <button
+              v-for="opt in disableablePlugins"
+              :key="opt.key"
+              type="button"
+              class="agent-config__chip"
+              :class="{ 'is-on': disabledPlugins.includes(opt.key) }"
+              @click="disabledPlugins = toggleDisabled(disabledPlugins, opt.key)"
+            >
+              {{ disabledPlugins.includes(opt.key) ? '✓ ' : '' }}{{ opt.name }}
+            </button>
           </div>
         </div>
 

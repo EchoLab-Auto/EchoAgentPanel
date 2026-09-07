@@ -268,6 +268,22 @@ const capabilityPluginOptions = computed(() =>
     .filter((p) => ['adapter', 'management'].includes(p.kind))
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
+// ── 可禁用插件（黑名单 disabled_plugins）：包维度门控的插件 ──
+// （工具集/技能目录/QQ 适配器/管理面；编排互斥子插件由「编排模式」分段管理）
+const DISABLEABLE_PLUGIN_KEYS = [
+  'echo-agent.tools.builtin',
+  'echo-agent.skills.dir',
+  'echo-agent.adapter.qq',
+  'echo-agent.management.panel',
+];
+const disableablePluginOptions = computed(() =>
+  state.plugins
+    .filter((p) => DISABLEABLE_PLUGIN_KEYS.includes(p.id))
+    .map((p) => ({ key: p.id, label: p.name })),
+);
+function toggleDisabled(list: string[], key: string): string[] {
+  return list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
+}
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
 const PACKAGE_NAMES: Record<string, string> = {
   'echo-agent.adapter.qq': 'QQ 适配器包',
@@ -1068,6 +1084,23 @@ watch(
                     @update:model-value="teamFormEnabledPlugins = toggleAllowlist(teamFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
                   />
                   <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
+                </div>
+              </NeumorphismFormItem>
+              <NeumorphismFormItem label="禁用插件">
+                <p class="muted caps-hint">
+                  勾选即从该智能体**黑名单禁用**包维度插件（如禁用「内置工具集」后该
+                  agent 没有工具、禁用「技能目录」后没有技能——纯对话 base 即此配置）。
+                </p>
+                <div class="caps-checkbox-grid">
+                  <NeumorphismCheckbox
+                    v-for="opt in disableablePluginOptions"
+                    :key="opt.key"
+                    size="small"
+                    :model-value="teamFormDisabledPlugins.includes(opt.key)"
+                    :label="opt.label"
+                    @update:model-value="teamFormDisabledPlugins = toggleDisabled(teamFormDisabledPlugins, opt.key)"
+                  />
+                  <span v-if="disableablePluginOptions.length === 0" class="muted">（无）</span>
                 </div>
               </NeumorphismFormItem>
               <NeumorphismFormItem label="启用包（Package）">
