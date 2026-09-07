@@ -49,6 +49,8 @@ export interface SkillInfo {
   category: string;
   package?: string;
   content: string;
+  /** 系统提示词 skill（system: true）：内容注入 base 区 */
+  system?: boolean;
   /** 外部 Git 来源（安装的 skill；内置为 undefined） */
   source?: { url: string; rev: string; branch?: string; installed_at?: string } | null;
 }
@@ -79,6 +81,8 @@ export interface TeamInfo {
   enabled_skills?: string[];
   memory_limit_tokens?: number | null;
   context_window_tokens?: number | null;
+  /** 该 agent 系统提示词由哪些 skill 组成（空 = 用 system_prompt 字段） */
+  system_skills?: string[];
   /**
    * 编排模式（互斥子插件推导）：single = 单任务编排（无会话管理 UI、
    * 回执分支不可见）；chatbot = 多任务并行编排（会话卡/全局分组/可见分支）。
@@ -246,6 +250,7 @@ export type BackendCommand =
         always: boolean;
         category: string;
         content: string;
+        system?: boolean;
       };
     }
   | { DeleteSkill: { name: string } }
@@ -260,6 +265,7 @@ export type BackendCommand =
         description: string;
         system_prompt: string;
         enabled: boolean;
+        system_skills?: string[];
         disabled_plugins?: string[];
         disabled_tools?: string[];
         disabled_skills?: string[];

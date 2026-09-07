@@ -241,6 +241,7 @@ const teamFormDisabledSkills = ref<string[]>([]);
 const teamFormEnabledPlugins = ref<string[]>([]);
 const teamFormEnabledTools = ref<string[]>([]);
 const teamFormEnabledSkills = ref<string[]>([]);
+const teamFormSystemSkills = ref<string[]>([]);
 /** 编辑已有成员时 ID 锁定；新建时 ID 可自由输入 */
 const teamFormIsEdit = ref(false);
 
@@ -256,6 +257,7 @@ const teamFormModel = computed(() => ({
   enabled_plugins: teamFormEnabledPlugins.value,
   enabled_tools: teamFormEnabledTools.value,
   enabled_skills: teamFormEnabledSkills.value,
+  system_skills: teamFormSystemSkills.value,
 }));
 
 // 能力列表（复选框）：插件 / 工具 / 技能
@@ -405,6 +407,7 @@ function startTeamCreate() {
   teamFormEnabledPlugins.value = [];
   teamFormEnabledTools.value = [];
   teamFormEnabledSkills.value = [];
+  teamFormSystemSkills.value = [];
   selectedTeam.value = null;
 }
 
@@ -422,6 +425,7 @@ function startTeamEdit(agent: TeamInfo) {
   teamFormEnabledPlugins.value = agent.enabled_plugins ?? [];
   teamFormEnabledTools.value = agent.enabled_tools ?? [];
   teamFormEnabledSkills.value = agent.enabled_skills ?? [];
+  teamFormSystemSkills.value = agent.system_skills ?? [];
 }
 
 function cancelTeamEdit() {
@@ -444,6 +448,7 @@ function saveTeam() {
       enabled_plugins: stripLegacyModeIds(teamFormEnabledPlugins.value),
       enabled_tools: teamFormEnabledTools.value,
       enabled_skills: teamFormEnabledSkills.value,
+      system_skills: teamFormSystemSkills.value,
     },
   });
   teamEditing.value = false;
@@ -526,6 +531,9 @@ function removeGitSource(skill: SkillInfo) {
 // ── 新建 / 编辑 / 保存 / 删除 ──
 function startCreate() {
   activeCategory.value = 'skill';
+  formAlways.value = false;
+  formSystem.value = false;
+  formContent.value = "";
   creating.value = true;
   editing.value = false;
   selectedSkill.value = null;
@@ -544,6 +552,7 @@ const formDescription = ref('');
 const formKeywords = ref('');
 const formCategory = ref('');
 const formAlways = ref(false);
+const formSystem = ref(false);
 const formContent = ref('');
 
 function startEdit() {
@@ -554,6 +563,7 @@ function startEdit() {
   formKeywords.value = s.keywords.join(', ');
   formCategory.value = s.category ?? '';
   formAlways.value = s.always;
+  formSystem.value = s.system ?? false;
   formContent.value = s.content;
   editing.value = true;
   creating.value = false;
@@ -579,6 +589,7 @@ function saveSkill() {
       always: formAlways.value,
       category: formCategory.value.trim(),
       content: formContent.value,
+      system: formSystem.value,
     },
   });
   editing.value = false;
@@ -843,6 +854,7 @@ watch(
               >
                 Git · {{ shortUrl(selectedSkill.source.url) }}
               </NeumorphismTag>
+              <NeumorphismTag v-if="selectedSkill.system" size="small" variant="primary">系统提示词</NeumorphismTag>
               <NeumorphismTag v-if="selectedSkill.category" size="small">{{ selectedSkill.category }}</NeumorphismTag>
               <NeumorphismTag v-if="selectedSkill.always" variant="warning" size="small">常驻</NeumorphismTag>
               <span class="muted">{{ selectedSkill.description || '（无描述）' }}</span>
@@ -888,6 +900,10 @@ watch(
               <div class="detail-field">
                 <span>常驻（总是注入）</span>
                 <NeumorphismSwitch v-model="formAlways" size="small" />
+              </div>
+              <div class="detail-field">
+                <span>系统提示词（注入 base 区，可插拔身份/规则层）</span>
+                <NeumorphismSwitch v-model="formSystem" size="small" />
               </div>
               <label>内容（Markdown 正文）</label>
               <NeumorphismTextarea
@@ -1009,6 +1025,24 @@ watch(
                     placeholder="你是…（留空 = 继承全局提示词与技能）"
                   />
                 </template>
+              </NeumorphismFormItem>
+              <NeumorphismFormItem label="系统提示词 skills">
+                <p class="muted caps-hint">
+                  勾选启用的 skill 作为该 agent 的系统提示词（注入 base 区，
+                  热重载/安装即生效）；不勾选则用上方文本。
+                </p>
+                <div class="caps-checkbox-grid">
+                  <NeumorphismCheckbox
+                    v-for="sk in state.skills"
+                    :key="sk.name"
+                    size="small"
+                    :model-value="teamFormSystemSkills.includes(sk.name)"
+                    :label="sk.name"
+                    @update:model-value="
+                      teamFormSystemSkills = toggleArrayItem(teamFormSystemSkills, sk.name)
+                    "
+                  />
+                </div>
               </NeumorphismFormItem>
               <NeumorphismFormItem label="启用" name="enabled">
                 <NeumorphismSwitch v-model="teamFormEnabled" size="small" />
