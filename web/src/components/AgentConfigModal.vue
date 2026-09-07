@@ -90,7 +90,10 @@ const skillItems = computed<GroupedItem[]>(() =>
 /** 插件：管理/适配器类（无 pkg 概念，按 kind 分组展示） */
 const pluginItems = computed<GroupedItem[]>(() =>
   state.plugins
-    .filter((p) => ['adapter', 'management'].includes(p.kind))
+    .filter((p) =>
+      ['adapter', 'management'].includes(p.kind) ||
+      ['echo-agent.tools.builtin', 'echo-agent.skills.dir', 'echo-agent.checklist'].includes(p.id),
+    )
     .map((p) => ({
       key: p.id,
       name: p.name,
@@ -102,6 +105,7 @@ const pluginItems = computed<GroupedItem[]>(() =>
 const DISABLEABLE_PLUGIN_KEYS = [
   'echo-agent.tools.builtin',
   'echo-agent.skills.dir',
+  'echo-agent.checklist',
   'echo-agent.adapter.qq',
   'echo-agent.management.panel',
 ];
