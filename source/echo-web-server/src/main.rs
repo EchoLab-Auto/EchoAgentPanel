@@ -65,6 +65,7 @@ async fn main() -> Result<()> {
 
     let state = proxy::AppState {
         core_url: Arc::from(core_url.as_str()),
+        core_access_token: Arc::from(cfg.core.access_token.as_str()),
         static_dir: Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
         qq: cfg.qq.clone(),
     };

@@ -283,7 +283,7 @@ export type BackendCommand =
   | { ShellStart: { workdir?: string | null } }
   | { ShellExec: { session_id: string; command: string; timeout_secs?: number } }
   | { ShellStop: { session_id: string } }
-  | 'ClearHistory'
+  | { ClearHistory: { team_id?: string | null } }
   | { CancelRequestedWork: { session_id: string; all: boolean; team_id?: string | null } }
   | { StartAdapter: { name: string } }
   | { StopAdapter: { name: string } }

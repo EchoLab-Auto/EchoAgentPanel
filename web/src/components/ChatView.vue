@@ -359,7 +359,7 @@ function imagesOf(message: ChatMessage): string[] {
           </NeumorphismButton>
         </div>
         <div class="ctx-overlay__body">
-          <ContextView />
+          <ContextView :team-id="props.activeTeamId ?? null" />
         </div>
       </div>
     </div>

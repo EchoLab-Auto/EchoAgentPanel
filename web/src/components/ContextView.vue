@@ -30,8 +30,11 @@ const KIND_CLASS: Record<string, string> = {
 const showMessages = ref(false);
 const confirmClear = ref(false);
 
+const props = defineProps<{ teamId?: string | null }>();
+const targetTeamId = computed(() => props.teamId ?? null);
+
 onMounted(() => {
-  sendCommand({ RequestContext: { team_id: null } });
+  sendCommand({ RequestContext: { team_id: targetTeamId.value } });
 });
 
 const snapshot = computed(() => state.context);
@@ -66,12 +69,12 @@ function handleClear() {
     confirmClear.value = true;
     return;
   }
-  sendCommand('ClearHistory');
+  sendCommand({ ClearHistory: { team_id: targetTeamId.value } });
   confirmClear.value = false;
 }
 
 function refresh() {
-  sendCommand({ RequestContext: { team_id: null } });
+  sendCommand({ RequestContext: { team_id: targetTeamId.value } });
 }
 
 // 手动重载磁盘上的 SKILL.md：刷新技能注册表并重新拉取上下文快照。
@@ -82,12 +85,12 @@ function reloadSkills() {
 
 function archiveHistory() {
   if (!window.confirm('归档当前会话历史？将复制快照到 archives/ 并清空当前历史。')) return;
-  sendCommand({ ArchiveHistory: { team_id: null } });
+  sendCommand({ ArchiveHistory: { team_id: targetTeamId.value } });
 }
 
 function compactHistory() {
   if (!window.confirm('压缩当前会话历史？早期事件将替换为规则摘要，保留最近 40 条。')) return;
-  sendCommand({ CompactHistory: { team_id: null, keep_recent: 40 } });
+  sendCommand({ CompactHistory: { team_id: targetTeamId.value, keep_recent: 40 } });
 }
 </script>
 

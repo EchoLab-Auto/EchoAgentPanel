@@ -56,12 +56,15 @@ impl Default for ServerSection {
 pub struct CoreSection {
     /// EchoAgentCore management WebSocket 地址。
     pub connect_url: String,
+    /// Optional bearer token expected by Core's management WebSocket.
+    pub access_token: String,
 }
 
 impl Default for CoreSection {
     fn default() -> Self {
         Self {
             connect_url: "ws://127.0.0.1:3132".to_string(),
+            access_token: String::new(),
         }
     }
 }

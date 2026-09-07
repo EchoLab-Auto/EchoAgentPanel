@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::Instant;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
 use tracing::warn;
 
 use crate::config::QqSection;
@@ -47,6 +47,8 @@ fn reap_after() -> Duration {
 pub struct AppState {
     /// Core management WebSocket address (e.g. `ws://127.0.0.1:3132`).
     pub core_url: Arc<str>,
+    /// Bearer token sent only on the server-to-Core hop.
+    pub core_access_token: Arc<str>,
     /// Static frontend directory (built `web/dist`).
     pub static_dir: Arc<str>,
     /// NapCat/QQ login helper settings.
@@ -59,7 +61,28 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> 
 }
 
 async fn bridge(browser: WebSocket, state: AppState) {
-    let (core, _) = match connect_async(state.core_url.as_ref()).await {
+    let core_request = match state.core_url.as_ref().into_client_request() {
+        Ok(mut request) => {
+            if !state.core_access_token.is_empty() {
+                let value = format!("Bearer {}", state.core_access_token);
+                match value.parse() {
+                    Ok(value) => {
+                        request.headers_mut().insert("authorization", value);
+                    }
+                    Err(error) => {
+                        warn!(%error, "invalid Core access token");
+                        return;
+                    }
+                }
+            }
+            request
+        }
+        Err(error) => {
+            warn!(%error, "invalid Core WebSocket URL");
+            return;
+        }
+    };
+    let (core, _) = match connect_async(core_request).await {
         Ok(pair) => pair,
         Err(error) => {
             warn!(

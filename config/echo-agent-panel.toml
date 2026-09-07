@@ -18,6 +18,8 @@ static_dir = "web/dist"
 [core]
 # EchoAgentCore management WebSocket 地址（与 Core 的 [core] management_address 对应）。
 connect_url = "ws://127.0.0.1:3132"
+# 必须与 Core [core].management_access_token 一致；留空表示不发送认证头。
+access_token = ""
 
 [qq]
 # NapCat Docker 容器名，Panel 通过 docker exec 读取登录二维码。

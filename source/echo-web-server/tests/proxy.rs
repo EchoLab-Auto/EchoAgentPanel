@@ -46,6 +46,7 @@ async fn spawn_panel(core_url: String) -> String {
         .route("/ws", get(ws_handler))
         .with_state(AppState {
             core_url: core_url.into(),
+            core_access_token: "".into(),
             static_dir: "/nonexistent".into(),
             qq: QqSection::default(),
         });
