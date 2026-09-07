@@ -16,6 +16,7 @@ import { state } from '../store';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
 import AgentConfigModal from './AgentConfigModal.vue';
+import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import ReasoningBlock from './ReasoningBlock.vue';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
@@ -34,8 +35,6 @@ const attachments = ref<string[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
-const showContext = ref(false);
-const showChecklist = ref(false);
 const showAdapter = ref(false);
 const adapterBtnRef = ref<HTMLElement | null>(null);
 const adapterTop = ref(0);
@@ -57,7 +56,9 @@ function toggleAdapter() {
   }
   showAdapter.value = true;
 }
+const showChecklist = ref(false);
 const checklistBtnRef = ref<HTMLElement | null>(null);
+const showContext = ref(false);
 const checklistBottom = ref(0);
 const checklistLeft = ref(0);
 
@@ -112,19 +113,9 @@ const adapterPluginIds = computed<string[]>(() => {
   return fromState.length ? fromState : ADAPTER_PLUGIN_FALLBACK;
 });
 
-/** 判断某插件是否被该团队配置启用（白名单为空=全部允许，黑名单优先） */
-function pluginEnabledForTeam(pluginId: string, team: { enabled_plugins?: string[]; disabled_plugins?: string[] } | null): boolean {
-  if (!team) return true; // 默认 agent / 未配置团队限制 → 启用
-  if (team.disabled_plugins?.includes(pluginId)) return false;
-  if (team.enabled_plugins && team.enabled_plugins.length > 0) {
-    return team.enabled_plugins.includes(pluginId);
-  }
-  return true;
-}
-
 /** 当前 Agent 是否启用了至少一个适配器插件（决定输入框上是否显示"适配器"按钮） */
 const adapterAvailable = computed(() =>
-  adapterPluginIds.value.some((id) => pluginEnabledForTeam(id, currentTeam.value)),
+  adapterPluginIds.value.some((id) => teamPluginEnabled(currentTeam.value, id)),
 );
 
 // 切换 Agent 时若适配器面板打开则关闭，避免残留禁用 agent 的面板
@@ -163,8 +154,13 @@ const activityText = computed(() => {
   switch (a?.phase) {
     case 'thinking':
       return a.detail ? `正在思考：${a.detail}…` : '正在思考…';
-    case 'tool':
-      return `正在调用工具 ${a.detail ?? ''}…`;
+    case 'tool': {
+      // 工具对当前 agent 不可见（已禁用）时模型不会调用——防御显示通用文案
+      if (a.detail && teamToolAvailable(currentTeam.value, a.detail)) {
+        return `正在调用工具 ${a.detail}…`;
+      }
+      return '正在处理…';
+    }
     case 'subagent':
       return '子代理工作中…';
     default:
@@ -291,6 +287,7 @@ function imagesOf(message: ChatMessage): string[] {
         配置
       </button>
       <button
+        v-if="showContext"
         class="ctx-entry"
         title="查看上下文占用"
         @click="showContext = true"
@@ -302,6 +299,7 @@ function imagesOf(message: ChatMessage): string[] {
         上下文
       </button>
       <button
+        v-if="showChecklist"
         ref="checklistBtnRef"
         class="ctx-entry"
         title="任务清单"
