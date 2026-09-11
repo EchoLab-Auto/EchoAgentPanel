@@ -5,7 +5,7 @@
 
 import { computed, ref } from 'vue';
 import { state } from '../store';
-import { orchestrationModeOf } from '../protocol';
+import { loopModeOf } from '../protocol';
 import SidebarCard from './SidebarCard.vue';
 import SessionGroups from './SessionGroups.vue';
 
@@ -14,11 +14,11 @@ defineProps<{
   activeBranchId: string | null;
 }>();
 
-// 会话管理 UI 总开关：仅 chatbot 编排模式显示「会话」与「临时分支」两张
-// 卡片（single 模式隐藏；后端按 TeamInfo.orchestration_mode 推导）。
+// 会话管理 UI 总开关：仅并行多会话模式显示「会话」与「临时分支」两张
+// 卡片（单会话模式隐藏；后端按 TeamInfo.loop_mode 推导）。
 const chatSessionsVisible = computed(() => {
   const team = state.teams.find((t) => t.id === state.activeTeamId);
-  return orchestrationModeOf(team) === 'chatbot';
+  return loopModeOf(team) === 'parallel';
 });
 
 // 临时分支卡与会话卡同属 chatbot 模式的会话管理 UI（合并后不再单独细分）。

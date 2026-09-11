@@ -16,7 +16,10 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
+  NeumorphismCard,
   NeumorphismCheckbox,
+  NeumorphismCollapse,
+  NeumorphismDivider,
   NeumorphismEmpty,
   NeumorphismForm,
   NeumorphismFormItem,
@@ -28,9 +31,9 @@ import {
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
-import type { OrchestrationMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
-import { orchestrationModeOf } from '../protocol';
-import { applyMode, deriveMode, stripLegacyModeIds } from '../orchestration-mode';
+import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
+import { loopModeOf } from '../protocol';
+import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
 import ApiSettings from './ApiSettings.vue';
 import LogView from './LogView.vue';
 
@@ -389,6 +392,52 @@ function isWhitelisted(current: string[], key: string): boolean {
   return current.length === 0 || current.includes(key);
 }
 
+// ── 智能体编辑器：分区折叠（基础 / 提示词 / 能力 / 禁用） ──
+const teamSections = [
+  { key: 'basic', title: '基础信息' },
+  { key: 'prompt', title: '系统提示词' },
+  { key: 'caps', title: '启用的能力' },
+  { key: 'deny', title: '禁用的能力' },
+];
+// 默认展开前两个分区；能力/禁用分区从摘要行按需展开（避免超长滚动）。
+const teamSectionOpen = ref<string[]>(['basic', 'prompt']);
+
+/** 分区摘要：基础（启用态 + 循环模式） */
+const teamBasicSummary = computed(
+  () =>
+    `${teamFormEnabled.value ? '启用' : '禁用'} · ${
+      teamLoopMode.value === 'parallel' ? '并行多会话' : '单会话'
+    }`,
+);
+/** 分区摘要：提示词（自定义/继承 + 系统技能数） */
+const teamPromptSummary = computed(() => {
+  const prompt = teamFormPrompt.value.trim() ? '自定义提示词' : '继承全局';
+  const n = teamFormSystemSkills.value.length;
+  return n > 0 ? `${prompt} · ${n} 个系统技能` : prompt;
+});
+/** 分区摘要：能力白名单（空表 = 不限制） */
+const teamCapsSummary = computed(() => {
+  const parts: string[] = [];
+  if (teamFormEnabledPlugins.value.length > 0) parts.push(`${teamFormEnabledPlugins.value.length} 插件`);
+  if (teamFormEnabledTools.value.length > 0) parts.push(`${teamFormEnabledTools.value.length} 工具`);
+  if (teamFormEnabledSkills.value.length > 0) parts.push(`${teamFormEnabledSkills.value.length} 技能`);
+  return parts.length > 0 ? parts.join(' · ') : '不限制（全部可用）';
+});
+/** 分区摘要：黑名单 */
+const teamDenySummary = computed(() => {
+  const n =
+    teamFormDisabledPlugins.value.length +
+    teamFormDisabledTools.value.length +
+    teamFormDisabledSkills.value.length;
+  return n > 0 ? `${n} 项已禁用` : '无黑名单';
+});
+/** 头像字（取名称首字符） */
+const teamAvatarText = computed(() => (teamFormName.value.trim()[0] ?? 'A').toUpperCase());
+/** 表单里的 ID 是否是当前主 Agent（决定「主 Agent」标签与删除保护） */
+function isPrimaryTeamId(id: string): boolean {
+  return isPrimaryTeam(state.teams.find((t) => t.id === id) ?? null);
+}
+
 const teamFormRules = {
   id: [
     { required: true, message: '请输入 ID' },
@@ -400,16 +449,16 @@ const teamFormRules = {
   name: [{ required: true, message: '请输入名称' }],
 };
 
-// ── 编排模式分段单选（互斥子插件，写入 enabled_plugins 白名单） ──
+// ── 循环模式分段单选（互斥循环插件，写入 enabled_plugins 白名单） ──
 const MODE_OPTIONS = [
-  { label: '单任务编排', value: 'single' },
-  { label: '多任务并行编排', value: 'chatbot' },
+  { label: '单会话（默认）', value: 'single' },
+  { label: '并行多会话', value: 'parallel' },
 ];
-const teamOrchestrationMode = computed(() => deriveMode(teamFormEnabledPlugins.value));
-function setTeamOrchestrationMode(value: string | number) {
+const teamLoopMode = computed(() => deriveMode(teamFormEnabledPlugins.value));
+function setTeamLoopMode(value: string | number) {
   teamFormEnabledPlugins.value = applyMode(
     teamFormEnabledPlugins.value,
-    String(value ?? 'chatbot') as OrchestrationMode,
+    String(value ?? 'single') as LoopMode,
     state.plugins.map((p) => p.id),
   );
 }
@@ -950,6 +999,13 @@ watch(
               <h3>{{ selectedTeam.name }}</h3>
               <div class="detail-actions">
                 <NeumorphismButton
+                  size="small"
+                  variant="primary"
+                  @click="startTeamEdit(selectedTeam!)"
+                >
+                  编辑
+                </NeumorphismButton>
+                <NeumorphismButton
                   v-if="!isPrimaryTeam(selectedTeam)"
                   size="small"
                   variant="glass"
@@ -965,7 +1021,7 @@ watch(
               </NeumorphismTag>
               <NeumorphismTag variant="info" size="small">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
               <NeumorphismTag size="small">
-                {{ orchestrationModeOf(selectedTeam) === 'chatbot' ? '多任务并行编排' : '单任务编排' }}
+                {{ loopModeOf(selectedTeam) === 'parallel' ? '并行多会话' : '单会话' }}
               </NeumorphismTag>
             </div>
             <div class="detail-field">
@@ -1013,11 +1069,33 @@ watch(
             </div>
           </div>
 
-          <!-- 智能体编辑 / 新建表单 -->
-          <div v-else-if="activeCategory === 'team' && teamEditing" class="caps-detail">
-            <div class="detail-head">
-              <h3>{{ teamFormIsEdit ? `配置：${teamFormName || '—'}` : '新建智能体' }}</h3>
-            </div>
+          <!-- 智能体编辑 / 新建表单（分区折叠：基础 / 提示词 / 能力 / 禁用） -->
+          <div v-else-if="activeCategory === 'team' && teamEditing" class="caps-detail team-editor">
+            <!-- 头部信息卡：头像 + 名称 + 状态标签（ui-frame NeumorphismCard） -->
+            <NeumorphismCard :elevation="2" radius="large" no-padding class="team-hero">
+              <div class="team-hero__body">
+                <div class="team-hero__avatar">{{ teamAvatarText }}</div>
+                <div class="team-hero__main">
+                  <div class="team-hero__title">
+                    <span>{{ teamFormIsEdit ? teamFormName || teamFormId || '未命名' : '新建智能体' }}</span>
+                    <NeumorphismTag
+                      v-if="teamFormIsEdit && isPrimaryTeamId(teamFormId)"
+                      variant="warning"
+                      size="small"
+                    >
+                      主 Agent
+                    </NeumorphismTag>
+                    <NeumorphismTag :variant="teamFormEnabled ? 'success' : 'info'" size="small">
+                      {{ teamFormEnabled ? '已启用' : '已禁用' }}
+                    </NeumorphismTag>
+                  </div>
+                  <div class="team-hero__id">
+                    {{ teamFormIsEdit ? teamFormId : 'ID 待填写' }} · {{ teamBasicSummary }}
+                  </div>
+                </div>
+              </div>
+            </NeumorphismCard>
+
             <NeumorphismForm
               :model="teamFormModel"
               :rules="teamFormRules"
@@ -1025,144 +1103,189 @@ watch(
               label-width="96px"
               @submit="saveTeam"
             >
-              <NeumorphismFormItem label="ID" required name="id" :rules="teamFormRules.id">
-                <NeumorphismInput
-                  v-model="teamFormId"
-                  placeholder="my-agent"
-                  :disabled="teamFormIsEdit"
-                />
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="名称" required name="name" :rules="teamFormRules.name">
-                <NeumorphismInput v-model="teamFormName" placeholder="写作助理" />
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="描述" name="description">
-                <NeumorphismInput v-model="teamFormDescription" placeholder="专注文档写作" />
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="系统提示词" name="system_prompt">
-                <template #default="{ }">
-                  <NeumorphismTextarea
-                    v-model="teamFormPrompt"
-                    rows="8"
-                    auto-resize
-                    placeholder="你是…（留空 = 继承全局提示词与技能）"
-                  />
+              <NeumorphismCollapse
+                :model-value="teamSectionOpen"
+                :items="teamSections"
+                @update:model-value="teamSectionOpen = $event"
+              >
+                <!-- 分区 1：基础信息 -->
+                <template #header-basic>
+                  <span class="sec-title">基础信息</span>
+                  <span class="sec-summary">{{ teamBasicSummary }}</span>
                 </template>
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="系统提示词 skills">
-                <p class="muted caps-hint">
-                  勾选启用的 skill 作为该 agent 的系统提示词（注入 base 区，
-                  热重载/安装即生效）；不勾选则用上方文本。
-                </p>
-                <div class="caps-checkbox-grid">
-                  <NeumorphismCheckbox
-                    v-for="sk in state.skills"
-                    :key="sk.name"
-                    size="small"
-                    :model-value="teamFormSystemSkills.includes(sk.name)"
-                    :label="sk.name"
-                    @update:model-value="
-                      teamFormSystemSkills = toggleArrayItem(teamFormSystemSkills, sk.name)
-                    "
-                  />
-                </div>
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="启用" name="enabled">
-                <NeumorphismSwitch v-model="teamFormEnabled" size="small" />
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="编排模式">
-                <p class="muted caps-hint">多任务并行 = 会话列表 / 全局会话 / 可见回执分支；单任务 = 无会话管理 UI（互斥，单任务为兜底）。</p>
-                <NeumorphismSegmented
-                  :model-value="teamOrchestrationMode"
-                  :options="MODE_OPTIONS"
-                  size="small"
-                  @update:model-value="setTeamOrchestrationMode"
-                />
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="启用插件">
-                <p class="muted caps-hint">勾选该智能体可用的能力块（适配器/编排/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。</p>
-                <div class="caps-checkbox-grid">
-                  <NeumorphismCheckbox
-                    v-for="opt in capabilityPluginOptions"
-                    :key="opt.key"
-                    size="small"
-                    :model-value="isWhitelisted(teamFormEnabledPlugins, opt.key)"
-                    :label="opt.label"
-                    @update:model-value="teamFormEnabledPlugins = toggleAllowlist(teamFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
-                  />
-                  <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
-                </div>
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="禁用插件">
-                <p class="muted caps-hint">
-                  勾选即从该智能体**黑名单禁用**包维度插件（如禁用「内置工具集」后该
-                  agent 没有工具、禁用「技能目录」后没有技能——纯对话 base 即此配置）。
-                </p>
-                <div class="caps-checkbox-grid">
-                  <NeumorphismCheckbox
-                    v-for="opt in disableablePluginOptions"
-                    :key="opt.key"
-                    size="small"
-                    :model-value="teamFormDisabledPlugins.includes(opt.key)"
-                    :label="opt.label"
-                    @update:model-value="teamFormDisabledPlugins = toggleDisabled(teamFormDisabledPlugins, opt.key)"
-                  />
-                  <span v-if="disableablePluginOptions.length === 0" class="muted">（无）</span>
-                </div>
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="启用包（Package）">
-                <p class="muted caps-hint">同一个包（如 QQ 适配器）的工具+技能作为一个整体，勾选/取消即同时开关包内所有成员。</p>
-                <div v-for="pkg in capabilityPackages" :key="pkg.id" class="caps-tool-group">
-                  <div class="caps-tool-group__head">
-                    <NeumorphismCheckbox
-                      size="small"
-                      :model-value="isPackageFullyEnabled(pkg)"
-                      :label="pkg.name"
-                      @update:model-value="togglePackage(pkg)"
+                <template #basic>
+                  <NeumorphismFormItem label="ID" required name="id" :rules="teamFormRules.id">
+                    <NeumorphismInput
+                      v-model="teamFormId"
+                      placeholder="my-agent"
+                      :disabled="teamFormIsEdit"
                     />
-                    <NeumorphismTag size="small" variant="info">
-                      {{ pkg.tools.length + pkg.skills.length }} 项
-                    </NeumorphismTag>
-                  </div>
-                  <div class="muted caps-pkg-members">
-                    工具：{{ pkg.tools.join('、') || '—' }}；技能：{{ pkg.skills.join('、') || '—' }}
-                  </div>
-                </div>
-                <span v-if="capabilityPackages.length === 0" class="muted">（无包可勾选）</span>
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="启用工具">
-                <p class="muted caps-hint">勾选该智能体可用的工具（按分类分组，含编排/自更新/运维）；全选 = 不限制（默认）。</p>
-                <div v-for="group in capabilityToolGroups" :key="group.cat" class="caps-tool-group">
-                  <div class="caps-tool-group__head">
-                    {{ group.title }}
-                    <NeumorphismTag size="small" variant="info">{{ group.items.length }}</NeumorphismTag>
-                  </div>
-                  <div class="caps-checkbox-grid">
+                  </NeumorphismFormItem>
+                  <NeumorphismFormItem label="名称" required name="name" :rules="teamFormRules.name">
+                    <NeumorphismInput v-model="teamFormName" placeholder="写作助理" />
+                  </NeumorphismFormItem>
+                  <NeumorphismFormItem label="描述" name="description">
+                    <NeumorphismInput v-model="teamFormDescription" placeholder="专注文档写作" />
+                  </NeumorphismFormItem>
+                  <NeumorphismFormItem label="启用" name="enabled">
+                    <NeumorphismSwitch v-model="teamFormEnabled" size="small" />
+                  </NeumorphismFormItem>
+                  <NeumorphismFormItem label="循环模式">
+                    <p class="muted caps-hint">
+                      单会话 = 同一会话的 turn 串行排队、无会话管理 UI（默认）；并行多会话 = 同一会话可并发分支、显示会话列表 / 全局会话 / 可见回执分支。
+                    </p>
+                    <NeumorphismSegmented
+                      :model-value="teamLoopMode"
+                      :options="MODE_OPTIONS"
+                      size="small"
+                      @update:model-value="setTeamLoopMode"
+                    />
+                  </NeumorphismFormItem>
+                </template>
+
+                <!-- 分区 2：系统提示词 -->
+                <template #header-prompt>
+                  <span class="sec-title">系统提示词</span>
+                  <span class="sec-summary">{{ teamPromptSummary }}</span>
+                </template>
+                <template #prompt>
+                  <NeumorphismFormItem label="提示词" name="system_prompt">
+                    <NeumorphismTextarea
+                      v-model="teamFormPrompt"
+                      rows="6"
+                      auto-resize
+                      placeholder="你是…（留空 = 继承全局提示词与技能）"
+                    />
+                  </NeumorphismFormItem>
+                  <NeumorphismFormItem label="系统提示词 skills">
+                    <p class="muted caps-hint">
+                      勾选启用的 skill 作为该 agent 的系统提示词（注入 base 区，
+                      热重载/安装即生效）；不勾选则用上方文本。
+                    </p>
+                    <div class="caps-checkbox-grid caps-checkbox-grid--grid">
+                      <NeumorphismCheckbox
+                        v-for="sk in state.skills"
+                        :key="sk.name"
+                        size="small"
+                        :model-value="teamFormSystemSkills.includes(sk.name)"
+                        :label="sk.name"
+                        @update:model-value="
+                          teamFormSystemSkills = toggleArrayItem(teamFormSystemSkills, sk.name)
+                        "
+                      />
+                    </div>
+                  </NeumorphismFormItem>
+                </template>
+
+                <!-- 分区 3：启用的能力（插件 / 包 / 工具 / 技能） -->
+                <template #header-caps>
+                  <span class="sec-title">启用的能力</span>
+                  <span class="sec-summary">{{ teamCapsSummary }}</span>
+                </template>
+                <template #caps>
+                  <div class="sec-sub">插件</div>
+                  <p class="muted caps-hint">
+                    勾选该智能体可用的能力块（适配器/编排/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
+                  </p>
+                  <div class="caps-checkbox-grid caps-checkbox-grid--grid">
                     <NeumorphismCheckbox
-                      v-for="opt in group.items"
+                      v-for="opt in capabilityPluginOptions"
                       :key="opt.key"
                       size="small"
-                      :model-value="isWhitelisted(teamFormEnabledTools, opt.key)"
+                      :model-value="isWhitelisted(teamFormEnabledPlugins, opt.key)"
                       :label="opt.label"
-                      @update:model-value="teamFormEnabledTools = toggleAllowlist(teamFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
+                      @update:model-value="teamFormEnabledPlugins = toggleAllowlist(teamFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
                     />
+                    <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
                   </div>
-                </div>
-                <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
-              </NeumorphismFormItem>
-              <NeumorphismFormItem label="启用技能">
-                <p class="muted caps-hint">勾选该智能体激活的技能；全选 = 不限制（默认）。</p>
-                <div class="caps-checkbox-grid">
-                  <NeumorphismCheckbox
-                    v-for="opt in capabilitySkillOptions"
-                    :key="opt.key"
-                    size="small"
-                    :model-value="isWhitelisted(teamFormEnabledSkills, opt.key)"
-                    :label="opt.label"
-                    @update:model-value="teamFormEnabledSkills = toggleAllowlist(teamFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
-                  />
-                  <span v-if="capabilitySkillOptions.length === 0" class="muted">（无）</span>
-                </div>
-              </NeumorphismFormItem>
+
+                  <NeumorphismDivider dashed inset />
+                  <div class="sec-sub">包（Package）</div>
+                  <p class="muted caps-hint">
+                    同一个包（如 QQ 适配器）的工具+技能作为一个整体，勾选/取消即同时开关包内所有成员。
+                  </p>
+                  <div v-for="pkg in capabilityPackages" :key="pkg.id" class="caps-tool-group">
+                    <div class="caps-tool-group__head">
+                      <NeumorphismCheckbox
+                        size="small"
+                        :model-value="isPackageFullyEnabled(pkg)"
+                        :label="pkg.name"
+                        @update:model-value="togglePackage(pkg)"
+                      />
+                      <NeumorphismTag size="small" variant="info">
+                        {{ pkg.tools.length + pkg.skills.length }} 项
+                      </NeumorphismTag>
+                    </div>
+                    <div class="muted caps-pkg-members">
+                      工具：{{ pkg.tools.join('、') || '—' }}；技能：{{ pkg.skills.join('、') || '—' }}
+                    </div>
+                  </div>
+                  <span v-if="capabilityPackages.length === 0" class="muted">（无包可勾选）</span>
+
+                  <NeumorphismDivider dashed inset />
+                  <div class="sec-sub">工具</div>
+                  <p class="muted caps-hint">
+                    勾选该智能体可用的工具（按分类分组，含编排/自更新/运维）；全选 = 不限制（默认）。
+                  </p>
+                  <div v-for="group in capabilityToolGroups" :key="group.cat" class="caps-tool-group">
+                    <div class="caps-tool-group__head">
+                      {{ group.title }}
+                      <NeumorphismTag size="small" variant="info">{{ group.items.length }}</NeumorphismTag>
+                    </div>
+                    <div class="caps-checkbox-grid caps-checkbox-grid--grid">
+                      <NeumorphismCheckbox
+                        v-for="opt in group.items"
+                        :key="opt.key"
+                        size="small"
+                        :model-value="isWhitelisted(teamFormEnabledTools, opt.key)"
+                        :label="opt.label"
+                        @update:model-value="teamFormEnabledTools = toggleAllowlist(teamFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
+                      />
+                    </div>
+                  </div>
+                  <span v-if="capabilityToolOptions.length === 0" class="muted">（无）</span>
+
+                  <NeumorphismDivider dashed inset />
+                  <div class="sec-sub">技能</div>
+                  <p class="muted caps-hint">勾选该智能体激活的技能；全选 = 不限制（默认）。</p>
+                  <div class="caps-checkbox-grid caps-checkbox-grid--grid">
+                    <NeumorphismCheckbox
+                      v-for="opt in capabilitySkillOptions"
+                      :key="opt.key"
+                      size="small"
+                      :model-value="isWhitelisted(teamFormEnabledSkills, opt.key)"
+                      :label="opt.label"
+                      @update:model-value="teamFormEnabledSkills = toggleAllowlist(teamFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
+                    />
+                    <span v-if="capabilitySkillOptions.length === 0" class="muted">（无）</span>
+                  </div>
+                </template>
+
+                <!-- 分区 4：禁用的能力（黑名单） -->
+                <template #header-deny>
+                  <span class="sec-title">禁用的能力</span>
+                  <span class="sec-summary">{{ teamDenySummary }}</span>
+                </template>
+                <template #deny>
+                  <div class="sec-sub">禁用插件</div>
+                  <p class="muted caps-hint">
+                    勾选即从该智能体**黑名单禁用**包维度插件（如禁用「内置工具集」后该
+                    agent 没有工具、禁用「技能目录」后没有技能——纯对话 base 即此配置）。
+                  </p>
+                  <div class="caps-checkbox-grid caps-checkbox-grid--grid">
+                    <NeumorphismCheckbox
+                      v-for="opt in disableablePluginOptions"
+                      :key="opt.key"
+                      size="small"
+                      :model-value="teamFormDisabledPlugins.includes(opt.key)"
+                      :label="opt.label"
+                      @update:model-value="teamFormDisabledPlugins = toggleDisabled(teamFormDisabledPlugins, opt.key)"
+                    />
+                    <span v-if="disableablePluginOptions.length === 0" class="muted">（无）</span>
+                  </div>
+                </template>
+              </NeumorphismCollapse>
+
               <div class="form-actions form-actions--corner">
                 <NeumorphismButton
                   v-if="teamFormIsEdit && selectedTeam && !isPrimaryTeam(selectedTeam)"
@@ -1202,6 +1325,8 @@ watch(
             <div class="detail-keywords">
               <span class="muted">ID:</span>
               <code>{{ selectedPlugin.id }}</code>
+              <span class="muted">包（Package）:</span>
+              <code>{{ selectedPlugin.package || selectedPlugin.id }}</code>
               <span class="muted">Entry:</span>
               <code>{{ selectedPlugin.entry || '—' }}</code>
               <span class="muted">Author:</span>
@@ -1492,6 +1617,84 @@ watch(
     var(--nm-surface-raised, #1c1c1c) 60%,
     transparent
   );
+}
+
+/* ── 智能体编辑器：头部信息卡 + 分区折叠 ── */
+.team-editor {
+  gap: 10px;
+}
+.team-hero__body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.team-hero__avatar {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-accent);
+  color: var(--nm-text-on-primary, #000);
+  font-weight: 700;
+  font-size: 14px;
+}
+.team-hero__main {
+  min-width: 0;
+}
+.team-hero__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--nm-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-hero__id {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--nm-text-secondary);
+  font-family: var(--nm-font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 分区标题行：标题 + 摘要（右侧灰字） */
+.sec-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.sec-summary {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--nm-text-secondary);
+}
+/* 分区内子块标题（插件 / 包 / 工具 / 技能） */
+.sec-sub {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nm-text-secondary);
+}
+/* 复选网格：自适应多列（减少纵向滚动） */
+.caps-checkbox-grid--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+/* 折叠面板内的表单行间距压缩 */
+.team-editor :deep(.nm-collapse__content-inner) {
+  padding: 10px 12px;
+}
+.team-editor :deep(.nm-collapse__item) {
+  margin-bottom: 6px;
 }
 
 /* 智能体表单：包 / 工具分组 */

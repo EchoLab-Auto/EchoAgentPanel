@@ -73,7 +73,6 @@ echo-agent-panel
 
 本仓库文档已合并到 EchoAgentCore 仓库的文档群（`document/`，ProDoc 格式）：
 
-- `document/panel.md` — Panel 前端（仓库布局、数据流、视图规范）
+- `document/panel.md` — Panel 前端（仓库布局、数据流、视图规范、无状态中继架构）
+- `document/panel-chat.md` — 会话视图（消息时序与入场动画）
 - `document/ops-deploy.md` — Panel 安装 / 更新 / 卸载（与 Core 同篇）
-- `document/0016-web-relay-architecture.md` — ADR-0016 无状态中继架构（原 doc/decisions/0001）
-- `document/0017-panel-agent-visual-timeline.md` — ADR-0017 时序与动画规范（原 doc/decisions/0004）

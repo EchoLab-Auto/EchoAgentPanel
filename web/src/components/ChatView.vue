@@ -5,7 +5,7 @@
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import { NeumorphismBadge, NeumorphismButton } from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
   ChatMessageItem,
@@ -35,8 +35,14 @@ const attachments = ref<string[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
+/** NeumorphismButton 组件根 DOM（模板 ref 拿到的是组件实例，取 $el）。 */
+function btnElement(instance: unknown): HTMLElement | null {
+  const el = (instance as { $el?: unknown } | null)?.$el;
+  return el instanceof HTMLElement ? el : null;
+}
+
 const showAdapter = ref(false);
-const adapterBtnRef = ref<HTMLElement | null>(null);
+const adapterBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
 const adapterTop = ref(0);
 const adapterLeft = ref(0);
 
@@ -45,7 +51,7 @@ function toggleAdapter() {
     showAdapter.value = false;
     return;
   }
-  const btn = adapterBtnRef.value;
+  const btn = btnElement(adapterBtnRef.value);
   if (btn) {
     const r = btn.getBoundingClientRect();
     adapterTop.value = Math.round(window.innerHeight - r.top + 8);
@@ -57,7 +63,7 @@ function toggleAdapter() {
   showAdapter.value = true;
 }
 const showChecklist = ref(false);
-const checklistBtnRef = ref<HTMLElement | null>(null);
+const checklistBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
 const showContext = ref(false);
 const checklistBottom = ref(0);
 const checklistLeft = ref(0);
@@ -67,7 +73,7 @@ function toggleChecklist() {
     showChecklist.value = false;
     return;
   }
-  const btn = checklistBtnRef.value;
+  const btn = btnElement(checklistBtnRef.value);
   if (btn) {
     const r = btn.getBoundingClientRect();
     // 弹窗底边 = 按钮顶边 - 8px（位于按钮上方，与按钮贴 8px）
@@ -118,6 +124,26 @@ const adapterAvailable = computed(() =>
   adapterPluginIds.value.some((id) => teamPluginEnabled(currentTeam.value, id)),
 );
 
+/** 上下文按钮显隐：management.panel 插件对当前 agent 启用才显示 */
+const contextAvailable = computed(() =>
+  teamPluginEnabled(currentTeam.value, 'echo-agent.management.panel'),
+);
+
+/** 清单按钮显隐：checklist 插件 + checklist 工具都可见才显示。
+ * 插件取消勾选后，Core 会卸载工具包；这里同步卸载对应 UI 入口与浮层。 */
+const checklistAvailable = computed(() =>
+  teamPluginEnabled(currentTeam.value, 'echo-agent.checklist') &&
+  teamToolAvailable(currentTeam.value, 'checklist'),
+);
+
+// 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
+watch(checklistAvailable, (available) => {
+  if (!available) {
+    showChecklist.value = false;
+    state.checklists.splice(0, state.checklists.length);
+  }
+});
+
 // 切换 Agent 时若适配器面板打开则关闭，避免残留禁用 agent 的面板
 watch(
   () => props.activeTeamId,
@@ -146,6 +172,8 @@ const configBottomOffset = computed(() => {
   const m = entryBottom.value.match(/(\d+)/);
   return (m ? parseInt(m[1], 10) : 170) + 30 + 12;
 });
+// 上下文弹层底部偏移与配置弹层一致：入口行（高约 30px）之上 12px
+const ctxBottomOffsetCss = computed(() => `${configBottomOffset.value}px`);
 
 // 活动指示浮条：思考/调用工具/子代理 的实时状态，让用户知道 agent 在干什么
 const activityText = computed(() => {
@@ -186,7 +214,24 @@ const emptyText = computed(() =>
 // 空串占位 → 库回退到 locale 默认（输入消息，Enter 发送…）。
 const placeholder = computed(() => (connected.value ? '' : '未连接到 Core，暂时无法发送'));
 
-// ── 图片工具：压缩为 data URL（最长边 1600，JPEG 0.85）──
+// ── 图片工具：压缩为 data URL（最长边 1600，优先 JPEG 0.85）──
+// 多模态 API 按像素计 token，但请求体积由编码后大小决定：PNG 截图动辄数 MB，
+// 直接塞进请求会让端点拒收整段请求。超过阈值就退化为 JPEG 并逐级缩小。
+const MAX_ATTACHMENT_CHARS = 1_500_000;
+
+function renderToDataUrl(img: HTMLImageElement, maxEdge: number, png: boolean): string {
+  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('canvas 不可用');
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL(png ? 'image/png' : 'image/jpeg', 0.85);
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -195,19 +240,16 @@ function fileToDataUrl(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => reject(new Error('图片解码失败'));
       img.onload = () => {
-        const MAX = 1600;
-        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
         try {
-          const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error('canvas 不可用');
-          ctx.drawImage(img, 0, 0, w, h);
-          const isPng = file.type === 'image/png';
-          resolve(canvas.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85));
+          // PNG 只在编码前体积不大时才保留无损（保透明），否则一律 JPEG。
+          const keepPng = file.type === 'image/png' && file.size <= MAX_ATTACHMENT_CHARS * 0.75;
+          let edge = 1600;
+          let data = renderToDataUrl(img, edge, keepPng);
+          for (let i = 0; i < 3 && data.length > MAX_ATTACHMENT_CHARS; i++) {
+            edge = Math.max(320, Math.round(edge * 0.65));
+            data = renderToDataUrl(img, edge, false);
+          }
+          resolve(data);
         } catch (e) {
           reject(e);
         }
@@ -266,8 +308,11 @@ function imagesOf(message: ChatMessage): string[] {
         @select="emit('selectTeam', $event)"
       />
       <!-- 配置当前 Agent：跳转到资源页并打开该 team 的配置编辑 -->
-      <button
+      <NeumorphismButton
         class="ctx-entry"
+        variant="glass"
+        shape="pill"
+        size="small"
         title="配置当前 Agent（系统提示词 / 能力白名单 / 禁用工具等）"
         @click="configOpen = true"
       >
@@ -285,10 +330,13 @@ function imagesOf(message: ChatMessage): string[] {
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
         配置
-      </button>
-      <button
-        v-if="showContext"
+      </NeumorphismButton>
+      <NeumorphismButton
+        v-if="contextAvailable"
         class="ctx-entry"
+        variant="glass"
+        shape="pill"
+        size="small"
         title="查看上下文占用"
         @click="showContext = true"
       >
@@ -297,25 +345,35 @@ function imagesOf(message: ChatMessage): string[] {
           <path d="M12 2v10h10" />
         </svg>
         上下文
-      </button>
-      <button
-        v-if="showChecklist"
-        ref="checklistBtnRef"
-        class="ctx-entry"
-        title="任务清单"
-        @click="toggleChecklist"
+      </NeumorphismButton>
+      <NeumorphismBadge
+        v-if="checklistAvailable"
+        :value="state.checklists.length"
+        :show-zero="false"
       >
-        <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M9 11l3 3L22 4" />
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-        </svg>
-        清单
-        <span v-if="state.checklists.length" class="entry-badge">{{ state.checklists.length }}</span>
-      </button>
-      <button
+        <NeumorphismButton
+          ref="checklistBtnRef"
+          class="ctx-entry"
+          variant="glass"
+          shape="pill"
+          size="small"
+          title="任务清单"
+          @click="toggleChecklist"
+        >
+          <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+          清单
+        </NeumorphismButton>
+      </NeumorphismBadge>
+      <NeumorphismButton
         v-if="adapterAvailable"
         ref="adapterBtnRef"
         class="ctx-entry"
+        variant="glass"
+        shape="pill"
+        size="small"
         title="平台适配器"
         @click="toggleAdapter"
       >
@@ -325,7 +383,7 @@ function imagesOf(message: ChatMessage): string[] {
           <path d="M12 22.08V12" />
         </svg>
         适配器
-      </button>
+      </NeumorphismButton>
     </div>
 
     <!-- 适配器：跟随适配器按钮上方 8px 的毛玻璃面板 -->
@@ -348,13 +406,13 @@ function imagesOf(message: ChatMessage): string[] {
       <ChecklistSidebar />
     </div>
 
-    <!-- 上下文覆盖层：毛玻璃面板 -->
+    <!-- 上下文弹层：与 Agent 配置同几何（上/左/右 12px，底距入口行 12px）；
+         点击弹层外背景关闭（@click.self），无独立返回按钮 -->
     <div v-if="showContext" class="ctx-overlay" @click.self="showContext = false">
       <div class="ctx-overlay__panel">
         <div class="ctx-overlay__head">
-          <NeumorphismButton size="small" variant="glass" @click="showContext = false">
-            返回聊天
-          </NeumorphismButton>
+          <h3 class="ctx-overlay__title">上下文占用</h3>
+          <span class="ctx-overlay__id">{{ props.activeTeamId ?? 'default' }}</span>
         </div>
         <div class="ctx-overlay__body">
           <ContextView :team-id="props.activeTeamId ?? null" />
@@ -747,68 +805,73 @@ function imagesOf(message: ChatMessage): string[] {
 }
 
 
-/* 上下文入口：位于输入框上方左侧，磨砂玻璃 */
-.ctx-entry {
-  position: absolute;
-  left: 20px;
-  bottom: v-bind(entryBottom); /* 与输入框固定 12px 间隔（ResizeObserver 动态） */
-  z-index: 6;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  backdrop-filter: blur(20px) saturate(1.6);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
-  color: var(--nm-text-primary);
-  font-size: 12px;
-  cursor: pointer;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
-  transition: background 0.15s ease, transform 0.15s ease;
+/* 入口行按钮：视觉（磨砂玻璃/胶囊/悬浮）由 ui-frame NeumorphismButton
+   variant=glass shape=pill size=small 提供。
+   更透：作用域内下调玻璃底色不透明度（45% vs 库默认 65%），
+   并把模糊提到 24px 保持可读性。 */
+.entry-row {
+  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-color) 45%, transparent);
+  --nm-glass-blur: 24px;
 }
-.ctx-entry:hover {
-  background: color-mix(in srgb, var(--nm-surface-raised) 65%, transparent);
-  transform: translateY(-1px);
+.ctx-entry {
+  flex: 0 0 auto;
 }
 .ctx-entry__icon {
   width: 14px;
   height: 14px;
+  flex: 0 0 auto;
 }
 
-/* 上下文覆盖层 */
+/* 上下文弹层：与 Agent 配置弹层同几何（覆盖层点击空白关闭） */
 .ctx-overlay {
   position: absolute;
   inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.25);
 }
 .ctx-overlay__panel {
-  flex: 1;
-  margin: 10px;
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  bottom: v-bind(ctxBottomOffsetCss);
   display: flex;
   flex-direction: column;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 0.5px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
-  border-radius: 24px;
-  background: color-mix(in srgb, var(--nm-surface-raised) 55%, transparent);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 .ctx-overlay__head {
-  padding: 10px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--nm-border-subtle) 50%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--nm-border-subtle);
+  background: linear-gradient(color-mix(in srgb, #ffffff 6%, transparent), transparent);
+}
+.ctx-overlay__title {
+  margin: 0;
+  font-size: 15px;
+  color: var(--nm-text-primary);
+}
+.ctx-overlay__id {
+  font-size: 11px;
+  color: var(--nm-text-secondary);
+  font-family: var(--nm-font-mono, monospace);
 }
 .ctx-overlay__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 18px;
+  padding: 12px 18px;
 }
 
 
@@ -821,24 +884,9 @@ function imagesOf(message: ChatMessage): string[] {
   align-items: center;
   gap: 8px;
 }
-.entry-row .ctx-entry {
-  position: static;
-}
 .ctx-overlay__panel--narrow {
   max-width: 640px;
   align-self: center;
-}
-.entry-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  border-radius: 8px;
-  background: var(--nm-primary-color, #5b8def);
-  color: #fff;
-  font-size: 10px;
-  padding: 0 4px;
 }
 
 

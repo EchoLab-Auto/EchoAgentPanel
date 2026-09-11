@@ -13,7 +13,7 @@ import {
 import { state } from './store';
 import { cancelSessionWork } from './state';
 import { sendCommand, startConnection } from './connection';
-import { orchestrationModeOf } from './protocol';
+import { loopModeOf } from './protocol';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import TasksPanel from './components/TasksPanel.vue';
@@ -177,12 +177,12 @@ function onLayoutCollapse(collapsed: boolean) {
   }
 }
 
-// ── 全局会话被禁用兜底：当前 agent 非 chatbot 编排模式时若停留在 global 则回退 local ──
+// ── 全局会话被禁用兜底：当前 agent 非并行多会话模式时若停留在 global 则回退 local ──
 watch(
   [() => state.teams, () => activeTeamId.value],
   () => {
     const team = state.teams.find((t) => t.id === activeTeamId.value);
-    if (activeSessionId.value === 'global' && team && orchestrationModeOf(team) !== 'chatbot') {
+    if (activeSessionId.value === 'global' && team && loopModeOf(team) !== 'parallel') {
       selectSession('local:tui::local_user');
     }
   },
@@ -245,18 +245,15 @@ watch(
         <div class="brand">EchoAgent Panel</div>
       </template>
 
-      <!-- 顶部栏中：连接状态 + 模型 -->
+      <!-- 顶部栏中：连接状态 + 忙碌徽标（模型名不再展示，见设置视图 API 分类） -->
       <template #header-center>
         <div class="topbar-status">
           <NeumorphismStatusDot :status="state.connected ? 'online' : 'connecting'" size="small" />
           {{ state.connected ? '已连接' : '连接中…' }}
         </div>
-        <div class="topbar-model">
-          {{ state.model || '—' }}
-          <NeumorphismTag v-if="busyCount > 0" variant="warning" size="small">
-            忙碌 ×{{ busyCount }}
-          </NeumorphismTag>
-        </div>
+        <NeumorphismTag v-if="busyCount > 0" variant="warning" size="small">
+          忙碌 ×{{ busyCount }}
+        </NeumorphismTag>
       </template>
 
       <!-- 顶部栏右：导航 -->

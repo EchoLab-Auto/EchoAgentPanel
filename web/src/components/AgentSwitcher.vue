@@ -32,6 +32,20 @@ function avatarColor(name: string): string {
 
 const avatarText = (name: string) => (name.trim()[0] ?? 'A').toUpperCase();
 
+/** 从全局供应商池解析某个 team 当前生效的模型名（'' = 跟随全局默认） */
+function resolveModel(team: { api_profile?: string | null }): string {
+  const ref = team.api_profile;
+  if (!ref) return state.api?.model ?? '';
+  const p = state.api?.profiles?.find((x) => x.name === ref);
+  return p?.model ?? '';
+}
+function teamModel(team: NonNullable<typeof state.teams>[number]): string {
+  return resolveModel(team);
+}
+function currentModel(team: NonNullable<typeof state.teams>[number] | null): string {
+  return team ? resolveModel(team) : '';
+}
+
 function select(id: string) {
   open.value = false;
   emit('select', id);
@@ -67,6 +81,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
       </span>
       <span v-else class="agent-card__avatar agent-card__avatar--off">?</span>
       <span class="agent-card__name">{{ current?.name ?? '未配置' }}</span>
+      <span v-if="currentModel(current)" class="agent-card__model" :title="currentModel(current)!">
+        {{ currentModel(current) }}
+      </span>
       <svg
         class="agent-card__caret"
         :class="{ 'agent-card__caret--rot': open }"
@@ -101,6 +118,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
           {{ avatarText(team.name) }}
         </span>
         <span class="agent-menu__name">{{ team.name }}</span>
+        <span v-if="teamModel(team)" class="agent-menu__model" :title="teamModel(team)!">
+          {{ teamModel(team) }}
+        </span>
         <NeumorphismStatusDot
           :status="team.enabled ? 'online' : 'offline'"
           size="small"
@@ -169,6 +189,15 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   white-space: nowrap;
 }
 
+.agent-card__model {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--nm-text-secondary);
+}
+
 .agent-card__caret {
   width: 14px;
   height: 14px;
@@ -233,5 +262,15 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+}
+
+.agent-menu__model {
+  margin-left: auto;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--nm-text-secondary);
 }
 </style>

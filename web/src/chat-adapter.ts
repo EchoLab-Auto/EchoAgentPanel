@@ -29,13 +29,30 @@ export interface ChatMessageWithImages extends ChatMessage {
   animate?: boolean;
 }
 
+/**
+ * 展示层压缩：正文里的内嵌 base64 图片换成占位符。
+ *
+ * 入站消息的原文是 hook JSON（带完整 data URI），与 Core 侧
+ * `compact_embedded_media` 同一套占位符：附图走缩略图渲染，正文只留
+ * `[图片#n]`，否则一条 1MB 截图会变成满屏 base64 文本。
+ */
+export function compactForDisplay(content: string, images?: string[]): string {
+  let text = content;
+  (images ?? []).forEach((image, index) => {
+    if (image.startsWith('data:') && text.includes(image)) {
+      text = text.split(image).join(`[图片#${index + 1}]`);
+    }
+  });
+  return text.replace(/data:[^;,"'\s]+;base64,[A-Za-z0-9+/=]{256,}/g, '[图片数据已省略]');
+}
+
 export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
   return {
     id: m.key, // 'm{N}' → id
     // backend → agent（库的角色命名）；reasoning 为面板扩展角色，由
     // ChatView 的 #message slot 拦截渲染（库 ChatRole 无该角色）。
     role: (m.role === 'backend' ? 'agent' : m.role) as ChatMessage['role'],
-    content: m.content,
+    content: compactForDisplay(m.content, m.images),
     time: m.time, // 双方都是秒级 Unix 时间戳，无需换算
     animate: m.animate,
     images: m.images,

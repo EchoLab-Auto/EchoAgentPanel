@@ -225,6 +225,11 @@ export interface AppState {
   toasts: Toast[];
   /** API 连通性测试结果（name(空=默认) → { ok, message, latencyMs }） */
   apiTests: Record<string, { ok: boolean; message: string; latencyMs: number }>;
+  /** API 余额查询结果（name(空=默认) → 余额信息） */
+  apiBalances: Record<
+    string,
+    { ok: boolean; available: boolean; total: string; currency: string; message: string }
+  >;
   /** 已发现并注册的技能列表 */
   skills: SkillInfo[];
   /** 已注册的工具定义列表 */
@@ -284,6 +289,7 @@ export function initialState(): AppState {
     sudoPrompt: null,
     toasts: [],
     apiTests: {},
+    apiBalances: {},
     skills: [],
     tools: [],
     plugins: [],
@@ -647,6 +653,28 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         ok: e.ok,
         message: e.message,
         latencyMs: e.latency_ms,
+      };
+      return state;
+    }
+    case 'ApiBalanceResult': {
+      const e = (
+        event as {
+          ApiBalanceResult: {
+            name: string;
+            ok: boolean;
+            available: boolean;
+            total: string;
+            currency: string;
+            message: string;
+          };
+        }
+      ).ApiBalanceResult;
+      state.apiBalances[e.name] = {
+        ok: e.ok,
+        available: e.available,
+        total: e.total,
+        currency: e.currency,
+        message: e.message,
       };
       return state;
     }

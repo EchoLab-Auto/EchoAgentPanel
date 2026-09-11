@@ -81,31 +81,42 @@ export interface TeamInfo {
   enabled_skills?: string[];
   memory_limit_tokens?: number | null;
   context_window_tokens?: number | null;
+  /** Persona 级 API 供应商引用（None/空 = 跟随全局默认配置） */
+  api_profile?: string | null;
   /** 该 agent 系统提示词由哪些 skill 组成（空 = 用 system_prompt 字段） */
   system_skills?: string[];
   /**
-   * 编排模式（互斥子插件推导）：single = 单任务编排（无会话管理 UI、
-   * 回执分支不可见）；chatbot = 多任务并行编排（会话卡/全局分组/可见分支）。
-   * 缺省视为 chatbot（对齐旧三布尔 default_true 语义）。
+   * 循环模式（互斥循环插件推导）：single = 单会话（会话内 turn 串行排队、
+   * 无会话管理 UI、回执分支不可见）；parallel = 并行多会话（会话卡/全局分组/
+   * 可见分支）。缺省视为 single（默认模式）。
    */
-  orchestration_mode?: OrchestrationMode;
+  loop_mode?: LoopMode;
+  /**
+   * 旧字段（过渡期兼容）：`parallel` 记为 `'chatbot'`。新代码请读 `loop_mode`。
+   */
+  orchestration_mode?: 'single' | 'chatbot';
 }
 
-export type OrchestrationMode = 'single' | 'chatbot';
+export type LoopMode = 'single' | 'parallel';
 
-/** 编排模式读取（TeamInfo 缺字段时按 chatbot——旧 core 消息兼容）。 */
-export function orchestrationModeOf(team?: TeamInfo | null): OrchestrationMode {
-  return team?.orchestration_mode ?? 'chatbot';
+/** 循环模式读取：优先新字段；旧字段（chatbot → parallel）兜底；缺省 single。 */
+export function loopModeOf(team?: TeamInfo | null): LoopMode {
+  if (!team) return 'single';
+  if (team.loop_mode) return team.loop_mode;
+  return team.orchestration_mode === 'chatbot' ? 'parallel' : 'single';
 }
 
-/** 编排模式子插件 id（编辑器写入 enabled_plugins 白名单用） */
-export const ORCHESTRATION_SINGLE_PLUGIN_ID = 'echo-agent.orchestration.single';
-export const ORCHESTRATION_CHATBOT_PLUGIN_ID = 'echo-agent.orchestration.chatbot';
-/** 旧特性插件 id（保存防御：从白名单中剔除，core 会迁移映射） */
+/** 循环模式插件 id（编辑器写入 enabled_plugins 白名单用，二选一） */
+export const LOOP_SINGLE_PLUGIN_ID = 'echo-agent.loop.single';
+export const LOOP_PARALLEL_PLUGIN_ID = 'echo-agent.loop.parallel';
+/** 旧编排模式 / 旧驱动插件 id（保存防御：从白名单中剔除，core 会迁移映射） */
 export const LEGACY_MODE_PLUGIN_IDS = [
+  'echo-agent.orchestration.single',
+  'echo-agent.orchestration.chatbot',
   'echo-agent.branch.reply',
   'echo-agent.session.global',
   'echo-agent.chatbot.sessions',
+  'echo-agent.loop.runner',
 ];
 
 /** 后台 shell 会话摘要（Shell 面板终端可视化） */
@@ -138,6 +149,8 @@ export interface PluginInfo {
   author: string;
   enabled: boolean;
   builtin: boolean;
+  /** 所属包 id（横跨 plugin+tool+skill 的组合标签；未声明 = 插件 id） */
+  package?: string;
 }
 
 export interface ApiProfileInfo {
@@ -236,6 +249,7 @@ export type BackendCommand =
     }
   | { SwitchApi: { name: string } }
   | { TestApi: { name: string } }
+  | { QueryApiBalance: { name: string } }
   | 'RequestSkillsList'
   | 'ReloadSkills'
   | 'RequestToolsList'
@@ -274,6 +288,7 @@ export type BackendCommand =
         enabled_skills?: string[];
         memory_limit_tokens?: number | null;
         context_window_tokens?: number | null;
+        api_profile?: string | null;
       };
     }
   | { DeleteTeam: { id: string } }
@@ -430,6 +445,16 @@ export type BackendEvent =
         ok: boolean;
         message: string;
         latency_ms: number;
+      }
+    }
+  | {
+      ApiBalanceResult: {
+        name: string;
+        ok: boolean;
+        available: boolean;
+        total: string;
+        currency: string;
+        message: string;
       }
     }
   | { SkillsList: { skills: SkillInfo[] } }

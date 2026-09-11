@@ -3,11 +3,11 @@
 //! 对应资源页的 Team 编辑（系统提示词 / 启用 / 能力白名单）。
 
 import { computed, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton, NeumorphismSegmented } from '@echolab-auto/ui-frame';
+import { NeumorphismButton, NeumorphismSegmented, NeumorphismSelect } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
-import type { OrchestrationMode, TeamInfo } from '../protocol';
-import { applyMode, deriveMode, stripLegacyModeIds } from '../orchestration-mode';
+import type { LoopMode, TeamInfo } from '../protocol';
+import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
 
 const props = defineProps<{
   team: TeamInfo;
@@ -35,6 +35,8 @@ const disabledSkills = ref<string[]>([]);
 const enabledPlugins = ref<string[]>([]);
 const enabledTools = ref<string[]>([]);
 const enabledSkills = ref<string[]>([]);
+/** Persona 级 API 供应商引用（'' = 跟随全局默认配置） */
+const apiProfile = ref<string>('');
 
 watch(
   () => props.team,
@@ -49,6 +51,7 @@ watch(
     enabledPlugins.value = t.enabled_plugins ?? [];
     enabledTools.value = t.enabled_tools ?? [];
     enabledSkills.value = t.enabled_skills ?? [];
+    apiProfile.value = t.api_profile ?? '';
   },
   { immediate: true },
 );
@@ -163,16 +166,31 @@ function toggleGroup(list: string[], all: string[], group: GroupedTable): string
 
 const bottomPx = computed(() => `${props.bottomOffset ?? 42}px`);
 
-// ── 编排模式分段单选（互斥子插件，写入 enabled_plugins 白名单） ──
+// ── 循环模式分段单选（互斥循环插件，写入 enabled_plugins 白名单） ──
 const MODE_OPTIONS = [
-  { label: '单任务编排', value: 'single' },
-  { label: '多任务并行编排', value: 'chatbot' },
+  { label: '单会话（默认）', value: 'single' },
+  { label: '并行多会话', value: 'parallel' },
 ];
-const orchestrationMode = computed(() => deriveMode(enabledPlugins.value));
-function setOrchestrationMode(value: string | number | (string | number)[] | undefined) {
+const loopMode = computed(() => deriveMode(enabledPlugins.value));
+
+/** API 供应商选项（全局供应商池 + 跟随全局默认） */
+const apiProviderOptions = computed(() => {
+  const profiles = state.api?.profiles ?? [];
+  const opts: Array<{ label: string; value: string }> = [
+    { label: '跟随全局默认配置', value: '' },
+  ];
+  for (const p of profiles) {
+    opts.push({
+      label: `${p.name}（${p.provider} / ${p.model}${p.api_key_set ? '' : ' · 无 key'}）`,
+      value: p.name,
+    });
+  }
+  return opts;
+});
+function setLoopMode(value: string | number | (string | number)[] | undefined) {
   enabledPlugins.value = applyMode(
     enabledPlugins.value,
-    String(value ?? 'chatbot') as OrchestrationMode,
+    String(value ?? 'single') as LoopMode,
     state.plugins.map((p) => p.id),
   );
 }
@@ -192,6 +210,7 @@ function save() {
       enabled_plugins: stripLegacyModeIds(enabledPlugins.value),
       enabled_tools: enabledTools.value,
       enabled_skills: enabledSkills.value,
+      api_profile: apiProfile.value || null,
     },
   });
   emit('close');
@@ -232,15 +251,28 @@ function save() {
         </div>
 
         <div class="agent-config__group">
-          <div class="agent-config__group-title">编排模式</div>
+          <div class="agent-config__group-title">API 供应商</div>
           <p class="muted agent-config__hint">
-            多任务并行 = 会话列表 / 全局会话 / 可见回执分支；单任务 = 无会话管理 UI（互斥，单任务为兜底）。
+            选择本 Agent 使用的模型供应商；「跟随全局默认配置」使用设置页 API 中的全局默认。
+          </p>
+          <NeumorphismSelect
+            :model-value="apiProfile"
+            :options="apiProviderOptions"
+            size="small"
+            @update:model-value="apiProfile = String($event ?? '')"
+          />
+        </div>
+
+        <div class="agent-config__group">
+          <div class="agent-config__group-title">循环模式</div>
+          <p class="muted agent-config__hint">
+            单会话 = 同一会话的 turn 串行排队、无会话管理 UI（默认）；并行多会话 = 同一会话可并发分支、显示会话列表 / 全局会话 / 可见回执分支。另启一个会话即另一条并行通道。
           </p>
           <NeumorphismSegmented
-            :model-value="orchestrationMode"
+            :model-value="loopMode"
             :options="MODE_OPTIONS"
             size="small"
-            @update:model-value="setOrchestrationMode"
+            @update:model-value="setLoopMode"
           />
         </div>
 

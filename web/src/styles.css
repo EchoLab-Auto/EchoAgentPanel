@@ -74,12 +74,7 @@ body {
   color: var(--nm-text-secondary);
   font-size: 13px;
 }
-.topbar-model {
-  color: var(--nm-text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+
 .topbar-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
 /* ── layout ── */
