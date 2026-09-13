@@ -21,11 +21,7 @@ connect_url = "ws://127.0.0.1:3132"
 # 必须与 Core [core].management_access_token 一致；留空表示不发送认证头。
 access_token = ""
 
-[qq]
-# 遗留字段：早期 Panel 直连 NapCat 用（docker exec 读二维码 / OneBot 查登录状态）。
+# 注：旧版曾有 [qq] 段（NapCat 容器名 / OneBot / WebUI 地址，Panel 直连 NapCat 用）。
 # 2026-09-13 起 QQ 登录与二维码由 Core 代理走 WS（RequestQqLoginStatus /
-# RequestQqQrcode → QqLoginStatus / QqQrcode 事件），此段不再参与运行，
-# 保留仅为配置兼容。
-napcat_container = "napcat"
-napcat_onebot_url = "http://localhost:3000"
-napcat_webui_url = "http://localhost:6099"
+# RequestQqQrcode → QqLoginStatus / QqQrcode 事件），该段已移除；
+# 旧配置文件中的 [qq] 段会被静默忽略，无需手工清理。

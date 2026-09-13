@@ -67,7 +67,7 @@ echo-agent-panel
 - `[server] bind_address`：HTTP/WS 监听地址（默认 `0.0.0.0:8080`，允许外部访问）
 - `[server] static_dir`：前端静态目录（安装器注入绝对路径，一般无需改）
 - `[core] connect_url`：Core management WS 地址（默认 `ws://127.0.0.1:3132`）
-- `[qq]`：**遗留字段**（早期 Panel 直连 NapCat 时使用；2026-09-13 起 QQ 登录 / 二维码由 Core 代理走 WS，此段不再参与运行，保留仅为配置兼容）
+- 注：旧版的 `[qq]` 段（NapCat 容器 / OneBot / WebUI 地址）已移除——QQ 登录 / 二维码改由 Core 代理走 WS；旧配置里的 `[qq]` 段会被静默忽略
 
 ## 文档
 

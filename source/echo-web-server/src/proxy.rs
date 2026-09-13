@@ -15,8 +15,6 @@ use tokio::time::Instant;
 use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
 use tracing::warn;
 
-use crate::config::QqSection;
-
 /// 心跳间隔：每 30s 向两侧各发一次 Ping。
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 /// 收割阈值：一侧超过 3 个心跳周期（90s）没有任何帧（含 Pong）→ 判定半死，
@@ -51,8 +49,6 @@ pub struct AppState {
     pub core_access_token: Arc<str>,
     /// Static frontend directory (built `web/dist`).
     pub static_dir: Arc<str>,
-    /// NapCat/QQ login helper settings.
-    pub qq: QqSection,
 }
 
 /// `GET /ws` — upgrade the browser connection and bridge it to Core.

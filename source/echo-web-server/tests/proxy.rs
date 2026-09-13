@@ -8,7 +8,6 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-use echo_web_server::config::QqSection;
 use echo_web_server::proxy::{ws_handler, AppState};
 
 /// A fake Core management server: echoes every text frame back verbatim.
@@ -48,7 +47,6 @@ async fn spawn_panel(core_url: String) -> String {
             core_url: core_url.into(),
             core_access_token: "".into(),
             static_dir: "/nonexistent".into(),
-            qq: QqSection::default(),
         });
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

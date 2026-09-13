@@ -48,7 +48,15 @@ pub async fn core_logs(Query(query): Query<LinesQuery>) -> Response {
 fn read_journal(units: &[&str], lines: u32) -> Option<String> {
     for unit in units {
         let output = Command::new("journalctl")
-            .args(["--user", "-u", unit, "-n", &lines.to_string(), "--no-pager", "-q"])
+            .args([
+                "--user",
+                "-u",
+                unit,
+                "-n",
+                &lines.to_string(),
+                "--no-pager",
+                "-q",
+            ])
             .output()
             .ok()?;
         if output.status.success() {

@@ -66,13 +66,13 @@ async fn main() -> Result<()> {
         core_url: Arc::from(core_url.as_str()),
         core_access_token: Arc::from(cfg.core.access_token.as_str()),
         static_dir: Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
-        qq: cfg.qq.clone(),
     };
 
     let app = Router::new()
         .route("/ws", get(proxy::ws_handler))
-        // QQ 登录状态/二维码自 2026-09 起由 Core 代理（WS 命令
-        // RequestQqLoginStatus / RequestQqQrcode），中继不再直连 NapCat。
+        // HTTP 旁路仅有日志两条；QQ 登录状态/二维码自 2026-09-13 起由
+        // Core 代理（WS 命令 RequestQqLoginStatus / RequestQqQrcode），
+        // 无 /api/qq/* 路由。
         .route("/api/logs/panel", get(log::panel_logs))
         .route("/api/logs/core", get(log::core_logs))
         .fallback(static_handler)
