@@ -30,6 +30,7 @@ import {
   NeumorphismTextarea,
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
+import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';
 import { sendCommand } from '../connection';
 import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { loopModeOf } from '../protocol';
@@ -258,29 +259,16 @@ const teamFormModel = computed(() => ({
 }));
 
 // 能力列表（复选框）：插件 / 工具 / 技能
-// 插件级勾选只保留"整类能力"（适配器/管理面）；内置工具集(kind=tool)
-// 和编排(kind=orchestration) 不作为插件出现——它们由工具/包层面勾选。
-// 白名单勾选：adapter/management + 包维度门控插件（工具集/技能目录/清单/工作区）
-//（编排互斥子插件由「编排模式」分段控件管理）
+// 插件级勾选只保留"整类能力"：kind ∈ {adapter, management} ∪ 包维度门控
+// 插件（判定单一来源 = capabilities.ts::isPluginCheckboxVisible；
+// 编排互斥子插件由「编排模式」分段控件管理）。
 const capabilityPluginOptions = computed(() =>
   state.plugins
-    .filter((p) =>
-      ['adapter', 'management'].includes(p.kind) ||
-      [
-        'echo-agent.tools.builtin',
-        'echo-agent.skills.dir',
-        'echo-agent.checklist',
-        'echo-agent.workspace',
-      ].includes(p.id),
-    )
+    .filter((p) => isPluginCheckboxVisible(p))
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
-const PACKAGE_NAMES: Record<string, string> = {
-  'echo-agent.adapter.qq': 'QQ 适配器包',
-  'echo-agent.orchestration': '编排工具包',
-  'echo-agent.workspace': '工作区会话',
-};
+// 包显示名单一来源 = capabilities.ts::PACKAGE_DISPLAY_NAMES。
 
 const capabilityPackages = computed(() => {
   const map = new Map<string, { tools: string[]; skills: string[] }>();
@@ -296,7 +284,7 @@ const capabilityPackages = computed(() => {
   }
   return [...map.entries()].map(([id, v]) => ({
     id,
-    name: PACKAGE_NAMES[id] ?? id,
+    name: PACKAGE_DISPLAY_NAMES[id] ?? id,
     tools: v.tools,
     skills: v.skills,
   }));

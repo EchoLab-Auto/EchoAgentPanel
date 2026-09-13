@@ -7,6 +7,50 @@
 
 import type { TeamInfo } from './protocol';
 import type { AppState } from './state';
+
+/**
+ * 包维度门控插件 id（单一来源）——「启用插件」勾选区除 adapter/management
+ * 类之外的补充成员。
+ *
+ * 其中多数（tools.builtin / skills.dir / checklist / workspace）的 kind 是
+ * `tool`，但它们是**整类能力开关**（禁用 = 其包内全部工具/技能对 LLM 不可见），
+ * 因此必须出现在智能体配置弹层（⚙ 配置）与设置视图智能体编辑器的
+ * 「启用插件」勾选区里；adapter.qq 由 kind 判定即已覆盖，列在此处是为了与
+ * Core 的 `GATED_PLUGIN_IDS` 保持逐项镜像（对齐测试守护）。
+ *
+ * 维护规则（对应 Core 端 `echo-agent/src/plugins.rs::GATED_PLUGIN_IDS`）：
+ * **新增包维度门控插件时，同步：
+ *   1. Core `GATED_PLUGIN_IDS` / `BUILTIN_PLUGIN_IDS`；
+ *   2. `scripts/update.sh` 插件校验清单；
+ *   3. 本常量（Panel 两处勾选区共用）。**
+ * 回归测试见 `src/__tests__/capabilities.test.ts`。
+ */
+export const PACKAGE_GATED_PLUGIN_IDS = [
+  'echo-agent.tools.builtin',
+  'echo-agent.skills.dir',
+  'echo-agent.checklist',
+  'echo-agent.workspace',
+  'echo-agent.adapter.qq',
+] as const;
+
+/** 包维度门控插件的中文显示名（工具/技能按包分组时的可读名）。 */
+export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
+  'echo-agent.adapter.qq': 'QQ 适配器包',
+  'echo-agent.orchestration': '编排工具包',
+  'echo-agent.tools.builtin': '内置工具集',
+  'echo-agent.skills.dir': '技能目录',
+  'echo-agent.checklist': '任务清单',
+  'echo-agent.workspace': '工作区会话',
+};
+
+/** 插件是否属于「启用插件」勾选区（kind 类 + 包维度门控清单）。 */
+export function isPluginCheckboxVisible(plugin: {
+  id: string;
+  kind: string;
+}): boolean {
+  if (plugin.kind === 'adapter' || plugin.kind === 'management') return true;
+  return (PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(plugin.id);
+}
 /** 工具是否被包级插件禁用（内置工具集关闭时全部工具不可用） */
 function toolPackageDisabled(team: TeamInfo | null | undefined): boolean {
   if (!team) return false;

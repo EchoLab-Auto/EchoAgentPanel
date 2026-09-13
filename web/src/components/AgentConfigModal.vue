@@ -23,6 +23,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
+import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';
 import { sendCommand } from '../connection';
 import type { LoopMode, TeamInfo } from '../protocol';
 import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
@@ -72,14 +73,8 @@ watch(
   { immediate: true },
 );
 
-// ── 包（pkg）名称映射：同 pkg 的工具/技能视作一个整体分组 ──
-const PACKAGE_NAMES: Record<string, string> = {
-  'echo-agent.adapter.qq': 'QQ 适配器包',
-  'echo-agent.orchestration': '编排工具包',
-  'echo-agent.tools.builtin': '内置工具集',
-  'echo-agent.skills.dir': '技能目录',
-  'echo-agent.workspace': '工作区会话',
-};
+// ── 包（pkg）名称映射：同 pkg 的工具/技能视作一个整体分组
+//（单一来源在 capabilities.ts::PACKAGE_DISPLAY_NAMES）──
 
 interface GroupedItem {
   key: string;
@@ -95,7 +90,7 @@ const toolItems = computed<GroupedItem[]>(() =>
     key: t.name,
     name: t.name,
     description: t.description || '（无描述）',
-    group: t.package ? (PACKAGE_NAMES[t.package] ?? t.package) : t.category || undefined,
+    group: t.package ? (PACKAGE_DISPLAY_NAMES[t.package] ?? t.package) : t.category || undefined,
   })),
 );
 /** 技能：按 package 分组（无 package 按 category） */
@@ -104,23 +99,14 @@ const skillItems = computed<GroupedItem[]>(() =>
     key: sk.name,
     name: sk.name,
     description: sk.description || '（无描述）',
-    group: sk.package ? (PACKAGE_NAMES[sk.package] ?? sk.package) : sk.category || undefined,
+    group: sk.package ? (PACKAGE_DISPLAY_NAMES[sk.package] ?? sk.package) : sk.category || undefined,
   })),
 );
 /** 插件：管理/适配器类与包维度门控插件（按 kind 分组展示）。
- * 包维度门控插件（工具集/技能目录/清单/工作区）是"整类能力"开关，
- * 其余 tool/orchestration 插件由工具/包层面勾选，不出现在此列表。 */
+ * 判定单一来源 = capabilities.ts::isPluginCheckboxVisible。 */
 const pluginItems = computed<GroupedItem[]>(() =>
   state.plugins
-    .filter((p) =>
-      ['adapter', 'management'].includes(p.kind) ||
-      [
-        'echo-agent.tools.builtin',
-        'echo-agent.skills.dir',
-        'echo-agent.checklist',
-        'echo-agent.workspace',
-      ].includes(p.id),
-    )
+    .filter((p) => isPluginCheckboxVisible(p))
     .map((p) => ({
       key: p.id,
       name: p.name,
