@@ -118,13 +118,13 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     last_browser_frame = Instant::now();
                     let forward = match message {
                         BrowserMessage::Text(text) => {
-                            tokio_tungstenite::tungstenite::Message::Text(text.to_string().into())
+                            tokio_tungstenite::tungstenite::Message::Text(text.to_string())
                         }
                         BrowserMessage::Ping(payload) => {
-                            tokio_tungstenite::tungstenite::Message::Ping(payload.to_vec().into())
+                            tokio_tungstenite::tungstenite::Message::Ping(payload.to_vec())
                         }
                         BrowserMessage::Pong(payload) => {
-                            tokio_tungstenite::tungstenite::Message::Pong(payload.to_vec().into())
+                            tokio_tungstenite::tungstenite::Message::Pong(payload.to_vec())
                         }
                         // Binary frames are not part of the protocol; drop the link.
                         BrowserMessage::Binary(_) | BrowserMessage::Close(_) => break,
@@ -139,7 +139,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         break;
                     }
                     if core_tx
-                        .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new().into()))
+                        .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new()))
                         .await
                         .is_err()
                     {
