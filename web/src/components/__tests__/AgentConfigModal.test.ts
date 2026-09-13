@@ -34,6 +34,7 @@ function seed() {
   ] as typeof state.tools;
   state.plugins = [
     { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin' },
+    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace' },
   ] as typeof state.plugins;
 }
 
@@ -93,6 +94,12 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
     }
     // 库 FormItem 提供标签
     expect(wrapper.findAll('.agent-config .nm-form-item').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('启用插件区包含包维度门控插件（工作区会话）', () => {
+    const wrapper = mountModal();
+    // 回归：workspace 插件（kind=tool）曾因不在允许清单而被隐藏
+    expect(wrapper.text()).toContain('工作区会话');
   });
 
   it('能力区用库 Collapse + Table + Checkbox 渲染（插件黑名单已移除）', () => {

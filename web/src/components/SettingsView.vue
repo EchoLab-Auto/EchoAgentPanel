@@ -260,13 +260,18 @@ const teamFormModel = computed(() => ({
 // 能力列表（复选框）：插件 / 工具 / 技能
 // 插件级勾选只保留"整类能力"（适配器/管理面）；内置工具集(kind=tool)
 // 和编排(kind=orchestration) 不作为插件出现——它们由工具/包层面勾选。
-// 白名单勾选：adapter/management + 包维度门控插件（工具集/技能目录/清单）
+// 白名单勾选：adapter/management + 包维度门控插件（工具集/技能目录/清单/工作区）
 //（编排互斥子插件由「编排模式」分段控件管理）
 const capabilityPluginOptions = computed(() =>
   state.plugins
     .filter((p) =>
       ['adapter', 'management'].includes(p.kind) ||
-      ['echo-agent.tools.builtin', 'echo-agent.skills.dir', 'echo-agent.checklist'].includes(p.id),
+      [
+        'echo-agent.tools.builtin',
+        'echo-agent.skills.dir',
+        'echo-agent.checklist',
+        'echo-agent.workspace',
+      ].includes(p.id),
     )
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
@@ -274,6 +279,7 @@ const capabilityPluginOptions = computed(() =>
 const PACKAGE_NAMES: Record<string, string> = {
   'echo-agent.adapter.qq': 'QQ 适配器包',
   'echo-agent.orchestration': '编排工具包',
+  'echo-agent.workspace': '工作区会话',
 };
 
 const capabilityPackages = computed(() => {

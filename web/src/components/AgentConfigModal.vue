@@ -78,6 +78,7 @@ const PACKAGE_NAMES: Record<string, string> = {
   'echo-agent.orchestration': '编排工具包',
   'echo-agent.tools.builtin': '内置工具集',
   'echo-agent.skills.dir': '技能目录',
+  'echo-agent.workspace': '工作区会话',
 };
 
 interface GroupedItem {
@@ -106,12 +107,19 @@ const skillItems = computed<GroupedItem[]>(() =>
     group: sk.package ? (PACKAGE_NAMES[sk.package] ?? sk.package) : sk.category || undefined,
   })),
 );
-/** 插件：管理/适配器类（无 pkg 概念，按 kind 分组展示） */
+/** 插件：管理/适配器类与包维度门控插件（按 kind 分组展示）。
+ * 包维度门控插件（工具集/技能目录/清单/工作区）是"整类能力"开关，
+ * 其余 tool/orchestration 插件由工具/包层面勾选，不出现在此列表。 */
 const pluginItems = computed<GroupedItem[]>(() =>
   state.plugins
     .filter((p) =>
       ['adapter', 'management'].includes(p.kind) ||
-      ['echo-agent.tools.builtin', 'echo-agent.skills.dir', 'echo-agent.checklist'].includes(p.id),
+      [
+        'echo-agent.tools.builtin',
+        'echo-agent.skills.dir',
+        'echo-agent.checklist',
+        'echo-agent.workspace',
+      ].includes(p.id),
     )
     .map((p) => ({
       key: p.id,
