@@ -26,6 +26,40 @@ export interface AdapterStatus {
   onebot_url?: string | null;
 }
 
+/** 工作区会话（workspace 插件）：名称 + 多个工作区目录。 */
+export interface WorkspaceSessionInfo {
+  /** 稳定 id（空 = 由 Core 依名称生成）。 */
+  id: string;
+  name: string;
+  description?: string;
+  /** 工作区目录绝对路径列表。 */
+  directories?: string[];
+}
+
+/** 一个工作区目录的 git 状态快照（只读采集）。 */
+export interface WorkspaceGitInfo {
+  directory: string;
+  /** 是否是 git 仓库（工作树内）。 */
+  is_repo: boolean;
+  /** 当前分支（detached 时为 HEAD）。 */
+  branch?: string | null;
+  /** 相对上游的领先/落后提交数（无上游时为 0）。 */
+  ahead?: number;
+  behind?: number;
+  /** 已暂存（索引区）文件数。 */
+  staged?: number;
+  /** 工作区已修改（未暂存）文件数。 */
+  modified?: number;
+  /** 未跟踪文件数。 */
+  untracked?: number;
+  /** 变更文件路径（前若干条）。 */
+  changed_files?: string[];
+  /** 最近一次提交摘要（`<short-hash> <subject>`）。 */
+  last_commit?: string | null;
+  /** 采集失败原因（目录不存在 / 不是 git 仓库等）。 */
+  error?: string | null;
+}
+
 export interface SessionInfo {
   id: string;
   team_id?: string | null;
@@ -318,6 +352,11 @@ export type BackendCommand =
   | { RequestFriendList: { adapter?: string | null } }
   | { RequestQqLoginStatus: { adapter?: string | null } }
   | { RequestQqQrcode: { adapter?: string | null } }
+  | { RequestWorkspaceSessions: { team_id?: string | null } }
+  | { SaveWorkspaceSession: { team_id?: string | null; session: WorkspaceSessionInfo } }
+  | { DeleteWorkspaceSession: { team_id?: string | null; id: string } }
+  | { ActivateWorkspaceSession: { team_id?: string | null; id?: string | null } }
+  | { RequestWorkspaceGitStatus: { team_id?: string | null; session_id: string } }
   | 'StartAllAdapters'
   | 'StopAllAdapters'
   | { UpdateQqAllowlist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
@@ -491,6 +530,20 @@ export type BackendEvent =
       };
     }
   | { QqQrcode: { adapter: string; png_base64: string; error?: string | null } }
+  | {
+      WorkspaceSessions: {
+        team_id?: string | null;
+        sessions: WorkspaceSessionInfo[];
+        active?: string | null;
+      };
+    }
+  | {
+      WorkspaceGitStatus: {
+        team_id?: string | null;
+        session_id: string;
+        directories: WorkspaceGitInfo[];
+      };
+    }
   | { FriendList: { friends: FriendInfo[]; adapter?: string | null } }
   | { SudoRequest: { request_id: number; command: string; session_id: string } }
   | { SudoResolved: { request_id: number; accepted: boolean; message: string } };

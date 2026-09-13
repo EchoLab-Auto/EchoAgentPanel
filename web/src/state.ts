@@ -32,6 +32,8 @@ import type {
   ToolInfo,
   PluginInfo,
   TeamInfo,
+  WorkspaceGitInfo,
+  WorkspaceSessionInfo,
 } from './protocol';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -268,6 +270,14 @@ export interface AppState {
   plugins: PluginInfo[];
   /** Team 成员列表（多 agent） */
   teams: TeamInfo[];
+  /** 工作区会话列表（workspace 插件；当前加载归属的 team 见 workspaceTeamId） */
+  workspaceSessions: WorkspaceSessionInfo[];
+  /** 激活的工作区会话 id（null = 未激活） */
+  workspaceActive: string | null;
+  /** 上述列表归属的 team id（用于切换 team 后判定新鲜度） */
+  workspaceTeamId: string | null;
+  /** 各会话目录 git 状态的缓存（session_id → 目录结果） */
+  workspaceGitBySession: Record<string, WorkspaceGitInfo[]>;
   /** 当前激活 team（null = default/未指定），用于实时事件隔离 */
   activeTeamId: string | null;
   /** 后台 shell 会话列表（Shell 面板） */
@@ -326,6 +336,10 @@ export function initialState(): AppState {
     tools: [],
     plugins: [],
     teams: [],
+    workspaceSessions: [],
+    workspaceActive: null,
+    workspaceTeamId: null,
+    workspaceGitBySession: {},
     activeTeamId: null,
     shellSessions: [],
     shellTerminals: {},
@@ -360,6 +374,34 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'AdapterList': {
       const e = (event as { AdapterList: { adapters: AdapterStatus[] } }).AdapterList;
       state.adapters = e.adapters;
+      return state;
+    }
+    case 'WorkspaceSessions': {
+      const e = (
+        event as {
+          WorkspaceSessions: {
+            team_id?: string | null;
+            sessions: WorkspaceSessionInfo[];
+            active?: string | null;
+          };
+        }
+      ).WorkspaceSessions;
+      state.workspaceSessions = e.sessions ?? [];
+      state.workspaceActive = e.active ?? null;
+      state.workspaceTeamId = e.team_id ?? null;
+      return state;
+    }
+    case 'WorkspaceGitStatus': {
+      const e = (
+        event as {
+          WorkspaceGitStatus: {
+            team_id?: string | null;
+            session_id: string;
+            directories: WorkspaceGitInfo[];
+          };
+        }
+      ).WorkspaceGitStatus;
+      state.workspaceGitBySession[e.session_id] = e.directories ?? [];
       return state;
     }
     case 'MessageReceived': {

@@ -21,6 +21,7 @@ import ReasoningBlock from './ReasoningBlock.vue';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import QqPanel from './QqPanel.vue';
+import WorkspacePanel from './WorkspacePanel.vue';
 
 const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
 const emit = defineEmits<{
@@ -136,6 +137,34 @@ const checklistAvailable = computed(() =>
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
+/** 工作区按钮显隐：workspace 插件 + workspace 工具都可见才显示。 */
+const workspaceAvailable = computed(() =>
+  teamPluginEnabled(currentTeam.value, 'echo-agent.workspace') &&
+  teamToolAvailable(currentTeam.value, 'workspace'),
+);
+
+const showWorkspace = ref(false);
+const workspaceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
+const workspaceBottom = ref(0);
+const workspaceLeft = ref(0);
+
+function toggleWorkspace() {
+  if (showWorkspace.value) {
+    showWorkspace.value = false;
+    return;
+  }
+  const btn = btnElement(workspaceBtnRef.value);
+  if (btn) {
+    const r = btn.getBoundingClientRect();
+    workspaceBottom.value = Math.round(window.innerHeight - r.top + 8);
+    const composer = composerFloatRef.value;
+    const cr = composer ? composer.getBoundingClientRect() : null;
+    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
+    workspaceLeft.value = Math.round(centerX - 280);
+  }
+  showWorkspace.value = true;
+}
+
 // 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
   if (!available) {
@@ -144,11 +173,17 @@ watch(checklistAvailable, (available) => {
   }
 });
 
-// 切换 Agent 时若适配器面板打开则关闭，避免残留禁用 agent 的面板
+// 插件/Team 更新回推后，若 workspace 插件变为不可用，关闭残留弹层。
+watch(workspaceAvailable, (available) => {
+  if (!available) showWorkspace.value = false;
+});
+
+// 切换 Agent 时若适配器/工作区面板打开则关闭，避免残留禁用 agent 的面板
 watch(
   () => props.activeTeamId,
   () => {
     showAdapter.value = false;
+    showWorkspace.value = false;
   },
 );
 
@@ -368,6 +403,21 @@ function imagesOf(message: ChatMessage): string[] {
         </NeumorphismButton>
       </NeumorphismBadge>
       <NeumorphismButton
+        v-if="workspaceAvailable"
+        ref="workspaceBtnRef"
+        class="ctx-entry"
+        variant="glass"
+        shape="pill"
+        size="small"
+        title="工作区会话（多会话 / 多目录 / git 状态）"
+        @click="toggleWorkspace"
+      >
+        <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        </svg>
+        工作区
+      </NeumorphismButton>
+      <NeumorphismButton
         v-if="adapterAvailable"
         ref="adapterBtnRef"
         class="ctx-entry"
@@ -384,6 +434,16 @@ function imagesOf(message: ChatMessage): string[] {
         </svg>
         适配器
       </NeumorphismButton>
+    </div>
+
+    <!-- 工作区会话：跟随入口按钮上方 8px 的毛玻璃面板 -->
+    <div
+      v-if="showWorkspace"
+      class="checklist-pop"
+      :style="{ bottom: workspaceBottom + 'px', left: workspaceLeft + 'px' }"
+      @click.self="showWorkspace = false"
+    >
+      <WorkspacePanel :team-id="props.activeTeamId ?? null" />
     </div>
 
     <!-- 适配器：跟随适配器按钮上方 8px 的毛玻璃面板 -->

@@ -58,6 +58,8 @@ export function startConnection(): void {
       state.trunk = [];
       state.teamTimelines = {};
       state.trunkTeamId = null;
+      // 工作区 git 状态缓存同样清空（打开面板时会按当前 team 重拉）。
+      state.workspaceGitBySession = {};
       // Bootstrap the panel state on (re)connect.
       // Timeline 按上次使用的 Agent（localStorage）加载，刷新/重连后不跳回默认。
       let savedTeam: string | null = null;
