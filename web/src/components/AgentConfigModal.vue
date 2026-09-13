@@ -1,9 +1,27 @@
 <script setup lang="ts">
 //! Agent 配置悬浮弹层：在会话区上方打开的轻量配置卡片，
 //! 对应资源页的 Team 编辑（系统提示词 / 启用 / 能力白名单）。
+//!
+//! 内层元素全部使用 ui-frame 组件（FormItem/Input/Textarea/Switch/Checkbox/
+//! Collapse/Table/Tag/Divider/Select/Segmented/Button）；外壳是库
+//! `NeumorphismCard glass`（磨砂配方见样式区）。
 
 import { computed, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton, NeumorphismSegmented, NeumorphismSelect } from '@echolab-auto/ui-frame';
+import {
+  NeumorphismButton,
+  NeumorphismCard,
+  NeumorphismCheckbox,
+  NeumorphismCollapse,
+  NeumorphismDivider,
+  NeumorphismFormItem,
+  NeumorphismInput,
+  NeumorphismSegmented,
+  NeumorphismSelect,
+  NeumorphismSwitch,
+  NeumorphismTable,
+  NeumorphismTextarea,
+} from '@echolab-auto/ui-frame';
+import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import type { LoopMode, TeamInfo } from '../protocol';
@@ -29,7 +47,6 @@ const name = ref('');
 const description = ref('');
 const systemPrompt = ref('');
 const enabled = ref(true);
-const disabledPlugins = ref<string[]>([]);
 const disabledTools = ref<string[]>([]);
 const disabledSkills = ref<string[]>([]);
 const enabledPlugins = ref<string[]>([]);
@@ -45,7 +62,6 @@ watch(
     description.value = t.description;
     systemPrompt.value = t.system_prompt ?? '';
     enabled.value = t.enabled;
-    disabledPlugins.value = t.disabled_plugins ?? [];
     disabledTools.value = t.disabled_tools ?? [];
     disabledSkills.value = t.disabled_skills ?? [];
     enabledPlugins.value = t.enabled_plugins ?? [];
@@ -104,20 +120,6 @@ const pluginItems = computed<GroupedItem[]>(() =>
       group: p.kind === 'adapter' ? '适配器' : '管理面',
     })),
 );
-/** 可禁用（黑名单）插件：包维度门控插件 */
-const DISABLEABLE_PLUGIN_KEYS = [
-  'echo-agent.tools.builtin',
-  'echo-agent.skills.dir',
-  'echo-agent.checklist',
-  'echo-agent.adapter.qq',
-  'echo-agent.management.panel',
-];
-const disableablePlugins = computed(() =>
-  state.plugins
-    .filter((p) => DISABLEABLE_PLUGIN_KEYS.includes(p.id))
-    .map((p) => ({ key: p.id, name: p.name })),
-);
-
 /** 按分组聚合成表格模型（组名 + 成员；无分组归入「其他」） */
 interface GroupedTable {
   group: string;
@@ -146,15 +148,17 @@ function isItemOn(list: string[], key: string): boolean {
 function isGroupOn(list: string[], group: GroupedTable): boolean {
   return list.length === 0 || group.items.every((i) => list.includes(i.key));
 }
+/** 组内部分启用（用于 checkbox 的 indeterminate 态） */
+function isGroupPartial(list: string[], group: GroupedTable): boolean {
+  if (list.length === 0) return false;
+  const on = group.items.filter((i) => list.includes(i.key)).length;
+  return on > 0 && on < group.items.length;
+}
 /** 切换单项（白名单为空时先以全量初始化再切换） */
 function toggleItem(list: string[], all: string[], key: string): string[] {
   const base = list.length ? list : [...all];
   return base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
 }
-function toggleDisabled(list: string[], key: string): string[] {
-  return list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
-}
-
 /** 切换整组 */
 function toggleGroup(list: string[], all: string[], group: GroupedTable): string[] {
   const base = list.length ? list : [...all];
@@ -163,6 +167,39 @@ function toggleGroup(list: string[], all: string[], group: GroupedTable): string
   if (on) return base.filter((k) => !keys.includes(k));
   return [...new Set([...base, ...keys])];
 }
+
+// ── 能力表格（ui-frame NeumorphismTable）：行数据即 GroupedItem ──
+/** 三张表共用列定义（行键 = GroupedItem.key，与 row-key="key" 对应） */
+const CAPABILITY_COLUMNS: TableColumn[] = [
+  { key: 'name', label: '名称', width: '180px' },
+  { key: 'description', label: '介绍' },
+  { key: 'check', label: '启用', width: '64px', align: 'center' },
+];
+/** 表格 data 契约（Record<string, unknown>[]）与 GroupedItem[] 的桥接 */
+function tableRows(items: GroupedItem[]): Record<string, unknown>[] {
+  return items as unknown as Record<string, unknown>[];
+}
+function rowKeyOf(row: Record<string, unknown>): string {
+  return String(row.key ?? '');
+}
+function isRowOn(list: string[], row: Record<string, unknown>): boolean {
+  return isItemOn(list, rowKeyOf(row));
+}
+function toggleRow(list: string[], all: GroupedItem[], row: Record<string, unknown>): string[] {
+  return toggleItem(
+    list,
+    all.map((i) => i.key),
+    rowKeyOf(row),
+  );
+}
+
+/** 能力分区（可折叠；默认全展开，保持与旧版一致的初始视图） */
+const CAP_SECTIONS = [
+  { key: 'plugins', title: '启用插件' },
+  { key: 'tools', title: '启用工具（按 pkg 分组）' },
+  { key: 'skills', title: '启用技能（按 pkg 分组）' },
+];
+const openSections = ref<string[]>(CAP_SECTIONS.map((s) => s.key));
 
 const bottomPx = computed(() => `${props.bottomOffset ?? 42}px`);
 
@@ -204,7 +241,6 @@ function save() {
       description: description.value.trim(),
       system_prompt: systemPrompt.value,
       enabled: enabled.value,
-      disabled_plugins: stripLegacyModeIds(disabledPlugins.value),
       disabled_tools: disabledTools.value,
       disabled_skills: disabledSkills.value,
       enabled_plugins: stripLegacyModeIds(enabledPlugins.value),
@@ -219,7 +255,9 @@ function save() {
 
 <template>
   <div class="agent-config-overlay" @click.self="emit('close')">
-    <div class="agent-config">
+    <!-- 玻璃外壳 = ui-frame NeumorphismCard（glass）；尺寸/定位与库 glass 的
+         面板化微调见样式区，内层布局保持不变。 -->
+    <NeumorphismCard glass no-padding class="agent-config">
       <div class="agent-config__head">
         <div>
           <h3>配置 Agent：{{ props.team.name }}</h3>
@@ -229,26 +267,27 @@ function save() {
       </div>
 
       <div class="agent-config__body">
-        <label class="agent-config__field">
-          <span>名称</span>
-          <input v-model="name" class="agent-config__input" />
-        </label>
-        <label class="agent-config__field">
-          <span>描述</span>
-          <input v-model="description" class="agent-config__input" />
-        </label>
-        <label class="agent-config__field">
-          <span>系统提示词（留空继承全局）</span>
-          <textarea v-model="systemPrompt" class="agent-config__textarea" rows="4" />
-        </label>
+        <NeumorphismFormItem label="名称" required>
+          <NeumorphismInput v-model="name" size="small" placeholder="Agent 名称" />
+        </NeumorphismFormItem>
+        <NeumorphismFormItem label="描述">
+          <NeumorphismInput v-model="description" size="small" placeholder="一句话说明这个 Agent 的职责" />
+        </NeumorphismFormItem>
+        <NeumorphismFormItem label="系统提示词（留空继承全局）">
+          <NeumorphismTextarea
+            v-model="systemPrompt"
+            size="small"
+            :rows="4"
+            placeholder="留空则继承全局系统提示词"
+          />
+        </NeumorphismFormItem>
 
         <div class="agent-config__row">
           <span>启用（禁用即卸载记忆）</span>
-          <label class="agent-config__switch">
-            <input v-model="enabled" type="checkbox" />
-            <span class="agent-config__switch-track" />
-          </label>
+          <NeumorphismSwitch v-model="enabled" size="small" />
         </div>
+
+        <NeumorphismDivider dashed inset />
 
         <div class="agent-config__group">
           <div class="agent-config__group-title">API 供应商</div>
@@ -276,133 +315,135 @@ function save() {
           />
         </div>
 
-        <div class="agent-config__group">
-          <div class="agent-config__group-title">启用插件</div>
-          <div v-if="!pluginGroups.length" class="muted">（无）</div>
-          <div v-for="g in pluginGroups" :key="g.group" class="agent-config__pkg">
-            <div class="agent-config__pkg-head">
-              <label class="agent-config__pkg-check">
-                <input
-                  type="checkbox"
-                  :checked="isGroupOn(enabledPlugins, g)"
-                  @change="enabledPlugins = toggleGroup(enabledPlugins, pluginItems.map((i) => i.key), g)"
+        <!-- 能力分区（ui-frame NeumorphismCollapse；pkg 分组 + 表格） -->
+        <NeumorphismCollapse v-model="openSections" :items="CAP_SECTIONS" size="small">
+          <template #header-plugins>
+            <span class="agent-config__sec-title">启用插件</span>
+            <span class="agent-config__sec-summary">{{ pluginItems.length }} 项</span>
+          </template>
+          <template #plugins>
+            <div v-if="!pluginGroups.length" class="muted">（无）</div>
+            <div v-for="g in pluginGroups" :key="g.group" class="agent-config__pkg">
+              <div class="agent-config__pkg-head">
+                <NeumorphismCheckbox
+                  :model-value="isGroupOn(enabledPlugins, g)"
+                  :indeterminate="isGroupPartial(enabledPlugins, g)"
+                  :label="`${g.group}（${g.items.length}）`"
+                  size="small"
+                  @update:model-value="enabledPlugins = toggleGroup(enabledPlugins, pluginItems.map((i) => i.key), g)"
                 />
-                <span>{{ g.group }}（{{ g.items.length }}）</span>
-              </label>
+              </div>
+              <NeumorphismTable
+                :data="tableRows(g.items)"
+                :columns="CAPABILITY_COLUMNS"
+                row-key="key"
+                size="small"
+                class="agent-config__table"
+              >
+                <template #cell-name="{ row }">
+                  <span class="agent-config__cell-name">{{ row.name }}</span>
+                </template>
+                <template #cell-description="{ row }">
+                  <span class="agent-config__cell-desc">{{ row.description }}</span>
+                </template>
+                <template #cell-check="{ row }">
+                  <NeumorphismCheckbox
+                    :model-value="isRowOn(enabledPlugins, row)"
+                    size="small"
+                    @update:model-value="enabledPlugins = toggleRow(enabledPlugins, pluginItems, row)"
+                  />
+                </template>
+              </NeumorphismTable>
             </div>
-            <table class="agent-config__table">
-              <thead>
-                <tr><th class="agent-config__th-name">名称</th><th>介绍</th><th class="agent-config__th-check">启用</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in g.items" :key="item.key">
-                  <td class="agent-config__td-name">{{ item.name }}</td>
-                  <td class="agent-config__td-desc">{{ item.description }}</td>
-                  <td class="agent-config__td-check">
-                    <input
-                      type="checkbox"
-                      :checked="isItemOn(enabledPlugins, item.key)"
-                      @change="enabledPlugins = toggleItem(enabledPlugins, pluginItems.map((i) => i.key), item.key)"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+          </template>
 
-        <div class="agent-config__group">
-          <div class="agent-config__group-title">禁用插件（黑名单）</div>
-          <div class="agent-config__chips">
-            <button
-              v-for="opt in disableablePlugins"
-              :key="opt.key"
-              type="button"
-              class="agent-config__chip"
-              :class="{ 'is-on': disabledPlugins.includes(opt.key) }"
-              @click="disabledPlugins = toggleDisabled(disabledPlugins, opt.key)"
-            >
-              {{ disabledPlugins.includes(opt.key) ? '✓ ' : '' }}{{ opt.name }}
-            </button>
-          </div>
-        </div>
-
-        <div class="agent-config__group">
-          <div class="agent-config__group-title">启用工具（按 pkg 分组）</div>
-          <div v-if="!toolGroups.length" class="muted">（无）</div>
-          <div v-for="g in toolGroups" :key="g.group" class="agent-config__pkg">
-            <div class="agent-config__pkg-head">
-              <label class="agent-config__pkg-check">
-                <input
-                  type="checkbox"
-                  :checked="isGroupOn(enabledTools, g)"
-                  @change="enabledTools = toggleGroup(enabledTools, toolItems.map((i) => i.key), g)"
+          <template #header-tools>
+            <span class="agent-config__sec-title">启用工具（按 pkg 分组）</span>
+            <span class="agent-config__sec-summary">{{ toolItems.length }} 项</span>
+          </template>
+          <template #tools>
+            <div v-if="!toolGroups.length" class="muted">（无）</div>
+            <div v-for="g in toolGroups" :key="g.group" class="agent-config__pkg">
+              <div class="agent-config__pkg-head">
+                <NeumorphismCheckbox
+                  :model-value="isGroupOn(enabledTools, g)"
+                  :indeterminate="isGroupPartial(enabledTools, g)"
+                  :label="`${g.group}（${g.items.length}）`"
+                  size="small"
+                  @update:model-value="enabledTools = toggleGroup(enabledTools, toolItems.map((i) => i.key), g)"
                 />
-                <span>{{ g.group }}（{{ g.items.length }}）</span>
-              </label>
+              </div>
+              <NeumorphismTable
+                :data="tableRows(g.items)"
+                :columns="CAPABILITY_COLUMNS"
+                row-key="key"
+                size="small"
+                class="agent-config__table"
+              >
+                <template #cell-name="{ row }">
+                  <span class="agent-config__cell-name">{{ row.name }}</span>
+                </template>
+                <template #cell-description="{ row }">
+                  <span class="agent-config__cell-desc">{{ row.description }}</span>
+                </template>
+                <template #cell-check="{ row }">
+                  <NeumorphismCheckbox
+                    :model-value="isRowOn(enabledTools, row)"
+                    size="small"
+                    @update:model-value="enabledTools = toggleRow(enabledTools, toolItems, row)"
+                  />
+                </template>
+              </NeumorphismTable>
             </div>
-            <table class="agent-config__table">
-              <thead>
-                <tr><th class="agent-config__th-name">名称</th><th>介绍</th><th class="agent-config__th-check">启用</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in g.items" :key="item.key">
-                  <td class="agent-config__td-name">{{ item.name }}</td>
-                  <td class="agent-config__td-desc">{{ item.description }}</td>
-                  <td class="agent-config__td-check">
-                    <input
-                      type="checkbox"
-                      :checked="isItemOn(enabledTools, item.key)"
-                      @change="enabledTools = toggleItem(enabledTools, toolItems.map((i) => i.key), item.key)"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+          </template>
 
-        <div class="agent-config__group">
-          <div class="agent-config__group-title">启用技能（按 pkg 分组）</div>
-          <div v-if="!skillGroups.length" class="muted">（无）</div>
-          <div v-for="g in skillGroups" :key="g.group" class="agent-config__pkg">
-            <div class="agent-config__pkg-head">
-              <label class="agent-config__pkg-check">
-                <input
-                  type="checkbox"
-                  :checked="isGroupOn(enabledSkills, g)"
-                  @change="enabledSkills = toggleGroup(enabledSkills, skillItems.map((i) => i.key), g)"
+          <template #header-skills>
+            <span class="agent-config__sec-title">启用技能（按 pkg 分组）</span>
+            <span class="agent-config__sec-summary">{{ skillItems.length }} 项</span>
+          </template>
+          <template #skills>
+            <div v-if="!skillGroups.length" class="muted">（无）</div>
+            <div v-for="g in skillGroups" :key="g.group" class="agent-config__pkg">
+              <div class="agent-config__pkg-head">
+                <NeumorphismCheckbox
+                  :model-value="isGroupOn(enabledSkills, g)"
+                  :indeterminate="isGroupPartial(enabledSkills, g)"
+                  :label="`${g.group}（${g.items.length}）`"
+                  size="small"
+                  @update:model-value="enabledSkills = toggleGroup(enabledSkills, skillItems.map((i) => i.key), g)"
                 />
-                <span>{{ g.group }}（{{ g.items.length }}）</span>
-              </label>
+              </div>
+              <NeumorphismTable
+                :data="tableRows(g.items)"
+                :columns="CAPABILITY_COLUMNS"
+                row-key="key"
+                size="small"
+                class="agent-config__table"
+              >
+                <template #cell-name="{ row }">
+                  <span class="agent-config__cell-name">{{ row.name }}</span>
+                </template>
+                <template #cell-description="{ row }">
+                  <span class="agent-config__cell-desc">{{ row.description }}</span>
+                </template>
+                <template #cell-check="{ row }">
+                  <NeumorphismCheckbox
+                    :model-value="isRowOn(enabledSkills, row)"
+                    size="small"
+                    @update:model-value="enabledSkills = toggleRow(enabledSkills, skillItems, row)"
+                  />
+                </template>
+              </NeumorphismTable>
             </div>
-            <table class="agent-config__table">
-              <thead>
-                <tr><th class="agent-config__th-name">名称</th><th>介绍</th><th class="agent-config__th-check">启用</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in g.items" :key="item.key">
-                  <td class="agent-config__td-name">{{ item.name }}</td>
-                  <td class="agent-config__td-desc">{{ item.description }}</td>
-                  <td class="agent-config__td-check">
-                    <input
-                      type="checkbox"
-                      :checked="isItemOn(enabledSkills, item.key)"
-                      @change="enabledSkills = toggleItem(enabledSkills, skillItems.map((i) => i.key), item.key)"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+          </template>
+        </NeumorphismCollapse>
       </div>
 
       <div class="agent-config__foot">
         <NeumorphismButton size="small" variant="glass" @click="emit('close')">取消</NeumorphismButton>
         <NeumorphismButton size="small" variant="primary" @click="save">保存</NeumorphismButton>
       </div>
-    </div>
+    </NeumorphismCard>
   </div>
 </template>
 
@@ -412,8 +453,11 @@ function save() {
   inset: 0;
   z-index: 50;
 }
-/* 磨砂玻璃卡片：距会话框 上/左/右 12px，下边框距配置按钮上边框 12px */
-.agent-config {
+/* 玻璃外壳 = ui-frame NeumorphismCard（glass）：距会话框 上/左/右 12px，
+   下边框距配置按钮上边框 12px。库负责玻璃语义（--nm-glass-* 与圆角/结构），
+   这里只做定位 + 面板化微调——背景与模糊走库 token，圆角/边框/投影按
+   .ctx-overlay__panel 的既有配方覆写（库无对应 token，且 blur 需带 saturate）。 */
+.agent-config-overlay .agent-config {
   position: absolute;
   top: 12px;
   left: 12px;
@@ -421,16 +465,27 @@ function save() {
   bottom: v-bind(bottomPx);
   display: flex;
   flex-direction: column;
+  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
+  --nm-glass-blur: 24px;
+  /* 表格密度对齐弹层（库默认 small 行为 8px/12px，弹层内更紧凑） */
+  --nm-table-cell-padding-y-sm: 5px;
+  --nm-table-cell-padding-x-sm: 10px;
   border-radius: 20px;
   border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
-  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(var(--nm-glass-blur)) saturate(1.6);
+  -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(1.6);
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.45),
     0 0 0 0.5px rgba(255, 255, 255, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
+}
+/* 库的内容槽：让头部/滚动区/脚部仍是外壳的直接弹性子项（布局不变） */
+.agent-config :deep(.nm-card__body) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 /* 头部/脚部随玻璃面半透明处理 */
 .agent-config__head {
@@ -453,34 +508,27 @@ function save() {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
-.agent-config__field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--nm-text-secondary); }
-.agent-config__input, .agent-config__textarea {
-  background: var(--nm-bg-color);
-  border: 1px solid var(--nm-border-color);
-  border-radius: 8px;
-  color: var(--nm-text-primary);
-  padding: 7px 10px;
+/* 库 FormItem 自带标签与下边距；弹层内收窄一点更紧凑 */
+.agent-config__body :deep(.nm-form-item) {
+  margin-bottom: 10px;
+}
+.agent-config__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 13px;
-  font-family: inherit;
-  resize: vertical;
+  margin: 2px 0 10px;
 }
-.agent-config__row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
-.agent-config__switch input { display: none; }
-.agent-config__switch-track {
-  width: 38px; height: 20px; border-radius: 10px; display: inline-block;
-  background: var(--nm-border-color); position: relative; cursor: pointer; transition: background 0.15s;
-}
-.agent-config__switch-track::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-  border-radius: 50%; background: #fff; transition: transform 0.15s;
-}
-.agent-config__switch input:checked + .agent-config__switch-track { background: var(--panel-accent); }
-.agent-config__switch input:checked + .agent-config__switch-track::after { transform: translateX(18px); }
+.agent-config__group { margin-bottom: 10px; }
 .agent-config__group-title { font-size: 12px; font-weight: 600; color: var(--nm-text-secondary); margin-bottom: 6px; }
 .agent-config__hint { margin: 0 0 6px; font-size: 11px; }
-/* pkg 分组块 */
+/* 能力分区：折叠头 = 标题 + 摘要（撑满整行） */
+.agent-config__sec-title { font-size: 12.5px; font-weight: 600; }
+.agent-config__sec-summary { margin-left: auto; font-size: 11px; color: var(--nm-text-secondary); }
+.agent-config__body :deep(.nm-collapse__trigger) { width: 100%; }
+.agent-config__body :deep(.nm-collapse) { margin-bottom: 10px; }
+/* pkg 分组块：容器只负责边框与分块，内部 checkbox / 表格均为库组件 */
 .agent-config__pkg {
   border: 1px solid var(--nm-border-subtle);
   border-radius: 10px;
@@ -490,60 +538,25 @@ function save() {
 .agent-config__pkg-head {
   display: flex;
   align-items: center;
-  padding: 7px 10px;
+  padding: 6px 10px;
   background: color-mix(in srgb, var(--nm-text-primary) 5%, transparent);
   border-bottom: 1px solid var(--nm-border-subtle);
 }
-.agent-config__pkg-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--nm-text-primary);
-  cursor: pointer;
+/* 表格融入玻璃面：库的 wrapper 自带实底 + 内凹投影（设计为落在页面底色上），
+   弹层内改成透明（保留结构/间距/悬浮行），避免在磨砂面上贴一块实色块 */
+.agent-config__table :deep(.nm-table__wrapper) {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
 }
-.agent-config__pkg-check input,
-.agent-config__td-check input {
-  /* ui-frame base.css 把 input 设为 appearance:none——原生 checkbox
-     在无外观时没有默认方框尺寸（0×0）。这里显式恢复外观并给尺寸。 */
-  -webkit-appearance: auto;
-  -moz-appearance: auto;
-  appearance: auto;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  cursor: pointer;
-  accent-color: var(--panel-accent);
+.agent-config__table :deep(.nm-table__head) {
+  background: color-mix(in srgb, var(--nm-text-primary) 4%, transparent);
 }
-/* 表格 */
-.agent-config__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.agent-config__table th {
-  text-align: left;
-  padding: 5px 10px;
-  color: var(--nm-text-secondary);
-  font-weight: 600;
-  font-size: 11px;
-  border-bottom: 1px solid var(--nm-border-subtle);
-  background: color-mix(in srgb, var(--nm-text-primary) 3%, transparent);
-}
-.agent-config__table td {
-  padding: 5px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--nm-border-subtle) 50%, transparent);
-  vertical-align: top;
-}
-.agent-config__table tr:last-child td { border-bottom: none; }
-.agent-config__th-name, .agent-config__td-name { width: 170px; font-weight: 600; white-space: nowrap; }
-.agent-config__th-check, .agent-config__td-check { width: 44px; text-align: center; }
-
-.agent-config__td-desc {
+.agent-config__cell-name { font-weight: 600; white-space: nowrap; }
+.agent-config__cell-desc {
+  display: block;
   color: var(--nm-text-secondary);
   line-height: 1.5;
-  max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

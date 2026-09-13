@@ -1,4 +1,4 @@
-# EchoAgentPanel 配置 — Web 面板（Rust 后端 + React 前端）
+# EchoAgentPanel 配置 — Web 面板（Rust 后端 + Vue 3 前端）
 # 复制为 config/echo-agent-panel.local.toml 后按需修改。
 # Core（Agent 核心服务）的配置在 EchoAgentCore 仓库的 config/echo-agent-core.toml。
 

@@ -72,7 +72,7 @@ export function startConnection(): void {
         // 由 onTeamSelect 缓存逻辑负责。
         { RequestTrunkTimeline: { team_id: savedTeam } },
         'RequestAdapterStatus',
-        'RequestQqFilterConfig',
+        { RequestQqFilterConfig: {} },
         'RequestTeamsList',
         'RequestShellSessions',
       ];

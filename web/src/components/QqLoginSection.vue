@@ -1,98 +1,89 @@
 <script setup lang="ts">
-//! QQ 登录状态区：轮询登录状态、二维码获取、NapCat WebUI 链接。
+//! QQ 登录状态区（多实例 / Core 代理，2026-09）。
+//!
+//! 面板**不再**直连 OneBot HTTP 或 docker：登录状态与二维码都由 Core 代理——
+//! 发 `RequestQqLoginStatus` / `RequestQqQrcode`（带实例名），Core 用
+//! `QqLoginStatus` / `QqQrcode` 事件回推（二维码为 PNG base64）。
 
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import type { AdapterStatus } from '../protocol';
-import { fetchWithTimeout } from '../api';
+import { state } from '../store';
+import { sendCommand } from '../connection';
 
-interface LoginStatus {
-  online: boolean;
-  user_id?: string | null;
-  nickname?: string | null;
-  error?: string | null;
-}
+const props = defineProps<{
+  adapter?: AdapterStatus | null;
+  /** 实例名（多实例寻址；缺省 = 唯一实例）。 */
+  adapterName?: string;
+  owner: number;
+}>();
 
-const props = defineProps<{ adapter?: AdapterStatus; owner: number }>();
-
-const status = ref<LoginStatus | null>(null);
 const loading = ref(false);
-const qrUrl = ref<string | null>(null);
 const error = ref<string | null>(null);
+const qrDataUrl = ref<string | null>(null);
 const qrRequested = ref(false);
 
-async function loadStatus() {
-  try {
-    const resp = await fetchWithTimeout('/api/qq/login-status', { cache: 'no-store' });
-    const data = await resp.json();
-    if (!resp.ok) {
-      status.value = { online: false };
-      return;
-    }
-    status.value = data as LoginStatus;
-    if (data.online) qrUrl.value = null;
-  } catch {
-    status.value = null;
-  }
+const instanceName = computed(() => props.adapterName || props.adapter?.name || '');
+/** 该实例的登录态（Core 经 QqLoginStatus 回推）。 */
+const instanceState = computed(() => state.qqByAdapter[instanceName.value]);
+const online = computed(
+  () => instanceState.value?.online ?? props.adapter?.connected ?? false,
+);
+const selfId = computed(() => instanceState.value?.selfId ?? props.adapter?.self_id ?? null);
+
+function requestStatus() {
+  sendCommand({ RequestQqLoginStatus: { adapter: instanceName.value || null } });
 }
 
-let timer: number | undefined;
-onMounted(() => {
-  loadStatus();
-  timer = window.setInterval(loadStatus, 5000);
-});
-onBeforeUnmount(() => {
-  if (timer !== undefined) window.clearInterval(timer);
-});
-
-async function loadQr() {
+function loadQr() {
   loading.value = true;
   error.value = null;
-  try {
-    const resp = await fetchWithTimeout('/api/qq/qrcode');
-    if (!resp.ok) {
-      let message = `二维码读取失败 (HTTP ${resp.status})`;
-      try {
-        const data = await resp.json();
-        if (data && data.error) message = data.error;
-      } catch {
-        // keep default message
-      }
-      qrUrl.value = null;
-      error.value = message;
-      return;
-    }
-    const blob = await resp.blob();
-    if (qrUrl.value) URL.revokeObjectURL(qrUrl.value);
-    qrUrl.value = URL.createObjectURL(blob);
-  } catch {
-    qrUrl.value = null;
-    error.value = '二维码读取失败，请确认 NapCat 容器正在运行';
-  } finally {
+  qrRequested.value = true;
+  sendCommand({ RequestQqQrcode: { adapter: instanceName.value || null } });
+  // Core 以事件回推，超时由事件缺失自然体现（无加载态挂死）。
+  window.setTimeout(() => {
     loading.value = false;
-  }
+  }, 8000);
 }
 
-// 后端报告 QQ 未登录时自动拉取一次二维码。
+// QqQrcode 事件 → data URL（Core 回推 base64 PNG）。
 watch(
-  [() => props.adapter?.connected, status, qrUrl, loading],
+  () => (state as unknown as { lastQrcode?: { adapter: string; png_base64: string; error?: string | null } }).lastQrcode,
+  (qr) => {
+    if (!qr || qr.adapter !== instanceName.value) return;
+    loading.value = false;
+    if (qr.error) {
+      error.value = qr.error;
+      qrDataUrl.value = null;
+      return;
+    }
+    qrDataUrl.value = qr.png_base64 ? `data:image/png;base64,${qr.png_base64}` : null;
+  },
+);
+
+onMounted(requestStatus);
+watch(() => props.adapterName, requestStatus);
+
+// 实例已连接 → 不需要二维码。
+watch(online, (isOnline) => {
+  if (isOnline) qrDataUrl.value = null;
+});
+
+// 未连接且未登录时自动拉一次二维码（单次闸）。
+watch(
+  [() => props.adapter?.running, online],
   () => {
-    if (
-      !props.adapter?.connected &&
-      status.value &&
-      !status.value.online &&
-      !qrUrl.value &&
-      !loading.value &&
-      !qrRequested.value
-    ) {
-      qrRequested.value = true;
+    if (props.adapter?.running && !online.value && !qrDataUrl.value && !loading.value && !qrRequested.value) {
       loadQr();
     }
   },
 );
 
-const webuiUrl = `http://${window.location.hostname}:6099`;
+const webuiUrl = computed(
+  () => props.adapter?.webui_url ?? `http://${window.location.hostname}:6099`,
+);
 </script>
+
 
 <template>
   <div class="panel-section qq-login">
@@ -103,31 +94,23 @@ const webuiUrl = `http://${window.location.hostname}:6099`;
       </NeumorphismButton>
     </div>
 
-    <div v-if="adapter?.connected" class="qq-login-status qq-login-online">
+    <div v-if="online" class="qq-login-status qq-login-online">
       <span class="qq-dot qq-dot--ok"></span>
-      <span>QQ 已连接：{{ adapter.self_id || '已连接' }}</span>
-      <span v-if="status?.online"> · {{ status.nickname || '已登录' }}（{{ status.user_id }}）</span>
-    </div>
-    <div v-else-if="status?.online" class="qq-login-status qq-login-online">
-      <span class="qq-dot qq-dot--ok"></span>
-      <span>QQ 已登录：{{ status.nickname || '未知昵称' }}（{{ status.user_id }}）</span>
+      <span>QQ 已连接：{{ selfId || '已连接' }}</span>
     </div>
     <div v-else class="qq-login-status qq-login-offline">
       <span class="qq-dot qq-dot--warn"></span>
       <span>
         {{
-          status === null
-            ? '正在检查登录状态…'
-            : adapter
-              ? `QQ 未连接（适配器 ${adapter.running ? '运行中，无客户端' : '未启动'}），请使用手机 QQ 扫码登录`
-              : 'QQ 未登录，请使用手机 QQ 扫码登录'
+          adapter
+            ? `QQ 未连接（实例 ${adapter.running ? '运行中，无客户端' : '未启动'}），请使用手机 QQ 扫码登录`
+            : 'QQ 未登录，请使用手机 QQ 扫码登录'
         }}
       </span>
-      <div v-if="status?.error" class="muted">登录状态接口暂不可用：{{ status.error }}</div>
     </div>
 
-    <div v-if="qrUrl" class="qq-login-qr">
-      <img :src="qrUrl" alt="QQ 登录二维码" class="qr-img" />
+    <div v-if="qrDataUrl" class="qq-login-qr">
+      <img :src="qrDataUrl" alt="QQ 登录二维码" class="qr-img" />
       <div class="muted">二维码约 2 分钟有效，过期请点击"获取登录二维码"刷新</div>
     </div>
     <div v-if="error" class="qq-login-error">{{ error }}</div>

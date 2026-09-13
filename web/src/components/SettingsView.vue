@@ -178,12 +178,8 @@ const toolGroups = computed(() => {
     }));
 });
 
-// 智能体平铺列表：主 Agent 置顶，其余按 id 排序
-const teamList = computed(() =>
-  [...state.teams].sort(
-    (a, b) => Number(isPrimaryTeam(b)) - Number(isPrimaryTeam(a)) || a.id.localeCompare(b.id),
-  ),
-);
+// 智能体平铺列表：一律平等，按 id 排序（去主智能体 2026-09）
+const teamList = computed(() => [...state.teams].sort((a, b) => a.id.localeCompare(b.id)));
 
 // ── 条目选中 ──
 function selectSkillItem(s: SkillInfo) {
@@ -238,7 +234,6 @@ const teamFormDescription = ref('');
 const teamFormPrompt = ref('');
 const teamFormEnabled = ref(true);
 const teamEditing = ref(false);
-const teamFormDisabledPlugins = ref<string[]>([]);
 const teamFormDisabledTools = ref<string[]>([]);
 const teamFormDisabledSkills = ref<string[]>([]);
 const teamFormEnabledPlugins = ref<string[]>([]);
@@ -254,7 +249,6 @@ const teamFormModel = computed(() => ({
   description: teamFormDescription.value,
   system_prompt: teamFormPrompt.value,
   enabled: teamFormEnabled.value,
-  disabled_plugins: teamFormDisabledPlugins.value,
   disabled_tools: teamFormDisabledTools.value,
   disabled_skills: teamFormDisabledSkills.value,
   enabled_plugins: teamFormEnabledPlugins.value,
@@ -276,23 +270,6 @@ const capabilityPluginOptions = computed(() =>
     )
     .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
 );
-// ── 可禁用插件（黑名单 disabled_plugins）：包维度门控的插件 ──
-// （工具集/技能目录/QQ 适配器/管理面；编排互斥子插件由「编排模式」分段管理）
-const DISABLEABLE_PLUGIN_KEYS = [
-  'echo-agent.tools.builtin',
-  'echo-agent.skills.dir',
-  'echo-agent.checklist',
-  'echo-agent.adapter.qq',
-  'echo-agent.management.panel',
-];
-const disableablePluginOptions = computed(() =>
-  state.plugins
-    .filter((p) => DISABLEABLE_PLUGIN_KEYS.includes(p.id))
-    .map((p) => ({ key: p.id, label: p.name })),
-);
-function toggleDisabled(list: string[], key: string): string[] {
-  return list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
-}
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
 const PACKAGE_NAMES: Record<string, string> = {
   'echo-agent.adapter.qq': 'QQ 适配器包',
@@ -397,9 +374,8 @@ const teamSections = [
   { key: 'basic', title: '基础信息' },
   { key: 'prompt', title: '系统提示词' },
   { key: 'caps', title: '启用的能力' },
-  { key: 'deny', title: '禁用的能力' },
 ];
-// 默认展开前两个分区；能力/禁用分区从摘要行按需展开（避免超长滚动）。
+// 默认展开前两个分区；能力分区从摘要行按需展开（避免超长滚动）。
 const teamSectionOpen = ref<string[]>(['basic', 'prompt']);
 
 /** 分区摘要：基础（启用态 + 循环模式） */
@@ -423,20 +399,8 @@ const teamCapsSummary = computed(() => {
   if (teamFormEnabledSkills.value.length > 0) parts.push(`${teamFormEnabledSkills.value.length} 技能`);
   return parts.length > 0 ? parts.join(' · ') : '不限制（全部可用）';
 });
-/** 分区摘要：黑名单 */
-const teamDenySummary = computed(() => {
-  const n =
-    teamFormDisabledPlugins.value.length +
-    teamFormDisabledTools.value.length +
-    teamFormDisabledSkills.value.length;
-  return n > 0 ? `${n} 项已禁用` : '无黑名单';
-});
 /** 头像字（取名称首字符） */
 const teamAvatarText = computed(() => (teamFormName.value.trim()[0] ?? 'A').toUpperCase());
-/** 表单里的 ID 是否是当前主 Agent（决定「主 Agent」标签与删除保护） */
-function isPrimaryTeamId(id: string): boolean {
-  return isPrimaryTeam(state.teams.find((t) => t.id === id) ?? null);
-}
 
 const teamFormRules = {
   id: [
@@ -472,7 +436,6 @@ function startTeamCreate() {
   teamFormDescription.value = '';
   teamFormPrompt.value = '';
   teamFormEnabled.value = true;
-  teamFormDisabledPlugins.value = [];
   teamFormDisabledTools.value = [];
   teamFormDisabledSkills.value = [];
   teamFormEnabledPlugins.value = [];
@@ -490,7 +453,6 @@ function startTeamEdit(agent: TeamInfo) {
   teamFormDescription.value = agent.description;
   teamFormPrompt.value = agent.system_prompt ?? '';
   teamFormEnabled.value = agent.enabled;
-  teamFormDisabledPlugins.value = agent.disabled_plugins ?? [];
   teamFormDisabledTools.value = agent.disabled_tools ?? [];
   teamFormDisabledSkills.value = agent.disabled_skills ?? [];
   teamFormEnabledPlugins.value = agent.enabled_plugins ?? [];
@@ -513,7 +475,6 @@ function saveTeam() {
       description: teamFormDescription.value.trim(),
       system_prompt: teamFormPrompt.value,
       enabled: teamFormEnabled.value,
-      disabled_plugins: stripLegacyModeIds(teamFormDisabledPlugins.value),
       disabled_tools: teamFormDisabledTools.value,
       disabled_skills: teamFormDisabledSkills.value,
       enabled_plugins: stripLegacyModeIds(teamFormEnabledPlugins.value),
@@ -525,13 +486,10 @@ function saveTeam() {
   teamEditing.value = false;
 }
 
-function isPrimaryTeam(team: TeamInfo | null): boolean {
-  return !!team && (team.is_default === true || team.id === 'default');
-}
-
 function deleteTeam(team: TeamInfo) {
-  if (isPrimaryTeam(team)) {
-    window.alert('主 Agent 受保护，不能删除。');
+  // 去主智能体（2026-09）：没有受保护的"主 Agent"，唯一约束是至少保留一个。
+  if (state.teams.length <= 1) {
+    window.alert('至少保留一个智能体，不能删除最后一个。');
     return;
   }
   if (!window.confirm(`确定删除智能体「${team.name}」？该成员的记忆与系统提示词将被移除，此操作不可恢复。`)) return;
@@ -882,7 +840,6 @@ watch(
               @click="selectTeamItem(t)"
             >
               <span class="caps-list-item__name">{{ t.name }}</span>
-              <NeumorphismTag v-if="isPrimaryTeam(t)" size="small" variant="warning">主</NeumorphismTag>
               <span v-if="!t.enabled" class="muted caps-list-item__flag">已禁用</span>
             </div>
             <div v-if="teamList.length === 0" class="muted caps-list-empty">（暂无智能体）</div>
@@ -1006,7 +963,7 @@ watch(
                   编辑
                 </NeumorphismButton>
                 <NeumorphismButton
-                  v-if="!isPrimaryTeam(selectedTeam)"
+                  v-if="state.teams.length > 1"
                   size="small"
                   variant="glass"
                   @click="deleteTeam(selectedTeam!)"
@@ -1016,9 +973,6 @@ watch(
               </div>
             </div>
             <div class="detail-meta">
-              <NeumorphismTag v-if="isPrimaryTeam(selectedTeam)" variant="warning" size="small">
-                主 Agent
-              </NeumorphismTag>
               <NeumorphismTag variant="info" size="small">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
               <NeumorphismTag size="small">
                 {{ loopModeOf(selectedTeam) === 'parallel' ? '并行多会话' : '单会话' }}
@@ -1054,10 +1008,7 @@ watch(
             </div>
             <div class="detail-keywords">
               <span class="muted">禁用能力：</span>
-              <template v-if="(selectedTeam.disabled_plugins?.length ?? 0) || (selectedTeam.disabled_tools?.length ?? 0) || (selectedTeam.disabled_skills?.length ?? 0)">
-                <NeumorphismTag v-for="d in selectedTeam.disabled_plugins ?? []" :key="d" size="small" variant="error">
-                  {{ d }}
-                </NeumorphismTag>
+              <template v-if="(selectedTeam.disabled_tools?.length ?? 0) || (selectedTeam.disabled_skills?.length ?? 0)">
                 <NeumorphismTag v-for="d in selectedTeam.disabled_tools ?? []" :key="d" size="small" variant="error">
                   {{ d }}
                 </NeumorphismTag>
@@ -1078,13 +1029,6 @@ watch(
                 <div class="team-hero__main">
                   <div class="team-hero__title">
                     <span>{{ teamFormIsEdit ? teamFormName || teamFormId || '未命名' : '新建智能体' }}</span>
-                    <NeumorphismTag
-                      v-if="teamFormIsEdit && isPrimaryTeamId(teamFormId)"
-                      variant="warning"
-                      size="small"
-                    >
-                      主 Agent
-                    </NeumorphismTag>
                     <NeumorphismTag :variant="teamFormEnabled ? 'success' : 'info'" size="small">
                       {{ teamFormEnabled ? '已启用' : '已禁用' }}
                     </NeumorphismTag>
@@ -1260,35 +1204,11 @@ watch(
                     <span v-if="capabilitySkillOptions.length === 0" class="muted">（无）</span>
                   </div>
                 </template>
-
-                <!-- 分区 4：禁用的能力（黑名单） -->
-                <template #header-deny>
-                  <span class="sec-title">禁用的能力</span>
-                  <span class="sec-summary">{{ teamDenySummary }}</span>
-                </template>
-                <template #deny>
-                  <div class="sec-sub">禁用插件</div>
-                  <p class="muted caps-hint">
-                    勾选即从该智能体**黑名单禁用**包维度插件（如禁用「内置工具集」后该
-                    agent 没有工具、禁用「技能目录」后没有技能——纯对话 base 即此配置）。
-                  </p>
-                  <div class="caps-checkbox-grid caps-checkbox-grid--grid">
-                    <NeumorphismCheckbox
-                      v-for="opt in disableablePluginOptions"
-                      :key="opt.key"
-                      size="small"
-                      :model-value="teamFormDisabledPlugins.includes(opt.key)"
-                      :label="opt.label"
-                      @update:model-value="teamFormDisabledPlugins = toggleDisabled(teamFormDisabledPlugins, opt.key)"
-                    />
-                    <span v-if="disableablePluginOptions.length === 0" class="muted">（无）</span>
-                  </div>
-                </template>
               </NeumorphismCollapse>
 
               <div class="form-actions form-actions--corner">
                 <NeumorphismButton
-                  v-if="teamFormIsEdit && selectedTeam && !isPrimaryTeam(selectedTeam)"
+                  v-if="teamFormIsEdit && selectedTeam && state.teams.length > 1"
                   variant="glass"
                   class="caps-delete-btn"
                   @click="deleteTeam(selectedTeam)"

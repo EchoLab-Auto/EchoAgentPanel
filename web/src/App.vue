@@ -6,7 +6,6 @@ import {
   NeumorphismButton,
   NeumorphismLayout,
   NeumorphismStatusDot,
-  NeumorphismTag,
   NeumorphismToastProvider,
   ThemeProvider,
 } from '@echolab-auto/ui-frame';
@@ -120,7 +119,8 @@ function send(content: string, images: string[] = []) {
       session_id: target,
       content,
       images,
-      team_id: activeTeamId.value || undefined,
+      // 去主智能体：team_id 必填（core 无"默认人格"兜底）。
+      team_id: activeTeamId.value ?? undefined,
     },
   });
 }
@@ -128,26 +128,18 @@ function send(content: string, images: string[] = []) {
 function cancelWork() {
   // 乐观中断：立即结束动画/任务/工具运行态（不等后端确认）
   cancelSessionWork(state, activeSessionId.value);
-  // 取消必须路由到 turn 实际所在的 agent：self-coding 的消息在
-  // self-coding 的 Agent 中执行，不带 team_id 会路由到默认 agent，
-  // 永远取消 0 个任务。
+  // 取消必须路由到 turn 实际所在的 agent（去主智能体后 team_id 必填，
+  // 缺省会被 core 明确拒绝）。
   sendCommand({
     CancelRequestedWork: {
       session_id: activeSessionId.value,
       all: false,
-      team_id: activeTeamId.value || undefined,
+      team_id: activeTeamId.value ?? undefined,
     },
   });
 }
 
 // ── 顶栏状态 ──
-const busyCount = computed(
-  () =>
-    Object.values(state.activities).filter((a) =>
-      ['thinking', 'tool', 'subagent'].includes(a.phase),
-    ).length,
-);
-
 const runningTaskCount = computed(
   () => state.tasks.filter((t) => t.status === 'running').length,
 );
@@ -188,28 +180,33 @@ watch(
   },
 );
 
-// ── Team 被删除后兜底：激活的 team 不存在时重置为默认并重载时间线 ──
+// ── Team 兜底：无选中或选中项已删除时，选列表首个并持久化 ──
+// 去主智能体（2026-09）：没有"默认/主 agent"；`activeTeamId` 始终指向一个
+// 具体智能体（首次连接取列表首个，纯客户端初始选择）。
 watch(
   () => state.teams,
   () => {
     // 列表尚未加载完成（空数组）时不校验，避免误清刚从 localStorage 恢复的 id。
     if (!state.teams.length) return;
     const id = activeTeamId.value;
-    if (id && !state.teams.some((t) => t.id === id)) {
-      activeTeamId.value = null;
-      state.activeTeamId = null;
-      saveActiveTeam(null);
-      const cached = state.teamTimelines[''];
+    const stillExists = !!id && state.teams.some((t) => t.id === id);
+    if (!stillExists) {
+      const next = state.teams[0].id;
+      activeTeamId.value = next;
+      state.activeTeamId = next;
+      saveActiveTeam(next);
+      const cached = state.teamTimelines[next];
       if (cached) {
         state.trunk = cached.msgs;
-        sendCommand({ RequestTrunkTimeline: { team_id: null, since_seq: cached.seq } });
+        sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
       } else {
         state.trunk = [];
-        sendCommand({ RequestTrunkTimeline: { team_id: null } });
+        sendCommand({ RequestTrunkTimeline: { team_id: next } });
       }
       selectSession('local:tui::local_user');
     }
   },
+  { immediate: true },
 );
 
 // ── Toast 桥：state.toasts 只是转发队列，立刻泵进库 ToastProvider 并排空 ──
@@ -245,15 +242,12 @@ watch(
         <div class="brand">EchoAgent Panel</div>
       </template>
 
-      <!-- 顶部栏中：连接状态 + 忙碌徽标（模型名不再展示，见设置视图 API 分类） -->
+      <!-- 顶部栏中：连接状态 -->
       <template #header-center>
         <div class="topbar-status">
           <NeumorphismStatusDot :status="state.connected ? 'online' : 'connecting'" size="small" />
           {{ state.connected ? '已连接' : '连接中…' }}
         </div>
-        <NeumorphismTag v-if="busyCount > 0" variant="warning" size="small">
-          忙碌 ×{{ busyCount }}
-        </NeumorphismTag>
       </template>
 
       <!-- 顶部栏右：导航 -->

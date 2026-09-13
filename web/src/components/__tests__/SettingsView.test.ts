@@ -13,8 +13,7 @@ function seed() {
     {
       id: 'EchoCode',
       name: 'EchoCode',
-      is_default: true,
-      description: '项目级编程助手',
+          description: '项目级编程助手',
       enabled: true,
       sessions: 2,
       system_prompt: '',
@@ -29,7 +28,6 @@ function seed() {
       description: '纯对话',
       enabled: false,
       sessions: 0,
-      disabled_plugins: ['echo-agent.tools.builtin'],
     },
   ] as typeof state.teams;
   state.skills = [
@@ -51,36 +49,40 @@ async function openTeamEditor() {
   const nav = wrapper.findAll('.caps-nav-item').find((n) => n.text().includes('智能体'));
   expect(nav).toBeTruthy();
   await nav!.trigger('click');
-  const item = wrapper.find('.caps-list-item');
-  expect(item.exists()).toBe(true);
-  await item.trigger('click');
+  // 列表按 id 排序（去主智能体后无置顶）；显式选中 EchoCode 保持断言稳定。
+  const item = wrapper
+    .findAll('.caps-list-item')
+    .find((el) => el.text().includes('EchoCode'));
+  expect(item).toBeTruthy();
+  await item!.trigger('click');
   return wrapper;
 }
 
 describe('SettingsView 智能体编辑器', () => {
   beforeEach(seed);
 
-  it('头部信息卡：名称 / 标识 / 主 Agent 标签', async () => {
+  it('头部信息卡：名称 / 标识 / 启用状态（无「主 Agent」标签，去主智能体）', async () => {
     const wrapper = await openTeamEditor();
     const hero = wrapper.find('.team-hero');
     expect(hero.exists()).toBe(true);
     expect(hero.text()).toContain('EchoCode');
-    expect(hero.text()).toContain('主 Agent');
     expect(hero.text()).toContain('已启用');
+    expect(hero.text()).not.toContain('主 Agent');
     // 头部卡片由 ui-frame NeumorphismCard 渲染
     expect(wrapper.find('.nm-card').exists()).toBe(true);
   });
 
-  it('四个分区折叠：标题带摘要，默认展开基础与提示词', async () => {
+  it('三个分区折叠：标题带摘要，默认展开基础与提示词（禁用能力分区已移除）', async () => {
     const wrapper = await openTeamEditor();
     const triggers = wrapper.findAll('.nm-collapse__trigger');
     const titles = triggers.map((t) => t.find('.sec-title').text());
-    expect(titles).toEqual(['基础信息', '系统提示词', '启用的能力', '禁用的能力']);
+    expect(titles).toEqual(['基础信息', '系统提示词', '启用的能力']);
     // 摘要存在
     expect(triggers[0].text()).toContain('启用');
     expect(triggers[1].text()).toContain('继承全局');
     expect(triggers[2].text()).toContain('1 插件');
-    expect(triggers[3].text()).toContain('无黑名单');
+    // 插件黑名单（禁用能力分区）已移除
+    expect(wrapper.text()).not.toContain('黑名单');
 
     // 默认展开 basic + prompt（面板未折叠）
     const panels = wrapper.findAll('.nm-collapse__panel');
@@ -104,13 +106,11 @@ describe('SettingsView 智能体编辑器', () => {
     expect(capsPanel.text()).toContain('send_private_msg');
   });
 
-  it('禁用分区：黑名单插件复选可见', async () => {
+  it('禁用能力分区已移除（插件黑名单不再可配置）', async () => {
     const wrapper = await openTeamEditor();
-    const triggers = wrapper.findAll('.nm-collapse__trigger');
-    await triggers[3].trigger('click');
-    const denyPanel = wrapper.findAll('.nm-collapse__panel')[3];
-    expect(denyPanel.text()).toContain('禁用插件');
-    expect(denyPanel.findAll('.nm-checkbox').length).toBeGreaterThan(0);
+    // 不存在第 4 个折叠分区，也没有「禁用的能力」标题
+    expect(wrapper.findAll('.nm-collapse__trigger').length).toBe(3);
+    expect(wrapper.text()).not.toContain('禁用的能力');
   });
 
   it('取消编辑回到详情，详情头部有「编辑」按钮', async () => {

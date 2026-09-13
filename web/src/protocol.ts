@@ -16,6 +16,14 @@ export interface AdapterStatus {
   self_id: string | null;
   bind_address: string;
   started_at: number | null;
+  /** QQ 实例：归属人格 id（多实例；其他平台为空） */
+  persona?: string | null;
+  /** QQ 实例：NapCat 容器名 */
+  container?: string | null;
+  /** QQ 实例：NapCat WebUI 地址 */
+  webui_url?: string | null;
+  /** QQ 实例：OneBot HTTP API 地址 */
+  onebot_url?: string | null;
 }
 
 export interface SessionInfo {
@@ -67,13 +75,10 @@ export interface ToolInfo {
 export interface TeamInfo {
   id: string;
   name: string;
-  /** 是否为主 agent（受保护，禁止删除） */
-  is_default?: boolean;
   description: string;
   enabled: boolean;
   sessions: number;
   system_prompt?: string;
-  disabled_plugins?: string[];
   disabled_tools?: string[];
   disabled_skills?: string[];
   enabled_plugins?: string[];
@@ -280,7 +285,6 @@ export type BackendCommand =
         system_prompt: string;
         enabled: boolean;
         system_skills?: string[];
-        disabled_plugins?: string[];
         disabled_tools?: string[];
         disabled_skills?: string[];
         enabled_plugins?: string[];
@@ -310,16 +314,18 @@ export type BackendCommand =
   | { StopAdapter: { name: string } }
   | { RestartAdapter: { name: string } }
   | 'RequestAdapterStatus'
-  | 'RequestGroupList'
-  | 'RequestFriendList'
+  | { RequestGroupList: { adapter?: string | null } }
+  | { RequestFriendList: { adapter?: string | null } }
+  | { RequestQqLoginStatus: { adapter?: string | null } }
+  | { RequestQqQrcode: { adapter?: string | null } }
   | 'StartAllAdapters'
   | 'StopAllAdapters'
-  | { UpdateQqAllowlist: { user_ids: number[]; group_ids: number[] } }
-  | { UpdateQqDenylist: { user_ids: number[]; group_ids: number[] } }
-  | 'RequestQqFilterConfig'
-  | { SetQqGateMode: { mode: GateMode } }
-  | 'RequestQqOwner'
-  | { SetQqOwner: { owner_qq: number } };
+  | { UpdateQqAllowlist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
+  | { UpdateQqDenylist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
+  | { RequestQqFilterConfig: { adapter?: string | null } }
+  | { SetQqGateMode: { mode: GateMode; adapter?: string | null } }
+  | { RequestQqOwner: { adapter?: string | null } }
+  | { SetQqOwner: { owner_qq: number; adapter?: string | null } };
 
 // ── BackendEvent（外部标签枚举）────────────────────────────────────────────
 
@@ -464,18 +470,28 @@ export type BackendEvent =
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
   | { AdapterList: { adapters: AdapterStatus[] } }
-  | { GroupList: { groups: GroupInfo[] } }
+  | { GroupList: { groups: GroupInfo[]; adapter?: string | null } }
   | {
       QqFilterConfig: {
         allowlist_users: number[];
         allowlist_groups: number[];
         denylist_users: number[];
         denylist_groups: number[];
+        adapter?: string | null;
       };
     }
-  | { QqGateMode: { mode: GateMode } }
-  | { QqOwner: { owner_qq: number } }
-  | { FriendList: { friends: FriendInfo[] } }
+  | { QqGateMode: { mode: GateMode; adapter?: string | null } }
+  | { QqOwner: { owner_qq: number; adapter?: string | null } }
+  | {
+      QqLoginStatus: {
+        adapter: string;
+        online: boolean;
+        user_id?: string | null;
+        nickname?: string | null;
+      };
+    }
+  | { QqQrcode: { adapter: string; png_base64: string; error?: string | null } }
+  | { FriendList: { friends: FriendInfo[]; adapter?: string | null } }
   | { SudoRequest: { request_id: number; command: string; session_id: string } }
   | { SudoResolved: { request_id: number; accepted: boolean; message: string } };
 

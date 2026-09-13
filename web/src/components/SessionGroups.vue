@@ -48,19 +48,14 @@ const globalSessionEnabled = computed(() => {
   return loopModeOf(team) === 'parallel';
 });
 
-/** 会话是否属于当前激活 team（null = 主/默认 agent）。
- * SessionInfo.team_id 由后端 annotate（主 agent 为其 id，如 alix）；
- * Panel 的 activeTeamId 用 null 表示主 agent，因此需要归一化匹配。 */
+/** 会话是否属于当前激活 team。
+ * 去主智能体（2026-09）：每个智能体一律平等，`activeTeamId` 必为具体 id；
+ * 尚未选中时按列表首个归一化（TeamsList 未到达时不放行他属会话，避免闪现）。 */
 function sessionBelongsToActiveTeam(session: SessionInfo, activeTeamId: string | null): boolean {
   const owner = session.team_id ?? null;
-  if (activeTeamId === null) {
-    if (owner === null) return true;
-    const primary = state.teams.find((t) => t.is_default);
-    // TeamsList 尚未到达时不放行他属会话：避免非默认 team 的会话在启动
-    // 瞬间闪现到主 agent 分组再消失。
-    return primary ? owner === primary.id : false;
-  }
-  return owner === activeTeamId;
+  const active = activeTeamId ?? state.teams[0]?.id ?? null;
+  if (active === null) return owner === null;
+  return owner === active;
 }
 
 const groups = computed(() => {

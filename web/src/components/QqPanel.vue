@@ -2,14 +2,47 @@
 //! 适配器管理面板：连接状态、门控模式、白名单/黑名单（用户与群）。
 //! 名单无本地草稿态——点击即发送更新命令，展示派生自 state.qqFilter。
 
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismSegmented, NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
+import { defaultQqInstanceState } from '../state';
 import { sendCommand } from '../connection';
 import type { GateMode } from '../protocol';
 import QqLoginSection from './QqLoginSection.vue';
 
-const qqAdapter = computed(() => state.adapters.find((adapter) => adapter.name === 'qq'));
+// ── 多实例（2026-09）：面板按实例寻址 ──
+// 实例列表来自 AdapterList（platform=qq）；单实例时行为与旧版一致。
+// AdapterStatus 不带 platform：QQ 实例以「有 persona 元数据或名为 qq*」识别，
+// 其余适配器（如未来的 tg）不进入 QQ 面板。
+const qqAdapters = computed(() =>
+  state.adapters.filter((a) => a.persona != null || a.name === 'qq' || a.name.startsWith('qq')),
+);
+/** 当前面板正在配置的实例名（默认第一个；实例消失时自动回退）。 */
+const activeInstance = ref<string>('');
+
+const instanceNames = computed(() => qqAdapters.value.map((a) => a.name));
+const activeAdapter = computed(
+  () =>
+    qqAdapters.value.find((a) => a.name === activeInstance.value) ?? qqAdapters.value[0] ?? null,
+);
+const qqAdapter = computed(() => activeAdapter.value);
+/** 当前实例的 QQ 管理态（门控/名单/owner/群/好友）。 */
+const instanceState = computed(
+  () => state.qqByAdapter[activeAdapter.value?.name ?? 'qq'] ?? defaultQqInstanceState(),
+);
+const activeName = computed(() => activeAdapter.value?.name ?? 'qq');
+/** 多实例时才显示实例切换（单实例零变化）。 */
+const multiInstance = computed(() => qqAdapters.value.length > 1);
+
+watch(
+  instanceNames,
+  (names) => {
+    if (!names.includes(activeInstance.value)) {
+      activeInstance.value = names[0] ?? '';
+    }
+  },
+  { immediate: true },
+);
 
 const GATE_OPTIONS = [
   { label: '无约束', value: 'none' },
@@ -24,14 +57,20 @@ const GATE_HINTS: Record<string, string> = {
 };
 
 function gateHint(): string {
-  return GATE_HINTS[state.qqGateMode] ?? GATE_HINTS.none;
+  return GATE_HINTS[instanceState.value.gateMode] ?? GATE_HINTS.none;
 }
 
 function refreshLists() {
-  sendCommand('RequestGroupList');
-  sendCommand('RequestFriendList');
-  sendCommand('RequestQqFilterConfig');
-  sendCommand('RequestQqOwner');
+  // 逐个实例刷新（多实例）；单实例时等同于旧行为。
+  const names = instanceNames.value.length ? instanceNames.value : [''];
+  for (const adapter of names) {
+    const key = adapter || null;
+    sendCommand({ RequestGroupList: { adapter: key } });
+    sendCommand({ RequestFriendList: { adapter: key } });
+    sendCommand({ RequestQqFilterConfig: { adapter: key } });
+    sendCommand({ RequestQqOwner: { adapter: key } });
+    sendCommand({ RequestQqLoginStatus: { adapter: key } });
+  }
 }
 
 onMounted(() => {
@@ -45,38 +84,54 @@ watch(
 );
 
 function setGateMode(value: string | number) {
-  sendCommand({ SetQqGateMode: { mode: value as GateMode } });
+  sendCommand({ SetQqGateMode: { mode: value as GateMode, adapter: activeName.value } });
 }
 
 function toggleAllowUser(id: number) {
-  const list = state.qqFilter.allowlist_users;
+  const list = instanceState.value.filter.allowlist_users;
   const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
   sendCommand({
-    UpdateQqAllowlist: { user_ids: next, group_ids: state.qqFilter.allowlist_groups },
+    UpdateQqAllowlist: {
+      user_ids: next,
+      group_ids: instanceState.value.filter.allowlist_groups,
+      adapter: activeName.value,
+    },
   });
 }
 
 function toggleDenyUser(id: number) {
-  const list = state.qqFilter.denylist_users;
+  const list = instanceState.value.filter.denylist_users;
   const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
   sendCommand({
-    UpdateQqDenylist: { user_ids: next, group_ids: state.qqFilter.denylist_groups },
+    UpdateQqDenylist: {
+      user_ids: next,
+      group_ids: instanceState.value.filter.denylist_groups,
+      adapter: activeName.value,
+    },
   });
 }
 
 function toggleAllowGroup(id: number) {
-  const list = state.qqFilter.allowlist_groups;
+  const list = instanceState.value.filter.allowlist_groups;
   const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
   sendCommand({
-    UpdateQqAllowlist: { user_ids: state.qqFilter.allowlist_users, group_ids: next },
+    UpdateQqAllowlist: {
+      user_ids: instanceState.value.filter.allowlist_users,
+      group_ids: next,
+      adapter: activeName.value,
+    },
   });
 }
 
 function toggleDenyGroup(id: number) {
-  const list = state.qqFilter.denylist_groups;
+  const list = instanceState.value.filter.denylist_groups;
   const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
   sendCommand({
-    UpdateQqDenylist: { user_ids: state.qqFilter.denylist_users, group_ids: next },
+    UpdateQqDenylist: {
+      user_ids: instanceState.value.filter.denylist_users,
+      group_ids: next,
+      adapter: activeName.value,
+    },
   });
 }
 </script>
@@ -92,6 +147,19 @@ function toggleDenyGroup(id: number) {
       <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="refreshLists">
         刷新列表
       </NeumorphismButton>
+    </div>
+
+    <!-- 多实例选择器（仅多实例时显示） -->
+    <div v-if="multiInstance" class="qq-section">
+      <div class="qq-section__head">
+        <h3>QQ 实例</h3>
+        <span class="qq-section__hint">每个实例一个容器 / 连接通道，互不干扰</span>
+      </div>
+      <NeumorphismSegmented
+        :model-value="activeName"
+        :options="qqAdapters.map((a) => ({ label: a.persona ? `${a.name}（${a.persona}）` : a.name, value: a.name }))"
+        @change="(v) => (activeInstance = String(v))"
+      />
     </div>
 
     <!-- 适配器状态行 -->
@@ -123,7 +191,7 @@ function toggleDenyGroup(id: number) {
       </span>
     </div>
 
-    <QqLoginSection :adapter="qqAdapter" :owner="state.qqOwner" />
+    <QqLoginSection :adapter="qqAdapter" :adapter-name="activeName" :owner="instanceState.owner" />
 
     <!-- 门控模式 -->
     <div class="qq-section">
@@ -132,7 +200,7 @@ function toggleDenyGroup(id: number) {
         <span class="qq-section__hint">{{ gateHint() }}</span>
       </div>
       <NeumorphismSegmented
-        :model-value="state.qqGateMode"
+        :model-value="instanceState.gateMode"
         :options="GATE_OPTIONS"
         @change="setGateMode"
       />
@@ -143,20 +211,20 @@ function toggleDenyGroup(id: number) {
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>白名单用户</h3>
-          <span class="qq-count">{{ state.qqFilter.allowlist_users.length }}</span>
+          <span class="qq-count">{{ instanceState.filter.allowlist_users.length }}</span>
         </div>
         <div class="qq-picked">
-          <span v-for="id in state.qqFilter.allowlist_users" :key="id" class="id-chip" @click="toggleAllowUser(id)">
+          <span v-for="id in instanceState.filter.allowlist_users" :key="id" class="id-chip" @click="toggleAllowUser(id)">
             {{ id }}<span class="id-chip__x">×</span>
           </span>
-          <span v-if="state.qqFilter.allowlist_users.length === 0" class="muted">未添加</span>
+          <span v-if="instanceState.filter.allowlist_users.length === 0" class="muted">未添加</span>
         </div>
         <div class="qq-select">
           <button
-            v-for="[id, name] in state.qqFriends"
+            v-for="[id, name] in instanceState.friends"
             :key="id"
             class="pick-chip"
-            :class="{ selected: state.qqFilter.allowlist_users.includes(id) }"
+            :class="{ selected: instanceState.filter.allowlist_users.includes(id) }"
             @click="toggleAllowUser(id)"
           >
             <span class="pick-chip__name">{{ name }}</span>
@@ -168,20 +236,20 @@ function toggleDenyGroup(id: number) {
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>黑名单用户</h3>
-          <span class="qq-count">{{ state.qqFilter.denylist_users.length }}</span>
+          <span class="qq-count">{{ instanceState.filter.denylist_users.length }}</span>
         </div>
         <div class="qq-picked">
-          <span v-for="id in state.qqFilter.denylist_users" :key="id" class="id-chip is-deny" @click="toggleDenyUser(id)">
+          <span v-for="id in instanceState.filter.denylist_users" :key="id" class="id-chip is-deny" @click="toggleDenyUser(id)">
             {{ id }}<span class="id-chip__x">×</span>
           </span>
-          <span v-if="state.qqFilter.denylist_users.length === 0" class="muted">未添加</span>
+          <span v-if="instanceState.filter.denylist_users.length === 0" class="muted">未添加</span>
         </div>
         <div class="qq-select">
           <button
-            v-for="[id, name] in state.qqFriends"
+            v-for="[id, name] in instanceState.friends"
             :key="id"
             class="pick-chip"
-            :class="{ selected: state.qqFilter.denylist_users.includes(id) }"
+            :class="{ selected: instanceState.filter.denylist_users.includes(id) }"
             @click="toggleDenyUser(id)"
           >
             <span class="pick-chip__name">{{ name }}</span>
@@ -193,20 +261,20 @@ function toggleDenyGroup(id: number) {
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>白名单群</h3>
-          <span class="qq-count">{{ state.qqFilter.allowlist_groups.length }}</span>
+          <span class="qq-count">{{ instanceState.filter.allowlist_groups.length }}</span>
         </div>
         <div class="qq-picked">
-          <span v-for="id in state.qqFilter.allowlist_groups" :key="id" class="id-chip" @click="toggleAllowGroup(id)">
+          <span v-for="id in instanceState.filter.allowlist_groups" :key="id" class="id-chip" @click="toggleAllowGroup(id)">
             {{ id }}<span class="id-chip__x">×</span>
           </span>
-          <span v-if="state.qqFilter.allowlist_groups.length === 0" class="muted">未添加</span>
+          <span v-if="instanceState.filter.allowlist_groups.length === 0" class="muted">未添加</span>
         </div>
         <div class="qq-select">
           <button
-            v-for="[id, name] in state.qqGroups"
+            v-for="[id, name] in instanceState.groups"
             :key="id"
             class="pick-chip"
-            :class="{ selected: state.qqFilter.allowlist_groups.includes(id) }"
+            :class="{ selected: instanceState.filter.allowlist_groups.includes(id) }"
             @click="toggleAllowGroup(id)"
           >
             <span class="pick-chip__name">{{ name }}</span>
@@ -218,13 +286,13 @@ function toggleDenyGroup(id: number) {
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>黑名单群</h3>
-          <span class="qq-count">{{ state.qqFilter.denylist_groups.length }}</span>
+          <span class="qq-count">{{ instanceState.filter.denylist_groups.length }}</span>
         </div>
         <div class="qq-picked">
-          <span v-for="id in state.qqFilter.denylist_groups" :key="id" class="id-chip is-deny" @click="toggleDenyGroup(id)">
+          <span v-for="id in instanceState.filter.denylist_groups" :key="id" class="id-chip is-deny" @click="toggleDenyGroup(id)">
             {{ id }}<span class="id-chip__x">×</span>
           </span>
-          <span v-if="state.qqFilter.denylist_groups.length === 0" class="muted">未添加</span>
+          <span v-if="instanceState.filter.denylist_groups.length === 0" class="muted">未添加</span>
         </div>
         <p class="qq-select-empty">群列表仅对白名单开放，黑名单群请在 Core 侧配置</p>
       </div>

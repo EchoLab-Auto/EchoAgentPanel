@@ -104,7 +104,7 @@ onMounted(() => {
 onBeforeUnmount(() => ctxObserver?.disconnect());
 
 // 适配器按钮显隐：仅当当前 Agent（team）启用了 adapter 类插件时显示。
-// 依据 TeamInfo 的 enabled_plugins（白名单）/ disabled_plugins（黑名单）判断，
+// 依据 TeamInfo 的 enabled_plugins 白名单判断（插件黑名单已移除），
 // 与 Core apply_capabilities 的过滤语义一致。
 const ADAPTER_PLUGIN_FALLBACK = ['echo-agent.adapter.qq'];
 

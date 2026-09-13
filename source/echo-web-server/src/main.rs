@@ -18,7 +18,6 @@ use clap::Parser;
 use echo_web_server::config::PanelConfig;
 use echo_web_server::log;
 use echo_web_server::proxy;
-use echo_web_server::qq;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -72,8 +71,8 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/ws", get(proxy::ws_handler))
-        .route("/api/qq/login-status", get(qq::login_status))
-        .route("/api/qq/qrcode", get(qq::qrcode))
+        // QQ 登录状态/二维码自 2026-09 起由 Core 代理（WS 命令
+        // RequestQqLoginStatus / RequestQqQrcode），中继不再直连 NapCat。
         .route("/api/logs/panel", get(log::panel_logs))
         .route("/api/logs/core", get(log::core_logs))
         .fallback(static_handler)

@@ -44,12 +44,9 @@ export const TRUNK_SESSION_ID = 'trunk';
 export function belongsToActiveTeam(state: AppState, teamId: string | null | undefined): boolean {
   if (teamId === undefined) return true;
   if (state.teams.length === 0) return true;
-  const active = state.activeTeamId;
-  if (active === null) {
-    if (teamId == null) return true;
-    const primary = state.teams.find((t) => t.is_default);
-    return primary ? teamId === primary.id : true;
-  }
+  // 去主智能体（2026-09）：没有"主 agent"归属；未指定 active 时按列表首个。
+  const active = state.activeTeamId ?? state.teams[0]?.id ?? null;
+  if (active === null) return true;
   return teamId === active;
 }
 
@@ -118,6 +115,24 @@ export interface BranchTab {
 }
 
 export type AgentPhase = 'thinking' | 'tool' | 'subagent' | 'completed' | 'failed';
+
+/// QQ 实例管理态的空白初值（多实例面板按实例填充）。
+export function defaultQqInstanceState() {
+  return {
+    filter: {
+      allowlist_users: [] as number[],
+      allowlist_groups: [] as number[],
+      denylist_users: [] as number[],
+      denylist_groups: [] as number[],
+    },
+    gateMode: 'none' as GateMode,
+    owner: 0,
+    groups: [] as Array<[number, string]>,
+    friends: [] as Array<[number, string]>,
+    online: false,
+    selfId: null as string | null,
+  };
+}
 
 export interface AgentActivity {
   phase: AgentPhase;
@@ -216,6 +231,21 @@ export interface AppState {
     denylist_users: number[];
     denylist_groups: number[];
   };
+  /** 最近一次二维码回推（Core 代理登录；按实例过滤消费）。 */
+  lastQrcode: { adapter: string; png_base64: string; error?: string | null } | null;
+  /** 多实例（2026-09）：按 QQ 实例名存放的 QQ 管理态；单实例时键为 "qq"。 */
+  qqByAdapter: Record<
+    string,
+    {
+      filter: AppState['qqFilter'];
+      gateMode: GateMode;
+      owner: number;
+      groups: Array<[number, string]>;
+      friends: Array<[number, string]>;
+      online: boolean;
+      selfId: string | null;
+    }
+  >;
   qqGateMode: GateMode;
   qqOwner: number;
   qqGroups: Array<[number, string]>;
@@ -285,6 +315,8 @@ export function initialState(): AppState {
     qqOwner: 0,
     qqGroups: [],
     qqFriends: [],
+    lastQrcode: null,
+    qqByAdapter: {},
     checklists: [],
     sudoPrompt: null,
     toasts: [],
@@ -750,23 +782,65 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'QqFilterConfig': {
-      const e = (event as { QqFilterConfig: AppState['qqFilter'] }).QqFilterConfig;
-      state.qqFilter = e;
+      const e = (event as { QqFilterConfig: AppState['qqFilter'] & { adapter?: string | null } })
+        .QqFilterConfig;
+      const { adapter: _a, ...filter } = e;
+      state.qqFilter = filter;
+      const key = e.adapter ?? 'qq';
+      state.qqByAdapter[key] = {
+        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
+        filter,
+      };
       return state;
     }
     case 'QqGateMode': {
-      const e = (event as { QqGateMode: { mode: GateMode } }).QqGateMode;
+      const e = (event as { QqGateMode: { mode: GateMode; adapter?: string | null } }).QqGateMode;
       state.qqGateMode = e.mode;
+      const key = e.adapter ?? 'qq';
+      state.qqByAdapter[key] = {
+        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
+        gateMode: e.mode,
+      };
       return state;
     }
     case 'QqOwner': {
-      const e = (event as { QqOwner: { owner_qq: number } }).QqOwner;
+      const e = (event as { QqOwner: { owner_qq: number; adapter?: string | null } }).QqOwner;
       state.qqOwner = e.owner_qq;
+      const key = e.adapter ?? 'qq';
+      state.qqByAdapter[key] = {
+        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
+        owner: e.owner_qq,
+      };
+      return state;
+    }
+    case 'QqQrcode': {
+      const e = (event as {
+        QqQrcode: { adapter: string; png_base64: string; error?: string | null };
+      }).QqQrcode;
+      state.lastQrcode = { ...e };
+      return state;
+    }
+    case 'QqLoginStatus': {
+      const e = (event as {
+        QqLoginStatus: { adapter: string; online: boolean; user_id?: string | null };
+      }).QqLoginStatus;
+      state.qqByAdapter[e.adapter] = {
+        ...(state.qqByAdapter[e.adapter] ?? defaultQqInstanceState()),
+        online: e.online,
+        selfId: e.user_id ?? null,
+      };
       return state;
     }
     case 'GroupList': {
-      const e = (event as { GroupList: { groups: Array<{ group_id: number; group_name: string }> } }).GroupList;
+      const e = (event as {
+        GroupList: { groups: Array<{ group_id: number; group_name: string }>; adapter?: string | null };
+      }).GroupList;
       state.qqGroups = e.groups.map((g) => [g.group_id, g.group_name]);
+      const key = e.adapter ?? 'qq';
+      state.qqByAdapter[key] = {
+        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
+        groups: state.qqGroups,
+      };
       return state;
     }
     case 'FriendList': {
