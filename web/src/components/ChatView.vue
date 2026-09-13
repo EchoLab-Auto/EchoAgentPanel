@@ -453,7 +453,7 @@ function imagesOf(message: ChatMessage): string[] {
       :style="{ bottom: adapterTop + 'px', left: adapterLeft + 'px' }"
       @click.self="showAdapter = false"
     >
-      <QqPanel />
+      <QqPanel :team-id="props.activeTeamId ?? null" />
     </div>
 
     <!-- 清单：跟随清单按钮下方 8px 的毛玻璃面板（无内层卡片） -->

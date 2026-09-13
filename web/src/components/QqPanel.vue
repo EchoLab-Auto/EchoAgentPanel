@@ -10,13 +10,33 @@ import { sendCommand } from '../connection';
 import type { GateMode } from '../protocol';
 import QqLoginSection from './QqLoginSection.vue';
 
+const props = defineProps<{
+  /** 当前智能体 id（面板只展示归属该智能体的 QQ 实例）。 */
+  teamId?: string | null;
+}>();
+
 // ── 多实例（2026-09）：面板按实例寻址 ──
 // 实例列表来自 AdapterList（platform=qq）；单实例时行为与旧版一致。
 // AdapterStatus 不带 platform：QQ 实例以「有 persona 元数据或名为 qq*」识别，
 // 其余适配器（如未来的 tg）不进入 QQ 面板。
-const qqAdapters = computed(() =>
+const allQqAdapters = computed(() =>
   state.adapters.filter((a) => a.persona != null || a.name === 'qq' || a.name.startsWith('qq')),
 );
+
+/** 只展示**当前智能体**的实例（persona = team id）——别的 agent 的实例
+ * 既不显示状态也不作为命令目标（去主智能体后每个 agent 管自己的 QQ）。
+ * 兼容旧 Core（无 persona 元数据）：当没有任何实例匹配且存在无归属实例时，
+ * 退化为展示这些实例（旧 Core 无从区分归属，只有单实例）。 */
+const qqAdapters = computed(() => {
+  const all = allQqAdapters.value;
+  const team = props.teamId;
+  if (!team) return all;
+  const scoped = all.filter((a) => a.persona === team);
+  if (scoped.length === 0 && all.some((a) => a.persona == null)) {
+    return all.filter((a) => a.persona == null);
+  }
+  return scoped;
+});
 /** 当前面板正在配置的实例名（默认第一个；实例消失时自动回退）。 */
 const activeInstance = ref<string>('');
 
@@ -164,12 +184,20 @@ function toggleDenyGroup(id: number) {
       />
     </div>
 
-    <!-- 适配器状态行 -->
-    <div v-if="state.adapters.length === 0" class="muted">（无适配器信息）</div>
-    <div v-for="adapter in state.adapters" :key="adapter.name" class="adapter-row">
+    <!-- 无实例空态：不显示别的 agent 的状态，也不发任何请求 -->
+    <p v-if="qqAdapters.length === 0" class="muted qq-empty">
+      （当前智能体没有 QQ 实例{{ teamId ? `：${teamId}` : '' }}——Core 侧需为该智能体启用
+      「QQ 适配器」插件并完成实例分配）
+    </p>
+
+    <!-- 适配器状态行（仅当前智能体的实例） -->
+    <div v-for="adapter in qqAdapters" :key="adapter.name" class="adapter-row">
       <NeumorphismStatusDot :status="adapter.running ? 'online' : 'offline'" size="small" />
       <span class="adapter-row__name">{{ adapter.display_name || adapter.name }}</span>
       <span v-if="adapter.self_id" class="adapter-row__id">{{ adapter.self_id }}</span>
+      <span v-if="adapter.container" class="adapter-row__container" :title="`NapCat 容器：${adapter.container}`">
+        {{ adapter.container }}
+      </span>
       <span class="adapter-row__state" :class="adapter.running ? 'is-run' : 'is-stop'">
         {{ adapter.running ? '运行中' : '已停止' }}
       </span>
@@ -193,6 +221,7 @@ function toggleDenyGroup(id: number) {
       </span>
     </div>
 
+    <template v-if="qqAdapters.length > 0">
     <QqLoginSection :adapter="qqAdapter" :adapter-name="activeName" :owner="instanceState.owner" />
 
     <!-- 门控模式 -->
@@ -300,6 +329,8 @@ function toggleDenyGroup(id: number) {
       </div>
     </div>
 
+    </template>
+
     <p class="qq-foot">点击名单条目即生效（无需手动保存）</p>
   </div>
 </template>
@@ -349,6 +380,19 @@ function toggleDenyGroup(id: number) {
   font-family: var(--nm-font-mono, monospace);
   font-size: 11px;
   color: var(--nm-text-secondary);
+}
+.adapter-row__container {
+  font-family: var(--nm-font-mono, monospace);
+  font-size: 10px;
+  color: var(--nm-text-secondary);
+  background: var(--panel-hover);
+  border: 1px solid var(--nm-border-color);
+  border-radius: 999px;
+  padding: 1px 7px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .adapter-row__state {
   margin-left: auto;
