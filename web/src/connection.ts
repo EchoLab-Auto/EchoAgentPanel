@@ -70,9 +70,13 @@ export function startConnection(): void {
         'RequestState',
         // 刷新前会话缓存不可用（内存态），这里仍走全量；切换后的增量
         // 由 onTeamSelect 缓存逻辑负责。
-        { RequestTrunkTimeline: { team_id: savedTeam } },
+        // 去主智能体后 team_id 必填：没有保存过的 Agent 时不发（发了必被
+        // Core 拒绝）；等 TeamsList 到达后由 App 的 watcher 用列表首个发起。
+        ...(savedTeam ? [{ RequestTrunkTimeline: { team_id: savedTeam } } as BackendCommand] : []),
         'RequestAdapterStatus',
-        { RequestQqFilterConfig: {} },
+        // QQ 过滤配置不在这里预取：面板打开时 QqPanel/QqLoginSection 会按实例
+        // 自行刷新；无 QQ（或多实例未指定实例）时预取必被 Core 拒绝，平白
+        // 弹出"QQ 适配器未找到"提示。
         'RequestTeamsList',
         'RequestShellSessions',
       ];
