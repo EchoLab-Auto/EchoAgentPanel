@@ -26,7 +26,7 @@
 - 工具调用进度、后台任务 / Subagent / 临时回复分支面板、清单面板
 - API 设置（provider / model / base_url / api_key / profiles / system prompt）
 - 🔐 sudo 授权弹窗（遮罩密码，Enter 授权 / Esc 拒绝，专用通道提交）
-- QQ 管理（扫码登录、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
+- QQ 管理（多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
 - 上下文快照、帮助与斜杠命令、深浅主题
 
 ## 快速开始（开发）
@@ -67,7 +67,7 @@ echo-agent-panel
 - `[server] bind_address`：HTTP/WS 监听地址（默认 `0.0.0.0:8080`，允许外部访问）
 - `[server] static_dir`：前端静态目录（安装器注入绝对路径，一般无需改）
 - `[core] connect_url`：Core management WS 地址（默认 `ws://127.0.0.1:3132`）
-- `[qq]`：NapCat 容器名 / OneBot HTTP / WebUI 地址，用于 Panel 扫码登录模块
+- `[qq]`：**遗留字段**（早期 Panel 直连 NapCat 时使用；2026-09-13 起 QQ 登录 / 二维码由 Core 代理走 WS，此段不再参与运行，保留仅为配置兼容）
 
 ## 文档
 

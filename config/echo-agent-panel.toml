@@ -22,9 +22,10 @@ connect_url = "ws://127.0.0.1:3132"
 access_token = ""
 
 [qq]
-# NapCat Docker 容器名，Panel 通过 docker exec 读取登录二维码。
+# 遗留字段：早期 Panel 直连 NapCat 用（docker exec 读二维码 / OneBot 查登录状态）。
+# 2026-09-13 起 QQ 登录与二维码由 Core 代理走 WS（RequestQqLoginStatus /
+# RequestQqQrcode → QqLoginStatus / QqQrcode 事件），此段不再参与运行，
+# 保留仅为配置兼容。
 napcat_container = "napcat"
-# OneBot HTTP API 地址，用于查询 QQ 登录状态。
 napcat_onebot_url = "http://localhost:3000"
-# NapCat WebUI 地址，用于展示扫码登录链接。
 napcat_webui_url = "http://localhost:6099"
