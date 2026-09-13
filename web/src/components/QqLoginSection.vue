@@ -32,10 +32,13 @@ const online = computed(
 const selfId = computed(() => instanceState.value?.selfId ?? props.adapter?.self_id ?? null);
 
 function requestStatus() {
-  sendCommand({ RequestQqLoginStatus: { adapter: instanceName.value || null } });
+  // 无实例（QQ 未启用）：不发——带实例名的请求会得到"QQ 实例未找到"。
+  if (!instanceName.value) return;
+  sendCommand({ RequestQqLoginStatus: { adapter: instanceName.value } });
 }
 
 function loadQr() {
+  if (!instanceName.value) return; // 无实例：不发二维码请求
   loading.value = true;
   error.value = null;
   qrRequested.value = true;

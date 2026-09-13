@@ -5,6 +5,7 @@
 //! 实例分段选择，且门控/名单操作都带 `adapter` 字段。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 
 vi.mock('../../connection', () => ({
@@ -48,6 +49,20 @@ describe('QqPanel 多实例', () => {
     const wrapper = mount(QqPanel);
     expect(wrapper.text()).toContain('QQ 实例');
     expect(wrapper.text()).toContain('alix');
+  });
+
+  it('无实例（QQ 未启用）：打开面板不发任何命令（零噪音）', async () => {
+    // 回归：此前打开面板会发 5 条（组/好友/过滤/owner/登录）+ 登录区 1 条
+    // （adapter 回退字面量 "qq"）必被 Core 拒绝的请求，堆一串
+    // "QQ 适配器未找到 / QQ 实例 qq 未找到"错误提示。
+    state.adapters = [];
+    state.qqByAdapter = {};
+    state.connected = true; // 触发 onMounted → refreshLists 路径
+    const wrapper = mount(QqPanel);
+    await nextTick();
+    expect(vi.mocked(sendCommand)).not.toHaveBeenCalled();
+    state.connected = false;
+    wrapper.unmount();
   });
 
   it('多实例：门控切换命令带 adapter（实例寻址）', async () => {

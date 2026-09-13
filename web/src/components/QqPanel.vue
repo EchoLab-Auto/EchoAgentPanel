@@ -30,7 +30,7 @@ const qqAdapter = computed(() => activeAdapter.value);
 const instanceState = computed(
   () => state.qqByAdapter[activeAdapter.value?.name ?? 'qq'] ?? defaultQqInstanceState(),
 );
-const activeName = computed(() => activeAdapter.value?.name ?? 'qq');
+const activeName = computed(() => activeAdapter.value?.name ?? '');
 /** 多实例时才显示实例切换（单实例零变化）。 */
 const multiInstance = computed(() => qqAdapters.value.length > 1);
 
@@ -61,9 +61,11 @@ function gateHint(): string {
 }
 
 function refreshLists() {
-  // 逐个实例刷新（多实例）；单实例时等同于旧行为。
-  const names = instanceNames.value.length ? instanceNames.value : [''];
-  for (const adapter of names) {
+  // 无实例（QQ 未启用/未注册）：不发——Core 会以"适配器未找到"拒绝，
+  // 面板一打开就堆一串错误提示（纯噪音）。有实例时逐个刷新（多实例），
+  // 单实例行为与旧版一致。
+  if (!instanceNames.value.length) return;
+  for (const adapter of instanceNames.value) {
     const key = adapter || null;
     sendCommand({ RequestGroupList: { adapter: key } });
     sendCommand({ RequestFriendList: { adapter: key } });
