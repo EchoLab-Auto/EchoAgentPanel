@@ -14,15 +14,28 @@ defineProps<{
   activeBranchId: string | null;
 }>();
 
-// 会话管理 UI 总开关：仅并行多会话模式显示「会话」与「临时分支」两张
-// 卡片（单会话模式隐藏；后端按 TeamInfo.loop_mode 推导）。
-const chatSessionsVisible = computed(() => {
+// 当前激活 team 的会话（含 team 归属归一化）。
+function teamSessions() {
+  const active = state.activeTeamId ?? state.teams[0]?.id ?? null;
+  return state.sessions.filter((s) => s.id !== 'global' && (s.team_id ?? null) === active);
+}
+
+// 「会话」卡可见性：并行多会话模式恒显示；单会话模式默认隐藏（本地单源
+// 对话不需要会话管理）——但**该智能体一旦存在非 local 来源的会话**
+// （QQ 私聊/群等），会话卡必须可见，否则这些会话在面板中完全不可达
+// （读不到也切不了：聊天区按会话过滤，默认只停在 local 会话）。
+const sessionsCardVisible = computed(() => {
+  const team = state.teams.find((t) => t.id === state.activeTeamId);
+  if (loopModeOf(team) === 'parallel') return true;
+  return teamSessions().some((s) => !s.id.startsWith('local:'));
+});
+
+// 「临时分支」卡：仅并行多会话模式（单会话模式后端不发射 ReplyBranch*
+// 事件，分支不可见，卡片没有内容可展示）。
+const replyBranchesVisible = computed(() => {
   const team = state.teams.find((t) => t.id === state.activeTeamId);
   return loopModeOf(team) === 'parallel';
 });
-
-// 临时分支卡与会话卡同属 chatbot 模式的会话管理 UI（合并后不再单独细分）。
-const replyBranchesVisible = chatSessionsVisible;
 
 const emit = defineEmits<{
   selectSession: [id: string];
@@ -72,9 +85,9 @@ function truncateTask(task: string): string {
       </div>
     </SidebarCard>
 
-    <!-- 卡片：会话（Chatbot 会话系统禁用时整卡隐藏） -->
+    <!-- 卡片：会话（单会话模式且无其他来源时整卡隐藏；见 sessionsCardVisible） -->
     <SidebarCard
-      v-if="chatSessionsVisible"
+      v-if="sessionsCardVisible"
       title="会话"
       :open="cardOpen.sessions"
       @toggle="toggleCard('sessions')"
