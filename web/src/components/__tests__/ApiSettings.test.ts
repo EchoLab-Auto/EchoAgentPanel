@@ -93,6 +93,18 @@ describe('ApiSettings 快捷模板', () => {
     expect(baseUrlInput.value).toBe('https://api.deepseek.com/anthropic');
   });
 
+  it('不再有「默认」标记与「设为默认」按钮（默认提供商功能已移除）', () => {
+    seedProfiles();
+    // 旧版在 active_api 指向的卡上显示「默认」标签、其余卡显示「设为默认」；
+    // 即便 active_api 指向某 profile，也不应再出现任何默认标记。
+    state.api!.active_api = 'deepseek';
+    const wrapper = mount(ApiSettings);
+    expect(wrapper.text()).not.toContain('设为默认');
+    for (const card of wrapper.findAll('.profile-card')) {
+      expect(card.text(), card.text()).not.toContain('默认');
+    }
+  });
+
   it('Profiles 以卡片展示：deepseek 卡带查余额，非 deepseek 卡不带', async () => {
     seedProfiles();
     const wrapper = mount(ApiSettings);

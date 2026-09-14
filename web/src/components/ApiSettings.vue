@@ -1,7 +1,10 @@
 <script setup lang="ts">
-//! API 设置页（设置视图的工作区面板）：概览视图（当前配置摘要卡 + Profiles 列表）+
+//! API 设置页（设置视图的工作区面板）：概览视图（Profiles 列表）+
 //! 按需展开的编辑表单（点击「编辑」/「添加 API 服务商」时出现，保存/收起后回到概览）。
 //! 由设置视图整页渲染（原为 SettingsModal 弹窗）；样式类复用 styles.css 全局定义。
+//!
+//! 2026-09-14：「默认」标记与「设为默认」按钮已移除（默认提供商功能去除）——
+//! profiles 只是可供 persona 引用的供应商池，不再有"哪个是默认"的概念。
 
 import { computed, ref, watch } from 'vue';
 import {
@@ -160,10 +163,6 @@ function fillForm(p: Partial<{
 /** 展开表单：清空上次测试结果（仅表单视角，不污染概览的列表结果） */
 function resetFormResults() {
   formTested.value = {};
-}
-
-function setDefaultProfile(profile: ApiProfile) {
-  sendCommand({ UpdateApiConfig: { name: '', provider: profile.provider, model: profile.model, base_url: profile.base_url, api_key: '', thinking: profile.thinking, reasoning_effort: profile.reasoning_effort } });
 }
 
 function openEdit(profile: ApiProfile) {
@@ -479,7 +478,6 @@ watch(
         <template #header>
           <div class="profile-card__head">
             <span class="profile-card__name" :title="profile.name">{{ profile.name }}</span>
-            <NeumorphismTag v-if="api?.active_api === profile.name" variant="primary" size="small">默认</NeumorphismTag>
             <NeumorphismTag
               v-if="formMode === 'edit' && editingProfile === profile.name"
               variant="warning"
@@ -538,7 +536,6 @@ watch(
               >
                 测试
               </NeumorphismButton>
-              <NeumorphismButton v-if="api?.active_api !== profile.name" size="small" variant="glass" @click="setDefaultProfile(profile)">设为默认</NeumorphismButton>
           <NeumorphismButton size="small" variant="glass" @click="openEdit(profile)">
                 编辑
               </NeumorphismButton>
