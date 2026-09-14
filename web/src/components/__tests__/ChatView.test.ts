@@ -117,6 +117,66 @@ describe('ChatView 布局契约', () => {
     expect(sendBtn.exists()).toBe(true);
   });
 
+  it('入口行「会话」按钮：>1 个会话时显示，点击弹层并选择发出 selectSession', async () => {
+    // 多会话（2026-09）：单会话模式下每个群/私聊独立上下文，入口行提供切换。
+    state.teams = [{ id: 'alix', name: 'Alix', enabled: true, sessions: 0 } as never];
+    state.sessions = [
+      {
+        id: 'local:tui::local_user',
+        team_id: 'alix',
+        platform: 'local',
+        scope: 'tui',
+        user_id: 'local_user',
+        nickname: 'local user',
+        group_name: null,
+        last_active: 1,
+        last_message: '',
+      },
+      {
+        id: 'qq:dm::1828980067',
+        team_id: 'alix',
+        platform: 'qq',
+        scope: 'dm',
+        user_id: '1828980067',
+        nickname: 'Evence',
+        group_name: null,
+        last_active: 2,
+        last_message: 'hi',
+      },
+    ] as never;
+    const wrapper = mountChatView();
+    const btn = wrapper
+      .findAll('.ctx-entry')
+      .find((b) => b.text().includes('会话'));
+    expect(btn, 'session button visible').toBeTruthy();
+    await btn!.trigger('click');
+    // 弹层内可选 QQ 私聊项
+    const item = wrapper.findAll('.sw-item').find((b) => b.text().includes('Evence'));
+    expect(item).toBeTruthy();
+    await item!.trigger('click');
+    expect(wrapper.emitted('selectSession')?.[0]).toEqual(['qq:dm::1828980067']);
+  });
+
+  it('入口行「会话」按钮：仅单一本地会话时隐藏', () => {
+    state.teams = [{ id: 'alix', name: 'Alix', enabled: true, sessions: 0 } as never];
+    state.sessions = [
+      {
+        id: 'local:tui::local_user',
+        team_id: 'alix',
+        platform: 'local',
+        scope: 'tui',
+        user_id: 'local_user',
+        nickname: 'local user',
+        group_name: null,
+        last_active: 1,
+        last_message: '',
+      },
+    ] as never;
+    const wrapper = mountChatView();
+    const btn = wrapper.findAll('.ctx-entry').find((b) => b.text().includes('会话'));
+    expect(btn).toBeUndefined();
+  });
+
   it('发送事件携带空 images（无附件时）', () => {
     const wrapper = mountChatView();
     const sendBtn = wrapper.find('.chat-view__send');

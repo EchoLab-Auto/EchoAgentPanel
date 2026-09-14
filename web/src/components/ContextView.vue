@@ -1,7 +1,7 @@
 <script setup lang="ts">
 //! 上下文分块视图（内嵌于 SessionPanel，取代原 ContextModal 弹窗）。
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismProgress } from '@echolab-auto/ui-frame';
 import { ChatFold } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
@@ -30,14 +30,32 @@ const KIND_CLASS: Record<string, string> = {
 const showMessages = ref(false);
 const confirmClear = ref(false);
 
-const props = defineProps<{ teamId?: string | null }>();
+const props = defineProps<{ teamId?: string | null; sessionId?: string | null }>();
 const targetTeamId = computed(() => props.teamId ?? null);
+const targetSessionId = computed(() => props.sessionId ?? null);
 
 onMounted(() => {
-  sendCommand({ RequestContext: { team_id: targetTeamId.value } });
+  requestSnapshot();
 });
 
-const snapshot = computed(() => state.context);
+/** 拉取当前（team, session）的上下文快照（多会话，2026-09）。 */
+function requestSnapshot() {
+  sendCommand({
+    RequestContext: { team_id: targetTeamId.value, session_id: targetSessionId.value },
+  });
+}
+
+// 会话切换/挂载后重拉；忽略归属其他会话的陈旧快照（避免切换瞬间串显）。
+watch([targetTeamId, targetSessionId], () => requestSnapshot());
+
+const snapshot = computed(() => {
+  const snap = state.context;
+  if (!snap) return null;
+  // 旧 Core 不带 session_id（单会话全局口径）：直接展示；
+  // 新 Core 带归属时只认当前会话的快照。
+  if (snap.session_id == null) return snap;
+  return snap.session_id === targetSessionId.value ? snap : null;
+});
 const blocks = computed(() => snapshot.value?.blocks ?? []);
 const maxBlockTokens = computed(() => Math.max(1, ...blocks.value.map((b) => b.tokens)));
 const pct = computed(() =>
@@ -74,7 +92,7 @@ function handleClear() {
 }
 
 function refresh() {
-  sendCommand({ RequestContext: { team_id: targetTeamId.value } });
+  requestSnapshot();
 }
 
 // 手动重载磁盘上的 SKILL.md：刷新技能注册表并重新拉取上下文快照。

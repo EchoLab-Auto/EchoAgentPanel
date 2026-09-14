@@ -211,6 +211,8 @@ export interface Toast {
 }
 
 export interface ContextSnapshotData {
+  /** 快照归属的会话 id（多会话，2026-09；旧 Core 缺省为 undefined） */
+  session_id?: string | null;
   messages: ContextMessageInfo[];
   blocks: ContextBlockInfo[];
   total_tokens: number;

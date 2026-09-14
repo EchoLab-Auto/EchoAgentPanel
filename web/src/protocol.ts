@@ -333,7 +333,7 @@ export type BackendCommand =
   | { ArchiveHistory: { team_id?: string | null } }
   | { CompactHistory: { team_id?: string | null; keep_recent?: number } }
   | 'RequestState'
-  | { RequestContext: { team_id?: string | null } }
+  | { RequestContext: { team_id?: string | null; session_id?: string | null } }
   | { RequestTrunkTimeline: { team_id?: string | null; since_seq?: number } }
   | { InstallSkillFromGit: { url: string; name?: string | null; branch?: string | null } }
   | { UpdateSkillFromGit: { name: string } }
@@ -457,6 +457,8 @@ export type BackendEvent =
   | { SessionUpdated: { session: SessionInfo } }
   | {
       ContextSnapshot: {
+        /** 快照归属的会话 id（多会话，2026-09；旧 Core 缺省） */
+        session_id?: string | null;
         messages: ContextMessageInfo[];
         blocks: ContextBlockInfo[];
         total_tokens: number;

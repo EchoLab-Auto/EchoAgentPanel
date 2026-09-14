@@ -308,6 +308,7 @@ watch(
           @send="send"
           @cancel="cancelWork"
           @select-team="onTeamSelect"
+          @select-session="selectSession"
         />
         <SettingsView v-else-if="view === 'settings'" />
         <ShellPanel v-else-if="view === 'shell'" />

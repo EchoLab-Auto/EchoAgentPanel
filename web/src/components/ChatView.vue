@@ -22,12 +22,14 @@ import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import QqPanel from './QqPanel.vue';
 import WorkspacePanel from './WorkspacePanel.vue';
+import SessionSwitcher from './SessionSwitcher.vue';
 
 const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
 const emit = defineEmits<{
   send: [content: string, images: string[]];
   cancel: [];
   selectTeam: [id: string | null];
+  selectSession: [id: string];
 }>();
 
 const input = ref('');
@@ -137,6 +139,42 @@ const checklistAvailable = computed(() =>
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
+/** 当前智能体名下的会话（去重团队归属，供「会话」按钮显隐）。 */
+const teamSessions = computed(() => {
+  const active = props.activeTeamId ?? state.teams[0]?.id ?? null;
+  return state.sessions.filter((s) => (s.team_id ?? null) === active);
+});
+
+/** 会话按钮显隐：当前智能体有多个会话（可切换）时显示。 */
+const sessionSwitcherAvailable = computed(() => teamSessions.value.length > 1);
+
+const showSessions = ref(false);
+const sessionsBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
+const sessionsBottom = ref(0);
+const sessionsLeft = ref(0);
+
+function toggleSessions() {
+  if (showSessions.value) {
+    showSessions.value = false;
+    return;
+  }
+  const btn = btnElement(sessionsBtnRef.value);
+  if (btn) {
+    const r = btn.getBoundingClientRect();
+    sessionsBottom.value = Math.round(window.innerHeight - r.top + 8);
+    const composer = composerFloatRef.value;
+    const cr = composer ? composer.getBoundingClientRect() : null;
+    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
+    sessionsLeft.value = Math.round(centerX - 150);
+  }
+  showSessions.value = true;
+}
+
+function pickSession(id: string) {
+  showSessions.value = false;
+  emit('selectSession', id);
+}
+
 /** 工作区按钮显隐：workspace 插件 + workspace 工具都可见才显示。 */
 const workspaceAvailable = computed(() =>
   teamPluginEnabled(currentTeam.value, 'echo-agent.workspace') &&
@@ -184,6 +222,7 @@ watch(
   () => {
     showAdapter.value = false;
     showWorkspace.value = false;
+    showSessions.value = false;
   },
 );
 
@@ -403,6 +442,21 @@ function imagesOf(message: ChatMessage): string[] {
         </NeumorphismButton>
       </NeumorphismBadge>
       <NeumorphismButton
+        v-if="sessionSwitcherAvailable"
+        ref="sessionsBtnRef"
+        class="ctx-entry"
+        variant="glass"
+        shape="pill"
+        size="small"
+        title="切换会话（每个群/私聊独立上下文）"
+        @click="toggleSessions"
+      >
+        <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        会话
+      </NeumorphismButton>
+      <NeumorphismButton
         v-if="workspaceAvailable"
         ref="workspaceBtnRef"
         class="ctx-entry"
@@ -434,6 +488,20 @@ function imagesOf(message: ChatMessage): string[] {
         </svg>
         适配器
       </NeumorphismButton>
+    </div>
+
+    <!-- 会话切换：跟随入口按钮上方 8px 的毛玻璃面板 -->
+    <div
+      v-if="showSessions"
+      class="checklist-pop"
+      :style="{ bottom: sessionsBottom + 'px', left: sessionsLeft + 'px' }"
+      @click.self="showSessions = false"
+    >
+      <SessionSwitcher
+        :active-team-id="props.activeTeamId ?? null"
+        :active-session-id="props.sessionId"
+        @select="pickSession"
+      />
     </div>
 
     <!-- 工作区会话：跟随入口按钮上方 8px 的毛玻璃面板 -->
@@ -475,7 +543,7 @@ function imagesOf(message: ChatMessage): string[] {
           <span class="ctx-overlay__id">{{ props.activeTeamId ?? 'default' }}</span>
         </div>
         <div class="ctx-overlay__body">
-          <ContextView :team-id="props.activeTeamId ?? null" />
+          <ContextView :team-id="props.activeTeamId ?? null" :session-id="props.sessionId" />
         </div>
       </div>
     </div>
