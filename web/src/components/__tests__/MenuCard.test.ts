@@ -1,10 +1,12 @@
-//! MenuModal（选单弹层）契约测试。
+//! MenuCard（会话区内联选单）契约测试。
 //!
-//! 锁定三件事（对应 Core 的 `present_menu` 语义）：
+//! 锁定四件事（对应 Core 的 `present_menu` 语义）：
 //!   1. 选项渲染顺序与数量 = MenuRequest 载荷（id 回传要能唯一映射）；
 //!   2. 点击选项 → `menu_answer` 带该 id；Esc/取消 → option_id=null
 //!      （**不许**把取消当成某个选项）；
-//!   3. store 的 MenuRequest/MenuResolved 处理：请求挂载、结束事件卸载。
+//!   3. store 的 MenuRequest/MenuResolved 处理：请求挂载、结束事件卸载；
+//!   4. **内联契约**（2026-09-14，替代弹窗）：选单渲染在会话区消息流尾部
+//!      （ChatView 合成条目），且只在该选单归属当前会话时出现。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
@@ -15,18 +17,12 @@ vi.mock('../../connection', () => ({
 }));
 
 import { sendMenuAnswer } from '../../connection';
-import MenuModal from '../MenuModal.vue';
+import MenuCard from '../MenuCard.vue';
+import ChatView from '../ChatView.vue';
 import { state, dispatch } from '../../store';
 import type { MenuPrompt } from '../../state';
 
 // ── 库组件 mock：不渲染真实 ui-frame ──
-const ModalStub = defineComponent({
-  name: 'NeumorphismModal',
-  props: ['modelValue', 'title'],
-  setup(props, { slots }) {
-    return () => h('div', { class: 'stub-modal', 'data-title': String(props.title) }, slots.default?.());
-  },
-});
 const ButtonStub = defineComponent({
   name: 'NeumorphismButton',
   setup(_, { slots, attrs }) {
@@ -55,12 +51,11 @@ function prompt(over: Partial<MenuPrompt> = {}): MenuPrompt {
   };
 }
 
-function mountModal(p: MenuPrompt = prompt()) {
-  return mount(MenuModal, {
+function mountCard(p: MenuPrompt = prompt()) {
+  return mount(MenuCard, {
     props: { prompt: p },
     global: {
       stubs: {
-        NeumorphismModal: ModalStub,
         NeumorphismButton: ButtonStub,
         NeumorphismTag: TagStub,
       },
@@ -72,41 +67,104 @@ beforeEach(() => {
   vi.mocked(sendMenuAnswer).mockClear();
 });
 
-describe('MenuModal 选择语义', () => {
-  it('按载荷顺序渲染全部选项', () => {
-    const wrapper = mountModal();
-    const options = wrapper.findAll('.menu-option');
+describe('MenuCard 选择语义', () => {
+  it('按载荷顺序渲染全部选项与标题', () => {
+    const wrapper = mountCard();
+    const options = wrapper.findAll('.menu-card__option');
     expect(options).toHaveLength(2);
     expect(options[0].text()).toContain('方案 A');
     expect(options[0].text()).toContain('更快');
     expect(options[1].text()).toContain('方案 B');
-    expect(wrapper.find('.stub-modal').attributes('data-title')).toBe('用哪个方案继续？');
+    expect(wrapper.find('.menu-card__title').text()).toBe('用哪个方案继续？');
+    // 内联卡片：不经过任何弹窗/遮罩壳。
+    expect(wrapper.find('.nm-modal').exists()).toBe(false);
   });
 
   it('点击选项回传该选项 id', async () => {
-    const wrapper = mountModal();
-    await wrapper.findAll('.menu-option')[1].trigger('click');
+    const wrapper = mountCard();
+    await wrapper.findAll('.menu-card__option')[1].trigger('click');
     expect(sendMenuAnswer).toHaveBeenCalledWith({ request_id: 7, option_id: 'b' });
   });
 
   it('取消按钮回传 null（不做选择）', async () => {
-    const wrapper = mountModal();
+    const wrapper = mountCard();
     await wrapper.find('.stub-button').trigger('click');
     expect(sendMenuAnswer).toHaveBeenCalledWith({ request_id: 7, option_id: null });
   });
 
   it('Esc 取消、数字键选择', async () => {
-    const wrapper = mountModal();
-    const body = wrapper.find('.menu-body');
-    await body.trigger('keydown', { key: '2' });
+    const wrapper = mountCard();
+    const card = wrapper.find('.menu-card');
+    await card.trigger('keydown', { key: '2' });
     expect(sendMenuAnswer).toHaveBeenCalledWith({ request_id: 7, option_id: 'b' });
     vi.mocked(sendMenuAnswer).mockClear();
-    await body.trigger('keydown', { key: 'Escape' });
+    await card.trigger('keydown', { key: 'Escape' });
     expect(sendMenuAnswer).toHaveBeenCalledWith({ request_id: 7, option_id: null });
     // 越界数字键不发送任何应答。
     vi.mocked(sendMenuAnswer).mockClear();
-    await body.trigger('keydown', { key: '9' });
+    await card.trigger('keydown', { key: '9' });
     expect(sendMenuAnswer).not.toHaveBeenCalled();
+  });
+});
+
+// ── 内联契约：选单出现在会话区消息流尾部（不再弹窗） ──
+const ListStub = defineComponent({
+  name: 'ChatMessageList',
+  props: ['messages', 'emptyText'],
+  setup(props, { slots }) {
+    return () =>
+      h(
+        'div',
+        { class: 'stub-chat-list' },
+        (props.messages ?? []).map((m: { id: string | number }) =>
+          slots.message?.({ key: m.id, message: m }),
+        ),
+      );
+  },
+});
+const ComposerStub = defineComponent({
+  name: 'ChatComposer',
+  setup: () => () => h('div', { class: 'stub-composer' }),
+});
+
+function mountChatView(sessionId: string) {
+  return mount(ChatView, {
+    props: { sessionId },
+    global: {
+      stubs: {
+        ChatMessageList: ListStub,
+        ChatComposer: ComposerStub,
+        NeumorphismButton: ButtonStub,
+        NeumorphismTag: TagStub,
+      },
+    },
+  });
+}
+
+describe('选单内联于会话区（不再弹窗）', () => {
+  beforeEach(() => {
+    state.menuPrompt = null;
+    state.trunk = [];
+  });
+
+  it('归属当前会话：选单卡片出现在消息流里', () => {
+    state.menuPrompt = prompt({ session_id: 'local:tui::one' });
+    const wrapper = mountChatView('local:tui::one');
+    expect(wrapper.find('.stub-chat-list').exists()).toBe(true);
+    expect(wrapper.find('.menu-card').exists()).toBe(true);
+    expect(wrapper.find('.menu-card').text()).toContain('方案 A');
+  });
+
+  it('非当前会话：选单不越会话显示', () => {
+    state.menuPrompt = prompt({ session_id: 'local:tui::one' });
+    const wrapper = mountChatView('local:tui::two');
+    expect(wrapper.find('.menu-card').exists()).toBe(false);
+  });
+
+  it('全局视图：选单可见（与消息同一过滤语义）', () => {
+    state.menuPrompt = prompt({ session_id: 'local:tui::one' });
+    const wrapper = mountChatView('global');
+    expect(wrapper.find('.menu-card').exists()).toBe(true);
   });
 });
 

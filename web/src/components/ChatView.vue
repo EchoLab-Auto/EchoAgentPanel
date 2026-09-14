@@ -24,6 +24,7 @@ import ChecklistSidebar from './ChecklistSidebar.vue';
 import QqPanel from './QqPanel.vue';
 import WorkspacePanel from './WorkspacePanel.vue';
 import SessionSwitcher from './SessionSwitcher.vue';
+import MenuCard from './MenuCard.vue';
 
 const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
 const emit = defineEmits<{
@@ -275,13 +276,39 @@ const activityText = computed(() => {
   }
 });
 
+/** 当前会话正在等待应答的选单（MenuRequest 事件 → MenuResolved 之间）。
+ * 选单内联在会话区消息流尾部（不再弹窗）；归属过滤同消息：
+ * 全局视图显示，具体会话只显示归属该会话的选单。 */
+const pendingMenu = computed(() => {
+  const menu = state.menuPrompt;
+  if (!menu) return null;
+  if (props.sessionId === 'global') return menu;
+  return menu.session_id === props.sessionId ? menu : null;
+});
+
+/** 内联选单的合成消息 id 前缀（槽渲染据此前缀分派 MenuCard）。 */
+const MENU_MESSAGE_PREFIX = 'menu:';
+function isMenuMessage(id: string | number): boolean {
+  return String(id).startsWith(MENU_MESSAGE_PREFIX);
+}
+
 // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
+// 末尾追加合成「选单」条目：与消息同列滚动，随 MenuResolved 自动消失。
 const messages = computed<ChatMessage[]>(() => {
   const list =
     props.sessionId === 'global'
       ? state.trunk
       : state.trunk.filter((m) => m.sessionId === props.sessionId);
-  return list.map(toChatMessage);
+  const mapped = list.map(toChatMessage);
+  const menu = pendingMenu.value;
+  if (menu) {
+    mapped.push({
+      id: `${MENU_MESSAGE_PREFIX}${menu.request_id}`,
+      role: 'system',
+      content: '',
+    });
+  }
+  return mapped;
 });
 
 const emptyText = computed(() =>
@@ -560,9 +587,15 @@ function imagesOf(message: ChatMessage): string[] {
       :empty-text="emptyText"
     >
       <template #message="slot">
+        <!-- 选单：内联卡片（会话区内作答，不弹窗）；归属当前会话且未应答时存在 -->
+        <MenuCard
+          v-if="isMenuMessage(slot.message.id) && pendingMenu"
+          :prompt="pendingMenu"
+          class="chat-view__item"
+        />
         <!-- 推理：面板扩展角色，由 ReasoningBlock 渲染（打字机动画）；时序穿插 -->
         <ReasoningBlock
-          v-if="(slot.message as { role: string }).role === 'reasoning'"
+          v-else-if="(slot.message as { role: string }).role === 'reasoning'"
           :text="slot.message.content"
           :animate="(slot.message as ChatMessageWithImages).animate !== false"
         />

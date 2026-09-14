@@ -26,7 +26,6 @@ import SettingsView from './components/SettingsView.vue';
 import ShellPanel from './components/ShellPanel.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
-import MenuModal from './components/MenuModal.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
@@ -386,7 +385,7 @@ watch(
       @close="activeBranchId = null"
     />
     <SudoModal v-if="state.sudoPrompt" :prompt="state.sudoPrompt" />
-    <MenuModal v-if="state.menuPrompt" :prompt="state.menuPrompt" />
+    <!-- 选单不再弹窗：内联渲染于会话区（ChatView 消息流尾部） -->
 
 
     <NeumorphismToastProvider ref="toastProvider" position="top-right" :max-count="8" />
