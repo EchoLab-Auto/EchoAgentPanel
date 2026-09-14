@@ -13,8 +13,10 @@ import { pushToast } from './state';
 import {
   parseEvent,
   serializeCommand,
+  serializeMenuAnswer,
   serializeSudoPassword,
   type BackendCommand,
+  type MenuAnswerSubmit,
   type SudoPasswordSubmit,
 } from './protocol';
 
@@ -156,5 +158,11 @@ export function sendCommand(command: BackendCommand): void {
 export function sendSudoPassword(submit: SudoPasswordSubmit): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(serializeSudoPassword(submit));
+  }
+}
+
+export function sendMenuAnswer(answer: MenuAnswerSubmit): void {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(serializeMenuAnswer(answer));
   }
 }

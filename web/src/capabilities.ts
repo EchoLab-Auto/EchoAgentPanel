@@ -30,6 +30,7 @@ export const PACKAGE_GATED_PLUGIN_IDS = [
   'echo-agent.skills.dir',
   'echo-agent.checklist',
   'echo-agent.workspace',
+  'echo-agent.menu',
   'echo-agent.adapter.qq',
 ] as const;
 
@@ -41,6 +42,7 @@ export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
   'echo-agent.skills.dir': '技能目录',
   'echo-agent.checklist': '任务清单',
   'echo-agent.workspace': '工作区会话',
+  'echo-agent.menu': '选单',
 };
 
 /** 插件是否属于「启用插件」勾选区（kind 类 + 包维度门控清单）。 */

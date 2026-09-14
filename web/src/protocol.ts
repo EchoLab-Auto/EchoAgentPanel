@@ -1,7 +1,7 @@
 //! TS 镜像 echo-protocol 的线格式（serde 外部标签枚举 + WsMessage 信封）。
 //!
 //! Core 的 `WsMessage` 序列化为
-//! `{"type":"command|event|sudo_password","payload":{...}}`；
+//! `{"type":"command|event|sudo_password|menu_answer","payload":{...}}`；
 //! `BackendCommand` / `BackendEvent` 是外部标签枚举（变体名即标签）。
 
 export type GateMode = 'none' | 'allowlist' | 'denylist';
@@ -265,6 +265,22 @@ export interface ChecklistState {
 export interface SudoPasswordSubmit {
   request_id: number;
   password: string | null;
+}
+
+/**
+ * 选单应答（Panel → Core，专用通道，不经命令队列）。
+ * `option_id = null` 表示取消选单（不给模型任何选择）。
+ */
+export interface MenuAnswerSubmit {
+  request_id: number;
+  option_id: string | null;
+}
+
+/** 选单的一项（MenuRequest 载荷）。 */
+export interface MenuOptionInfo {
+  id: string;
+  label: string;
+  description?: string | null;
 }
 
 // ── BackendCommand（外部标签枚举）──────────────────────────────────────────
@@ -548,14 +564,26 @@ export type BackendEvent =
     }
   | { FriendList: { friends: FriendInfo[]; adapter?: string | null } }
   | { SudoRequest: { request_id: number; command: string; session_id: string } }
-  | { SudoResolved: { request_id: number; accepted: boolean; message: string } };
+  | { SudoResolved: { request_id: number; accepted: boolean; message: string } }
+  | {
+      MenuRequest: {
+        request_id: number;
+        session_id: string;
+        title: string;
+        description?: string | null;
+        options: MenuOptionInfo[];
+        timeout_secs?: number;
+      };
+    }
+  | { MenuResolved: { request_id: number; accepted: boolean; message: string } };
 
 // ── WsMessage 信封 ─────────────────────────────────────────────────────────
 
 export type WsMessage =
   | { type: 'command'; payload: BackendCommand }
   | { type: 'event'; payload: BackendEvent }
-  | { type: 'sudo_password'; payload: SudoPasswordSubmit };
+  | { type: 'sudo_password'; payload: SudoPasswordSubmit }
+  | { type: 'menu_answer'; payload: MenuAnswerSubmit };
 
 export function serializeCommand(command: BackendCommand): string {
   return JSON.stringify({ type: 'command', payload: command });
@@ -563,6 +591,10 @@ export function serializeCommand(command: BackendCommand): string {
 
 export function serializeSudoPassword(submit: SudoPasswordSubmit): string {
   return JSON.stringify({ type: 'sudo_password', payload: submit });
+}
+
+export function serializeMenuAnswer(answer: MenuAnswerSubmit): string {
+  return JSON.stringify({ type: 'menu_answer', payload: answer });
 }
 
 export function parseEvent(text: string): BackendEvent | null {

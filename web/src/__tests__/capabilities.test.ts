@@ -25,6 +25,7 @@ describe('包维度门控插件清单（单一来源）', () => {
       [
         'echo-agent.adapter.qq',
         'echo-agent.checklist',
+        'echo-agent.menu',
         'echo-agent.skills.dir',
         'echo-agent.tools.builtin',
         'echo-agent.workspace',

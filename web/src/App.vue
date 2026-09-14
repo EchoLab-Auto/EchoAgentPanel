@@ -26,6 +26,7 @@ import SettingsView from './components/SettingsView.vue';
 import ShellPanel from './components/ShellPanel.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
+import MenuModal from './components/MenuModal.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
@@ -385,6 +386,7 @@ watch(
       @close="activeBranchId = null"
     />
     <SudoModal v-if="state.sudoPrompt" :prompt="state.sudoPrompt" />
+    <MenuModal v-if="state.menuPrompt" :prompt="state.menuPrompt" />
 
 
     <NeumorphismToastProvider ref="toastProvider" position="top-right" :max-count="8" />
