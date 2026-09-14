@@ -30,7 +30,11 @@ import {
   NeumorphismTextarea,
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
-import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';
+import {
+  PACKAGE_DISPLAY_NAMES,
+  PLUGIN_KIND_LABELS,
+  isPluginCheckboxVisible,
+} from '../capabilities';
 import { sendCommand } from '../connection';
 import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { loopModeOf } from '../protocol';
@@ -135,20 +139,11 @@ const skillGroups = computed(() => {
     }));
 });
 
-const KIND_LABEL_PLUGIN: Record<string, string> = {
-  skill: '技能',
-  tool: '工具',
-  provider: 'LLM Provider',
-  loop: 'Turn Runner',
-  adapter: '适配器',
-  orchestration: '编排',
-  management: '管理面',
-};
 
 const pluginGroups = computed(() => {
   const groups = new Map<string, PluginInfo[]>();
   for (const p of state.plugins) {
-    const cat = KIND_LABEL_PLUGIN[p.kind] ?? p.kind;
+    const cat = PLUGIN_KIND_LABELS[p.kind] ?? p.kind;
     if (!groups.has(cat)) groups.set(cat, []);
     groups.get(cat)!.push(p);
   }
@@ -265,7 +260,10 @@ const teamFormModel = computed(() => ({
 const capabilityPluginOptions = computed(() =>
   state.plugins
     .filter((p) => isPluginCheckboxVisible(p))
-    .map((p) => ({ key: p.id, label: `${p.name}（${p.kind}）` })),
+    .map((p) => ({
+      key: p.id,
+      label: `${p.name}（${PLUGIN_KIND_LABELS[p.kind] ?? p.kind}）`,
+    })),
 );
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
 // 包显示名单一来源 = capabilities.ts::PACKAGE_DISPLAY_NAMES。
@@ -1123,7 +1121,7 @@ watch(
                 <template #caps>
                   <div class="sec-sub">插件</div>
                   <p class="muted caps-hint">
-                    勾选该智能体可用的能力块（适配器/编排/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
+                    勾选该智能体可用的能力块（适配器/交互/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
                   </p>
                   <div class="caps-checkbox-grid caps-checkbox-grid--grid">
                     <NeumorphismCheckbox
@@ -1224,7 +1222,7 @@ watch(
               </NeumorphismTag>
             </div>
             <div class="detail-meta">
-              <NeumorphismTag size="small">{{ KIND_LABEL_PLUGIN[selectedPlugin.kind] ?? selectedPlugin.kind }}</NeumorphismTag>
+              <NeumorphismTag size="small">{{ PLUGIN_KIND_LABELS[selectedPlugin.kind] ?? selectedPlugin.kind }}</NeumorphismTag>
               <NeumorphismTag variant="info" size="small">v{{ selectedPlugin.version || '—' }}</NeumorphismTag>
               <span class="muted">{{ selectedPlugin.description || '（无描述）' }}</span>
             </div>

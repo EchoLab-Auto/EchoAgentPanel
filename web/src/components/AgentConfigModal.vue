@@ -102,7 +102,13 @@ const skillItems = computed<GroupedItem[]>(() =>
     group: sk.package ? (PACKAGE_DISPLAY_NAMES[sk.package] ?? sk.package) : sk.category || undefined,
   })),
 );
-/** 插件：管理/适配器类与包维度门控插件（按 kind 分组展示）。
+/** 勾选区分组名（按 kind 显示；仅适配器/交互为独立组，
+ * 其余整类能力项（工具/技能等包维度门控）归入「管理面」）。 */
+const PLUGIN_GROUP_LABELS: Record<string, string> = {
+  adapter: '适配器',
+  interaction: '交互',
+};
+/** 插件：适配器/交互类与包维度门控插件（按 kind 分组展示）。
  * 判定单一来源 = capabilities.ts::isPluginCheckboxVisible。 */
 const pluginItems = computed<GroupedItem[]>(() =>
   state.plugins
@@ -111,7 +117,7 @@ const pluginItems = computed<GroupedItem[]>(() =>
       key: p.id,
       name: p.name,
       description: p.description || '（无描述）',
-      group: p.kind === 'adapter' ? '适配器' : '管理面',
+      group: PLUGIN_GROUP_LABELS[p.kind] ?? '管理面',
     })),
 );
 /** 按分组聚合成表格模型（组名 + 成员；无分组归入「其他」） */

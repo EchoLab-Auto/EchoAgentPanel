@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PACKAGE_GATED_PLUGIN_IDS,
   PACKAGE_DISPLAY_NAMES,
+  PLUGIN_KIND_LABELS,
   isPluginCheckboxVisible,
   teamPluginEnabled,
   teamToolAvailable,
@@ -40,9 +41,12 @@ describe('包维度门控插件清单（单一来源）', () => {
   });
 
   it('勾选可见性：kind 类 + 门控清单 + 其余不可见', () => {
-    // adapter / management 类恒可见
+    // adapter / management / interaction 类恒可见（整类能力开关）
     expect(isPluginCheckboxVisible({ id: 'echo-agent.adapter.qq', kind: 'adapter' })).toBe(true);
     expect(isPluginCheckboxVisible({ id: 'echo-agent.management.panel', kind: 'management' })).toBe(true);
+    expect(isPluginCheckboxVisible({ id: 'echo-agent.menu', kind: 'interaction' })).toBe(true);
+    // interaction 类不在门控清单里也可见（kind 判定生效）
+    expect(isPluginCheckboxVisible({ id: 'echo-agent.future-interaction', kind: 'interaction' })).toBe(true);
     // 包维度门控（kind=tool）可见
     for (const id of PACKAGE_GATED_PLUGIN_IDS) {
       expect(isPluginCheckboxVisible({ id, kind: 'tool' }), id).toBe(true);
@@ -52,6 +56,15 @@ describe('包维度门控插件清单（单一来源）', () => {
     expect(isPluginCheckboxVisible({ id: 'echo-agent.loop.parallel', kind: 'loop' })).toBe(false);
     expect(isPluginCheckboxVisible({ id: 'echo-agent.orchestration', kind: 'orchestration' })).toBe(false);
     expect(isPluginCheckboxVisible({ id: 'echo-agent.provider.llm', kind: 'provider' })).toBe(false);
+  });
+
+  it('插件 kind 中文显示名覆盖 Core PluginKind 全部 wire 名（含 interaction=交互）', () => {
+    // Core 端 echo-plugin::PluginKind 的 as_str 全集（新增 kind 必须同步标签）。
+    const kinds = ['skill', 'tool', 'provider', 'loop', 'adapter', 'orchestration', 'management', 'interaction'];
+    for (const kind of kinds) {
+      expect(PLUGIN_KIND_LABELS[kind], `缺少 kind 显示名: ${kind}`).toBeTruthy();
+    }
+    expect(PLUGIN_KIND_LABELS.interaction).toBe('交互');
   });
 });
 

@@ -35,6 +35,7 @@ function seed() {
   state.plugins = [
     { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin' },
     { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace' },
+    { id: 'echo-agent.menu', name: '选单', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.menu' },
   ] as typeof state.plugins;
 }
 
@@ -100,6 +101,13 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
     const wrapper = mountModal();
     // 回归：workspace 插件（kind=tool）曾因不在允许清单而被隐藏
     expect(wrapper.text()).toContain('工作区会话');
+  });
+
+  it('选单插件（kind=interaction）单列「交互」分组，不混入管理面', () => {
+    const wrapper = mountModal();
+    // 回归：分组曾按「非适配器即管理面」粗分，把选单归入管理面。
+    expect(wrapper.text()).toContain('交互（1）');
+    expect(wrapper.text()).toContain('选单');
   });
 
   it('能力区用库 Collapse + Table + Checkbox 渲染（插件黑名单已移除）', () => {
