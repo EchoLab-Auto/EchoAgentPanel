@@ -25,6 +25,11 @@ import type { AppState } from './state';
  *   1. Core `GATED_PLUGIN_IDS` / `BUILTIN_PLUGIN_IDS`；
  *   2. `scripts/update.sh` 插件校验清单；
  *   3. 本常量（Panel 两处勾选区共用）。**
+ * **新增插件 type（Core `PluginKind`）时，同步：
+ *   1. 本文件 `PLUGIN_KIND_LABELS`（中文显示名；
+ *      测试覆盖 Core 全部 wire 名）；
+ *   2. 若新类型属于「整类能力开关」（adapter/management/interaction 同层），
+ *      加入 `isPluginCheckboxVisible` 的 kind 类判定。**
  * 回归测试见 `src/__tests__/capabilities.test.ts`。
  */
 export const PACKAGE_GATED_PLUGIN_IDS = [
