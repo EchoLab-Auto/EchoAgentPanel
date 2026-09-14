@@ -692,7 +692,13 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'SessionUpdated': {
       const e = (event as { SessionUpdated: { session: SessionInfo } }).SessionUpdated;
-      const index = state.sessions.findIndex((s) => s.id === e.session.id);
+      // 会话 id 在**团队维度**唯一（不同智能体各有自己的
+      // `local:tui::local_user` 等）——按 (team_id, id) 复合键匹配，
+      // 否则先到的智能体会话会被后到者覆盖（多会话下导致切换器/侧栏丢项）。
+      const teamOf = (session: SessionInfo) => session.team_id ?? null;
+      const index = state.sessions.findIndex(
+        (s) => s.id === e.session.id && teamOf(s) === teamOf(e.session),
+      );
       if (index >= 0) {
         state.sessions[index] = e.session;
       } else {
