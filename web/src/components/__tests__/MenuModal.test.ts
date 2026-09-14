@@ -123,8 +123,10 @@ describe('state 选单生命周期', () => {
         timeout_secs: 300,
       },
     });
-    expect(state.menuPrompt?.request_id).toBe(3);
-    expect(state.menuPrompt?.options).toHaveLength(2);
+    // 显式断言读回（`state.menuPrompt` 在赋值 null 后被 TS 收窄，需断言类型）。
+    const afterRequest = state.menuPrompt as MenuPrompt | null;
+    expect(afterRequest?.request_id).toBe(3);
+    expect(afterRequest?.options).toHaveLength(2);
 
     // 选定：静默关闭（选项本身即反馈）。
     dispatch({ MenuResolved: { request_id: 3, accepted: true, message: '已选择「继续」' } });
@@ -147,7 +149,8 @@ describe('state 选单生命周期', () => {
     // 旧请求的结束事件不得关掉当前弹层。
     state.menuPrompt = prompt({ request_id: 9 });
     dispatch({ MenuResolved: { request_id: 4, accepted: false, message: '旧事件' } });
-    expect(state.menuPrompt?.request_id).toBe(9);
+    const afterStale = state.menuPrompt as MenuPrompt | null;
+    expect(afterStale?.request_id).toBe(9);
     state.menuPrompt = null;
   });
 });
