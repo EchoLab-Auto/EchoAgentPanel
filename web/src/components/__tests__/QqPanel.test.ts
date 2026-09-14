@@ -128,6 +128,36 @@ describe('QqPanel 多实例', () => {
     wrapper.unmount();
   });
 
+  it('未登录时打开面板自动拉一次登录二维码（挂载即触发）', async () => {
+    // 回归：QqPanel 在有实例时才渲染登录区，挂载时 adapter.running 已是
+    // true、online 已是 false——watch 不带 immediate 时初值即终值、
+    // 自动拉码永不触发（用户须手动点按钮，重启后看不到码）。
+    state.adapters = [
+      {
+        name: 'qq',
+        display_name: 'QQ（alix）',
+        connected: false,
+        running: true,
+        self_id: null,
+        bind_address: '0.0.0.0:3131',
+        started_at: null,
+        persona: 'alix',
+        container: 'napcat',
+      },
+    ] as typeof state.adapters;
+    state.qqByAdapter = {};
+    state.connected = true;
+    const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
+    await nextTick();
+    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0]);
+    expect(
+      calls.some((c) => typeof c === 'object' && 'RequestQqQrcode' in (c as object)),
+      `calls: ${JSON.stringify(calls)}`,
+    ).toBe(true);
+    state.connected = false;
+    wrapper.unmount();
+  });
+
   it('刷新命令只寻址当前智能体的实例', async () => {
     state.adapters = [
       {

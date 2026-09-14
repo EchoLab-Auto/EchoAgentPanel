@@ -73,6 +73,12 @@ watch(online, (isOnline) => {
 });
 
 // 未连接且未登录时自动拉一次二维码（单次闸）。
+//
+// `immediate: true` 是关键：面板在有实例时（v-if 包裹）才渲染本组件，
+// 挂载时 adapter.running 已是 true、online 已是 false——若只监听变化，
+// watch 初值即终值、永不触发（实测：打开面板不出码，必须手动点按钮）。
+// immediate 让"挂载即满足条件"的场景也拉一次；后续 adapter 状态变化
+// （如从停止变为运行中）同样覆盖。
 watch(
   [() => props.adapter?.running, online],
   () => {
@@ -80,6 +86,7 @@ watch(
       loadQr();
     }
   },
+  { immediate: true },
 );
 
 const webuiUrl = computed(
