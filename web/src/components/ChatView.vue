@@ -17,6 +17,7 @@ import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-a
 import AgentSwitcher from './AgentSwitcher.vue';
 import AgentConfigModal from './AgentConfigModal.vue';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
+import { loopModeOf } from '../protocol';
 import ReasoningBlock from './ReasoningBlock.vue';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
@@ -145,8 +146,12 @@ const teamSessions = computed(() => {
   return state.sessions.filter((s) => (s.team_id ?? null) === active);
 });
 
-/** 会话按钮显隐：当前智能体有多个会话（可切换）时显示。 */
-const sessionSwitcherAvailable = computed(() => teamSessions.value.length > 1);
+/** 会话按钮显隐：可切换（>1 个会话）或并行多会话模式（含「全局」入口）时显示。 */
+const sessionSwitcherAvailable = computed(() => {
+  if (teamSessions.value.length > 1) return true;
+  const team = state.teams.find((t) => t.id === (props.activeTeamId ?? state.teams[0]?.id));
+  return loopModeOf(team) === 'parallel';
+});
 
 const showSessions = ref(false);
 const sessionsBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);

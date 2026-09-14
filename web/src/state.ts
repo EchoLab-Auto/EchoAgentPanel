@@ -40,7 +40,7 @@ export const TRUNK_SESSION_ID = 'trunk';
 
 /** 实时事件是否属于当前显示的 team 时间线。
  * Panel 的 activeTeamId 用 null 表示主/默认 agent；core 端 team_id 为
- * null 或默认 team id 都归一化为主 agent（与 SessionGroups 的
+ * null 或默认 team id 都归一化为主 agent（与入口行会话切换的
  * sessionBelongsToActiveTeam 同一套归一化）。事件未带 team_id（旧 core）
  * 或 TeamsList 尚未到达时不过滤。 */
 export function belongsToActiveTeam(state: AppState, teamId: string | null | undefined): boolean {
