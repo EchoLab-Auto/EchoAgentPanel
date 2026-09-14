@@ -13,6 +13,12 @@ import { state } from './store';
 import { cancelSessionWork } from './state';
 import { sendCommand, startConnection } from './connection';
 import { loopModeOf } from './protocol';
+import { teamPluginEnabled } from './capabilities';
+import {
+  LOCAL_DEFAULT_SESSION,
+  localSessionProjection,
+  workspacePickIntent,
+} from './workspace';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
 import TasksPanel from './components/TasksPanel.vue';
@@ -85,7 +91,7 @@ function onTeamSelect(next: string | null) {
     state.trunkTeamId = teamKey;
     sendCommand({ RequestTrunkTimeline: { team_id: next } });
   }
-  selectSession('local:tui::local_user');
+  selectSession(localLanding(next));
 }
 
 function setView(next: View) {
@@ -148,6 +154,66 @@ function selectSession(id: string) {
   setView('chat');
 }
 
+// ── 工作区通道（激活 = 进入项目对话，2026-09-14）──
+// 面板的「本地当前对话」是 workspace active 的**投影**：
+//   active 空 → 默认本地会话；active = W → W 的通道会话。
+// 由 Core 的 `WorkspaceSessions` 回推驱动（所有激活来源共一条广播路径），
+// 面板侧只在本地视图上跟随。
+
+/** 切换团队后的本地落点：已知该团队 active → 通道投影；否则默认本地会话。 */
+function localLanding(teamId: string | null): string {
+  const synced = state.workspaceTeamId === teamId;
+  return synced ? localSessionProjection(state.workspaceActive) : LOCAL_DEFAULT_SESSION;
+}
+
+function sendWorkspaceActivate(id: string | null) {
+  sendCommand({
+    ActivateWorkspaceSession: { team_id: activeTeamId.value ?? undefined, id },
+  });
+}
+
+/** 用户在「会话」切换器点选（用户意图；程序化切换走 selectSession）。 */
+function onSessionPick(id: string) {
+  const synced = state.workspaceTeamId === activeTeamId.value;
+  const intent = workspacePickIntent(id, state.workspaceActive, synced);
+  if (intent.kind === 'activate') sendWorkspaceActivate(intent.workspaceId);
+  else if (intent.kind === 'deactivate') sendWorkspaceActivate(null);
+  selectSession(id);
+}
+
+// active 回推（面板激活按钮 / 模型 use 工具 / 切换器）→ 本地视图跟随投影。
+// 仅当停留在 Local 来源会话上：正在看 QQ/global 会话时不打扰（切回本地
+// 时由 localLanding / 本 watcher 落到 active 对应通道）；不在会话视图时
+// 只更新目标会话，不强制拉回聊天视图。
+watch(
+  [() => state.workspaceTeamId, () => state.workspaceActive],
+  () => {
+    if (state.workspaceTeamId !== activeTeamId.value) return;
+    if (!activeSessionId.value.startsWith('local:')) return;
+    const next = localSessionProjection(state.workspaceActive);
+    if (activeSessionId.value !== next) activeSessionId.value = next;
+  },
+);
+
+// 连接/切换 Team 后拉取工作区会话快照（投影与切换器双击绑定依赖它）。
+// 仅对启用 workspace 插件的人格发（未挂载存储的人格会回明确错误提示）。
+let workspaceFetchKey = '';
+watch(
+  [() => state.connected, () => state.teams, () => activeTeamId.value],
+  () => {
+    if (!state.connected) {
+      workspaceFetchKey = '';
+      return;
+    }
+    const team = state.teams.find((t) => t.id === activeTeamId.value);
+    if (!team || !teamPluginEnabled(team, 'echo-agent.workspace')) return;
+    if (workspaceFetchKey === team.id) return;
+    workspaceFetchKey = team.id;
+    sendCommand({ RequestWorkspaceSessions: { team_id: team.id } });
+  },
+  { immediate: true },
+);
+
 // ── 侧边栏折叠：由 NeumorphismLayout 管理，状态持久化 ──
 const sidebarCollapsed = ref<boolean>(
   (() => {
@@ -174,7 +240,7 @@ watch(
   () => {
     const team = state.teams.find((t) => t.id === activeTeamId.value);
     if (activeSessionId.value === 'global' && team && loopModeOf(team) !== 'parallel') {
-      selectSession('local:tui::local_user');
+      selectSession(localLanding(activeTeamId.value));
     }
   },
 );
@@ -202,7 +268,7 @@ watch(
         state.trunk = [];
         sendCommand({ RequestTrunkTimeline: { team_id: next } });
       }
-      selectSession('local:tui::local_user');
+      selectSession(localLanding(next));
     }
   },
   { immediate: true },
@@ -305,7 +371,7 @@ watch(
           @send="send"
           @cancel="cancelWork"
           @select-team="onTeamSelect"
-          @select-session="selectSession"
+          @select-session="onSessionPick"
         />
         <SettingsView v-else-if="view === 'settings'" />
         <ShellPanel v-else-if="view === 'shell'" />

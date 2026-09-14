@@ -4,6 +4,10 @@
 //! 列出当前智能体名下的全部会话（本地 / QQ 私聊 / QQ 群 / 其他），
 //! 点击切换；当前会话高亮，运行中会话带忙碌点。每个会话拥有独立的
 //! 模型上下文（Core 侧按会话投影，见 TrunkStore::snapshot_for）。
+//!
+//! Local 分组含**工作区通道**（`local:workspace:<id>:local_user`，
+//! 昵称 = 工作区名，标签「工作区」）：点选语义由 App 侧双向绑定
+//! ——选通道 = 激活对应工作区、选默认会话 = 取消激活（2026-09-14）。
 
 import { computed } from 'vue';
 import { state } from '../store';
@@ -22,6 +26,8 @@ interface SessionTag {
   group: string;
   label: string;
   tag: string;
+  /** 标签配色键（默认同分组；工作区通道独立配色）。 */
+  tagKey: string;
 }
 
 function sessionTag(session: SessionInfo): SessionTag {
@@ -29,15 +35,19 @@ function sessionTag(session: SessionInfo): SessionTag {
   const platform = parts[0] ?? '';
   const scope = parts[1] ?? '';
   if (platform === 'local') {
-    return { group: 'local', label: session.nickname || session.id, tag: 'Local' };
+    // 工作区通道（激活 = 进入项目对话）：昵称 = 工作区名，独立标签。
+    if (scope === 'workspace') {
+      return { group: 'local', label: session.nickname || session.id, tag: '工作区', tagKey: 'workspace' };
+    }
+    return { group: 'local', label: session.nickname || session.id, tag: 'Local', tagKey: 'local' };
   }
   if (platform === 'qq') {
     if (scope === 'group') {
-      return { group: 'qq-group', label: session.group_name || session.id, tag: '群' };
+      return { group: 'qq-group', label: session.group_name || session.id, tag: '群', tagKey: 'qq-group' };
     }
-    return { group: 'qq-dm', label: session.nickname || session.id, tag: '私聊' };
+    return { group: 'qq-dm', label: session.nickname || session.id, tag: '私聊', tagKey: 'qq-dm' };
   }
-  return { group: 'other', label: session.nickname || session.id, tag: platform };
+  return { group: 'other', label: session.nickname || session.id, tag: platform, tagKey: 'other' };
 }
 
 const GROUP_LABEL: Record<string, string> = {
@@ -120,7 +130,7 @@ function pickGlobal() {
         :title="session.id"
         @click="pick(session)"
       >
-        <span class="sw-tag" :class="`tag-${group.key}`">{{ sessionTag(session).tag }}</span>
+        <span class="sw-tag" :class="`tag-${sessionTag(session).tagKey}`">{{ sessionTag(session).tag }}</span>
         <span class="sw-label">{{ sessionTag(session).label }}</span>
         <span v-if="isBusy(session)" class="sw-busy">●</span>
       </button>
@@ -177,6 +187,7 @@ function pickGlobal() {
 }
 .sw-tag.tag-global { color: #8b5cf6; }
 .sw-tag.tag-local { color: #0ea5e9; }
+.sw-tag.tag-workspace { color: #14b8a6; }
 .sw-tag.tag-qq-dm { color: #2ea46e; }
 .sw-tag.tag-qq-group { color: #f59e0b; }
 .sw-label {

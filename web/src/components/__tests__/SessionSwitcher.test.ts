@@ -98,6 +98,24 @@ describe('SessionSwitcher 会话切换', () => {
     expect(wrapper.text()).not.toContain('全部消息');
   });
 
+  it('工作区通道：Local 分组内展示通道行（昵称 = 工作区名，标签「工作区」）', () => {
+    state.sessions.push(
+      session({
+        id: 'local:workspace:echo-agent:local_user',
+        scope: 'workspace',
+        nickname: 'echo-agent',
+        last_active: 99,
+      }),
+    );
+    const wrapper = mountSwitcher();
+    const text = wrapper.text();
+    expect(text).toContain('echo-agent');
+    // 标签「工作区」带独立配色类（tag-workspace）
+    const tag = wrapper.findAll('.sw-tag').find((t) => t.text() === '工作区');
+    expect(tag).toBeTruthy();
+    expect(tag!.classes()).toContain('tag-workspace');
+  });
+
   it('运行中会话显示忙碌点', () => {
     state.activities = {
       'qq:dm::1828980067': { phase: 'thinking', detail: null, startedAt: 1, toolsCompleted: 0, subagentsCompleted: 0, promptTokens: 0, completionTokens: 0 },
