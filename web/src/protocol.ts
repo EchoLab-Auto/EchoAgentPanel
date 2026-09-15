@@ -26,6 +26,14 @@ export interface AdapterStatus {
   onebot_url?: string | null;
 }
 
+/** 文件浏览器条目（文件或子目录；workspace 插件）。 */
+export interface WorkspaceFileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
 /** 工作区会话（workspace 插件）：名称 + 多个工作区目录。 */
 export interface WorkspaceSessionInfo {
   /** 稳定 id（空 = 由 Core 依名称生成）。 */
@@ -373,6 +381,13 @@ export type BackendCommand =
   | { DeleteWorkspaceSession: { team_id?: string | null; id: string } }
   | { ActivateWorkspaceSession: { team_id?: string | null; id?: string | null } }
   | { RequestWorkspaceGitStatus: { team_id?: string | null; session_id: string } }
+  | {
+      RequestWorkspaceFiles: {
+        team_id?: string | null;
+        session_id: string;
+        path: string;
+      };
+    }
   | 'StartAllAdapters'
   | 'StopAllAdapters'
   | { UpdateQqAllowlist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
@@ -560,6 +575,15 @@ export type BackendEvent =
         team_id?: string | null;
         session_id: string;
         directories: WorkspaceGitInfo[];
+      };
+    }
+  | {
+      WorkspaceFiles: {
+        team_id?: string | null;
+        session_id: string;
+        path: string;
+        entries: WorkspaceFileEntry[];
+        error?: string | null;
       };
     }
   | { FriendList: { friends: FriendInfo[]; adapter?: string | null } }

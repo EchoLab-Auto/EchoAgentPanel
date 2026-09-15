@@ -27,6 +27,7 @@ import type {
   SessionInfo,
   SkillInfo,
   ThinkingMode,
+  WorkspaceFileEntry,
   ReasoningEffort,
   TimelineMessage,
   ToolInfo,
@@ -291,6 +292,8 @@ export interface AppState {
   workspaceTeamId: string | null;
   /** 各会话目录 git 状态的缓存（session_id → 目录结果） */
   workspaceGitBySession: Record<string, WorkspaceGitInfo[]>;
+  /** 文件浏览器缓存（目录绝对路径 → 条目/错误；workspace 插件） */
+  workspaceFiles: Record<string, { entries: WorkspaceFileEntry[]; error: string | null }>;
   /** 当前激活 team（null = default/未指定），用于实时事件隔离 */
   activeTeamId: string | null;
   /** 后台 shell 会话列表（Shell 面板） */
@@ -354,6 +357,7 @@ export function initialState(): AppState {
     workspaceActive: null,
     workspaceTeamId: null,
     workspaceGitBySession: {},
+    workspaceFiles: {},
     activeTeamId: null,
     shellSessions: [],
     shellTerminals: {},
@@ -416,6 +420,23 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         }
       ).WorkspaceGitStatus;
       state.workspaceGitBySession[e.session_id] = e.directories ?? [];
+      return state;
+    }
+    case 'WorkspaceFiles': {
+      const e = (
+        event as {
+          WorkspaceFiles: {
+            session_id: string;
+            path: string;
+            entries: WorkspaceFileEntry[];
+            error?: string | null;
+          };
+        }
+      ).WorkspaceFiles;
+      state.workspaceFiles[e.path] = {
+        entries: e.entries ?? [],
+        error: e.error ?? null,
+      };
       return state;
     }
     case 'MessageReceived': {

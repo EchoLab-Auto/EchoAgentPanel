@@ -27,7 +27,7 @@
 - API 设置（provider / model / base_url / api_key / profiles / system prompt）
 - 🔐 sudo 授权弹窗（遮罩密码，Enter 授权 / Esc 拒绝，专用通道提交）
 - QQ 管理（多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
-- 工作区会话管理（入口行「工作区」：多会话 / 多工作区目录 / 各目录 git 状态；`echo-agent.workspace` 插件）
+- 工作区会话管理（入口行「工作区」宽版面板：左栏文件浏览器（只读）+ 右栏多会话 / 多工作区目录 / 各目录 git 状态；`echo-agent.workspace` 插件）
 - 上下文快照、帮助与斜杠命令、深浅主题
 
 ## 快速开始（开发）

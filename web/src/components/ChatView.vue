@@ -192,6 +192,14 @@ const workspaceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null)
 const workspaceBottom = ref(0);
 const workspaceLeft = ref(0);
 
+/** 工作区弹层宽度（px）：宽版两栏（左文件浏览器 + 右会话/git），
+ * CSS `.checklist-pop--wide` 的 `min(920px, 92vw)` 必须与此保持一致。 */
+const WORKSPACE_POP_WIDTH = 920;
+
+function workspacePopWidth(): number {
+  return Math.min(WORKSPACE_POP_WIDTH, Math.round(window.innerWidth * 0.92));
+}
+
 function toggleWorkspace() {
   if (showWorkspace.value) {
     showWorkspace.value = false;
@@ -204,7 +212,10 @@ function toggleWorkspace() {
     const composer = composerFloatRef.value;
     const cr = composer ? composer.getBoundingClientRect() : null;
     const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
-    workspaceLeft.value = Math.round(centerX - 280);
+    // 以输入区为中心，左缘不越出视口（宽弹层在窄窗口下被钳制到 8px 边距）。
+    workspaceLeft.value = Math.round(
+      Math.max(8, centerX - workspacePopWidth() / 2),
+    );
   }
   showWorkspace.value = true;
 }
@@ -536,10 +547,10 @@ function imagesOf(message: ChatMessage): string[] {
       />
     </div>
 
-    <!-- 工作区会话：跟随入口按钮上方 8px 的毛玻璃面板 -->
+    <!-- 工作区会话：跟随入口按钮上方 8px 的毛玻璃面板（宽版：左文件浏览器 + 右会话/git） -->
     <div
       v-if="showWorkspace"
-      class="checklist-pop"
+      class="checklist-pop checklist-pop--wide"
       :style="{ bottom: workspaceBottom + 'px', left: workspaceLeft + 'px' }"
       @click.self="showWorkspace = false"
     >
@@ -1070,6 +1081,13 @@ function imagesOf(message: ChatMessage): string[] {
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* 工作区面板（宽版两栏：左文件浏览器 + 右会话/git）。
+   宽度与 ChatView.toggleWorkspace 的 WORKSPACE_POP_WIDTH 保持一致。 */
+.checklist-pop--wide {
+  width: min(920px, 92vw);
+  max-height: 78vh;
 }
 
 /* ── 实时消息入场动画（历史回放不播） ── */

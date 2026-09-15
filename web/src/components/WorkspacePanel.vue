@@ -1,15 +1,18 @@
 <script setup lang="ts">
-//! 工作区会话面板（workspace 插件）：多会话管理（新建/编辑/删除/激活），
-//! 每会话多个工作区目录，并查看各目录的 git 状态。
+//! 工作区会话面板（workspace 插件）：两栏布局——左侧**文件浏览器**
+//! （`WorkspaceFileBrowser`，只读浏览选中会话的工作区目录），右侧会话
+//! 管理（新建/编辑/删除/激活）与各目录 git 状态。
 //!
 //! 数据流：命令带 team_id 路由到对应 persona（去主智能体后必填）；
-//! Core 以 `WorkspaceSessions` / `WorkspaceGitStatus` 事件回推。
+//! Core 以 `WorkspaceSessions` / `WorkspaceGitStatus` / `WorkspaceFiles`
+//! 事件回推。弹层几何由 ChatView 的 `.checklist-pop--wide` 提供。
 
 import { computed, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import type { WorkspaceSessionInfo } from '../protocol';
+import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
 
 const props = defineProps<{ teamId: string | null }>();
 
@@ -146,8 +149,15 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
 </script>
 
 <template>
-  <div class="ws-panel">
-    <div class="ws-head">
+  <div class="ws-panel ws-panel--split">
+    <!-- 左栏：文件浏览器（只读，跟随选中会话） -->
+    <aside class="ws-pane ws-pane--files">
+      <WorkspaceFileBrowser :team-id="teamId" :session="selected" />
+    </aside>
+
+    <!-- 右栏：会话管理与 git 状态 -->
+    <section class="ws-pane ws-pane--main">
+      <div class="ws-head">
       <div class="ws-head__text">
         <h2>工作区会话</h2>
         <p class="ws-head__sub">多会话 · 多工作区目录 · git 状态</p>
@@ -257,16 +267,50 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
       <div v-if="!gitDirs.length" class="muted ws-empty">
         （{{ gitLoading ? '正在读取 git 状态…' : '暂无数据，点击「刷新状态」' }}）
       </div>
-    </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
-/* 外层几何由 ChatView 的 .checklist-pop 提供：这里只负责内部排版。 */
+/* 外层几何由 ChatView 的 .checklist-pop--wide 提供：这里只负责内部排版。 */
 .ws-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 两栏：左文件浏览器（固定宽度）+ 右会话管理与 git（自适应）。
+   左栏自带滚动（文件列表 max-height），右栏跟随外层滚动。 */
+.ws-panel--split {
+  display: grid;
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.ws-pane--files {
+  min-width: 0;
+  padding-right: 14px;
+  border-right: 1px solid var(--nm-border-color);
+}
+.ws-pane--main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* 窄窗口（宽版弹层被 92vw 钳制后仍可能很窄）：回退为上下单栏。 */
+@media (max-width: 560px) {
+  .ws-panel--split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-pane--files {
+    padding-right: 0;
+    padding-bottom: 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--nm-border-color);
+  }
 }
 
 .ws-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
