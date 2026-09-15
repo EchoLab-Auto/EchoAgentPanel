@@ -26,7 +26,6 @@ describe('包维度门控插件清单（单一来源）', () => {
       [
         'echo-agent.adapter.qq',
         'echo-agent.checklist',
-        'echo-agent.menu',
         'echo-agent.skills.dir',
         'echo-agent.tools.builtin',
         'echo-agent.workspace',
@@ -44,7 +43,6 @@ describe('包维度门控插件清单（单一来源）', () => {
     // adapter / management / interaction 类恒可见（整类能力开关）
     expect(isPluginCheckboxVisible({ id: 'echo-agent.adapter.qq', kind: 'adapter' })).toBe(true);
     expect(isPluginCheckboxVisible({ id: 'echo-agent.management.panel', kind: 'management' })).toBe(true);
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.menu', kind: 'interaction' })).toBe(true);
     // interaction 类不在门控清单里也可见（kind 判定生效）
     expect(isPluginCheckboxVisible({ id: 'echo-agent.future-interaction', kind: 'interaction' })).toBe(true);
     // 包维度门控（kind=tool）可见

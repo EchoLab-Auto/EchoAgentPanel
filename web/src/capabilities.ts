@@ -17,8 +17,8 @@ import type { AppState } from './state';
  * 因此必须出现在智能体配置弹层（⚙ 配置）与设置视图智能体编辑器的
  * 「启用插件」勾选区里；adapter.qq 由 kind 判定即已覆盖，列在此处是为了与
  * Core 的 `GATED_PLUGIN_IDS` 保持逐项镜像（对齐测试守护）。选单
- * （echo-agent.menu）的 kind 是 `interaction`（整类能力开关，同 kind 判定
- * 即已覆盖），同样列入以保持镜像。
+ * （present_menu）已降级为普通编排工具，不再有插件维度，其开关在
+ * 工具白/黑名单里进行。
  *
  * 维护规则（对应 Core 端 `echo-agent/src/plugins.rs::GATED_PLUGIN_IDS`）：
  * **新增包维度门控插件时，同步：
@@ -37,7 +37,6 @@ export const PACKAGE_GATED_PLUGIN_IDS = [
   'echo-agent.skills.dir',
   'echo-agent.checklist',
   'echo-agent.workspace',
-  'echo-agent.menu',
   'echo-agent.adapter.qq',
 ] as const;
 
@@ -49,7 +48,6 @@ export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
   'echo-agent.skills.dir': '技能目录',
   'echo-agent.checklist': '任务清单',
   'echo-agent.workspace': '工作区会话',
-  'echo-agent.menu': '选单',
 };
 
 /**

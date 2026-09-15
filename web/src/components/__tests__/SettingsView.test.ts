@@ -43,7 +43,7 @@ function seed() {
     { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin' },
     { id: 'echo-agent.adapter.qq', name: 'QQ 适配器', version: '1', kind: 'adapter', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.adapter.qq' },
     { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace' },
-    { id: 'echo-agent.menu', name: '选单', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.menu' },
+    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.future-interaction' },
   ] as typeof state.plugins;
 }
 
@@ -117,8 +117,8 @@ describe('SettingsView 智能体编辑器', () => {
     // 工作区插件是包维度门控插件：出现在「插件」勾选区（回归：曾因
     // kind=tool 且不在允许清单而被隐藏）
     expect(capsPanel.text()).toContain('工作区会话（工具）');
-    // 选单插件（kind=interaction）：勾选区标签显示中文 kind 名「交互」
-    expect(capsPanel.text()).toContain('选单（交互）');
+    // interaction 类插件：勾选区标签显示中文 kind 名「交互」
+    expect(capsPanel.text()).toContain('交互示例（交互）');
     // 包维度聚合展示（工作区包 = 其工具集合）
     expect(capsPanel.text()).toContain('工作区会话');
     expect(capsPanel.text()).toContain('workspace');
