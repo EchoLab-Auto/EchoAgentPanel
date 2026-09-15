@@ -25,7 +25,6 @@ describe('包维度门控插件清单（单一来源）', () => {
     expect([...PACKAGE_GATED_PLUGIN_IDS].sort()).toEqual(
       [
         'echo-agent.adapter.qq',
-        'echo-agent.checklist',
         'echo-agent.skills.dir',
         'echo-agent.tools.builtin',
         'echo-agent.workspace',
@@ -76,7 +75,7 @@ describe('persona 名单语义（含包维度）', () => {
       teamPluginEnabled(team({ enabled_plugins: ['echo-agent.workspace'] }), 'echo-agent.workspace'),
     ).toBe(true);
     expect(
-      teamPluginEnabled(team({ enabled_plugins: ['echo-agent.checklist'] }), 'echo-agent.workspace'),
+      teamPluginEnabled(team({ enabled_plugins: ['echo-agent.skills.dir'] }), 'echo-agent.workspace'),
     ).toBe(false);
   });
 

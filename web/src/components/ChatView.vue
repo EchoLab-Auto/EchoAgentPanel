@@ -134,10 +134,10 @@ const contextAvailable = computed(() =>
   teamPluginEnabled(currentTeam.value, 'echo-agent.management.panel'),
 );
 
-/** 清单按钮显隐：checklist 插件 + checklist 工具都可见才显示。
- * 插件取消勾选后，Core 会卸载工具包；这里同步卸载对应 UI 入口与浮层。 */
+/** 清单按钮显隐：checklist 工具可用才显示（2026-09 起插件维度已移除，
+ * 只受工具级白/黑名单与内置工具集包门控）。
+ * 工具禁用后同步卸载对应 UI 入口与浮层，并清空本地清单状态。 */
 const checklistAvailable = computed(() =>
-  teamPluginEnabled(currentTeam.value, 'echo-agent.checklist') &&
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 

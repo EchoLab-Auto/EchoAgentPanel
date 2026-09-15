@@ -2,8 +2,10 @@
 //! 后端权威：enabled_* 非空 = 仅列出的可用（空白名单 = 全部可用）；工具/技能
 //! 另有 disabled_tools/disabled_skills 黑名单细化。插件维度自 2026-09-11 起
 //! 只有白名单（黑名单已移除）：包维度插件（tools.builtin/skills.dir/adapter.qq/
-//! management.panel）不在白名单即其注册表整体不可见。这里复刻同一语义供 UI
-//! 入口显隐。
+//! workspace/management.panel）不在白名单即其注册表整体不可见。这里复刻同一
+//! 语义供 UI 入口显隐。
+//! 2026-09：选单（menu）与任务清单（checklist）先后降级为普通工具——插件维度
+//! 移除，开关在工具级白/黑名单（`已不再出现在「启用插件」勾选区`）。
 
 import type { TeamInfo } from './protocol';
 import type { AppState } from './state';
@@ -12,13 +14,13 @@ import type { AppState } from './state';
  * 包维度门控插件 id（单一来源）——「启用插件」勾选区除 adapter/management/
  * interaction 类之外的补充成员。
  *
- * 其中多数（tools.builtin / skills.dir / checklist / workspace）的 kind 是
- * `tool`，但它们是**整类能力开关**（禁用 = 其包内全部工具/技能对 LLM 不可见），
+ * 其中多数（tools.builtin / skills.dir / workspace）的 kind 是 `tool`，
+ * 但它们是**整类能力开关**（禁用 = 其包内全部工具/技能对 LLM 不可见），
  * 因此必须出现在智能体配置弹层（⚙ 配置）与设置视图智能体编辑器的
  * 「启用插件」勾选区里；adapter.qq 由 kind 判定即已覆盖，列在此处是为了与
  * Core 的 `GATED_PLUGIN_IDS` 保持逐项镜像（对齐测试守护）。选单
- * （present_menu）已降级为普通编排工具，不再有插件维度，其开关在
- * 工具白/黑名单里进行。
+ * （present_menu）与任务清单（checklist）已降级为普通工具，不再有插件
+ * 维度，其开关在工具白/黑名单里进行。
  *
  * 维护规则（对应 Core 端 `echo-agent/src/plugins.rs::GATED_PLUGIN_IDS`）：
  * **新增包维度门控插件时，同步：
@@ -35,7 +37,6 @@ import type { AppState } from './state';
 export const PACKAGE_GATED_PLUGIN_IDS = [
   'echo-agent.tools.builtin',
   'echo-agent.skills.dir',
-  'echo-agent.checklist',
   'echo-agent.workspace',
   'echo-agent.adapter.qq',
 ] as const;
@@ -46,7 +47,6 @@ export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
   'echo-agent.orchestration': '编排工具包',
   'echo-agent.tools.builtin': '内置工具集',
   'echo-agent.skills.dir': '技能目录',
-  'echo-agent.checklist': '任务清单',
   'echo-agent.workspace': '工作区会话',
 };
 
