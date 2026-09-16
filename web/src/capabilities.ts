@@ -39,6 +39,7 @@ export const PACKAGE_GATED_PLUGIN_IDS = [
   'echo-agent.skills.dir',
   'echo-agent.workspace',
   'echo-agent.adapter.qq',
+  'echo-agent.subagent',
 ] as const;
 
 /** 包维度门控插件的中文显示名（工具/技能按包分组时的可读名）。 */
@@ -48,6 +49,7 @@ export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
   'echo-agent.tools.builtin': '内置工具集',
   'echo-agent.skills.dir': '技能目录',
   'echo-agent.workspace': '工作区会话',
+  'echo-agent.subagent': 'Subagent 委派',
 };
 
 /**
