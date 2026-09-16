@@ -1,11 +1,15 @@
 <script setup lang="ts">
 //! 任务与分支面板：后台任务 / 并行任务 / Subagent / 临时回复分支的实时进度。
+//! `sessionId` 传入且非 'global' 时只显示该会话的任务（入口行弹层：
+//! 只对应当前 agent 的当前会话）；不传/传 'global' 显示全部。
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismTag } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { cancelSessionWork } from '../state';
 import { sendCommand } from '../connection';
+
+const props = defineProps<{ sessionId?: string }>();
 
 const KIND_LABEL: Record<string, string> = {
   background: '后台',
@@ -52,8 +56,15 @@ const BRANCH_VARIANT: Record<string, 'default' | 'primary' | 'success' | 'warnin
 const now = ref(Date.now());
 let timer: number | undefined;
 
+/** 面板展示范围：限定会话时只取该会话的任务。 */
+const scopedTasks = computed(() =>
+  props.sessionId && props.sessionId !== 'global'
+    ? state.tasks.filter((task) => task.sessionId === props.sessionId)
+    : state.tasks,
+);
+
 const hasActiveTask = computed(() =>
-  state.tasks.some((task) => task.status === 'running' || task.status === 'awaiting'),
+  scopedTasks.value.some((task) => task.status === 'running' || task.status === 'awaiting'),
 );
 
 watch(
@@ -76,7 +87,7 @@ onBeforeUnmount(() => {
   if (timer !== undefined) window.clearInterval(timer);
 });
 
-const tasks = computed(() => [...state.tasks].reverse());
+const tasks = computed(() => [...scopedTasks.value].reverse());
 
 function formatMs(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -106,7 +117,7 @@ function cancel(sessionId: string) {
 </script>
 
 <template>
-  <div v-if="state.tasks.length === 0" class="panel muted">
+  <div v-if="tasks.length === 0" class="panel muted">
     （暂无后台任务 / Subagent / 临时回复分支）
   </div>
   <div v-else class="panel">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 //! 应用壳：NeumorphismLayout（库 sider 槽位，覆盖样式去背景/边框）+ 主视图 + 弹窗 + toast 桥。
 
-import { computed, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismLayout,
@@ -21,7 +21,6 @@ import {
 } from './workspace';
 import ChatView from './components/ChatView.vue';
 import PanelSidebar from './components/PanelSidebar.vue';
-import TasksPanel from './components/TasksPanel.vue';
 import SettingsView from './components/SettingsView.vue';
 import ShellPanel from './components/ShellPanel.vue';
 import BranchModal from './components/BranchModal.vue';
@@ -30,16 +29,18 @@ import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'tasks' | 'settings' | 'shell';
+type View = 'chat' | 'settings' | 'shell';
 
 const view = ref<View>(loadView());
 
 function loadView(): View {
   try {
     const saved = localStorage.getItem('echo-panel-view');
-    // 旧视图名迁移：资源/日志视图已合并进设置视图
+    // 旧视图名迁移：资源/日志视图已合并进设置视图；任务视图已并入
+    // 聊天入口行的「任务」弹层（按当前 agent 的当前会话过滤）。
     if (saved === 'caps' || saved === 'logs') return 'settings';
-    return (['chat', 'tasks', 'settings', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    if (saved === 'tasks') return 'chat';
+    return (['chat', 'settings', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -143,11 +144,6 @@ function cancelWork() {
     },
   });
 }
-
-// ── 顶栏状态 ──
-const runningTaskCount = computed(
-  () => state.tasks.filter((t) => t.status === 'running').length,
-);
 
 function selectSession(id: string) {
   activeSessionId.value = id;
@@ -329,14 +325,6 @@ watch(
           <NeumorphismButton
             size="small"
             variant="glass"
-            :pressed="view === 'tasks'"
-            @click="setView('tasks')"
-          >
-            任务{{ runningTaskCount ? `(${runningTaskCount})` : '' }}
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
             :pressed="view === 'shell'"
             @click="setView('shell')"
           >
@@ -374,8 +362,7 @@ watch(
           @select-session="onSessionPick"
         />
         <SettingsView v-else-if="view === 'settings'" />
-        <ShellPanel v-else-if="view === 'shell'" />
-        <TasksPanel v-else />
+        <ShellPanel v-else />
       </div>
     </NeumorphismLayout>
 

@@ -177,6 +177,86 @@ describe('ChatView 布局契约', () => {
     expect(btn).toBeUndefined();
   });
 
+  it('入口行「任务」按钮：弹层只显示当前会话的任务', async () => {
+    const TasksPanelStub = defineComponent({
+      name: 'TasksPanel',
+      props: ['sessionId'],
+      setup(props) {
+        return () => h('div', { class: 'stub-tasks' }, String(props.sessionId ?? ''));
+      },
+    });
+    state.teams = [];
+    state.tasks = [
+      {
+        id: 't1',
+        sequence: null,
+        sessionId: 'local:tui::local_user',
+        kind: 'subagent',
+        objective: '本会话任务',
+        status: 'running',
+        createdAtMs: 1,
+        completedAtMs: null,
+        integratedAtMs: null,
+        branches: [],
+      },
+      {
+        id: 't2',
+        sequence: null,
+        sessionId: 'qq:dm::1',
+        kind: 'subagent',
+        objective: '其他会话任务',
+        status: 'running',
+        createdAtMs: 1,
+        completedAtMs: null,
+        integratedAtMs: null,
+        branches: [],
+      },
+    ] as never;
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'local:tui::local_user' },
+      global: {
+        stubs: {
+          ChatMessageList: ChatMessageListStub,
+          ChatComposer: ChatComposerStub,
+          TasksPanel: TasksPanelStub,
+        },
+      },
+    });
+    const btn = wrapper.findAll('.ctx-entry').find((b) => b.text().includes('任务'));
+    expect(btn, 'tasks entry visible').toBeTruthy();
+    await btn!.trigger('click');
+    // 弹层按当前会话过滤：只传当前 sessionId 给 TasksPanel
+    const panel = wrapper.find('.stub-tasks');
+    expect(panel.exists()).toBe(true);
+    expect(panel.text()).toBe('local:tui::local_user');
+    state.tasks = [];
+  });
+
+  it('入口行「任务」按钮：subagent 插件未启用且无会话任务时隐藏', () => {
+    state.teams = [
+      {
+        id: 'alix',
+        name: 'Alix',
+        enabled: true,
+        sessions: 0,
+        enabled_plugins: ['echo-agent.tools.builtin'],
+      } as never,
+    ];
+    state.tasks = [];
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'local:tui::local_user', activeTeamId: 'alix' },
+      global: {
+        stubs: {
+          ChatMessageList: ChatMessageListStub,
+          ChatComposer: ChatComposerStub,
+        },
+      },
+    });
+    const btn = wrapper.findAll('.ctx-entry').find((b) => b.text().includes('任务'));
+    expect(btn).toBeUndefined();
+    state.teams = [];
+  });
+
   it('发送事件携带空 images（无附件时）', () => {
     const wrapper = mountChatView();
     const sendBtn = wrapper.find('.chat-view__send');

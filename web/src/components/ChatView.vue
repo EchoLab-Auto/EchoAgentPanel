@@ -25,6 +25,7 @@ import QqPanel from './QqPanel.vue';
 import WorkspacePanel from './WorkspacePanel.vue';
 import SessionSwitcher from './SessionSwitcher.vue';
 import MenuCard from './MenuCard.vue';
+import TasksPanel from './TasksPanel.vue';
 
 const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
 const emit = defineEmits<{
@@ -141,6 +142,54 @@ const checklistAvailable = computed(() =>
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
+/** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 插件启用，
+ * 或当前会话已有任务记录（即使插件后被禁用，历史任务仍可见）。 */
+const sessionTasks = computed(() =>
+  props.sessionId === 'global'
+    ? state.tasks
+    : state.tasks.filter((task) => task.sessionId === props.sessionId),
+);
+
+const sessionRunningTaskCount = computed(
+  () =>
+    sessionTasks.value.filter(
+      (task) => task.status === 'running' || task.status === 'awaiting',
+    ).length,
+);
+
+const tasksAvailable = computed(
+  () =>
+    teamPluginEnabled(currentTeam.value, 'echo-agent.subagent') ||
+    sessionTasks.value.length > 0,
+);
+
+const showTasks = ref(false);
+const tasksBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
+const tasksBottom = ref(0);
+const tasksLeft = ref(0);
+
+function toggleTasks() {
+  if (showTasks.value) {
+    showTasks.value = false;
+    return;
+  }
+  const btn = btnElement(tasksBtnRef.value);
+  if (btn) {
+    const r = btn.getBoundingClientRect();
+    tasksBottom.value = Math.round(window.innerHeight - r.top + 8);
+    const composer = composerFloatRef.value;
+    const cr = composer ? composer.getBoundingClientRect() : null;
+    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
+    tasksLeft.value = Math.round(centerX - 260);
+  }
+  showTasks.value = true;
+}
+
+// 插件/Team 更新回推后，若任务入口变为不可用，关闭残留弹层。
+watch(tasksAvailable, (available) => {
+  if (!available) showTasks.value = false;
+});
+
 /** 当前智能体名下的会话（去重团队归属，供「会话」按钮显隐）。 */
 const teamSessions = computed(() => {
   const active = props.activeTeamId ?? state.teams[0]?.id ?? null;
@@ -240,6 +289,7 @@ watch(
     showAdapter.value = false;
     showWorkspace.value = false;
     showSessions.value = false;
+    showTasks.value = false;
   },
 );
 
@@ -531,6 +581,28 @@ function imagesOf(message: ChatMessage): string[] {
         </svg>
         适配器
       </NeumorphismButton>
+      <NeumorphismBadge
+        v-if="tasksAvailable"
+        :value="sessionRunningTaskCount"
+        :show-zero="false"
+      >
+        <NeumorphismButton
+          ref="tasksBtnRef"
+          class="ctx-entry"
+          variant="glass"
+          shape="pill"
+          size="small"
+          title="任务（Subagent / 后台 / 分支，仅当前会话）"
+          @click="toggleTasks"
+        >
+          <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M8 10h8" />
+            <path d="M8 14h5" />
+          </svg>
+          任务
+        </NeumorphismButton>
+      </NeumorphismBadge>
     </div>
 
     <!-- 会话切换：跟随入口按钮上方 8px 的毛玻璃面板 -->
@@ -565,6 +637,16 @@ function imagesOf(message: ChatMessage): string[] {
       @click.self="showAdapter = false"
     >
       <QqPanel :team-id="props.activeTeamId ?? null" />
+    </div>
+
+    <!-- 任务：跟随任务按钮上方 8px 的毛玻璃面板（仅当前 agent 的当前会话） -->
+    <div
+      v-if="showTasks"
+      class="checklist-pop"
+      :style="{ bottom: tasksBottom + 'px', left: tasksLeft + 'px' }"
+      @click.self="showTasks = false"
+    >
+      <TasksPanel :session-id="props.sessionId" />
     </div>
 
     <!-- 清单：跟随清单按钮下方 8px 的毛玻璃面板（无内层卡片） -->
