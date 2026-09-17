@@ -230,16 +230,18 @@ const animClass = computed(() => (props.loading ? `tool-icon--anim-${kind.value}
 .tool-icon--anim-calc .ti-calc__dot--5 { animation-delay: 0.6s; }
 .tool-icon--anim-calc .ti-calc__dot--6 { animation-delay: 0.75s; }
 
-/* 搜索：放大镜整体小幅巡游 */
+/* 搜索：放大镜明显巡游（大范围平移 + 缩放） */
 .tool-icon--anim-search .ti-search__lens {
   transform-box: view-box;
   transform-origin: center;
-  animation: ti-search-move 1.4s ease-in-out infinite;
+  animation: ti-search-move 1.3s ease-in-out infinite;
 }
 @keyframes ti-search-move {
-  25% { transform: translate(-1.2px, -1.2px); }
-  50% { transform: translate(0, 0); }
-  75% { transform: translate(1.2px, 1.2px); }
+  0% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(-2.2px, -2.2px) scale(1.12); }
+  50% { transform: translate(0, 0) scale(1); }
+  75% { transform: translate(2.2px, 2.2px) scale(0.9); }
+  100% { transform: translate(0, 0) scale(1); }
 }
 
 /* 子代理：两条连线依次描画（任务下发到两个子节点） */
