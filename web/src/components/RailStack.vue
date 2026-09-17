@@ -159,9 +159,8 @@ defineExpose({ isOpen });
   min-height: 0;
   border-radius: 20px;
   border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
-  background: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  /* 完全透明：不铺底色、不做毛玻璃，仅保留描边与投影界定卡片形状 */
+  background: transparent;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
