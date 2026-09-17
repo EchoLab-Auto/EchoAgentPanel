@@ -20,7 +20,6 @@ import {
   workspacePickIntent,
 } from './workspace';
 import ChatView from './components/ChatView.vue';
-import PanelSidebar from './components/PanelSidebar.vue';
 import SettingsView from './components/SettingsView.vue';
 import ShellPanel from './components/ShellPanel.vue';
 import BranchModal from './components/BranchModal.vue';
@@ -210,26 +209,6 @@ watch(
   { immediate: true },
 );
 
-// ── 侧边栏折叠：由 NeumorphismLayout 管理，状态持久化 ──
-const sidebarCollapsed = ref<boolean>(
-  (() => {
-    try {
-      return localStorage.getItem('echo-panel-sidebar-collapsed') === '1';
-    } catch {
-      return false;
-    }
-  })(),
-);
-
-function onLayoutCollapse(collapsed: boolean) {
-  sidebarCollapsed.value = collapsed;
-  try {
-    localStorage.setItem('echo-panel-sidebar-collapsed', collapsed ? '1' : '0');
-  } catch {
-    // ignore storage errors
-  }
-}
-
 // ── 全局会话被禁用兜底：当前 agent 非并行多会话模式时若停留在 global 则回退 local ──
 watch(
   [() => state.teams, () => activeTeamId.value],
@@ -287,17 +266,7 @@ watch(
 
 <template>
   <ThemeProvider default-theme="auto" storage-key="echo-panel-theme">
-    <NeumorphismLayout
-      show-header
-      show-sider
-      collapsible
-      :default-collapsed="sidebarCollapsed"
-      :sider-width="264"
-      :collapsed-width="0"
-      height="100%"
-      class="panel-layout"
-      @collapse="onLayoutCollapse"
-    >
+    <NeumorphismLayout show-header height="100%" class="panel-layout">
       <!-- 顶部栏左：库自带折叠按钮 + 品牌 -->
       <template #header-left>
         <div class="brand">EchoAgent Panel</div>
@@ -342,24 +311,19 @@ watch(
         </div>
       </template>
 
-      <!-- 侧边栏：委托给 PanelSidebar（折叠卡片 + 清单） -->
-      <template #sider>
-        <PanelSidebar
-          :active-branch-id="activeBranchId"
-          @select-branch="(id) => (activeBranchId = id)"
-        />
-      </template>
-
-      <!-- 主区 -->
+      <!-- 主区（左侧边栏已移除：会话切换/清单/工作区/临时分支分别
+           在入口行与会话视图右侧边栏，2026-09-19） -->
       <div class="main">
         <ChatView
           v-if="view === 'chat'"
           :session-id="activeSessionId"
           :active-team-id="activeTeamId"
+          :active-branch-id="activeBranchId"
           @send="send"
           @cancel="cancelWork"
           @select-team="onTeamSelect"
           @select-session="onSessionPick"
+          @select-branch="(id) => (activeBranchId = id)"
         />
         <SettingsView v-else-if="view === 'settings'" />
         <ShellPanel v-else />

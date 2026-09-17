@@ -576,30 +576,6 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 .panel-layout.nm-layout {
   background: var(--nm-bg-color, #141414);
 }
-.panel-layout .nm-layout__sider {
-  background: transparent;
-  border-right: none;
-  box-shadow: none;
-}
-.panel-layout .nm-layout__sider-inner {
-  background: none;
-}
-/* 折叠态：sider 完全隐藏（collapsedWidth=0 基础上再兜底） */
-.panel-layout.nm-layout--sider-collapsed .nm-layout__sider {
-  width: 0 !important;
-  overflow: hidden;
-}
-/* sider 槽位内容：卡片纵向堆叠，间距由卡片自身阴影区分 */
-.panel-sider {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 12px;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
 /* ── API 设置：编辑上下文横幅 ── */
 .edit-banner {
   display: flex;

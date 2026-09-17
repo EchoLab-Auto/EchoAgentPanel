@@ -28,13 +28,19 @@ import MenuCard from './MenuCard.vue';
 import TasksPanel from './TasksPanel.vue';
 import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
 import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
+import PanelSidebar from './PanelSidebar.vue';
 
-const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
+const props = defineProps<{
+  sessionId: string;
+  activeTeamId?: string | null;
+  activeBranchId?: string | null;
+}>();
 const emit = defineEmits<{
   send: [content: string, images: string[]];
   cancel: [];
   selectTeam: [id: string | null];
   selectSession: [id: string];
+  selectBranch: [id: string];
 }>();
 
 const input = ref('');
@@ -269,6 +275,19 @@ const workspaceRailAvailable = computed(() => {
   const synced = state.workspaceTeamId === (props.activeTeamId ?? state.teams[0]?.id ?? null);
   return synced && !!state.workspaceActive;
 });
+
+/** 临时分支卡可见（并行多会话模式；与 PanelSidebar 内部判定同源）。 */
+const branchCardsVisible = computed(() => {
+  const team = state.teams.find(
+    (t) => t.id === (props.activeTeamId ?? state.teams[0]?.id ?? null),
+  );
+  return loopModeOf(team) === 'parallel';
+});
+
+/** 右侧边栏容器显隐：任一卡片可见即出现。 */
+const railVisible = computed(
+  () => workspaceRailAvailable.value || branchCardsVisible.value,
+);
 
 /** 右侧边栏浏览目标：当前激活的工作区会话信息。 */
 const railWorkspaceSession = computed(() => {
@@ -793,27 +812,33 @@ function imagesOf(message: ChatMessage): string[] {
       @close="configOpen = false"
     />
 
-    <!-- 右侧边栏（常驻容器）：工作区文件浏览器卡片
-         （有激活工作区会话即出现，不经入口行开关） -->
-    <aside v-if="workspaceRailAvailable" class="chat-rail">
-      <div class="chat-rail__head">
-        <span class="chat-rail__title">文件浏览器</span>
-        <span class="chat-rail__sub">{{ railWorkspaceSession?.name ?? '' }}</span>
-        <button
-          type="button"
-          class="chat-rail__manage"
-          title="工作区会话管理与 git 状态"
-          @click="toggleWorkspace"
-        >
-          管理
-        </button>
+    <!-- 右侧边栏（常驻容器）：文件浏览器卡片（有激活工作区会话即出现）
+         + 临时分支等卡片（PanelSidebar，按模式门控） -->
+    <aside v-if="railVisible" class="chat-rail">
+      <div v-if="workspaceRailAvailable" class="chat-rail__card">
+        <div class="chat-rail__head">
+          <span class="chat-rail__title">文件浏览器</span>
+          <span class="chat-rail__sub">{{ railWorkspaceSession?.name ?? '' }}</span>
+          <button
+            type="button"
+            class="chat-rail__manage"
+            title="工作区会话管理与 git 状态"
+            @click="toggleWorkspace"
+          >
+            管理
+          </button>
+        </div>
+        <div class="chat-rail__body">
+          <WorkspaceFileBrowser
+            :team-id="props.activeTeamId ?? null"
+            :session="railWorkspaceSession"
+          />
+        </div>
       </div>
-      <div class="chat-rail__body">
-        <WorkspaceFileBrowser
-          :team-id="props.activeTeamId ?? null"
-          :session="railWorkspaceSession"
-        />
-      </div>
+      <PanelSidebar
+        :active-branch-id="props.activeBranchId ?? null"
+        @select-branch="(id) => emit('selectBranch', id)"
+      />
     </aside>
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
@@ -949,6 +974,17 @@ function imagesOf(message: ChatMessage): string[] {
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
   overflow: hidden;
+}
+.chat-rail__card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.chat-rail__card + :deep(.panel-rail-cards) {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--nm-border-subtle);
 }
 .chat-rail__head {
   display: flex;

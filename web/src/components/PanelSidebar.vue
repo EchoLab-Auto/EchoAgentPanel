@@ -1,8 +1,7 @@
 <script setup lang="ts">
-//! 侧边栏内容：临时分支折叠卡片。
-//! 会话切换已迁至入口行「会话」按钮（SessionSwitcher，2026-09）；
-//! 折叠状态在组件内部维护；分支选择冒泡给 App。
-//! Team（Agent）切换在聊天输入框左侧的 AgentSwitcher 悬浮卡片。
+//! 右侧边栏卡片：临时分支（2026-09-19 起从左侧边栏迁入 chat-rail 容器）。
+//! 会话切换/清单/工作区已分别迁至入口行与右侧边栏文件浏览器；
+//! 仅并行多会话模式显示（单会话模式 Core 不发 ReplyBranch* 事件）。
 
 import { computed, ref } from 'vue';
 import { state } from '../store';
@@ -13,6 +12,10 @@ defineProps<{
   activeBranchId: string | null;
 }>();
 
+const emit = defineEmits<{
+  selectBranch: [id: string];
+}>();
+
 // 「临时分支」卡：仅并行多会话模式（单会话模式后端不发射 ReplyBranch*
 // 事件，分支不可见，卡片没有内容可展示）。
 const replyBranchesVisible = computed(() => {
@@ -20,16 +23,11 @@ const replyBranchesVisible = computed(() => {
   return loopModeOf(team) === 'parallel';
 });
 
-const emit = defineEmits<{
-  selectBranch: [id: string];
-}>();
-
 const cardOpen = ref<Record<'branches', boolean>>({ branches: true });
 
 function toggleCard(key: 'branches') {
   cardOpen.value[key] = !cardOpen.value[key];
 }
-
 
 function truncateTask(task: string): string {
   const oneLine = task.replace(/\s+/g, ' ').trim();
@@ -38,8 +36,7 @@ function truncateTask(task: string): string {
 </script>
 
 <template>
-  <div class="panel-sider">
-    <!-- 卡片：临时分支（当前 Agent 未启用回执分支时整卡隐藏） -->
+  <div class="panel-rail-cards">
     <SidebarCard
       v-if="replyBranchesVisible"
       title="临时分支"
@@ -63,10 +60,5 @@ function truncateTask(task: string): string {
         </span>
       </div>
     </SidebarCard>
-
   </div>
 </template>
-
-<style scoped>
-</style>
-
