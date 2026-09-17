@@ -83,7 +83,7 @@ export function startConnection(): void {
         // 自行刷新；无 QQ（或多实例未指定实例）时预取必被 Core 拒绝，平白
         // 弹出"QQ 适配器未找到"提示。
         'RequestTeamsList',
-        'RequestShellSessions',
+        { RequestShellSessions: {} },
       ];
       for (const command of bootstrap) {
         ws.send(serializeCommand(command));

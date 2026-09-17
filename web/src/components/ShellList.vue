@@ -2,17 +2,32 @@
 //! 后台 Shell 会话列表（右侧边栏「Shell」卡内容）：只保留会话行 + 详情按钮。
 //! 终端内容不在此展示——点「详情」经 `openDetail` 事件打开 Shell 详情卡。
 
-import { onMounted } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 
+/** 当前 agent（team）：Shell 列表只显示该 agent 的后台会话，
+ *  不串显其他 agent（去主智能体：team_id 必填）。 */
+const props = defineProps<{ teamId: string | null }>();
+
 const emit = defineEmits<{ openDetail: [sessionId: string] }>();
 
+const teamKey = computed(() => props.teamId ?? state.teams[0]?.id ?? null);
+
+/** 本 agent 的会话（事件按 team_id 过滤；旧 core 无 team_id 字段时不过滤）。 */
+const sessions = computed(() =>
+  state.shellSessions.filter(
+    (s) => s.team_id === undefined || s.team_id === null || s.team_id === teamKey.value,
+  ),
+);
+
 function refresh() {
-  sendCommand('RequestShellSessions');
+  sendCommand({ RequestShellSessions: { team_id: teamKey.value } });
 }
 onMounted(refresh);
+// 切换 agent 后重拉（列表归属变化）。
+watch(teamKey, refresh);
 
 </script>
 
@@ -26,10 +41,10 @@ onMounted(refresh);
         刷新
       </NeumorphismButton>
     </div>
-    <div v-if="state.shellSessions.length === 0" class="muted shell-list__empty">
-      （暂无 shell 会话）
+    <div v-if="sessions.length === 0" class="muted shell-list__empty">
+      （当前 agent 暂无 shell 会话）
     </div>
-    <div v-for="session in state.shellSessions" :key="session.session_id" class="shell-row">
+    <div v-for="session in sessions" :key="session.session_id" class="shell-row">
       <span class="shell-row__dot" />
       <span class="shell-row__id">{{ session.session_id }}</span>
       <span class="shell-row__meta" :title="session.workdir">

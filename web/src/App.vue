@@ -301,14 +301,6 @@ watch(
           <NeumorphismButton
             size="small"
             variant="glass"
-            :pressed="view === 'shell'"
-            @click="setView('shell')"
-          >
-            Shell
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
             :pressed="view === 'settings'"
             @click="setView('settings')"
           >

@@ -169,6 +169,7 @@ export const LEGACY_MODE_PLUGIN_IDS = [
 /** 后台 shell 会话摘要（Shell 面板终端可视化） */
 export interface ShellSessionInfo {
   session_id: string;
+  team_id?: string | null;
   workdir: string;
   created_at_ms: number;
   last_active_ms: number;
@@ -362,7 +363,7 @@ export type BackendCommand =
   | { InstallSkillFromGit: { url: string; name?: string | null; branch?: string | null } }
   | { UpdateSkillFromGit: { name: string } }
   | { RemoveSkillSource: { name: string } }
-  | 'RequestShellSessions'
+  | { RequestShellSessions: { team_id?: string | null } }
   | { ShellStart: { workdir?: string | null } }
   | { ShellExec: { session_id: string; command: string; timeout_secs?: number } }
   | { ShellStop: { session_id: string } }
@@ -497,7 +498,7 @@ export type BackendEvent =
       };
     }
   | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }
-  | { ShellSessionsList: { sessions: ShellSessionInfo[] } }
+  | { ShellSessionsList: { sessions: ShellSessionInfo[]; team_id?: string | null } }
   | { ShellSessionStarted: { session: ShellSessionInfo } }
   | { ShellExecStarted: { session_id: string; seq: number; command: string } }
   | { ShellExecOutput: { session_id: string; seq: number; chunk: string } }

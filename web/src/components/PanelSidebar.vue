@@ -58,8 +58,13 @@ const cards = computed<RailCardDef[]>(() => {
   list.push({
     id: 'shell',
     title: 'Shell',
-    count: state.shellSessions.length,
-    countTitle: '会话数',
+    count: state.shellSessions.filter(
+      (s) =>
+        s.team_id === undefined ||
+        s.team_id === null ||
+        s.team_id === (props.teamId ?? state.teams[0]?.id ?? null),
+    ).length,
+    countTitle: '当前 agent 的会话数',
   });
   if (branchCardVisible.value) {
     list.push({
@@ -94,7 +99,7 @@ function truncateTask(task: string): string {
       </div>
     </template>
     <template #shell>
-      <ShellList @open-detail="(id) => emit('openShellDetail', id)" />
+      <ShellList :team-id="teamId" @open-detail="(id) => emit('openShellDetail', id)" />
     </template>
     <template #branches>
       <div v-if="Object.keys(state.branchTabs).length === 0" class="muted">

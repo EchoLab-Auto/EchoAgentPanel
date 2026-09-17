@@ -19,7 +19,7 @@ const session = computed(() =>
 const inputBySession = ref<Record<string, string>>({});
 const terminalEls = ref<Record<string, HTMLElement | null>>({});
 
-onMounted(() => sendCommand('RequestShellSessions'));
+onMounted(() => sendCommand({ RequestShellSessions: {} }));
 
 function stopSession(sessionId: string) {
   sendCommand({ ShellStop: { session_id: sessionId } });
