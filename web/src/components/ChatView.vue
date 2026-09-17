@@ -913,22 +913,17 @@ function imagesOf(message: ChatMessage): string[] {
   min-height: 0;
 }
 
-/* 右侧边栏：会话视图右侧的常驻卡片容器（RailStack：文件浏览器/Shell/
-   临时分支上下排列，折叠为横条，分隔条拖动调整上下空间）。 */
+/* 右侧边栏：会话视图右侧的常驻悬浮区（透明容器）；卡片本体是
+   RailStack 里的悬浮圆角矩形（毛玻璃）。 */
 .chat-rail {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   z-index: 4;
-  width: 300px;
+  width: 324px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--nm-border-color);
-  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.3);
 }
 .chat-rail > :deep(.rail-stack) {
   flex: 1;

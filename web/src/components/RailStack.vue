@@ -140,12 +140,16 @@ defineExpose({ isOpen });
 
 <style scoped>
 /* 卡片栈：填满容器高，纵向 flex；展开的卡片按 flex-grow 分配空间，
-   折叠的卡片收缩为一条横条（内容高度）。 */
+   折叠的卡片收缩为一条横条（内容高度）。
+   卡片是悬浮圆角矩形（毛玻璃），间距由 gap 提供。 */
 .rail-stack {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
 }
 
 .rail-stack__card {
@@ -153,6 +157,13 @@ defineExpose({ isOpen });
   flex-direction: column;
   flex: 0 0 auto; /* 折叠态：横条 */
   min-height: 0;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  background: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
 }
 .rail-stack__card--open {
   flex: 1 1 0; /* 展开态：按 flexGrow 比例分配剩余空间 */
@@ -165,6 +176,7 @@ defineExpose({ isOpen });
   justify-content: space-between;
   gap: 8px;
   padding: 10px 14px;
+  border-bottom: 1px solid transparent;
   cursor: pointer;
   user-select: none;
   flex: 0 0 auto;
@@ -189,11 +201,12 @@ defineExpose({ isOpen });
   padding: 4px 14px 12px;
 }
 
-/* 分隔条：上下边框分隔卡片；两张都展开时可拖动 */
+/* 分隔条：卡片间隙中的隐形拖动把手（两张都展开时可拖动） */
 .rail-stack__divider {
   flex: 0 0 auto;
   height: 5px;
-  border-top: 1px solid var(--nm-border-color);
+  margin: -8px 8px;
+  border-radius: 999px;
 }
 .rail-stack__divider--draggable {
   cursor: row-resize;
