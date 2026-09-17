@@ -44,9 +44,10 @@ describe('ToolRunGroup', () => {
         ],
       },
     });
-    // 运行中 → 默认折叠
+    // 运行中 → 默认折叠；运行指示为 SVG 内嵌旋转轨道（spin），不再有状态点环
     expect(wrapper.find('.tool-run-group__detail').exists()).toBe(false);
-    expect(wrapper.findAll('.tool-run-group__dot').length).toBe(1);
+    expect(wrapper.findAll('.tool-icon--spin').length).toBe(1);
+    expect(wrapper.findAll('.tool-run-group__dot').length).toBe(0);
 
     // 点击第二个图标 → 展开其详情
     await wrapper.findAll('.tool-run-group__icon')[1].trigger('click');

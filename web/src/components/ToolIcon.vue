@@ -3,7 +3,9 @@
 
 import { computed } from 'vue';
 
-const props = defineProps<{ name: string }>();
+const props = withDefaults(defineProps<{ name: string; spin?: boolean }>(), {
+  spin: false,
+});
 
 type IconKind =
   | 'bash'
@@ -69,6 +71,8 @@ const kind = computed<IconKind>(() => {
 </script>
 
 <template>
+  <!-- 加载动画（spin）：绕图标中心旋转的圆弧轨道，替代原状态点旋转环；
+       加一层反向虚线环，转动更有"在跑"的质感。 -->
   <svg
     viewBox="0 0 24 24"
     fill="none"
@@ -77,7 +81,12 @@ const kind = computed<IconKind>(() => {
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
+    :class="{ 'tool-icon--spin': spin }"
   >
+    <g v-if="spin" class="tool-icon__orbit" aria-hidden="true">
+      <circle class="tool-icon__track" cx="12" cy="12" r="10" />
+      <circle class="tool-icon__arc" cx="12" cy="12" r="10" />
+    </g>
     <!-- bash / shell -->
     <template v-if="kind === 'bash'">
       <polyline points="4 17 10 11 4 5" />
@@ -162,3 +171,32 @@ const kind = computed<IconKind>(() => {
     </template>
   </svg>
 </template>
+
+<style scoped>
+/* 加载动画：SVG 内部圆弧轨道绕中心旋转（transform-box 保证以图标中心为原点） */
+.tool-icon--spin {
+  animation: none;
+}
+.tool-icon__orbit {
+  transform-box: view-box;
+  transform-origin: center;
+  animation: tool-icon-spin 1s linear infinite;
+}
+.tool-icon__track {
+  fill: none;
+  stroke-width: 1.5;
+  opacity: 0.18;
+  stroke: currentColor;
+}
+.tool-icon__arc {
+  fill: none;
+  stroke-width: 1.5;
+  stroke: currentColor;
+  stroke-dasharray: 32 62;
+}
+@keyframes tool-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

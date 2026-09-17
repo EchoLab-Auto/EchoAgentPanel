@@ -75,9 +75,8 @@ const STATUS_LABEL: Record<string, string> = {
         :aria-label="item.name"
         @click="toggle(item.key)"
       >
-        <ToolIcon :name="item.name" />
+        <ToolIcon :name="item.name" :spin="item.status === 'running'" />
         <span v-if="item.status === 'failed'" class="tool-run-group__dot tool-run-group__dot--failed" />
-        <span v-else-if="item.status === 'running'" class="tool-run-group__dot" />
       </button>
     </div>
 
