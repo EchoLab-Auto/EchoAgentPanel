@@ -27,6 +27,7 @@ import SessionSwitcher from './SessionSwitcher.vue';
 import MenuCard from './MenuCard.vue';
 import TasksPanel from './TasksPanel.vue';
 import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
+import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
 
 const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
 const emit = defineEmits<{
@@ -242,14 +243,6 @@ const workspaceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null)
 const workspaceBottom = ref(0);
 const workspaceLeft = ref(0);
 
-/** 工作区弹层宽度（px）：宽版两栏（左文件浏览器 + 右会话/git），
- * CSS `.checklist-pop--wide` 的 `min(920px, 92vw)` 必须与此保持一致。 */
-const WORKSPACE_POP_WIDTH = 920;
-
-function workspacePopWidth(): number {
-  return Math.min(WORKSPACE_POP_WIDTH, Math.round(window.innerWidth * 0.92));
-}
-
 function toggleWorkspace() {
   if (showWorkspace.value) {
     showWorkspace.value = false;
@@ -262,13 +255,39 @@ function toggleWorkspace() {
     const composer = composerFloatRef.value;
     const cr = composer ? composer.getBoundingClientRect() : null;
     const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
-    // 以输入区为中心，左缘不越出视口（宽弹层在窄窗口下被钳制到 8px 边距）。
-    workspaceLeft.value = Math.round(
-      Math.max(8, centerX - workspacePopWidth() / 2),
-    );
+    workspaceLeft.value = Math.round(centerX - 260);
   }
   showWorkspace.value = true;
 }
+
+// ── 右侧边栏（2026-09-19）：会话视图右侧的卡片容器（workspace 文件浏览器）──
+// 「工作区」按钮切换右侧边栏；会话管理/git 仍在原弹层（入口行按钮旁的
+// 小三角不再单独开——弹层入口保留在 rail 头部「管理」）。
+const showWorkspaceRail = ref(false);
+
+function toggleWorkspaceRail() {
+  showWorkspaceRail.value = !showWorkspaceRail.value;
+}
+
+/** 右侧边栏显隐：workspace 插件可用且存在激活的工作区会话。 */
+const workspaceRailAvailable = computed(() => {
+  if (!workspaceAvailable.value) return false;
+  const synced = state.workspaceTeamId === (props.activeTeamId ?? state.teams[0]?.id ?? null);
+  return synced && !!state.workspaceActive;
+});
+
+/** 右侧边栏浏览目标：当前激活的工作区会话信息。 */
+const railWorkspaceSession = computed(() => {
+  if (!state.workspaceActive) return null;
+  return (
+    state.workspaceSessions.find((s) => s.id === state.workspaceActive) ?? null
+  );
+});
+
+// 插件/team 切换或激活取消时收起右侧边栏。
+watch(workspaceRailAvailable, (available) => {
+  if (!available) showWorkspaceRail.value = false;
+});
 
 // 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
@@ -612,8 +631,8 @@ function imagesOf(message: ChatMessage): string[] {
         variant="glass"
         shape="pill"
         size="small"
-        title="工作区会话（多会话 / 多目录 / git 状态）"
-        @click="toggleWorkspace"
+        title="工作区文件浏览器（右侧边栏）；会话管理与 git 状态见弹层"
+        @click="toggleWorkspaceRail"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -675,10 +694,11 @@ function imagesOf(message: ChatMessage): string[] {
       />
     </div>
 
-    <!-- 工作区会话：跟随入口按钮上方 8px 的毛玻璃面板（宽版：左文件浏览器 + 右会话/git） -->
+    <!-- 工作区会话管理：跟随入口按钮上方 8px 的毛玻璃面板
+         （文件浏览器已迁至会话视图右侧边栏） -->
     <div
       v-if="showWorkspace"
-      class="checklist-pop checklist-pop--wide"
+      class="checklist-pop"
       :style="{ bottom: workspaceBottom + 'px', left: workspaceLeft + 'px' }"
       @click.self="showWorkspace = false"
     >
@@ -783,6 +803,36 @@ function imagesOf(message: ChatMessage): string[] {
       :bottom-offset="configBottomOffset"
       @close="configOpen = false"
     />
+
+    <!-- 右侧边栏：工作区文件浏览器卡片（激活工作区会话时可用） -->
+    <aside v-if="showWorkspaceRail && workspaceRailAvailable" class="chat-rail">
+      <div class="chat-rail__head">
+        <span class="chat-rail__title">文件浏览器</span>
+        <span class="chat-rail__sub">{{ railWorkspaceSession?.name ?? '' }}</span>
+        <button
+          type="button"
+          class="chat-rail__manage"
+          title="工作区会话管理与 git 状态"
+          @click="toggleWorkspace"
+        >
+          管理
+        </button>
+        <button
+          type="button"
+          class="chat-rail__close"
+          title="收起右侧边栏"
+          @click="showWorkspaceRail = false"
+        >
+          ×
+        </button>
+      </div>
+      <div class="chat-rail__body">
+        <WorkspaceFileBrowser
+          :team-id="props.activeTeamId ?? null"
+          :session="railWorkspaceSession"
+        />
+      </div>
+    </aside>
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
     <div ref="composerFloatRef" class="chat-composer-float">
@@ -897,6 +947,77 @@ function imagesOf(message: ChatMessage): string[] {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+/* 右侧边栏：会话视图右侧的卡片容器（工作区文件浏览器等）。
+   打开时主区让出 264px（与左侧边栏同宽，视觉对称）；圆角毛玻璃卡。 */
+.chat-rail {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: v-bind(entryBottom);
+  z-index: 4;
+  width: 264px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.chat-rail__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--nm-border-subtle);
+}
+.chat-rail__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--nm-text-primary);
+}
+.chat-rail__sub {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--nm-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-rail__close {
+  border: none;
+  background: transparent;
+  color: var(--nm-text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 6px;
+}
+.chat-rail__close:hover {
+  color: var(--nm-text-primary);
+}
+.chat-rail__manage {
+  border: none;
+  background: transparent;
+  color: var(--panel-accent);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.chat-rail__manage:hover {
+  background: var(--panel-accent-soft);
+}
+.chat-rail__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
 }
 
 /* ChatTray 需要定高父级才能出现滚动区。
@@ -1236,13 +1357,6 @@ function imagesOf(message: ChatMessage): string[] {
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
-}
-
-/* 工作区面板（宽版两栏：左文件浏览器 + 右会话/git）。
-   宽度与 ChatView.toggleWorkspace 的 WORKSPACE_POP_WIDTH 保持一致。 */
-.checklist-pop--wide {
-  width: min(920px, 92vw);
-  max-height: 78vh;
 }
 
 /* ── 实时消息入场动画（历史回放不播） ── */
