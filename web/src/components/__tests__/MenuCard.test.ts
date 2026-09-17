@@ -108,18 +108,11 @@ describe('MenuCard 选择语义', () => {
 });
 
 // ── 内联契约：选单出现在会话区消息流尾部（不再弹窗） ──
+// ChatView 自渲染消息行（连续工具合并为 ToolRunGroup），容器为库 ChatTray。
 const ListStub = defineComponent({
-  name: 'ChatMessageList',
-  props: ['messages', 'emptyText'],
-  setup(props, { slots }) {
-    return () =>
-      h(
-        'div',
-        { class: 'stub-chat-list' },
-        (props.messages ?? []).map((m: { id: string | number }) =>
-          slots.message?.({ key: m.id, message: m }),
-        ),
-      );
+  name: 'ChatTray',
+  setup(_, { slots }) {
+    return () => h('div', { class: 'stub-chat-list' }, slots.default?.());
   },
 });
 const ComposerStub = defineComponent({
@@ -132,7 +125,7 @@ function mountChatView(sessionId: string) {
     props: { sessionId },
     global: {
       stubs: {
-        ChatMessageList: ListStub,
+        ChatTray: ListStub,
         ChatComposer: ComposerStub,
         NeumorphismButton: ButtonStub,
         NeumorphismTag: TagStub,

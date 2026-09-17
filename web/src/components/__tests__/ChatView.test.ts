@@ -11,11 +11,18 @@ import ChatView from '../ChatView.vue';
 import { state } from '../../store';
 
 // ── 库组件 mock：不渲染真实 ui-frame/chat（避免 markdown/dom 依赖） ──
-const ChatMessageListStub = defineComponent({
-  name: 'ChatMessageList',
-  props: ['messages', 'formatTime', 'emptyText'],
+// ChatView 自渲染消息行（ToolRunGroup 合并 + ChatMessageItem），容器为库 ChatTray。
+const ChatTrayStub = defineComponent({
+  name: 'ChatTray',
+  setup(_, { slots }) {
+    return () => h('div', { class: 'stub-list' }, slots.default?.());
+  },
+});
+const ChatMessageItemStub = defineComponent({
+  name: 'ChatMessageItem',
+  props: ['message'],
   setup(props) {
-    return () => h('div', { class: 'stub-list', 'data-count': String(props.messages.length) });
+    return () => h('div', { class: 'stub-item' }, String((props.message as { content?: string })?.content ?? ''));
   },
 });
 
@@ -43,7 +50,8 @@ function mountChatView(sessionId = 'local:tui::local_user') {
     props: { sessionId },
     global: {
       stubs: {
-        ChatMessageList: ChatMessageListStub,
+        ChatTray: ChatTrayStub,
+        ChatMessageItem: ChatMessageItemStub,
         ChatComposer: ChatComposerStub,
       },
     },
@@ -80,9 +88,9 @@ describe('ChatView 布局契约', () => {
       { key: 'm2', role: 'user', content: 'b', time: 2, sessionId: 'local:tui::b' },
     ];
     const global = mountChatView('global');
-    expect(global.find('.stub-list').attributes('data-count')).toBe('2');
+    expect(global.findAll('.stub-item').length).toBe(2);
     const scoped = mountChatView('local:tui::a');
-    expect(scoped.find('.stub-list').attributes('data-count')).toBe('1');
+    expect(scoped.findAll('.stub-item').length).toBe(1);
   });
 
   it('输入区吸底悬浮（absolute 叠层）：样式契约', () => {
@@ -216,7 +224,8 @@ describe('ChatView 布局契约', () => {
       props: { sessionId: 'local:tui::local_user' },
       global: {
         stubs: {
-          ChatMessageList: ChatMessageListStub,
+          ChatTray: ChatTrayStub,
+          ChatMessageItem: ChatMessageItemStub,
           ChatComposer: ChatComposerStub,
           TasksPanel: TasksPanelStub,
         },
@@ -247,7 +256,8 @@ describe('ChatView 布局契约', () => {
       props: { sessionId: 'local:tui::local_user', activeTeamId: 'alix' },
       global: {
         stubs: {
-          ChatMessageList: ChatMessageListStub,
+          ChatTray: ChatTrayStub,
+          ChatMessageItem: ChatMessageItemStub,
           ChatComposer: ChatComposerStub,
         },
       },

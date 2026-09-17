@@ -9,7 +9,7 @@ import { NeumorphismBadge, NeumorphismButton } from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
   ChatMessageItem,
-  ChatMessageList,
+  ChatTray,
   type ChatMessage,
 } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
@@ -26,6 +26,7 @@ import WorkspacePanel from './WorkspacePanel.vue';
 import SessionSwitcher from './SessionSwitcher.vue';
 import MenuCard from './MenuCard.vue';
 import TasksPanel from './TasksPanel.vue';
+import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
 
 const props = defineProps<{ sessionId: string; activeTeamId?: string | null }>();
 const emit = defineEmits<{
@@ -372,6 +373,61 @@ const messages = computed<ChatMessage[]>(() => {
   return mapped;
 });
 
+// ── 连续工具调用合并（2026-09-19）──
+// 多个 tool 连续出现时合成一条 ToolRunGroup：折叠态 = 一排圆角矩形图标
+// （横向扩展、空间不足自动换行），点击图标在下方浮现具体内容卡片；
+// 运行过程中默认折叠，全部完成且有失败时自动展开首个失败项。
+type ChatRow =
+  | { kind: 'single'; message: ChatMessage }
+  | { kind: 'tool-group'; key: string; items: ToolRunItem[] };
+
+const toolRowOf = (m: ChatMessage): ToolRunItem | null => {
+  const tool = m.tool;
+  if (m.role !== 'tool' || !tool) return null;
+  return {
+    key: String(m.id),
+    name: tool.name,
+    input: tool.input,
+    output: tool.output,
+    status: tool.status,
+    time: m.time ? formatTime(m.time) : undefined,
+  };
+};
+
+const messageRows = computed<ChatRow[]>(() => {
+  const rows: ChatRow[] = [];
+  for (const m of messages.value) {
+    const item = toolRowOf(m);
+    if (!item) {
+      rows.push({ kind: 'single', message: m });
+      continue;
+    }
+    const last = rows[rows.length - 1];
+    if (last && last.kind === 'tool-group') {
+      last.items.push(item);
+    } else {
+      rows.push({ kind: 'tool-group', key: `tools:${item.key}`, items: [item] });
+    }
+  }
+  return rows;
+});
+
+function rowKey(row: ChatRow): string {
+  return row.kind === 'tool-group' ? row.key : String(row.message.id);
+}
+
+/** ChatTray 吸底观察源：最后一条消息的尾部内容（与库 ChatMessageList 同源）。 */
+function trayWatchSource(): unknown {
+  const last = messages.value[messages.value.length - 1];
+  return [
+    messages.value.length,
+    last?.content,
+    last?.reasoning?.length,
+    last?.tool?.output,
+    last?.branch?.entries.length,
+  ];
+}
+
 const emptyText = computed(() =>
   props.sessionId === 'global'
     ? '（暂无消息，从下方输入开始对话）'
@@ -672,44 +728,53 @@ function imagesOf(message: ChatMessage): string[] {
         </div>
       </div>
     </div>
-    <!-- 消息列表：flex:1，内部 ChatTray 独立滚动 -->
-    <ChatMessageList
+    <!-- 消息列表：flex:1，内部 ChatTray 独立滚动。
+         连续工具调用合并为一行图标（ToolRunGroup）；其余消息照旧逐条渲染。
+         （不交给 ChatMessageList 的逐条 #message 插槽：工具行需要跨条合并，
+         这里自渲染，滚动/吸底沿用库的 ChatTray。） -->
+    <ChatTray
       class="chat-view__list"
-      :messages="messages"
-      :format-time="formatTime"
-      :empty-text="emptyText"
+      :watch-source="trayWatchSource"
     >
-      <template #message="slot">
-        <!-- 选单：内联卡片（会话区内作答，不弹窗）；归属当前会话且未应答时存在 -->
-        <MenuCard
-          v-if="isMenuMessage(slot.message.id) && pendingMenu"
-          :prompt="pendingMenu"
+      <div v-if="messageRows.length === 0" class="chat-view__empty">{{ emptyText }}</div>
+      <template v-for="row in messageRows" :key="rowKey(row)">
+        <ToolRunGroup
+          v-if="row.kind === 'tool-group'"
+          :items="row.items"
           class="chat-view__item"
         />
-        <!-- 推理：面板扩展角色，由 ReasoningBlock 渲染（打字机动画）；时序穿插 -->
-        <ReasoningBlock
-          v-else-if="(slot.message as { role: string }).role === 'reasoning'"
-          :text="slot.message.content"
-          :animate="(slot.message as ChatMessageWithImages).animate !== false"
-        />
-        <div
-          v-else
-          class="chat-view__item"
-          :class="{ 'chat-view__item--enter': (slot.message as ChatMessageWithImages).animate }"
-        >
-          <div v-if="imagesOf(slot.message).length" class="chat-view__images">
-            <img
-              v-for="(img, i) in imagesOf(slot.message)"
-              :key="i"
-              :src="img"
-              class="chat-view__image"
-              alt=""
-            />
+        <template v-else-if="row.kind === 'single'">
+          <!-- 选单：内联卡片（会话区内作答，不弹窗）；归属当前会话且未应答时存在 -->
+          <MenuCard
+            v-if="isMenuMessage(row.message.id) && pendingMenu"
+            :prompt="pendingMenu"
+            class="chat-view__item"
+          />
+          <!-- 推理：面板扩展角色，由 ReasoningBlock 渲染（打字机动画）；时序穿插 -->
+          <ReasoningBlock
+            v-else-if="(row.message as { role: string }).role === 'reasoning'"
+            :text="row.message.content"
+            :animate="(row.message as ChatMessageWithImages).animate !== false"
+          />
+          <div
+            v-else
+            class="chat-view__item"
+            :class="{ 'chat-view__item--enter': (row.message as ChatMessageWithImages).animate }"
+          >
+            <div v-if="imagesOf(row.message).length" class="chat-view__images">
+              <img
+                v-for="(img, i) in imagesOf(row.message)"
+                :key="i"
+                :src="img"
+                class="chat-view__image"
+                alt=""
+              />
+            </div>
+            <ChatMessageItem :message="row.message" :format-time="formatTime" />
           </div>
-          <ChatMessageItem :message="slot.message" :format-time="formatTime" />
-        </div>
+        </template>
       </template>
-    </ChatMessageList>
+    </ChatTray>
 
     <!-- Agent 配置悬浮弹层：覆盖会话区（上/左/右 12px，底距配置按钮 12px） -->
     <AgentConfigModal
@@ -847,6 +912,14 @@ function imagesOf(message: ChatMessage): string[] {
 /* 滚动区内部底部预留：按输入框最大高度(5行,约156px) + 边距(12px) + 松量 */
 .chat-view__list :deep(.nm-chat-tray__scroll) {
   padding-bottom: 190px;
+}
+
+/* 空态占位（自渲染列表后，empty 不再由库 ChatMessageList 提供） */
+.chat-view__empty {
+  margin: auto;
+  padding: 24px;
+  color: var(--nm-text-placeholder);
+  font-size: var(--nm-font-sm);
 }
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上；
