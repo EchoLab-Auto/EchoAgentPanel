@@ -1,13 +1,16 @@
-//! 侧边栏契约（2026-09-14 会话卡迁出后）。
+//! 右侧边栏卡片栈契约（RailStack，2026-09-19）。
 //!
-//! 背景：侧边栏原有「会话」卡（SessionGroups）——多会话上下文上线后，
-//! 会话切换统一走入口行「会话」按钮（SessionSwitcher），侧边栏会话卡
-//! 已删除（避免两处入口重复/状态分叉）。本测试锁定：
-//! - 侧边栏只保留「临时分支」卡，且仅并行多会话模式显示；
-//! - 任何模式下都不再渲染「会话」卡（防回流）。
+//! 卡片：文件浏览器（workspace 插件 + 激活会话时）/ Shell（常驻）/
+//! 临时分支（并行模式）。卡片可折叠为横条；分隔条拖动调整上下空间。
+//! 本测试锁定：卡片门控、折叠行为、会话切换卡不回流。
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
+
+vi.mock('../../connection', () => ({
+  sendCommand: vi.fn(),
+}));
+
 import PanelSidebar from '../PanelSidebar.vue';
 import { state } from '../../store';
 import type { SessionInfo, TeamInfo } from '../../protocol';
@@ -33,26 +36,84 @@ function session(over: Partial<SessionInfo>): SessionInfo {
 
 function mountSidebar() {
   return mount(PanelSidebar, {
-    props: { activeBranchId: null },
+    props: { activeBranchId: null, teamId: 'alix' },
   });
 }
 
-describe('PanelSidebar（会话卡已迁出）', () => {
+describe('PanelSidebar（右侧边栏卡片栈）', () => {
   beforeEach(() => {
+    localStorage.clear();
     state.teams = [team({ loop_mode: 'single' })];
     state.activeTeamId = 'alix';
     state.sessions = [session({})];
     state.branchTabs = {};
+    state.shellSessions = [];
+    state.connected = true;
+    state.workspaceSessions = [];
+    state.workspaceActive = null;
+    state.workspaceTeamId = null;
   });
 
-  it('单会话模式：无任何卡片', () => {
+  it('卡片顺序与门控：Shell 常驻（在文件浏览器下方）、临时分支仅并行模式、无激活工作区时无文件浏览器卡', () => {
     const wrapper = mountSidebar();
-    const text = wrapper.text();
-    expect(text).not.toContain('临时分支');
-    expect(text).not.toContain('会话');
+    const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
+    expect(titles.some((t) => t.startsWith('Shell'))).toBe(true);
+    expect(titles.some((t) => t.includes('临时分支'))).toBe(false);
+    expect(titles.some((t) => t.includes('文件浏览器'))).toBe(false);
   });
 
-  it('存在 QQ 会话时也不渲染「会话」卡（切换统一走入口行按钮）', () => {
+  it('有激活工作区会话：文件浏览器卡在最上方，Shell 在其下方', () => {
+    state.workspaceSessions = [
+      { id: 'core', name: '框架', description: '', directories: ['/srv/core'] },
+    ];
+    state.workspaceActive = 'core';
+    state.workspaceTeamId = 'alix';
+    const wrapper = mountSidebar();
+    const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
+    expect(titles[0]).toContain('文件浏览器');
+    expect(titles[0]).toContain('框架');
+    expect(titles[1]).toContain('Shell');
+  });
+
+  it('并行多会话模式：临时分支卡出现在栈尾', () => {
+    state.teams = [team({ loop_mode: 'parallel' })];
+    const wrapper = mountSidebar();
+    const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
+    expect(titles[titles.length - 1]).toContain('临时分支');
+  });
+
+  it('卡片可折叠为横条：点卡头收起内容（折叠态持久化）', async () => {
+    const wrapper = mountSidebar();
+    const head = wrapper.findAll('.rail-stack__head').find((el) => el.text().includes('Shell'));
+    expect(head).toBeTruthy();
+    await head!.trigger('click');
+    // 折叠后内容区从 DOM 移除（v-if），卡片收缩为横条
+    expect(wrapper.find('.shell-panel').exists()).toBe(false);
+    const saved = JSON.parse(localStorage.getItem('echo-panel-rail-cards') ?? '{}');
+    expect(saved.open?.shell).toBe(false);
+    await head!.trigger('click');
+    expect(wrapper.find('.shell-panel').exists()).toBe(true);
+  });
+
+  it('两张卡都展开时分隔条可拖动（draggable 标记），折叠后不可拖', async () => {
+    state.workspaceSessions = [
+      { id: 'core', name: '框架', description: '', directories: ['/srv/core'] },
+    ];
+    state.workspaceActive = 'core';
+    state.workspaceTeamId = 'alix';
+    const wrapper = mountSidebar();
+    const divider = wrapper.find('.rail-stack__divider');
+    expect(divider.exists()).toBe(true);
+    expect(divider.classes()).toContain('rail-stack__divider--draggable');
+    // 折叠上方卡片后分隔条不可拖
+    const head = wrapper.findAll('.rail-stack__head')[0];
+    await head.trigger('click');
+    expect(wrapper.find('.rail-stack__divider').classes()).not.toContain(
+      'rail-stack__divider--draggable',
+    );
+  });
+
+  it('不渲染「会话」切换卡（切换统一走入口行按钮）', () => {
     state.sessions.push(
       session({
         id: 'qq:dm::1828980067',
@@ -64,15 +125,6 @@ describe('PanelSidebar（会话卡已迁出）', () => {
       }),
     );
     const wrapper = mountSidebar();
-    expect(wrapper.text()).not.toContain('会话');
     expect(wrapper.text()).not.toContain('Evence');
-  });
-
-  it('并行多会话模式：仅「临时分支」卡（会话卡不再出现）', () => {
-    state.teams = [team({ loop_mode: 'parallel' })];
-    const wrapper = mountSidebar();
-    const text = wrapper.text();
-    expect(text).toContain('临时分支');
-    expect(text).not.toContain('会话');
   });
 });

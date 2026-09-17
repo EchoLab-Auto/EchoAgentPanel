@@ -27,7 +27,6 @@ import SessionSwitcher from './SessionSwitcher.vue';
 import MenuCard from './MenuCard.vue';
 import TasksPanel from './TasksPanel.vue';
 import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
-import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
 import PanelSidebar from './PanelSidebar.vue';
 
 const props = defineProps<{
@@ -269,33 +268,9 @@ function toggleWorkspace() {
 // ── 右侧边栏（2026-09-19）：会话视图右侧的常驻卡片容器 ──
 // 文件浏览器常驻其中（有激活工作区会话即出现），不经入口行开关；
 // 入口行「工作区」按钮只负责会话管理/git 弹层。容器预留扩展：
-// 后续卡片（如大纲/上下文摘要）追加进 .chat-rail 即可。
-const workspaceRailAvailable = computed(() => {
-  if (!workspaceAvailable.value) return false;
-  const synced = state.workspaceTeamId === (props.activeTeamId ?? state.teams[0]?.id ?? null);
-  return synced && !!state.workspaceActive;
-});
-
-/** 临时分支卡可见（并行多会话模式；与 PanelSidebar 内部判定同源）。 */
-const branchCardsVisible = computed(() => {
-  const team = state.teams.find(
-    (t) => t.id === (props.activeTeamId ?? state.teams[0]?.id ?? null),
-  );
-  return loopModeOf(team) === 'parallel';
-});
-
-/** 右侧边栏容器显隐：任一卡片可见即出现。 */
-const railVisible = computed(
-  () => workspaceRailAvailable.value || branchCardsVisible.value,
-);
-
-/** 右侧边栏浏览目标：当前激活的工作区会话信息。 */
-const railWorkspaceSession = computed(() => {
-  if (!state.workspaceActive) return null;
-  return (
-    state.workspaceSessions.find((s) => s.id === state.workspaceActive) ?? null
-  );
-});
+// 卡片栈（文件浏览器/Shell/临时分支）在 PanelSidebar 内部按门控组装；
+// 容器常驻，卡片折叠/空间分配由 RailStack 持久化。
+const railVisible = computed(() => true);
 
 // 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
@@ -812,32 +787,14 @@ function imagesOf(message: ChatMessage): string[] {
       @close="configOpen = false"
     />
 
-    <!-- 右侧边栏（常驻容器）：文件浏览器卡片（有激活工作区会话即出现）
-         + 临时分支等卡片（PanelSidebar，按模式门控） -->
+    <!-- 右侧边栏（常驻容器）：PanelSidebar 卡片栈
+         （文件浏览器 / Shell / 临时分支，上下排列，可折叠/拖动分隔条） -->
     <aside v-if="railVisible" class="chat-rail">
-      <div v-if="workspaceRailAvailable" class="chat-rail__card">
-        <div class="chat-rail__head">
-          <span class="chat-rail__title">文件浏览器</span>
-          <span class="chat-rail__sub">{{ railWorkspaceSession?.name ?? '' }}</span>
-          <button
-            type="button"
-            class="chat-rail__manage"
-            title="工作区会话管理与 git 状态"
-            @click="toggleWorkspace"
-          >
-            管理
-          </button>
-        </div>
-        <div class="chat-rail__body">
-          <WorkspaceFileBrowser
-            :team-id="props.activeTeamId ?? null"
-            :session="railWorkspaceSession"
-          />
-        </div>
-      </div>
       <PanelSidebar
         :active-branch-id="props.activeBranchId ?? null"
+        :team-id="props.activeTeamId ?? null"
         @select-branch="(id) => emit('selectBranch', id)"
+        @manage-workspace="toggleWorkspace"
       />
     </aside>
 
@@ -956,74 +913,26 @@ function imagesOf(message: ChatMessage): string[] {
   min-height: 0;
 }
 
-/* 右侧边栏：会话视图右侧的卡片容器（工作区文件浏览器等）。
-   打开时主区让出 264px（与左侧边栏同宽，视觉对称）；圆角毛玻璃卡。 */
+/* 右侧边栏：会话视图右侧的常驻卡片容器（RailStack：文件浏览器/Shell/
+   临时分支上下排列，折叠为横条，分隔条拖动调整上下空间）。 */
 .chat-rail {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  bottom: v-bind(entryBottom);
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 4;
-  width: 264px;
+  width: 300px;
   display: flex;
   flex-direction: column;
-  border-radius: 20px;
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border-left: 1px solid var(--nm-border-color);
   background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.3);
 }
-.chat-rail__card {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}
-.chat-rail__card + :deep(.panel-rail-cards) {
-  flex: 0 0 auto;
-  padding: 10px 12px;
-  border-top: 1px solid var(--nm-border-subtle);
-}
-.chat-rail__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px 8px;
-  border-bottom: 1px solid var(--nm-border-subtle);
-}
-.chat-rail__title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--nm-text-primary);
-}
-.chat-rail__sub {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--nm-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-rail__manage {
-  border: none;
-  background: transparent;
-  color: var(--panel-accent);
-  font-size: 11px;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-.chat-rail__manage:hover {
-  background: var(--panel-accent-soft);
-}
-.chat-rail__body {
+.chat-rail > :deep(.rail-stack) {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: 10px 12px;
 }
 
 /* ChatTray 需要定高父级才能出现滚动区。
