@@ -260,16 +260,10 @@ function toggleWorkspace() {
   showWorkspace.value = true;
 }
 
-// ── 右侧边栏（2026-09-19）：会话视图右侧的卡片容器（workspace 文件浏览器）──
-// 「工作区」按钮切换右侧边栏；会话管理/git 仍在原弹层（入口行按钮旁的
-// 小三角不再单独开——弹层入口保留在 rail 头部「管理」）。
-const showWorkspaceRail = ref(false);
-
-function toggleWorkspaceRail() {
-  showWorkspaceRail.value = !showWorkspaceRail.value;
-}
-
-/** 右侧边栏显隐：workspace 插件可用且存在激活的工作区会话。 */
+// ── 右侧边栏（2026-09-19）：会话视图右侧的常驻卡片容器 ──
+// 文件浏览器常驻其中（有激活工作区会话即出现），不经入口行开关；
+// 入口行「工作区」按钮只负责会话管理/git 弹层。容器预留扩展：
+// 后续卡片（如大纲/上下文摘要）追加进 .chat-rail 即可。
 const workspaceRailAvailable = computed(() => {
   if (!workspaceAvailable.value) return false;
   const synced = state.workspaceTeamId === (props.activeTeamId ?? state.teams[0]?.id ?? null);
@@ -282,11 +276,6 @@ const railWorkspaceSession = computed(() => {
   return (
     state.workspaceSessions.find((s) => s.id === state.workspaceActive) ?? null
   );
-});
-
-// 插件/team 切换或激活取消时收起右侧边栏。
-watch(workspaceRailAvailable, (available) => {
-  if (!available) showWorkspaceRail.value = false;
 });
 
 // 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
@@ -631,8 +620,8 @@ function imagesOf(message: ChatMessage): string[] {
         variant="glass"
         shape="pill"
         size="small"
-        title="工作区文件浏览器（右侧边栏）；会话管理与 git 状态见弹层"
-        @click="toggleWorkspaceRail"
+        title="工作区会话（多会话 / 多目录 / git 状态；文件浏览器常驻右侧边栏）"
+        @click="toggleWorkspace"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -804,8 +793,9 @@ function imagesOf(message: ChatMessage): string[] {
       @close="configOpen = false"
     />
 
-    <!-- 右侧边栏：工作区文件浏览器卡片（激活工作区会话时可用） -->
-    <aside v-if="showWorkspaceRail && workspaceRailAvailable" class="chat-rail">
+    <!-- 右侧边栏（常驻容器）：工作区文件浏览器卡片
+         （有激活工作区会话即出现，不经入口行开关） -->
+    <aside v-if="workspaceRailAvailable" class="chat-rail">
       <div class="chat-rail__head">
         <span class="chat-rail__title">文件浏览器</span>
         <span class="chat-rail__sub">{{ railWorkspaceSession?.name ?? '' }}</span>
@@ -816,14 +806,6 @@ function imagesOf(message: ChatMessage): string[] {
           @click="toggleWorkspace"
         >
           管理
-        </button>
-        <button
-          type="button"
-          class="chat-rail__close"
-          title="收起右侧边栏"
-          @click="showWorkspaceRail = false"
-        >
-          ×
         </button>
       </div>
       <div class="chat-rail__body">
@@ -988,18 +970,6 @@ function imagesOf(message: ChatMessage): string[] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.chat-rail__close {
-  border: none;
-  background: transparent;
-  color: var(--nm-text-secondary);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0 4px;
-  border-radius: 6px;
-}
-.chat-rail__close:hover {
-  color: var(--nm-text-primary);
 }
 .chat-rail__manage {
   border: none;
