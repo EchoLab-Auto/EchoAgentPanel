@@ -919,7 +919,9 @@ function imagesOf(message: ChatMessage): string[] {
   position: absolute;
   top: 0;
   right: 0;
-  bottom: 0;
+  /* 下界不超过输入框外边框上方 5px：输入框上缘 = entryBottom(输入框高+24)
+     - 12(底部边距) - 12(与入口行的间隔) → 再退 5px。 */
+  bottom: calc(v-bind(entryBottom) - 17px);
   z-index: 4;
   width: 324px;
   display: flex;
