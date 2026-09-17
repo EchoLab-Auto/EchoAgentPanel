@@ -21,14 +21,13 @@ import {
 } from './workspace';
 import ChatView from './components/ChatView.vue';
 import SettingsView from './components/SettingsView.vue';
-import ShellPanel from './components/ShellPanel.vue';
 import BranchModal from './components/BranchModal.vue';
 import SudoModal from './components/SudoModal.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
 
-type View = 'chat' | 'settings' | 'shell';
+type View = 'chat' | 'settings';
 
 const view = ref<View>(loadView());
 
@@ -39,7 +38,9 @@ function loadView(): View {
     // 聊天入口行的「任务」弹层（按当前 agent 的当前会话过滤）。
     if (saved === 'caps' || saved === 'logs') return 'settings';
     if (saved === 'tasks') return 'chat';
-    return (['chat', 'settings', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
+    // Shell 视图已并入会话视图右侧边栏的「Shell」卡（2026-09-19）
+    if (saved === 'shell') return 'chat';
+    return (['chat', 'settings'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
   }
@@ -294,14 +295,6 @@ watch(
           <NeumorphismButton
             size="small"
             variant="glass"
-            :pressed="view === 'shell'"
-            @click="setView('shell')"
-          >
-            Shell
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
             :pressed="view === 'settings'"
             @click="setView('settings')"
           >
@@ -325,8 +318,7 @@ watch(
           @select-session="onSessionPick"
           @select-branch="(id) => (activeBranchId = id)"
         />
-        <SettingsView v-else-if="view === 'settings'" />
-        <ShellPanel v-else />
+        <SettingsView v-else />
       </div>
     </NeumorphismLayout>
 
