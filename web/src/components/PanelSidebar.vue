@@ -7,7 +7,6 @@ import { computed, ref } from 'vue';
 import { state } from '../store';
 import { loopModeOf } from '../protocol';
 import SidebarCard from './SidebarCard.vue';
-import ShellPanel from './ShellPanel.vue';
 
 defineProps<{
   activeBranchId: string | null;
@@ -24,12 +23,9 @@ const replyBranchesVisible = computed(() => {
   return loopModeOf(team) === 'parallel';
 });
 
-const cardOpen = ref<Record<'branches' | 'shell', boolean>>({
-  branches: true,
-  shell: true,
-});
+const cardOpen = ref<Record<'branches', boolean>>({ branches: true });
 
-function toggleCard(key: 'branches' | 'shell') {
+function toggleCard(key: 'branches') {
   cardOpen.value[key] = !cardOpen.value[key];
 }
 
@@ -63,17 +59,6 @@ function truncateTask(task: string): string {
           {{ truncateTask(state.branchTabs[branchId].task) }}
         </span>
       </div>
-    </SidebarCard>
-
-    <!-- 卡片：Shell 会话（2026-09-19 起从顶栏视图迁入右侧边栏容器） -->
-    <SidebarCard
-      title="Shell"
-      :open="cardOpen.shell"
-      :count="state.shellSessions.length"
-      count-title="会话数"
-      @toggle="toggleCard('shell')"
-    >
-      <ShellPanel />
     </SidebarCard>
   </div>
 </template>

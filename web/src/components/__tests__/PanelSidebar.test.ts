@@ -1,19 +1,13 @@
-//! 右侧边栏卡片容器契约（2026-09-19：迁入 chat-rail，新增 Shell 卡）。
+//! 侧边栏契约（2026-09-14 会话卡迁出后）。
 //!
-//! 背景：左侧边栏已移除；容器现承载「临时分支」（并行模式门控）与
-//! 「Shell」（常驻）两类卡片。会话切换统一走入口行「会话」按钮。
-//! 本测试锁定：
-//! - Shell 卡常驻（含计数徽标 = 会话数）；
-//! - 临时分支卡仅并行多会话模式显示；
-//! - 不再渲染「会话」切换卡（防回流）。
+//! 背景：侧边栏原有「会话」卡（SessionGroups）——多会话上下文上线后，
+//! 会话切换统一走入口行「会话」按钮（SessionSwitcher），侧边栏会话卡
+//! 已删除（避免两处入口重复/状态分叉）。本测试锁定：
+//! - 侧边栏只保留「临时分支」卡，且仅并行多会话模式显示；
+//! - 任何模式下都不再渲染「会话」卡（防回流）。
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
-
-vi.mock('../../connection', () => ({
-  sendCommand: vi.fn(),
-}));
-
 import PanelSidebar from '../PanelSidebar.vue';
 import { state } from '../../store';
 import type { SessionInfo, TeamInfo } from '../../protocol';
@@ -43,47 +37,22 @@ function mountSidebar() {
   });
 }
 
-describe('PanelSidebar（右侧边栏卡片容器）', () => {
+describe('PanelSidebar（会话卡已迁出）', () => {
   beforeEach(() => {
     state.teams = [team({ loop_mode: 'single' })];
     state.activeTeamId = 'alix';
     state.sessions = [session({})];
     state.branchTabs = {};
-    state.shellSessions = [];
-    state.connected = true;
   });
 
-  it('Shell 卡常驻，计数徽标 = 会话数；单会话模式无临时分支卡', () => {
+  it('单会话模式：无任何卡片', () => {
     const wrapper = mountSidebar();
     const text = wrapper.text();
-    expect(text).toContain('Shell');
     expect(text).not.toContain('临时分支');
+    expect(text).not.toContain('会话');
   });
 
-  it('卡片可折叠：点击 Shell 卡头收起内容，再点展开', async () => {
-    const wrapper = mountSidebar();
-    const head = wrapper.findAll('.sidebar-card-head').find((el) =>
-      el.text().includes('Shell'),
-    );
-    expect(head).toBeTruthy();
-    await head!.trigger('click');
-    // 收起后终端面板内容隐藏（v-show：仍在 DOM 但不可见）
-    const body = wrapper.findAll('.sidebar-card-body').find((el) =>
-      (el.element as HTMLElement).innerHTML.includes('shell-panel'),
-    );
-    expect(body).toBeTruthy();
-    expect((body!.element as HTMLElement).style.display).toBe('none');
-  });
-
-  it('并行多会话模式：临时分支卡 + Shell 卡并存', () => {
-    state.teams = [team({ loop_mode: 'parallel' })];
-    const wrapper = mountSidebar();
-    const text = wrapper.text();
-    expect(text).toContain('临时分支');
-    expect(text).toContain('Shell');
-  });
-
-  it('不渲染「会话」切换卡（切换统一走入口行按钮）', () => {
+  it('存在 QQ 会话时也不渲染「会话」卡（切换统一走入口行按钮）', () => {
     state.sessions.push(
       session({
         id: 'qq:dm::1828980067',
@@ -95,6 +64,15 @@ describe('PanelSidebar（右侧边栏卡片容器）', () => {
       }),
     );
     const wrapper = mountSidebar();
+    expect(wrapper.text()).not.toContain('会话');
     expect(wrapper.text()).not.toContain('Evence');
+  });
+
+  it('并行多会话模式：仅「临时分支」卡（会话卡不再出现）', () => {
+    state.teams = [team({ loop_mode: 'parallel' })];
+    const wrapper = mountSidebar();
+    const text = wrapper.text();
+    expect(text).toContain('临时分支');
+    expect(text).not.toContain('会话');
   });
 });

@@ -276,62 +276,18 @@ const workspaceRailAvailable = computed(() => {
   return synced && !!state.workspaceActive;
 });
 
-/** 右侧边栏容器常驻（Shell 卡始终在；卡片门控在 PanelSidebar 内部）。 */
-const railVisible = computed(() => true);
+/** 临时分支卡可见（并行多会话模式；与 PanelSidebar 内部判定同源）。 */
+const branchCardsVisible = computed(() => {
+  const team = state.teams.find(
+    (t) => t.id === (props.activeTeamId ?? state.teams[0]?.id ?? null),
+  );
+  return loopModeOf(team) === 'parallel';
+});
 
-// ── 右侧边栏折叠：整条容器收起为窄条（点击展开），状态持久化 ──
-const railCollapsed = ref<boolean>(
-  (() => {
-    try {
-      return localStorage.getItem('echo-panel-rail-collapsed') === '1';
-    } catch {
-      return false;
-    }
-  })(),
+/** 右侧边栏容器显隐：任一卡片可见即出现。 */
+const railVisible = computed(
+  () => workspaceRailAvailable.value || branchCardsVisible.value,
 );
-
-function toggleRailCollapsed() {
-  railCollapsed.value = !railCollapsed.value;
-  try {
-    localStorage.setItem('echo-panel-rail-collapsed', railCollapsed.value ? '1' : '0');
-  } catch {
-    // ignore
-  }
-}
-
-// ── 右侧边栏宽度：左缘拖拽调整（240..560px），持久化 ──
-const RAIL_DEFAULT_WIDTH = 264;
-const railWidth = ref<number>(
-  (() => {
-    try {
-      const v = parseInt(localStorage.getItem('echo-panel-rail-width') ?? '', 10);
-      return Number.isFinite(v) ? Math.min(560, Math.max(240, v)) : RAIL_DEFAULT_WIDTH;
-    } catch {
-      return RAIL_DEFAULT_WIDTH;
-    }
-  })(),
-);
-
-function onRailDragStart(event: MouseEvent) {
-  event.preventDefault();
-  const startX = event.clientX;
-  const startWidth = railWidth.value;
-  const onMove = (e: MouseEvent) => {
-    // 右缘固定在视口右侧：向左拖（clientX 减小）→ 变宽
-    railWidth.value = Math.min(560, Math.max(240, startWidth + (startX - e.clientX)));
-  };
-  const onUp = () => {
-    window.removeEventListener('mousemove', onMove);
-    window.removeEventListener('mouseup', onUp);
-    try {
-      localStorage.setItem('echo-panel-rail-width', String(railWidth.value));
-    } catch {
-      // ignore
-    }
-  };
-  window.addEventListener('mousemove', onMove);
-  window.addEventListener('mouseup', onUp);
-}
 
 /** 右侧边栏浏览目标：当前激活的工作区会话信息。 */
 const railWorkspaceSession = computed(() => {
@@ -857,54 +813,32 @@ function imagesOf(message: ChatMessage): string[] {
     />
 
     <!-- 右侧边栏（常驻容器）：文件浏览器卡片（有激活工作区会话即出现）
-         + Shell / 临时分支等卡片（PanelSidebar）。
-         可整条折叠为窄条；左缘拖拽调宽（240..560px，持久化）。 -->
-    <aside
-      v-if="railVisible"
-      class="chat-rail"
-      :class="{ 'chat-rail--collapsed': railCollapsed }"
-      :style="railCollapsed ? undefined : { width: railWidth + 'px' }"
-    >
-      <div
-        v-if="!railCollapsed"
-        class="chat-rail__drag"
-        title="拖动调整宽度"
-        @mousedown="onRailDragStart"
-      />
-      <button
-        type="button"
-        class="chat-rail__collapse"
-        :title="railCollapsed ? '展开右侧边栏' : '折叠右侧边栏'"
-        @click="toggleRailCollapsed"
-      >
-        {{ railCollapsed ? '«' : '»' }}
-      </button>
-      <template v-if="!railCollapsed">
-        <div v-if="workspaceRailAvailable" class="chat-rail__card">
-          <div class="chat-rail__head">
-            <span class="chat-rail__title">文件浏览器</span>
-            <span class="chat-rail__sub">{{ railWorkspaceSession?.name ?? '' }}</span>
-            <button
-              type="button"
-              class="chat-rail__manage"
-              title="工作区会话管理与 git 状态"
-              @click="toggleWorkspace"
-            >
-              管理
-            </button>
-          </div>
-          <div class="chat-rail__body">
-            <WorkspaceFileBrowser
-              :team-id="props.activeTeamId ?? null"
-              :session="railWorkspaceSession"
-            />
-          </div>
+         + 临时分支等卡片（PanelSidebar，按模式门控） -->
+    <aside v-if="railVisible" class="chat-rail">
+      <div v-if="workspaceRailAvailable" class="chat-rail__card">
+        <div class="chat-rail__head">
+          <span class="chat-rail__title">文件浏览器</span>
+          <span class="chat-rail__sub">{{ railWorkspaceSession?.name ?? '' }}</span>
+          <button
+            type="button"
+            class="chat-rail__manage"
+            title="工作区会话管理与 git 状态"
+            @click="toggleWorkspace"
+          >
+            管理
+          </button>
         </div>
-        <PanelSidebar
-          :active-branch-id="props.activeBranchId ?? null"
-          @select-branch="(id) => emit('selectBranch', id)"
-        />
-      </template>
+        <div class="chat-rail__body">
+          <WorkspaceFileBrowser
+            :team-id="props.activeTeamId ?? null"
+            :session="railWorkspaceSession"
+          />
+        </div>
+      </div>
+      <PanelSidebar
+        :active-branch-id="props.activeBranchId ?? null"
+        @select-branch="(id) => emit('selectBranch', id)"
+      />
     </aside>
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
@@ -1026,37 +960,31 @@ function imagesOf(message: ChatMessage): string[] {
    打开时主区让出 264px（与左侧边栏同宽，视觉对称）；圆角毛玻璃卡。 */
 .chat-rail {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  top: 12px;
+  right: 12px;
+  bottom: v-bind(entryBottom);
   z-index: 4;
+  width: 264px;
   display: flex;
   flex-direction: column;
-  /* 容器边框：整体只留左右边框（上下贴边延伸到视图边缘） */
-  border-left: 1px solid var(--nm-border-color);
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
   background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
   overflow: hidden;
 }
-/* 内部卡片：上下边框分隔（容器不再用圆角卡片包裹） */
 .chat-rail__card {
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1;
-  border-bottom: 1px solid var(--nm-border-color);
 }
 .chat-rail__card + :deep(.panel-rail-cards) {
   flex: 0 0 auto;
   padding: 10px 12px;
-}
-.chat-rail__card + :deep(.panel-rail-cards > *) {
-  border-top: none;
-}
-.chat-rail :deep(.panel-rail-cards) {
-  border-top: 1px solid var(--nm-border-color);
+  border-top: 1px solid var(--nm-border-subtle);
 }
 .chat-rail__head {
   display: flex;
@@ -1064,47 +992,6 @@ function imagesOf(message: ChatMessage): string[] {
   gap: 8px;
   padding: 12px 14px 8px;
   border-bottom: 1px solid var(--nm-border-subtle);
-}
-/* 左缘拖拽把手：4px 宽，hover 高亮 */
-.chat-rail__drag {
-  position: absolute;
-  left: -2px;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  cursor: col-resize;
-  z-index: 2;
-}
-.chat-rail__drag:hover {
-  background: color-mix(in srgb, var(--panel-accent) 35%, transparent);
-}
-/* 折叠按钮：右上角小圆钮 */
-.chat-rail__collapse {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 2;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--nm-border-color);
-  border-radius: 50%;
-  background: var(--nm-surface-color);
-  color: var(--nm-text-secondary);
-  font-size: 11px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-}
-.chat-rail__collapse:hover {
-  color: var(--nm-text-primary);
-}
-/* 折叠态：收起为 28px 窄条（只留折叠按钮） */
-.chat-rail--collapsed {
-  width: 28px;
-}
-.chat-rail--collapsed .chat-rail__collapse {
-  top: 8px;
-  right: 3px;
 }
 .chat-rail__title {
   font-size: 13px;

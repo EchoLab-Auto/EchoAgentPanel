@@ -14,7 +14,6 @@ import { defineComponent, h } from 'vue';
 
 vi.mock('../../connection', () => ({
   sendMenuAnswer: vi.fn(),
-  sendCommand: vi.fn(),
 }));
 
 import { sendMenuAnswer } from '../../connection';
