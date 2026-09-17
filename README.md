@@ -23,7 +23,7 @@
 ## 功能（对齐原 TUI）
 
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
-- 工具调用进度、后台任务 / Subagent / 临时回复分支面板、清单面板
+- 工具调用进度、后台任务 / Subagent / 临时回复分支面板（会话视图入口行「任务」弹层，按当前会话过滤）、清单面板
 - API 设置（provider / model / base_url / api_key / profiles / system prompt）
 - 🔐 sudo 授权弹窗（遮罩密码，Enter 授权 / Esc 拒绝，专用通道提交）
 - QQ 管理（多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
