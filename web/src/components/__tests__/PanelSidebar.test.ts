@@ -88,11 +88,11 @@ describe('PanelSidebar（右侧边栏卡片栈）', () => {
     expect(head).toBeTruthy();
     await head!.trigger('click');
     // 折叠后内容区从 DOM 移除（v-if），卡片收缩为横条
-    expect(wrapper.find('.shell-panel').exists()).toBe(false);
+    expect(wrapper.find('.shell-list').exists()).toBe(false);
     const saved = JSON.parse(localStorage.getItem('echo-panel-rail-cards') ?? '{}');
     expect(saved.open?.shell).toBe(false);
     await head!.trigger('click');
-    expect(wrapper.find('.shell-panel').exists()).toBe(true);
+    expect(wrapper.find('.shell-list').exists()).toBe(true);
   });
 
   it('两张卡都展开时分隔条可拖动（draggable 标记），折叠后不可拖', async () => {

@@ -40,6 +40,7 @@ const emit = defineEmits<{
   selectTeam: [id: string | null];
   selectSession: [id: string];
   selectBranch: [id: string];
+  openShellDetail: [sessionId: string];
 }>();
 
 const input = ref('');
@@ -795,6 +796,7 @@ function imagesOf(message: ChatMessage): string[] {
         :team-id="props.activeTeamId ?? null"
         @select-branch="(id) => emit('selectBranch', id)"
         @manage-workspace="toggleWorkspace"
+        @open-shell-detail="(id) => emit('openShellDetail', id)"
       />
     </aside>
 

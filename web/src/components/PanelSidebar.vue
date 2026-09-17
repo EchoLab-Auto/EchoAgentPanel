@@ -13,7 +13,7 @@ import { loopModeOf } from '../protocol';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import RailStack, { type RailCardDef } from './RailStack.vue';
 import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
-import ShellPanel from './ShellPanel.vue';
+import ShellList from './ShellList.vue';
 
 const props = defineProps<{
   activeBranchId: string | null;
@@ -23,6 +23,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   selectBranch: [id: string];
   manageWorkspace: [];
+  openShellDetail: [sessionId: string];
 }>();
 
 const currentTeam = computed(() => {
@@ -93,7 +94,7 @@ function truncateTask(task: string): string {
       </div>
     </template>
     <template #shell>
-      <ShellPanel />
+      <ShellList @open-detail="(id) => emit('openShellDetail', id)" />
     </template>
     <template #branches>
       <div v-if="Object.keys(state.branchTabs).length === 0" class="muted">

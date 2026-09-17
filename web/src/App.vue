@@ -31,6 +31,13 @@ startConnection();
 type View = 'chat' | 'settings' | 'shell';
 
 const view = ref<View>(loadView());
+/** Shell 详情视图的目标会话（右侧边栏「详情」按钮设置；null = 无目标） */
+const shellDetailId = ref<string | null>(null);
+
+function openShellDetail(sessionId: string) {
+  shellDetailId.value = sessionId;
+  setView('shell');
+}
 
 function loadView(): View {
   try {
@@ -324,9 +331,14 @@ watch(
           @select-team="onTeamSelect"
           @select-session="onSessionPick"
           @select-branch="(id) => (activeBranchId = id)"
+          @open-shell-detail="openShellDetail"
         />
         <SettingsView v-else-if="view === 'settings'" />
-        <ShellPanel v-else />
+        <ShellPanel
+          v-else-if="shellDetailId"
+          :session-id="shellDetailId"
+          @back="setView('chat')"
+        />
       </div>
     </NeumorphismLayout>
 

@@ -2,26 +2,24 @@
 //! Shell 面板：后台持久 shell 会话的终端可视化。
 //! 每个会话一张终端卡片：启动/停止会话、逐条命令回显 + 流式输出、运行态指示。
 
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 
-/** 新建会话的工作目录（默认空 = 框架 workspace） */
-const workdir = ref('');
+/** 详情视图（2026-09-19 起）：`sessionId` 必填，只展示该会话的终端。
+ *  会话列表在右侧边栏「Shell」卡（ShellList），点「详情」进入本视图。 */
+const props = defineProps<{ sessionId: string }>();
+const emit = defineEmits<{ back: [] }>();
+
+const session = computed(() =>
+  state.shellSessions.find((s) => s.session_id === props.sessionId) ?? null,
+);
+
 const inputBySession = ref<Record<string, string>>({});
 const terminalEls = ref<Record<string, HTMLElement | null>>({});
 
-function refresh() {
-  sendCommand('RequestShellSessions');
-}
-onMounted(refresh);
-
-function startSession() {
-  sendCommand({ ShellStart: { workdir: workdir.value.trim() || null } });
-  workdir.value = '';
-  refresh();
-}
+onMounted(() => sendCommand('RequestShellSessions'));
 
 function stopSession(sessionId: string) {
   sendCommand({ ShellStop: { session_id: sessionId } });
@@ -64,45 +62,27 @@ watch(
 
 <template>
   <div class="shell-panel">
-    <!-- 头部 -->
+    <!-- 头部：返回 + 会话信息 -->
     <div class="shell-head">
       <div class="shell-head__text">
-        <h2>后台 Shell</h2>
-        <p class="shell-head__sub">持久 bash 会话 · 终端可视化 · 与 LLM 工具共用同一会话</p>
+        <h2>Shell · {{ session?.session_id ?? props.sessionId }}</h2>
+        <p class="shell-head__sub">
+          {{ session?.workdir ?? '' }} ·
+          {{ session ? `${fmtTime(session.created_at_ms)} · ${session.exec_count} 条命令` : '会话不存在或已停止' }}
+        </p>
       </div>
       <div class="shell-head__actions">
-        <input
-          v-model="workdir"
-          class="shell-workdir"
-          placeholder="工作目录（默认框架 workspace）"
-          @keyup.enter="startSession"
-        />
-        <NeumorphismButton size="small" variant="primary" @click="startSession">新建会话</NeumorphismButton>
-        <NeumorphismButton size="small" variant="glass" @click="refresh">刷新</NeumorphismButton>
-      </div>
-    </div>
-
-    <!-- 会话卡片 -->
-    <div v-if="state.shellSessions.length === 0" class="shell-empty">
-      （暂无 shell 会话，点击「新建会话」开始）
-    </div>
-
-    <div
-      v-for="session in state.shellSessions"
-      :key="session.session_id"
-      class="shell-card"
-    >
-      <div class="shell-card__head">
-        <span class="shell-dot" />
-        <span class="shell-card__id">{{ session.session_id }}</span>
-        <span class="shell-card__meta">{{ session.workdir }}</span>
-        <span class="shell-card__meta">{{ fmtTime(session.created_at_ms) }} · {{ session.exec_count }} 条命令</span>
-        <span class="shell-card__spacer" />
-        <NeumorphismButton size="small" variant="glass" @click="stopSession(session.session_id)">
-          停止
+        <NeumorphismButton size="small" variant="glass" @click="emit('back')">返回列表</NeumorphismButton>
+        <NeumorphismButton v-if="session" size="small" variant="glass" @click="stopSession(session.session_id)">
+          停止会话
         </NeumorphismButton>
       </div>
+    </div>
 
+    <!-- 会话卡片（仅目标会话） -->
+    <div v-if="!session" class="shell-empty">（会话不存在或已停止，返回列表刷新）</div>
+
+    <div v-else class="shell-card">
       <!-- 终端区 -->
       <div ref="el => (terminalEls[session.session_id] = el)" class="shell-terminal">
         <div v-if="!(state.shellTerminals[session.session_id] ?? []).length" class="shell-terminal__hint">
