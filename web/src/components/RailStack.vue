@@ -159,8 +159,10 @@ defineExpose({ isOpen });
   min-height: 0;
   border-radius: 20px;
   border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
-  /* 完全透明：不铺底色、不做毛玻璃，仅保留描边与投影界定卡片形状 */
-  background: transparent;
+  /* 卡片本体：磨砂玻璃材质；其后的容器层完全透明（见 .chat-rail）。 */
+  background: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
