@@ -3,6 +3,7 @@
 //! 分隔条可拖动调整上下空间分配（flex-grow 比例，持久化）。
 
 import { ref } from 'vue';
+import { NeumorphismCard } from '@echolab-auto/ui-frame';
 
 export interface RailCardDef {
   /** 稳定 id（折叠态与高度比例持久化键） */
@@ -114,26 +115,34 @@ defineExpose({ isOpen });
             : undefined
         "
       />
-      <section class="rail-stack__card" :class="{ 'rail-stack__card--open': isOpen(card.id) }"
+      <!-- 卡片 = ui-frame NeumorphismCard（glass 磨砂玻璃；布局经透传的
+           rail-stack__card 类施加——卡片自身不内置布局，见库的布局契约） -->
+      <NeumorphismCard
+        glass
+        no-padding
+        class="rail-stack__card"
+        :class="{ 'rail-stack__card--open': isOpen(card.id) }"
         :style="isOpen(card.id) ? { flexGrow: flexOf(card.id) } : undefined"
       >
-        <header class="rail-stack__head" @click="toggle(card.id)">
-          <span class="rail-stack__title">
-            {{ card.title }}
-            <span
-              v-if="card.count && card.count > 0"
-              class="branch-tab-count"
-              :title="card.countTitle"
-            >
-              {{ card.count }}
+        <template #header>
+          <header class="rail-stack__head" @click="toggle(card.id)">
+            <span class="rail-stack__title">
+              {{ card.title }}
+              <span
+                v-if="card.count && card.count > 0"
+                class="branch-tab-count"
+                :title="card.countTitle"
+              >
+                {{ card.count }}
+              </span>
             </span>
-          </span>
-          <span class="rail-stack__caret">{{ isOpen(card.id) ? '▾' : '▸' }}</span>
-        </header>
+            <span class="rail-stack__caret">{{ isOpen(card.id) ? '▾' : '▸' }}</span>
+          </header>
+        </template>
         <div v-if="isOpen(card.id)" class="rail-stack__body">
           <slot :name="card.id" />
         </div>
-      </section>
+      </NeumorphismCard>
     </template>
   </div>
 </template>
@@ -152,22 +161,31 @@ defineExpose({ isOpen });
   overflow: hidden;
 }
 
+/* 布局（经透传类施加在 NeumorphismCard 根节点上；材质由库 glass 提供）：
+   折叠态收缩为横条，展开态按 flexGrow 比例分配空间；body 内部滚动。 */
 .rail-stack__card {
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto; /* 折叠态：横条 */
+  flex: 0 0 auto;
   min-height: 0;
+  /* 覆盖库 glass 底色的不透明度，与面板其他悬浮元素一致 */
+  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
+  --nm-glass-blur: 24px;
   border-radius: 20px;
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
-  /* 卡片本体：磨砂玻璃材质；其后的容器层完全透明（见 .chat-rail）。 */
-  background: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
-  overflow: hidden;
+}
+.rail-stack__card :deep(.nm-card__header),
+.rail-stack__card :deep(.nm-card__body) {
+  padding: 0;
+}
+.rail-stack__card :deep(.nm-card__body) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 .rail-stack__card--open {
-  flex: 1 1 0; /* 展开态：按 flexGrow 比例分配剩余空间 */
+  flex: 1 1 0;
   min-height: 80px;
 }
 
@@ -200,6 +218,8 @@ defineExpose({ isOpen });
   min-height: 0;
   overflow-y: auto;
   padding: 4px 14px 12px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 分隔条：卡片间隙中的隐形拖动把手（两张都展开时可拖动） */

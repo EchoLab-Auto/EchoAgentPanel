@@ -58,13 +58,14 @@ describe('App 顶栏', () => {
     // 品牌 + 连接态 + 导航
     expect(headerText).toContain('EchoAgent Panel');
     expect(headerText).toContain('已连接');
-    for (const label of ['聊天', 'Shell', '设置']) {
+    for (const label of ['聊天', '设置']) {
       expect(headerText).toContain(label);
     }
     // 模型名/供应商不得出现在顶栏
     expect(headerText).not.toMatch(/model|模型|deepseek|openai|anthropic|claude|kimi|gpt/i);
-    // 任务视图已并入入口行：顶栏不再出现全局任务入口
+    // 任务/Shell 视图已分别并入入口行与右侧边栏：顶栏无全局入口
     expect(headerText).not.toContain('任务');
+    expect(headerText).not.toContain('Shell');
     // 忙碌徽标已移除：顶栏不出现 忙碌/×N，且不含任何 nm-tag
     expect(headerText).not.toContain('忙碌');
     expect(header.find('.nm-tag').exists()).toBe(false);

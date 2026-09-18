@@ -1,18 +1,34 @@
-import { ref as n } from "vue";
-function c(r = {}) {
-  const { resetDelay: a = 1200 } = r, e = n(!1);
-  let t;
-  async function i(o) {
+import { ref as f } from "vue";
+function d(a = {}) {
+  const { resetDelay: i = 1200 } = a, r = f(!1);
+  let n;
+  function c(t) {
+    if (typeof document > "u") return !1;
+    const e = document.createElement("textarea");
+    e.value = t, e.style.position = "fixed", e.style.opacity = "0", document.body.appendChild(e), e.select();
     try {
-      return typeof navigator > "u" || !navigator.clipboard ? !1 : (await navigator.clipboard.writeText(o), e.value = !0, t && clearTimeout(t), t = setTimeout(() => {
-        e.value = !1;
-      }, a), !0);
+      return document.execCommand("copy");
     } catch {
       return !1;
+    } finally {
+      e.remove();
     }
   }
-  return { copied: e, copy: i };
+  function o() {
+    r.value = !0, n && clearTimeout(n), n = setTimeout(() => {
+      r.value = !1;
+    }, i);
+  }
+  async function u(t) {
+    try {
+      if (typeof navigator < "u" && navigator.clipboard)
+        return await navigator.clipboard.writeText(t), o(), !0;
+    } catch {
+    }
+    return c(t) ? (o(), !0) : !1;
+  }
+  return { copied: r, copy: u };
 }
 export {
-  c as useClipboard
+  d as useClipboard
 };
