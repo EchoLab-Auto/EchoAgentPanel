@@ -108,7 +108,7 @@ import { a as bo, N as yo } from "./chunks/NeumorphismRadioGroup-LbLt8St5.js";
 import { N as wo } from "./chunks/NeumorphismCheckbox-ZN_HeVOw.js";
 import { T as Ao } from "./chunks/ThemeProvider-CCR_TjUs.js";
 import { N as Po } from "./chunks/NeumorphismInput-BlgrjPEH.js";
-import { N as Ro } from "./chunks/NeumorphismCard-BYf9mwR0.js";
+import { N as Ro } from "./chunks/NeumorphismCard-BE0-5aJC.js";
 import { N as Fo } from "./chunks/NeumorphismSwitch-Caas9-Oj.js";
 import { N as Io } from "./chunks/NeumorphismButton-DEVgFO0I.js";
 import './ui-frame.css';const c = /* @__PURE__ */ new WeakMap();

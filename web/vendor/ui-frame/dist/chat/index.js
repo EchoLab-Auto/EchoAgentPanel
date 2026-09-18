@@ -3,7 +3,7 @@ import { useLocale as w } from "../composables/useLocale.js";
 import { u as A } from "../chunks/createComponent-jnXBYqCm.js";
 import { useChatScroll as q } from "../composables/useChatScroll.js";
 import { _ as T } from "../chunks/_plugin-vue_export-helper-CHgC5LLL.js";
-import { _ as H } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-RcXhGxPg.js";
+import { _ as H } from "../chunks/MarkdownRenderer.vue_vue_type_style_index_0_lang-CQWAEYiQ.js";
 import { useClipboard as Q } from "../composables/useClipboard.js";
 import { N as V } from "../chunks/NeumorphismTag-S0FZZ2i6.js";
 import { N as X } from "../chunks/NeumorphismSpinner-CecIG42-.js";
