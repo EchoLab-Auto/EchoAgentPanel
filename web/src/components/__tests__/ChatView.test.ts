@@ -9,6 +9,7 @@ import { mount } from '@vue/test-utils';
 import { defineComponent, h } from 'vue';
 import ChatView from '../ChatView.vue';
 import { state } from '../../store';
+import { displayContentOf } from '../../state_domains/timeline';
 
 // ── 库组件 mock：不渲染真实 ui-frame/chat（避免 markdown/dom 依赖） ──
 // ChatView 自渲染消息行（ToolRunGroup 合并 + ChatMessageItem），容器为库 ChatTray。
@@ -291,5 +292,15 @@ describe('ChatView 布局契约', () => {
     expect(raw).not.toContain('🖼');
     // 发送按钮内联 flex 布局（图标+文字）
     expect(styleBlock).toMatch(/chat-view__send\s*\{[^}]*display:\s*inline-flex/s);
+  });
+});
+
+describe('displayContentOf（hook 输入展示剥离）', () => {
+  it('hook 输入只显示 payload.content；非 hook 原样返回', () => {
+    const hook = `<qq_message_hook>{"content":"你好","message_sequence":5}</qq_message_hook>`;
+    expect(displayContentOf(hook)).toBe('你好');
+    expect(displayContentOf('普通文本 {"a":1}')).toBe('普通文本 {"a":1}');
+    // 非法 JSON 兜底原样
+    expect(displayContentOf('<qq_message_hook>{bad}</qq_message_hook>')).toContain('{bad}');
   });
 });

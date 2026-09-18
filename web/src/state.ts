@@ -11,7 +11,7 @@ import {
   integrateBackgroundTask,
   stageOrchestrationTool,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage } from './state_domains/timeline';
+import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf } from './state_domains/timeline';
 import { sendCommand } from './connection';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
@@ -1027,7 +1027,7 @@ function reduceMessage(
   } else if (e.adapter_name === 'background') {
     applyBackgroundHook(state, e.content);
   } else {
-    pushTo(state, 'user', e.content, e.timestamp, {
+    pushTo(state, 'user', displayContentOf(e.content), e.timestamp, {
       sessionId: e.session_id,
       source: {
         adapter_name: e.adapter_name,

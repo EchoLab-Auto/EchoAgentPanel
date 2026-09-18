@@ -21,6 +21,22 @@ export function nextKey(): string {
   return `m${globalSeq}`;
 }
 
+/** hook 输入的展示文本：`<xxx_hook>{json}</xxx_hook>` 结构化输入只显示
+ * payload 的 content 字段（会话里不糊原始 JSON）；非 hook 输入原样返回。
+ * 实时事件（state.ts reduceMessage）与历史回放共用同一剥离。 */
+export function displayContentOf(content: string): string {
+  const match = content.match(/^<[a-z_]+_hook>\s*(\{.*?\})\s*<\/[a-z_]+_hook>$/s);
+  if (!match) return content;
+  try {
+    const payload = JSON.parse(match[1]) as { content?: unknown };
+    return typeof payload.content === 'string' && payload.content.trim()
+      ? payload.content
+      : content;
+  } catch {
+    return content;
+  }
+}
+
 export function pushTo(state: AppState, role: MsgRole, content: string, time: number, extra?: Partial<DisplayMessage>) {
   pushMessage(state, { key: nextKey(), role, content, time, ...extra });
 }
@@ -73,7 +89,7 @@ export function toDisplayMessage(message: TimelineMessage): DisplayMessage {
     return {
       ...base,
       role: 'user' as const,
-      content: message.content,
+      content: displayContentOf(message.content),
       source: message.source ?? null,
       images: message.images && message.images.length ? message.images : undefined,
     };
