@@ -46,6 +46,44 @@ const emit = defineEmits<{
 const input = ref('');
 /** 待发送图片（data URL 形式） */
 const attachments = ref<string[]>([]);
+
+// ── 输入条毛玻璃性能策略（2026-09-18）──
+// 跨行拖选文字每帧触发输入条（大面积 backdrop-filter）全量重栅格化，
+// 是拖选卡顿的根治点。策略：聚焦或拖选期间临时关 blur（纯色底撑住视觉），
+// 失去焦点/选择结束且输入为空时恢复毛玻璃——日常展示质感不变。
+const composerBusy = ref(false);
+let blurRestoreTimer: number | undefined;
+
+function suspendComposerBlur() {
+  if (blurRestoreTimer !== undefined) {
+    window.clearTimeout(blurRestoreTimer);
+    blurRestoreTimer = undefined;
+  }
+  composerBusy.value = true;
+}
+
+function restoreComposerBlurSoon() {
+  // 拖选结束时 selection 可能先清空再重设：延迟一拍确认无选择再恢复。
+  if (blurRestoreTimer !== undefined) window.clearTimeout(blurRestoreTimer);
+  blurRestoreTimer = window.setTimeout(() => {
+    blurRestoreTimer = undefined;
+    const selection = window.getSelection();
+    const hasSelection = !!selection && !selection.isCollapsed;
+    if (!hasSelection) composerBusy.value = false;
+  }, 120);
+}
+
+function onComposerFocus() {
+  suspendComposerBlur();
+}
+
+function onComposerBlur() {
+  restoreComposerBlurSoon();
+}
+
+onBeforeUnmount(() => {
+  if (blurRestoreTimer !== undefined) window.clearTimeout(blurRestoreTimer);
+});
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
@@ -107,6 +145,8 @@ const entryBottom = ref('170px');
 let ctxObserver: ResizeObserver | null = null;
 
 onMounted(() => {
+  // 拖选监听：选区出现即临时关 blur（输入框未聚焦时也可能拖选已输入文本）。
+  document.addEventListener('selectionchange', onSelectionChange);
   const target = composerFloatRef.value;
   if (!target) return;
   ctxObserver = new ResizeObserver(() => {
@@ -115,7 +155,20 @@ onMounted(() => {
   });
   ctxObserver.observe(target);
 });
-onBeforeUnmount(() => ctxObserver?.disconnect());
+onBeforeUnmount(() => {
+  ctxObserver?.disconnect();
+  document.removeEventListener('selectionchange', onSelectionChange);
+});
+
+function onSelectionChange() {
+  const selection = window.getSelection();
+  if (selection && !selection.isCollapsed) {
+    suspendComposerBlur();
+  } else if (composerBusy.value) {
+    // 选择清空：延迟一拍恢复（区分拖选换向与真正结束）。
+    restoreComposerBlurSoon();
+  }
+}
 
 // 适配器按钮显隐：仅当当前 Agent（team）启用了 adapter 类插件时显示。
 // 依据 TeamInfo 的 enabled_plugins 白名单判断（插件黑名单已移除），
@@ -801,7 +854,13 @@ function imagesOf(message: ChatMessage): string[] {
     </aside>
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
-    <div ref="composerFloatRef" class="chat-composer-float">
+    <div
+      ref="composerFloatRef"
+      class="chat-composer-float"
+      :class="{ 'chat-composer-float--busy': composerBusy }"
+      @focusin="onComposerFocus"
+      @focusout="onComposerBlur"
+    >
       <!-- 待发送图片预览 -->
       <div v-if="attachments.length" class="chat-view__attachments">
         <div v-for="(img, i) in attachments" :key="i" class="chat-view__attach">
