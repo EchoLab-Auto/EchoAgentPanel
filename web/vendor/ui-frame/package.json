@@ -1,6 +1,6 @@
 {
   "name": "@echolab-auto/ui-frame",
-  "version": "1.3.0",
+  "version": "1.3.2-dev.4",
   "description": "Vue 3 新拟态 UI 组件库",
   "type": "module",
   "main": "./dist/ui-frame.umd.cjs",

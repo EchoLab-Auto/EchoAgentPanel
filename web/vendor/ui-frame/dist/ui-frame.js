@@ -216,7 +216,7 @@ function Do(o, m) {
 }
 const Gr = {
   install: Do,
-  version: "1.3.2-dev.3"
+  version: "1.3.2-dev.4"
 };
 export {
   zm as ComponentRegistry,
