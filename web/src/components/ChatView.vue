@@ -1035,13 +1035,34 @@ function imagesOf(message: ChatMessage): string[] {
       transparent 45%
     ),
     color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  backdrop-filter: blur(20px) saturate(1.6);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  /* 性能（2026-09-18）：blur 20px→10px、去 saturate；聚焦/拖选期间由
+     .chat-composer-float--busy 临时关闭 blur。大面积 backdrop-filter 每次
+     重绘全量重栅格化，跨行拖选每帧触发，是拖选卡顿的根治点。 */
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
   box-shadow:
     0 12px 32px rgba(0, 0, 0, 0.45),
     0 0 0 0.5px rgba(255, 255, 255, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 聚焦/拖选期间：临时关毛玻璃（纯色底撑住视觉），拖选重绘不再触发
+   大面积 blur 重栅格化。 */
+.chat-composer-float--busy {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--nm-surface-raised);
+}
+/* 拖选卡顿根治之二（2026-09-18）：库 NeumorphismTextarea 在悬浮/聚焦态
+   默认给文本域容器 `transform: translateY(-1px)` + transform 过渡——
+   分数像素位移让选区重绘走"变换文本层"慢路径，跨行拖选每帧重绘时卡顿
+   明显。此处置零位移并禁用 transform 过渡（视觉仅差 1px，无感）。 */
+.chat-composer-float :deep(.nm-textarea),
+.chat-composer-float :deep(.nm-textarea:hover),
+.chat-composer-float :deep(.nm-textarea--focused) {
+  transform: none !important;
+  transition-property: box-shadow, background-color, color, border-color !important;
 }
 
 /* 吸底跳转按钮上移，避免被悬浮输入框遮挡 */
