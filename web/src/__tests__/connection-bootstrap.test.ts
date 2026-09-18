@@ -79,6 +79,29 @@ describe('重连引导命令（去主智能体）', () => {
     expect(timeline).toContain('self-coding');
   });
 
+  it('握手期（CONNECTING）发送的命令排队，连接建立后补发且不弹错', async () => {
+    const { startConnection, sendCommand } = await import('../connection');
+    const { state } = await import('../store');
+    startConnection();
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    // 刷新页面后组件挂载即发请求，此刻握手未完成。
+    sendCommand({ RequestShellSessions: { team_id: null } });
+    expect(state.toasts.length).toBe(0); // 不再误报"未连接到 Core"
+    expect(ws.sent.some((c) => c.includes('RequestShellSessions'))).toBe(false);
+    ws.triggerOpen();
+    expect(ws.sent.some((c) => c.includes('RequestShellSessions'))).toBe(true);
+    // 补发只做一次：重复 onopen 不再重复投递。
+    expect(ws.sent.filter((c) => c.includes('team_id\":null')).length).toBe(1);
+  });
+
+  it('连接不存在时仍给出明确提示（命令确实没发出去）', async () => {
+    const { sendCommand } = await import('../connection');
+    const { state } = await import('../store');
+    sendCommand({ RequestShellSessions: {} });
+    expect(state.toasts.length).toBe(1);
+    expect(state.toasts[0].text).toContain('未连接到 Core');
+  });
+
   it('其余引导命令照常发送', async () => {
     const sent = await bootstrapCommands();
     for (const cmd of [

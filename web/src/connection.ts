@@ -27,6 +27,19 @@ let probeTimer: number | undefined;
 /** 最近一次收到下行帧的时间（onopen/onmessage 更新） */
 let lastFrameAt = 0;
 
+/**
+ * 握手期暂存队列（2026-09-18）。
+ *
+ * 刷新页面后组件挂载（ShellList/ContextView 等的 onMounted / watch immediate）
+ * 会立刻发请求，此时 WS 还在 CONNECTING（实测 t≈43ms，握手完成 t≈81ms）——
+ * 旧实现直接判"未连接"弹错并丢弃，于是**每次刷新都弹"未连接到 Core，命令未发送"**，
+ * 且这些请求真的丢了。改为握手期静默排队、onopen 引导命令之后按序补发：
+ * 既不再误报，也不丢请求（这些请求都幂等，重复发无副作用）。
+ */
+const pendingCommands: string[] = [];
+/** 队列上限：握手期正常只有个位数条；上限只用于防御性封顶。 */
+const PENDING_LIMIT = 128;
+
 export function startConnection(): void {
   if (started) return;
   started = true;
@@ -88,6 +101,11 @@ export function startConnection(): void {
       for (const command of bootstrap) {
         ws.send(serializeCommand(command));
       }
+      // 补发握手期暂存的命令（见 pendingCommands 注释）。
+      for (const payload of pendingCommands) {
+        ws.send(payload);
+      }
+      pendingCommands.length = 0;
     };
 
     ws.onmessage = (message) => {
@@ -151,6 +169,13 @@ export function startConnection(): void {
 export function sendCommand(command: BackendCommand): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(serializeCommand(command));
+    return;
+  }
+  if (socket && socket.readyState === WebSocket.CONNECTING) {
+    // 握手期（页面刚加载/重连窗口）：静默排队，连接建立后补发。
+    if (pendingCommands.length < PENDING_LIMIT) {
+      pendingCommands.push(serializeCommand(command));
+    }
     return;
   }
   pushToast(state, '未连接到 Core，命令未发送', 'error');
