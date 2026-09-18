@@ -1,3 +1,4 @@
+import { Mock } from 'vitest';
 import { VueWrapper } from '@vue/test-utils';
 import { Component, ComponentPublicInstance } from 'vue';
 
@@ -58,38 +59,26 @@ export declare function arrowDownKey(): KeyboardEvent;
 export declare function arrowUpKey(): KeyboardEvent;
 export declare function homeKey(): KeyboardEvent;
 export declare function endKey(): KeyboardEvent;
+/** 三个观察器 mock 共用的实例形状（显式标注，避免 TS2742 非可移植推断） */
+interface ObserverMock {
+    observe: Mock;
+    unobserve: Mock;
+    disconnect: Mock;
+}
 /**
  * 创建 ResizeObserver mock（用于 useVirtualList 等依赖元素尺寸的测试）。
  */
-export declare function createResizeObserverMock(): {
-    ResizeObserver: {
-        new (): {
-            observe: import('vitest').Mock<import('@vitest/spy').Procedure>;
-            unobserve: import('vitest').Mock<import('@vitest/spy').Procedure>;
-            disconnect: import('vitest').Mock<import('@vitest/spy').Procedure>;
-        };
-    };
-    observe: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    unobserve: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    disconnect: import('vitest').Mock<import('@vitest/spy').Procedure>;
+export declare function createResizeObserverMock(): ObserverMock & {
+    ResizeObserver: new () => ObserverMock;
 };
 /**
  * 创建 IntersectionObserver mock（用于 scroll-spy、懒加载等测试）。
  */
-export declare function createIntersectionObserverMock(): {
-    IntersectionObserver: {
-        new (cb: IntersectionObserverCallback): {
-            observe: import('vitest').Mock<import('@vitest/spy').Procedure>;
-            unobserve: import('vitest').Mock<import('@vitest/spy').Procedure>;
-            disconnect: import('vitest').Mock<import('@vitest/spy').Procedure>;
-        };
-        /** 手动触发回调，模拟元素进出视口 */
-        trigger(entries: Partial<IntersectionObserverEntry>[]): void;
+export declare function createIntersectionObserverMock(): ObserverMock & {
+    IntersectionObserver: (new (cb: IntersectionObserverCallback) => ObserverMock) & {
+        trigger: (entries: Partial<IntersectionObserverEntry>[]) => void;
     };
     callback: () => IntersectionObserverCallback | null;
-    observe: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    unobserve: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    disconnect: import('vitest').Mock<import('@vitest/spy').Procedure>;
 };
 /**
  * 创建 localStorage mock（用于 useTheme 等持久化相关测试）。
@@ -109,13 +98,14 @@ export declare function createMatchMediaMock(matches: boolean): () => {
     matches: boolean;
     media: string;
     onchange: null;
-    addListener: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    removeListener: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    addEventListener: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    removeEventListener: import('vitest').Mock<import('@vitest/spy').Procedure>;
-    dispatchEvent: import('vitest').Mock<import('@vitest/spy').Procedure>;
+    addListener: Mock;
+    removeListener: Mock;
+    addEventListener: Mock;
+    removeEventListener: Mock;
+    dispatchEvent: Mock;
 };
 /**
  * 创建 File 对象的辅助函数（用于 upload 相关测试）。
  */
 export declare function createTestFile(name: string, size: number, type: string): File;
+export {};

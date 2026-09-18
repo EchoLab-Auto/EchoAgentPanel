@@ -30,8 +30,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     sunk: boolean;
     expandable: boolean;
 }>>> & Readonly<{
-    "onUpdate:open"?: ((value: boolean) => any) | undefined;
     onToggle?: ((value: boolean) => any) | undefined;
+    "onUpdate:open"?: ((value: boolean) => any) | undefined;
 }>, {
     open: boolean;
     defaultOpen: boolean;

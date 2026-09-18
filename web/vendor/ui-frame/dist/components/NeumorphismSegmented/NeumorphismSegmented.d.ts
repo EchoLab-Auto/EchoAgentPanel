@@ -26,13 +26,13 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     disabled: undefined;
     ariaLabel: string;
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((value: string | number) => any) | undefined;
     onChange?: ((value: string | number) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: string | number) => any) | undefined;
 }>, {
     size: SegmentedSize;
     disabled: boolean;
-    modelValue: string | number;
     ariaLabel: string;
+    modelValue: string | number;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 export default _default;
 type __VLS_NonUndefinedable<T> = T extends undefined ? never : T;

@@ -22,7 +22,7 @@ import '../NeumorphismChartCandlestick.css';const vt = {
     height: { default: "400px" },
     showVolume: { type: Boolean, default: void 0 },
     showMA: { type: Boolean, default: void 0 },
-    maPeriods: { default: () => [5, 10, 20] },
+    maPeriods: { default: void 0 },
     upColor: {},
     downColor: {},
     showTooltip: { type: Boolean, default: void 0 },
@@ -363,7 +363,7 @@ import '../NeumorphismChartCandlestick.css';const vt = {
       ])) : u("", !0)
     ], 4));
   }
-}), Zt = /* @__PURE__ */ _t(jt, [["__scopeId", "data-v-8ddf85f9"]]);
+}), Zt = /* @__PURE__ */ _t(jt, [["__scopeId", "data-v-9eca2656"]]);
 export {
   Zt as N
 };

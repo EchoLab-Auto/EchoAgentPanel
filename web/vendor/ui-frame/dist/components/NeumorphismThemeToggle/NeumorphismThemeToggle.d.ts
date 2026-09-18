@@ -22,8 +22,8 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     modelValue: string;
     disabled: boolean;
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((value: Theme) => any) | undefined;
     onChange?: ((value: Theme) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: Theme) => any) | undefined;
 }>, {
     disabled: boolean;
     modelValue: Theme;

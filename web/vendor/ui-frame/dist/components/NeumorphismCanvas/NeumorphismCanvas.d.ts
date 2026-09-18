@@ -1,3 +1,9 @@
+export interface NeumorphismCanvasBounds {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
 export interface NeumorphismCanvasProps {
     /** Current zoom level (1 = 100%) */
     modelValue?: number;
@@ -23,6 +29,17 @@ export interface NeumorphismCanvasProps {
     panOnDrag?: boolean;
     /** Zoom to cursor with Ctrl/Cmd + wheel */
     wheelZoom?: boolean;
+    /**
+     * Infinite canvas mode: pan/zoom are unbounded virtual state applied via
+     * transform, instead of native overflow scrolling. Content may live at any
+     * (including negative) canvas coordinates.
+     */
+    infinite?: boolean;
+    /**
+     * Content bounding box in canvas coordinates (infinite mode). Used by
+     * fit()/resetView(); falls back to measuring slotted children when omitted.
+     */
+    contentBounds?: NeumorphismCanvasBounds;
     /** Canvas width (CSS value, e.g. '100%', '800px') */
     width?: string;
     /** Canvas height (CSS value) */
@@ -33,7 +50,32 @@ declare function zoomOut(): void;
 declare function resetZoom(): void;
 /** Scale content to fit the viewport (with padding) and center it. */
 declare function fit(): void;
+/**
+ * Reset the view: animate pan and zoom back to the fit-to-content view.
+ * In infinite mode this is the "return to content" action behind the reset
+ * button and the `0` key; identical to fit() but named for intent.
+ */
+declare function resetView(): void;
 declare function toggleFullscreen(): void;
+/** Imperative pan by viewport-px deltas (infinite mode; no-op in scroll mode) */
+declare function panBy(dx: number, dy: number): void;
+/** Current view state (pan is viewport-px translation, post-zoom) */
+declare function getView(): {
+    panX: number;
+    panY: number;
+    zoom: number;
+};
+/**
+ * Convert client (screen) coordinates to canvas coordinates.
+ * Infinite mode uses the virtual pan state; scroll mode uses scroll offsets.
+ */
+declare function toCanvasCoords(clientX: number, clientY: number): {
+    x: number;
+    y: number;
+    zoom: number;
+};
+/** Viewport bounding rect (for edge auto-pan hit tests etc.) */
+declare function getViewportRect(): DOMRect | null;
 declare function __VLS_template(): {
     toolbar?(_: {}): any;
     default?(_: {}): any;
@@ -42,6 +84,7 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     showControls: undefined;
     showGrid: undefined;
     gridVariant: undefined;
+    infinite: undefined;
     modelValue: number;
     minZoom: number;
     maxZoom: number;
@@ -57,7 +100,12 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     zoomOut: typeof zoomOut;
     resetZoom: typeof resetZoom;
     fit: typeof fit;
+    resetView: typeof resetView;
     toggleFullscreen: typeof toggleFullscreen;
+    panBy: typeof panBy;
+    getView: typeof getView;
+    toCanvasCoords: typeof toCanvasCoords;
+    getViewportRect: typeof getViewportRect;
 }, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {
     "update:modelValue": (value: number) => void;
     "zoom-change": (value: number) => void;
@@ -65,6 +113,7 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     showControls: undefined;
     showGrid: undefined;
     gridVariant: undefined;
+    infinite: undefined;
     modelValue: number;
     minZoom: number;
     maxZoom: number;
@@ -92,6 +141,7 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     showFullscreen: boolean;
     panOnDrag: boolean;
     wheelZoom: boolean;
+    infinite: boolean;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;

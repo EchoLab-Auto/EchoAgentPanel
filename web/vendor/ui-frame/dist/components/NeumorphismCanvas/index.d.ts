@@ -1,2 +1,2 @@
 export { default } from './NeumorphismCanvas';
-export type { NeumorphismCanvasProps } from './NeumorphismCanvas';
+export type { NeumorphismCanvasProps, NeumorphismCanvasBounds } from './NeumorphismCanvas';

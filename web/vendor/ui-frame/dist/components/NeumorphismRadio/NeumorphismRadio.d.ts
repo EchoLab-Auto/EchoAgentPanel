@@ -18,8 +18,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
 }, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismRadioProps>, {
     disabled: boolean;
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((value: unknown) => any) | undefined;
     onChange?: ((value: unknown) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: unknown) => any) | undefined;
 }>, {
     disabled: boolean;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;

@@ -138,7 +138,7 @@ import '../NeumorphismSteps.css';const j = ["aria-current", "disabled", "onClick
           a.description ? (i(), c("span", G, v(a.description), 1)) : m("", !0)
         ])
       ], 2))), 128)),
-      r.steps.length ? m("", !0) : D(e.$slots, "empty", { key: 0 }, void 0, !0)
+      r.steps.length ? m("", !0) : D(e.$slots, "empty", {}, void 0, !0, 0)
     ], 2));
   }
 }), R = /* @__PURE__ */ V(H, [["__scopeId", "data-v-c6f6b267"]]);

@@ -50,19 +50,19 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     autoResize: boolean;
     maxlength: undefined;
 }>>> & Readonly<{
+    onCancel?: (() => any) | undefined;
     "onUpdate:modelValue"?: ((value: string) => any) | undefined;
     onSend?: ((content: string) => any) | undefined;
-    onCancel?: (() => any) | undefined;
 }>, {
     disabled: boolean;
     placeholder: string;
     modelValue: string;
     maxlength: number | string;
     rows: number | string;
+    cancelLabel: string;
     autoResize: boolean;
     cancelable: boolean;
     sendLabel: string;
-    cancelLabel: string;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;

@@ -41,8 +41,8 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     disabled: boolean;
     vertical: boolean;
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((value: number) => any) | undefined;
     onChange?: ((value: number) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: number) => any) | undefined;
 }>, {
     vertical: boolean;
     step: number;

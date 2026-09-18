@@ -84,9 +84,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
 }>>> & Readonly<{
     onFocus?: ((event: FocusEvent) => any) | undefined;
     onSearch?: ((query: string) => any) | undefined;
+    onChange?: ((value: string | number | (string | number)[] | undefined) => any) | undefined;
     onBlur?: ((event: FocusEvent) => any) | undefined;
     "onUpdate:modelValue"?: ((value: string | number | (string | number)[] | undefined) => any) | undefined;
-    onChange?: ((value: string | number | (string | number)[] | undefined) => any) | undefined;
     "onVisible-change"?: ((open: boolean) => any) | undefined;
     "onRemove-tag"?: ((value: string | number) => any) | undefined;
 }>, {
@@ -94,10 +94,10 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     disabled: boolean;
     placeholder: string;
     modelValue: string | number | (string | number)[];
-    loading: boolean;
-    emptyText: string;
     options: SelectOption[];
+    loading: boolean;
     clearable: boolean;
+    emptyText: string;
     clearLabel: string;
     loadingText: string;
     maxCollapseTags: number;

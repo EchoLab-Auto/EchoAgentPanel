@@ -1,67 +1,70 @@
 import { computed as f } from "vue";
 import { useChart as k } from "./useChart.js";
 const D = { top: 24, right: 24, bottom: 24, left: 24 };
-function U(n) {
+function U(o) {
   const {
     containerRef: s,
     data: t,
-    margin: l,
-    innerRadius: u = 0,
+    margin: r,
+    innerRadius: u,
     outerRadius: i,
     padAngle: q = 0.02,
     startAngle: p = -90,
-    labelPosition: Z = "outside",
-    roundedCorners: r = !1,
-    colorPalette: m
-  } = n, b = f(() => [
+    labelPosition: Z,
+    roundedCorners: l,
+    colorPalette: g
+  } = o, b = f(() => [
     {
       name: "pie",
       data: t.value
     }
-  ]), e = k({
+  ]), n = k({
     containerRef: s,
     series: b,
-    margin: l ?? D
+    margin: r ?? D
   }), M = f(
     () => {
-      var a, o;
-      return e.resolveProp(u, (o = (a = e.config.value.chart) == null ? void 0 : a.pie) == null ? void 0 : o.innerRadius, 0);
+      var e, a;
+      return n.resolveProp(u, (a = (e = n.config.value.chart) == null ? void 0 : e.pie) == null ? void 0 : a.innerRadius, 0);
     }
-  ), x = f(
+  ), m = f(
     () => {
-      var a, o;
-      return e.resolveProp(Z, (o = (a = e.config.value.chart) == null ? void 0 : a.pie) == null ? void 0 : o.labelPosition, "outside");
+      var e, a;
+      return n.resolveProp(Z, (a = (e = n.config.value.chart) == null ? void 0 : e.pie) == null ? void 0 : a.labelPosition, "outside");
     }
   ), I = f(
     () => {
-      var a, o;
-      return e.resolveProp(
-        r,
-        (o = (a = e.config.value.chart) == null ? void 0 : a.pie) == null ? void 0 : o.roundedCorners,
+      var e, a;
+      return n.resolveProp(
+        l,
+        (a = (e = n.config.value.chart) == null ? void 0 : e.pie) == null ? void 0 : a.roundedCorners,
         !1
       );
     }
-  ), X = f(() => p * (Math.PI / 180)), S = f(
-    () => m && m.length > 0 ? m : e.palette.value
-  ), $ = f(
-    () => t.value.reduce((a, o) => a + Math.abs(o.value), 0)
+  ), X = f(() => p * (Math.PI / 180)), S = f(() => {
+    var a;
+    if (g && g.length > 0) return g;
+    const e = (a = n.config.value.chart) == null ? void 0 : a.colorPalette;
+    return e && e.length > 0 ? e : n.palette.value;
+  }), $ = f(
+    () => t.value.reduce((e, a) => e + Math.abs(a.value), 0)
   ), P = f(() => {
     if (i !== void 0) return i;
-    const a = e.plotSize.value.width, o = e.plotSize.value.height;
-    return Math.min(a, o) / 2;
+    const e = n.plotSize.value.width, a = n.plotSize.value.height;
+    return Math.min(e, a) / 2;
   }), L = f(() => {
-    const a = [];
-    if ($.value === 0) return a;
-    const o = e.plotSize.value.width / 2, j = e.plotSize.value.height / 2, B = Math.max(0, P.value), y = M.value, z = t.value.length > 1 ? q : 0;
+    const e = [];
+    if ($.value === 0) return e;
+    const a = n.plotSize.value.width / 2, j = n.plotSize.value.height / 2, B = Math.max(0, P.value), y = M.value, z = t.value.length > 1 ? q : 0;
     let C = X.value;
     for (let A = 0; A < t.value.length; A++) {
-      const w = t.value[A], d = $.value > 0 ? w.value / $.value : 0, g = d * Math.PI * 2 - z, h = C, v = C + Math.max(0, g), T = J(o, j, B, y, h, v, I.value), E = h + g / 2, F = (B + y) / 2, W = o + F * Math.cos(E), _ = j + F * Math.sin(E);
+      const w = t.value[A], d = $.value > 0 ? w.value / $.value : 0, x = d * Math.PI * 2 - z, h = C, v = C + Math.max(0, x), T = J(a, j, B, y, h, v, I.value), E = h + x / 2, F = (B + y) / 2, W = a + F * Math.cos(E), _ = j + F * Math.sin(E);
       let G, H, N = "start";
-      if (x.value === "outside") {
+      if (m.value === "outside") {
         const O = B + 20;
-        G = o + O * Math.cos(E), H = j + O * Math.sin(E), N = Math.cos(E) >= 0 ? "start" : "end";
+        G = a + O * Math.cos(E), H = j + O * Math.sin(E), N = Math.cos(E) >= 0 ? "start" : "end";
       }
-      a.push({
+      e.push({
         path: T,
         centroidX: W,
         centroidY: _,
@@ -72,82 +75,82 @@ function U(n) {
         value: w.value,
         percentage: Math.round(d * 1e3) / 10,
         index: A,
-        isFocused: e.focusedIndex.value === A,
+        isFocused: n.focusedIndex.value === A,
         labelX: G,
         labelY: H,
         labelAnchor: N
       }), C = v + z;
     }
-    return a;
+    return e;
   });
-  function Y(a, o) {
-    const j = e.plotSize.value.width / 2, B = e.plotSize.value.height / 2, y = a - j, z = o - B, C = Math.sqrt(y * y + z * z), A = P.value, w = M.value;
+  function Y(e, a) {
+    const j = n.plotSize.value.width / 2, B = n.plotSize.value.height / 2, y = e - j, z = a - B, C = Math.sqrt(y * y + z * z), A = P.value, w = M.value;
     if (C < w || C > A) return null;
     let d = Math.atan2(z, y);
     d < 0 && (d += Math.PI * 2);
-    for (const g of L.value) {
-      let h = g.startAngle % (Math.PI * 2), v = g.endAngle % (Math.PI * 2);
+    for (const x of L.value) {
+      let h = x.startAngle % (Math.PI * 2), v = x.endAngle % (Math.PI * 2);
       if (h < 0 && (h += Math.PI * 2), v < 0 && (v += Math.PI * 2), h <= v) {
-        if (d >= h && d <= v) return g;
-      } else if (d >= h || d <= v) return g;
+        if (d >= h && d <= v) return x;
+      } else if (d >= h || d <= v) return x;
     }
     return null;
   }
   return {
-    ...e,
+    ...n,
     arcs: L,
     total: $,
     outerRadius: P,
     resolvedInnerRadius: M,
-    resolvedLabelPosition: x,
+    resolvedLabelPosition: m,
     findArcAtPosition: Y,
     effectivePalette: S
   };
 }
-function c(n, s, t, l) {
+function c(o, s, t, r) {
   return {
-    x: n + t * Math.cos(l),
-    y: s + t * Math.sin(l)
+    x: o + t * Math.cos(r),
+    y: s + t * Math.sin(r)
   };
 }
-function J(n, s, t, l, u, i, q) {
-  const p = i - u > Math.PI ? 1 : 0, Z = i - u, r = q && Z > 0 ? Math.max(0, Math.min(t * 0.18, Z * t / 2 - 1)) : 0, m = r > 0, b = m ? r / t : 0;
-  if (l <= 0) {
-    const $ = c(n, s, t, u), P = c(n, s, t, i);
-    if (!m)
+function J(o, s, t, r, u, i, q) {
+  const p = i - u > Math.PI ? 1 : 0, Z = i - u, l = q && Z > 0 ? Math.max(0, Math.min(t * 0.18, Z * t / 2 - 1)) : 0, g = l > 0, b = g ? l / t : 0;
+  if (r <= 0) {
+    const $ = c(o, s, t, u), P = c(o, s, t, i);
+    if (!g)
       return [
-        `M${n},${s}`,
+        `M${o},${s}`,
         `L${$.x},${$.y}`,
         `A${t},${t} 0 ${p} 1 ${P.x},${P.y}`,
         "Z"
       ].join(" ");
-    const L = c(n, s, t, u + b), Y = c(n, s, t, i - b);
+    const L = c(o, s, t, u + b), Y = c(o, s, t, i - b);
     return [
-      `M${n},${s}`,
+      `M${o},${s}`,
       `L${L.x},${L.y}`,
-      `A${r},${r} 0 0 1 ${$.x},${$.y}`,
+      `A${l},${l} 0 0 1 ${$.x},${$.y}`,
       `A${t},${t} 0 ${p} 1 ${P.x},${P.y}`,
-      `A${r},${r} 0 0 1 ${Y.x},${Y.y}`,
+      `A${l},${l} 0 0 1 ${Y.x},${Y.y}`,
       "Z"
     ].join(" ");
   }
-  const e = c(n, s, t, u), M = c(n, s, t, i), x = c(n, s, l, i), I = c(n, s, l, u);
-  if (!m)
+  const n = c(o, s, t, u), M = c(o, s, t, i), m = c(o, s, r, i), I = c(o, s, r, u);
+  if (!g)
     return [
-      `M${e.x},${e.y}`,
+      `M${n.x},${n.y}`,
       `A${t},${t} 0 ${p} 1 ${M.x},${M.y}`,
-      `L${x.x},${x.y}`,
-      `A${l},${l} 0 ${p} 0 ${I.x},${I.y}`,
+      `L${m.x},${m.y}`,
+      `A${r},${r} 0 ${p} 0 ${I.x},${I.y}`,
       "Z"
     ].join(" ");
-  const X = c(n, s, t, u + b), S = c(n, s, t, i - b);
+  const X = c(o, s, t, u + b), S = c(o, s, t, i - b);
   return [
     `M${X.x},${X.y}`,
-    `A${r},${r} 0 0 1 ${e.x},${e.y}`,
+    `A${l},${l} 0 0 1 ${n.x},${n.y}`,
     `A${t},${t} 0 ${p} 1 ${M.x},${M.y}`,
-    `A${r},${r} 0 0 1 ${S.x},${S.y}`,
-    `L${x.x},${x.y}`,
-    `A${l},${l} 0 ${p} 0 ${I.x},${I.y}`,
+    `A${l},${l} 0 0 1 ${S.x},${S.y}`,
+    `L${m.x},${m.y}`,
+    `A${r},${r} 0 ${p} 0 ${I.x},${I.y}`,
     "Z"
   ].join(" ");
 }

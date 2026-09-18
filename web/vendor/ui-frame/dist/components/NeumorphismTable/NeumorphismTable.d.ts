@@ -62,9 +62,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     data: Record<string, unknown>[];
     loading: boolean;
     hoverable: boolean;
-    emptyText: string;
     showHeader: boolean;
     selectable: boolean | "single" | "multiple";
+    emptyText: string;
     columns: TableColumn[];
     rowKey: string;
     selectedKeys: string[];

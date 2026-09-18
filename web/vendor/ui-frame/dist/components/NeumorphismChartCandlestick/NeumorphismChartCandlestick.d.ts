@@ -22,9 +22,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     data: () => never[];
     width: string;
     height: string;
-    maPeriods: () => number[];
     showVolume: undefined;
     showMA: undefined;
+    maPeriods: undefined;
     showTooltip: undefined;
     showGrid: undefined;
     showAxis: undefined;
@@ -42,9 +42,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     data: () => never[];
     width: string;
     height: string;
-    maPeriods: () => number[];
     showVolume: undefined;
     showMA: undefined;
+    maPeriods: undefined;
     showTooltip: undefined;
     showGrid: undefined;
     showAxis: undefined;

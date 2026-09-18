@@ -40,6 +40,13 @@ export interface NeumorphismCardProps {
     hoverable?: boolean | 'bulge' | 'sink';
     /** Enable glass morphism: frosted glass with backdrop blur */
     glass?: boolean;
+    /**
+     * Layout: vertical flex container with a flexible body.
+     * true = card fills the parent's flex space and the body scrolls internally
+     * (`min-height: 0` chains). Use inside rail/stack containers that
+     * distribute height between cards (e.g. Panel 右侧边栏卡片栈).
+     */
+    flexible?: boolean;
 }
 declare function __VLS_template(): {
     header?(_: {}): any;
@@ -50,14 +57,17 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     hoverable: undefined;
     noPadding: boolean;
     glass: boolean;
+    flexible: boolean;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {}, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismCardProps>, {
     hoverable: undefined;
     noPadding: boolean;
     glass: boolean;
+    flexible: boolean;
 }>>> & Readonly<{}>, {
     glass: boolean;
     noPadding: boolean;
     hoverable: boolean | "bulge" | "sink";
+    flexible: boolean;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;

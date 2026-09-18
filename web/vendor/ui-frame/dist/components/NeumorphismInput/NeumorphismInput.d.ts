@@ -47,14 +47,14 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
 }>>> & Readonly<{
     onInput?: ((event: Event) => any) | undefined;
     onFocus?: ((event: FocusEvent) => any) | undefined;
-    onBlur?: ((event: FocusEvent) => any) | undefined;
-    "onUpdate:modelValue"?: ((value: string) => any) | undefined;
     onChange?: ((event: Event) => any) | undefined;
+    onBlur?: ((event: FocusEvent) => any) | undefined;
     onKeydown?: ((event: KeyboardEvent) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: string) => any) | undefined;
     onEnter?: ((value: string) => any) | undefined;
 }>, {
-    disabled: boolean;
     type: string;
+    disabled: boolean;
     required: boolean;
     modelValue: string;
     readonly: boolean;

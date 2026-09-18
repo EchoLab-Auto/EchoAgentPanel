@@ -1,3 +1,16 @@
+/**
+ * src/components — 基础组件（basic components）
+ *
+ * 本目录下的全部组件均为**基础组件**：单一职责、自包含的 UI 原子/分子，
+ * 仅靠 props / slots / events 通信，不消费任何领域数据契约，无外部副作用
+ * （不发网络请求、不读写宿主业务状态），可与其他组件任意组合。
+ *
+ * 与之相对的**组合组件**（消费领域数据契约、由基础组件拼装、交付完整场景）
+ * 位于 `src/composites/`（doc 文档渲染、chat 聊天面板），经子路径导出。
+ * 分类定义见 document/user/components.md「组件分层：基础组件与组合组件」。
+ *
+ * @category 基础组件
+ */
 export { default as NeumorphismButton } from './NeumorphismButton';
 export type { NeumorphismButtonProps, ButtonVariant, ButtonSize, ButtonShape, } from './NeumorphismButton';
 export { default as NeumorphismSwitch } from './NeumorphismSwitch';
@@ -85,7 +98,7 @@ export type { NeumorphismLogoProps, LogoMode, LogoSize } from './NeumorphismLogo
 export { default as NeumorphismArt } from './NeumorphismArt';
 export type { NeumorphismArtProps, ArtEffectName } from './NeumorphismArt';
 export { default as NeumorphismAsciiArt } from './NeumorphismAsciiArt';
-export type { NeumorphismAsciiArtProps } from './NeumorphismAsciiArt';
+export type { NeumorphismAsciiArtProps, AsciiArtRadius } from './NeumorphismAsciiArt';
 export { NeumorphismRadio, NeumorphismRadioGroup } from './NeumorphismRadio';
 export type { NeumorphismRadioProps, NeumorphismRadioGroupProps } from './NeumorphismRadio';
 export { default as NeumorphismSlider } from './NeumorphismSlider';

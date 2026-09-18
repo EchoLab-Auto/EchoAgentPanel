@@ -1,4 +1,4 @@
-import { defineComponent as m, computed as o, openBlock as a, createElementBlock as d, normalizeClass as p, renderSlot as _, createCommentVNode as f } from "vue";
+import { defineComponent as m, computed as o, openBlock as d, createElementBlock as a, normalizeClass as p, renderSlot as _, createCommentVNode as f } from "vue";
 import { u as h } from "./createComponent-jnXBYqCm.js";
 import { _ as g } from "./_plugin-vue_export-helper-CHgC5LLL.js";
 import '../NeumorphismDivider.css';const N = ["aria-orientation"], B = {
@@ -40,17 +40,17 @@ import '../NeumorphismDivider.css';const N = ["aria-orientation"], B = {
         "nm-divider--inset": c.value
       }
     ]);
-    return (e, $) => (a(), d("div", {
+    return (e, $) => (d(), a("div", {
       class: p(u.value),
       role: "separator",
       "aria-orientation": r.value
     }, [
-      e.$slots.default ? (a(), d("span", B, [
+      e.$slots.default ? (d(), a("span", B, [
         _(e.$slots, "default", {}, void 0, !0)
       ])) : f("", !0)
     ], 10, N));
   }
-}), C = /* @__PURE__ */ g(D, [["__scopeId", "data-v-50126a6e"]]);
+}), C = /* @__PURE__ */ g(D, [["__scopeId", "data-v-534f718b"]]);
 export {
   C as N
 };

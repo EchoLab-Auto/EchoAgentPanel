@@ -58,8 +58,8 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     disabled: boolean;
     placeholder: string;
     modelValue: string | number;
-    loading: boolean;
     options: AutoCompleteOption[];
+    loading: boolean;
     clearable: boolean;
     debounce: number;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;

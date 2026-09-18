@@ -26,7 +26,7 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     disabled: boolean;
     prevLabel: string;
     nextLabel: string;
-    totalLabel: string;
+    totalLabel: undefined;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {
     "update:modelValue": (value: number) => void;
     change: (value: number) => void;
@@ -38,10 +38,10 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     disabled: boolean;
     prevLabel: string;
     nextLabel: string;
-    totalLabel: string;
+    totalLabel: undefined;
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((value: number) => any) | undefined;
     onChange?: ((value: number) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: number) => any) | undefined;
 }>, {
     disabled: boolean;
     modelValue: number;

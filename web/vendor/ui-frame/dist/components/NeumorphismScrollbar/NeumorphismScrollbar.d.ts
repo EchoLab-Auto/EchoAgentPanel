@@ -31,8 +31,8 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     accentColor: string;
     sigma: number;
 }>>> & Readonly<{}>, {
-    variant: ScrollbarVariant;
     target: string;
+    variant: ScrollbarVariant;
     dotColor: string;
     accentColor: string;
     sigma: number;

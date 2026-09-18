@@ -23,7 +23,7 @@ import '../NeumorphismInputNumber.css';const U = { class: "nm-input-number__body
     const n = o, s = y, { config: N, resolveProp: P } = F(), w = d(
       () => {
         var t;
-        return P(n.size, (t = N.value.input) == null ? void 0 : t.size, "medium");
+        return P(n.size, (t = N.value.inputNumber) == null ? void 0 : t.size, "medium");
       }
     ), x = d(() => n.disabled), _ = d({
       get: () => n.modelValue,
@@ -126,7 +126,7 @@ import '../NeumorphismInputNumber.css';const U = { class: "nm-input-number__body
       ])
     ], 2));
   }
-}), ne = /* @__PURE__ */ M(O, [["__scopeId", "data-v-930c93bd"]]);
+}), ne = /* @__PURE__ */ M(O, [["__scopeId", "data-v-b5d342eb"]]);
 export {
   ne as N
 };

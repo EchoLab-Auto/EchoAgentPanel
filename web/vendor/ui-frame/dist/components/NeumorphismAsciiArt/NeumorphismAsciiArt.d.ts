@@ -1,9 +1,12 @@
+export type AsciiArtRadius = 'none' | 'small' | 'medium' | 'large' | 'xl';
 export interface NeumorphismAsciiArtProps {
     /** Image source rendered as ASCII art (required) */
     src: string;
     /** Density multiplier of the character grid */
     density?: number;
-    /** Container height (CSS value or px number) */
+    /** Container width (CSS value or px number); default 100% */
+    width?: string | number;
+    /** Container height (CSS value or px number); omit to auto-fit the image aspect ratio */
     height?: string | number;
     /** Pointer interaction: characters near the pointer brighten and enlarge */
     reactive?: boolean;
@@ -11,6 +14,8 @@ export interface NeumorphismAsciiArtProps {
     speed?: number;
     /** Custom palette; defaults to theme tokens */
     palette?: string[];
+    /** Container corner radius */
+    radius?: AsciiArtRadius;
     /** Accessible label */
     ariaLabel?: string;
 }
@@ -19,19 +24,19 @@ declare function __VLS_template(): {
 };
 declare const __VLS_component: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismAsciiArtProps>, {
     density: number;
-    height: number;
     reactive: boolean;
     speed: number;
+    radius: string;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {}, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismAsciiArtProps>, {
     density: number;
-    height: number;
     reactive: boolean;
     speed: number;
+    radius: string;
 }>>> & Readonly<{}>, {
-    height: string | number;
     reactive: boolean;
     speed: number;
     density: number;
+    radius: AsciiArtRadius;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;

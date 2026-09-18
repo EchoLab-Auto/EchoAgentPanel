@@ -14,6 +14,7 @@ const e = {
   canvasZoomOut: "缩小",
   canvasZoomIn: "放大",
   canvasZoomReset: "重置缩放",
+  canvasResetView: "复位视图",
   canvasZoomFit: "适应屏幕",
   canvasFullscreen: "进入全屏",
   canvasExitFullscreen: "退出全屏",
@@ -54,6 +55,7 @@ const e = {
   paginationTotal: "共 {total} 条",
   paginationLabel: "分页导航",
   paginationPageLabel: "第 {page} 页",
+  paginationJumper: "跳至 {input} 页",
   // Toast
   toastClose: "关闭通知",
   // Tabs
@@ -185,6 +187,7 @@ const e = {
   canvasZoomOut: "Zoom out",
   canvasZoomIn: "Zoom in",
   canvasZoomReset: "Reset zoom",
+  canvasResetView: "Reset view",
   canvasZoomFit: "Fit to screen",
   canvasFullscreen: "Enter fullscreen",
   canvasExitFullscreen: "Exit fullscreen",
@@ -225,6 +228,7 @@ const e = {
   paginationTotal: "Total {total}",
   paginationLabel: "Pagination",
   paginationPageLabel: "Page {page}",
+  paginationJumper: "Go to {input}",
   // Toast
   toastClose: "Close notification",
   // Tabs

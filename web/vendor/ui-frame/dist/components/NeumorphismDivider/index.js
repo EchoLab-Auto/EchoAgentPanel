@@ -1,4 +1,4 @@
-import { N as f } from "../../chunks/NeumorphismDivider-C571hn7Q.js";
+import { N as f } from "../../chunks/NeumorphismDivider-BYSWiIDi.js";
 export {
   f as default
 };

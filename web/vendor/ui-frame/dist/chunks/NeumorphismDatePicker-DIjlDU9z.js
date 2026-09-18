@@ -1,4 +1,4 @@
-import { defineComponent as fe, computed as l, ref as D, watch as be, openBlock as b, createElementBlock as h, createVNode as B, unref as i, withCtx as q, createElementVNode as r, normalizeClass as F, toDisplayString as y, createCommentVNode as he, Fragment as z, renderList as O, nextTick as ye } from "vue";
+import { defineComponent as be, computed as l, ref as D, watch as he, openBlock as m, createElementBlock as v, createVNode as B, unref as n, createCommentVNode as z, withCtx as O, createElementVNode as r, normalizeClass as F, toDisplayString as y, Fragment as K, renderList as W, nextTick as ye } from "vue";
 import { useDatePicker as _e } from "../composables/useDatePicker.js";
 import { useFormField as ge } from "../composables/useFormField.js";
 import { u as we } from "./createComponent-jnXBYqCm.js";
@@ -7,7 +7,7 @@ import { N as De } from "./NeumorphismFieldLabel-CBF1nZs1.js";
 import { N as Pe } from "./NeumorphismFieldError-BxamHjhs.js";
 import { N as Me } from "./NeumorphismPopover-m8EjDIRe.js";
 import { _ as Ce } from "./_plugin-vue_export-helper-CHgC5LLL.js";
-import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrapper" }, Be = ["tabindex", "aria-label", "aria-expanded", "aria-controls"], Fe = { class: "nm-datepicker__actions" }, Le = ["aria-label"], Te = ["aria-label"], Ve = { class: "nm-datepicker__header" }, Ae = ["aria-label"], Ye = ["aria-label"], $e = { class: "nm-datepicker__header-label" }, Ee = ["aria-label"], Se = ["aria-label"], Ie = { class: "nm-datepicker__weekdays" }, Re = ["id"], qe = ["disabled", "tabindex", "aria-label", "aria-selected", "aria-current", "onClick", "onFocus"], ze = { class: "nm-datepicker__footer" }, Oe = /* @__PURE__ */ fe({
+import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrapper" }, Be = ["name", "value"], Fe = ["tabindex", "aria-label", "aria-expanded", "aria-controls"], Le = { class: "nm-datepicker__actions" }, Te = ["aria-label"], Ve = ["aria-label"], Ae = { class: "nm-datepicker__header" }, Ye = ["aria-label"], $e = ["aria-label"], Ee = { class: "nm-datepicker__header-label" }, Se = ["aria-label"], Ie = ["aria-label"], Re = { class: "nm-datepicker__weekdays" }, qe = ["id"], ze = ["disabled", "tabindex", "aria-label", "aria-selected", "aria-current", "onClick", "onFocus"], Oe = { class: "nm-datepicker__footer" }, Ke = /* @__PURE__ */ be({
   __name: "NeumorphismDatePicker",
   props: {
     modelValue: { default: null },
@@ -26,13 +26,13 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
     id: {}
   },
   emits: ["update:modelValue", "change", "focus", "blur"],
-  setup(u, { emit: K }) {
-    const d = u, m = K, { config: _, resolveProp: P } = we(), { t: o } = xe(), W = l(
+  setup(u, { emit: J }) {
+    const d = u, p = J, { config: _, resolveProp: P } = we(), { t: o } = xe(), H = l(
       () => {
         var e;
         return P(d.size, (e = _.value.datePicker) == null ? void 0 : e.size, "medium");
       }
-    ), J = l(
+    ), U = l(
       () => {
         var e;
         return P(d.format, (e = _.value.datePicker) == null ? void 0 : e.format, "yyyy-MM-dd");
@@ -42,68 +42,68 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
         var e;
         return d.placeholder || ((e = _.value.datePicker) == null ? void 0 : e.placeholder) || o("datePickerPlaceholder");
       }
-    ), H = l(
+    ), j = l(
       () => {
         var e;
         return P(d.clearable, (e = _.value.datePicker) == null ? void 0 : e.clearable, !0);
       }
-    ), U = l(() => o("datePickerClear")), j = l(() => o("datePickerToday")), G = l(() => o("datePickerPrevMonth")), Q = l(() => o("datePickerNextMonth")), X = l(() => o("datePickerPrevYear")), Z = l(() => o("datePickerNextYear")), ee = l({
+    ), G = l(() => o("datePickerClear")), Q = l(() => o("datePickerToday")), X = l(() => o("datePickerPrevMonth")), Z = l(() => o("datePickerNextMonth")), ee = l(() => o("datePickerPrevYear")), ae = l(() => o("datePickerNextYear")), te = l({
       get: () => d.modelValue ?? null,
       set: (e) => {
-        m("update:modelValue", e), m("change", e);
+        p("update:modelValue", e), p("change", e);
       }
     }), {
       currentYear: T,
       currentMonth: V,
-      calendarDays: v,
-      weekdays: ae,
-      selectedDate: p,
+      calendarDays: k,
+      weekdays: re,
+      selectedDate: f,
       selectDate: M,
       prevMonth: A,
       nextMonth: Y,
       prevYear: $,
       nextYear: E,
-      formatDate: te,
-      goToToday: re
+      formatDate: oe,
+      goToToday: ne
     } = _e({
-      modelValue: ee,
+      modelValue: te,
       minDate: l(() => d.minDate),
       maxDate: l(() => d.maxDate),
-      format: J,
+      format: U,
       firstDayOfWeek: l(() => {
         var e;
         return d.firstDayOfWeek ?? ((e = _.value.datePicker) == null ? void 0 : e.firstDayOfWeek);
       })
-    }), { fieldId: g, errorMessage: oe, baseClassList: ie, handleFocus: ne, handleBlur: le } = ge(() => ({
+    }), { fieldId: g, errorMessage: ie, baseClassList: le, handleFocus: se, handleBlur: de } = ge(() => ({
       id: d.id,
-      size: W.value,
+      size: H.value,
       disabled: d.disabled,
       error: d.error,
       prefix: "datepicker"
-    })), k = D(), w = D(!1);
-    function se(e) {
+    })), b = D(), w = D(!1);
+    function ue(e) {
       w.value = e;
     }
-    function de(e) {
+    function ce(e) {
       var a;
-      e.isDisabled || (M(e.date), (a = k.value) == null || a.hide(), N());
+      e.isDisabled || (M(e.date), (a = b.value) == null || a.hide(), N());
     }
-    function ue() {
+    function me() {
       var a;
       const e = /* @__PURE__ */ new Date();
-      e.setHours(0, 0, 0, 0), M(e), re(), (a = k.value) == null || a.hide();
+      e.setHours(0, 0, 0, 0), M(e), ne(), (a = b.value) == null || a.hide();
     }
-    function ce(e) {
-      e.stopPropagation(), m("update:modelValue", null), m("change", null);
+    function ve(e) {
+      e.stopPropagation(), p("update:modelValue", null), p("change", null);
     }
-    be(p, (e) => {
+    he(f, (e) => {
       e && (T.value = e.getFullYear(), V.value = e.getMonth() + 1);
     });
-    const me = l(() => p.value ? te(p.value) : ""), ve = l(() => [
-      ...ie("nm-datepicker").value,
+    const S = l(() => f.value ? oe(f.value) : ""), pe = l(() => [
+      ...le("nm-datepicker").value,
       {
         "nm-datepicker--open": w.value,
-        "nm-datepicker--has-value": p.value !== null
+        "nm-datepicker--has-value": f.value !== null
       }
     ]), C = l(() => {
       const e = T.value, a = V.value, t = [
@@ -121,91 +121,97 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
         o("datePickerMonth12") || "December"
       ];
       return { year: e, monthName: t[a - 1] };
-    }), n = D(-1), S = D();
+    }), i = D(-1), I = D();
     function N() {
       var e;
-      (e = S.value) == null || e.focus();
+      (e = I.value) == null || e.focus();
     }
-    function I(e = 5) {
+    function R(e = 5) {
       var t;
       const a = (t = document.getElementById(`${g}-grid`)) == null ? void 0 : t.querySelector('.nm-datepicker__day[tabindex="0"]');
       if (a) {
         a.focus();
         return;
       }
-      e > 0 && w.value && typeof window < "u" && window.requestAnimationFrame(() => I(e - 1));
-    }
-    function pe(e) {
-      var a, t;
-      d.disabled || (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") && (e.preventDefault(), n.value === -1 && (n.value = v.value.findIndex((s) => s.isCurrentMonth && !s.isDisabled)), (t = (a = k.value) == null ? void 0 : a.show) == null || t.call(a), ye(() => I()));
+      e > 0 && w.value && typeof window < "u" && window.requestAnimationFrame(() => R(e - 1));
     }
     function ke(e) {
-      var s, c, x, R;
-      const a = v.value.length;
+      var a, t;
+      d.disabled || (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") && (e.preventDefault(), i.value === -1 && (i.value = k.value.findIndex((s) => s.isCurrentMonth && !s.isDisabled)), (t = (a = b.value) == null ? void 0 : a.show) == null || t.call(a), ye(() => R()));
+    }
+    function fe(e) {
+      var s, c, x, q;
+      const a = k.value.length;
       if (a === 0) return;
-      n.value === -1 && (n.value = v.value.findIndex((f) => f.isCurrentMonth && !f.isDisabled));
-      let t = n.value;
+      i.value === -1 && (i.value = k.value.findIndex((h) => h.isCurrentMonth && !h.isDisabled));
+      let t = i.value;
       switch (e.key) {
         case "ArrowRight":
-          t = Math.min(a - 1, n.value + 1);
+          t = Math.min(a - 1, i.value + 1);
           break;
         case "ArrowLeft":
-          t = Math.max(0, n.value - 1);
+          t = Math.max(0, i.value - 1);
           break;
         case "ArrowDown":
-          t = Math.min(a - 1, n.value + 7);
+          t = Math.min(a - 1, i.value + 7);
           break;
         case "ArrowUp":
-          t = Math.max(0, n.value - 7);
+          t = Math.max(0, i.value - 7);
           break;
         case "Home":
-          t = n.value - n.value % 7;
+          t = i.value - i.value % 7;
           break;
         case "End":
-          t = n.value + (6 - n.value % 7);
+          t = i.value + (6 - i.value % 7);
           break;
         case "Enter":
         case " ": {
-          const f = v.value[n.value];
-          f && !f.isDisabled && (M(f.date), (c = (s = k.value) == null ? void 0 : s.hide) == null || c.call(s), N()), e.preventDefault();
+          const h = k.value[i.value];
+          h && !h.isDisabled && (M(h.date), (c = (s = b.value) == null ? void 0 : s.hide) == null || c.call(s), N()), e.preventDefault();
           return;
         }
         case "Escape":
-          (R = (x = k.value) == null ? void 0 : x.hide) == null || R.call(x), N(), e.preventDefault();
+          (q = (x = b.value) == null ? void 0 : x.hide) == null || q.call(x), N(), e.preventDefault();
           return;
         default:
           return;
       }
-      e.preventDefault(), t >= 0 && t < a && !v.value[t].isDisabled && (n.value = t);
+      e.preventDefault(), t >= 0 && t < a && !k.value[t].isDisabled && (i.value = t);
     }
-    return (e, a) => (b(), h("div", Ne, [
+    return (e, a) => (m(), v("div", Ne, [
       B(De, {
         label: u.label,
         required: u.required,
-        "for-id": i(g)
+        "for-id": n(g)
       }, null, 8, ["label", "required", "for-id"]),
+      u.name ? (m(), v("input", {
+        key: 0,
+        type: "hidden",
+        name: u.name,
+        value: S.value
+      }, null, 8, Be)) : z("", !0),
       B(Me, {
         ref_key: "popoverRef",
-        ref: k,
+        ref: b,
         disabled: u.disabled,
         width: "trigger",
         "show-arrow": !1,
         trigger: "click",
-        onVisibleChange: se
+        onVisibleChange: ue
       }, {
-        content: q(() => [
+        content: O(() => [
           r("div", {
             class: "nm-datepicker__calendar",
             role: "dialog",
             "aria-label": u.label || "Date picker"
           }, [
-            r("div", Ve, [
+            r("div", Ae, [
               r("button", {
                 class: "nm-datepicker__nav-btn",
                 type: "button",
-                "aria-label": X.value,
+                "aria-label": ee.value,
                 onClick: a[2] || (a[2] = //@ts-ignore
-                (...t) => i($) && i($)(...t))
+                (...t) => n($) && n($)(...t))
               }, [...a[8] || (a[8] = [
                 r("svg", {
                   width: "14",
@@ -218,13 +224,13 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
                   r("polyline", { points: "11 17 6 12 11 7" }),
                   r("polyline", { points: "18 17 13 12 18 7" })
                 ], -1)
-              ])], 8, Ae),
+              ])], 8, Ye),
               r("button", {
                 class: "nm-datepicker__nav-btn",
                 type: "button",
-                "aria-label": G.value,
+                "aria-label": X.value,
                 onClick: a[3] || (a[3] = //@ts-ignore
-                (...t) => i(A) && i(A)(...t))
+                (...t) => n(A) && n(A)(...t))
               }, [...a[9] || (a[9] = [
                 r("svg", {
                   width: "14",
@@ -236,14 +242,14 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
                 }, [
                   r("polyline", { points: "15 18 9 12 15 6" })
                 ], -1)
-              ])], 8, Ye),
-              r("span", $e, y(C.value.monthName) + " " + y(C.value.year), 1),
+              ])], 8, $e),
+              r("span", Ee, y(C.value.monthName) + " " + y(C.value.year), 1),
               r("button", {
                 class: "nm-datepicker__nav-btn",
                 type: "button",
-                "aria-label": Q.value,
+                "aria-label": Z.value,
                 onClick: a[4] || (a[4] = //@ts-ignore
-                (...t) => i(Y) && i(Y)(...t))
+                (...t) => n(Y) && n(Y)(...t))
               }, [...a[10] || (a[10] = [
                 r("svg", {
                   width: "14",
@@ -255,13 +261,13 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
                 }, [
                   r("polyline", { points: "9 18 15 12 9 6" })
                 ], -1)
-              ])], 8, Ee),
+              ])], 8, Se),
               r("button", {
                 class: "nm-datepicker__nav-btn",
                 type: "button",
-                "aria-label": Z.value,
+                "aria-label": ae.value,
                 onClick: a[5] || (a[5] = //@ts-ignore
-                (...t) => i(E) && i(E)(...t))
+                (...t) => n(E) && n(E)(...t))
               }, [...a[11] || (a[11] = [
                 r("svg", {
                   width: "14",
@@ -274,25 +280,25 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
                   r("polyline", { points: "13 17 18 12 13 7" }),
                   r("polyline", { points: "6 17 11 12 6 7" })
                 ], -1)
-              ])], 8, Se)
+              ])], 8, Ie)
             ]),
-            r("div", Ie, [
-              (b(!0), h(z, null, O(i(ae), (t, s) => (b(), h("span", {
+            r("div", Re, [
+              (m(!0), v(K, null, W(n(re), (t, s) => (m(), v("span", {
                 key: s,
                 class: "nm-datepicker__weekday"
               }, y(t), 1))), 128))
             ]),
             r("div", {
-              id: `${i(g)}-grid`,
+              id: `${n(g)}-grid`,
               class: "nm-datepicker__days",
               role: "grid",
-              onKeydown: ke
+              onKeydown: fe
             }, [
-              (b(!0), h(z, null, O(i(v), (t, s) => (b(), h("button", {
+              (m(!0), v(K, null, W(n(k), (t, s) => (m(), v("button", {
                 key: s,
                 ref_for: !0,
                 ref: (c) => {
-                  s === n.value && c && c.focus();
+                  s === i.value && c && c.focus();
                 },
                 class: F(["nm-datepicker__day", {
                   "nm-datepicker__day--other-month": !t.isCurrentMonth,
@@ -303,49 +309,49 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
                 }]),
                 type: "button",
                 disabled: t.isDisabled,
-                tabindex: s === n.value ? 0 : -1,
+                tabindex: s === i.value ? 0 : -1,
                 role: "gridcell",
                 "aria-label": `${C.value.monthName} ${t.day}, ${t.date.getFullYear()}`,
                 "aria-selected": t.isSelected,
                 "aria-current": t.isToday ? "date" : void 0,
-                onClick: (c) => de(t),
-                onFocus: (c) => n.value = s
-              }, y(t.day), 43, qe))), 128))
-            ], 40, Re),
-            r("div", ze, [
+                onClick: (c) => ce(t),
+                onFocus: (c) => i.value = s
+              }, y(t.day), 43, ze))), 128))
+            ], 40, qe),
+            r("div", Oe, [
               r("button", {
                 class: "nm-datepicker__today-btn",
                 type: "button",
-                onClick: ue
-              }, y(j.value), 1)
+                onClick: me
+              }, y(Q.value), 1)
             ])
-          ], 8, Te)
+          ], 8, Ve)
         ]),
-        default: q(() => [
+        default: O(() => [
           r("div", {
             ref_key: "triggerRef",
-            ref: S,
-            class: F(ve.value),
+            ref: I,
+            class: F(pe.value),
             tabindex: u.disabled ? -1 : 0,
             "aria-label": u.label || L.value,
             role: "combobox",
             "aria-expanded": w.value,
             "aria-haspopup": "dialog",
-            "aria-controls": `${i(g)}-grid`,
-            onFocus: a[0] || (a[0] = (t) => i(ne)(t, m)),
-            onBlur: a[1] || (a[1] = (t) => i(le)(t, m)),
-            onKeydown: pe
+            "aria-controls": `${n(g)}-grid`,
+            onFocus: a[0] || (a[0] = (t) => n(se)(t, p)),
+            onBlur: a[1] || (a[1] = (t) => n(de)(t, p)),
+            onKeydown: ke
           }, [
             r("span", {
-              class: F(["nm-datepicker__value", { "nm-datepicker__value--placeholder": !i(p) }])
-            }, y(me.value || L.value), 3),
-            r("span", Fe, [
-              H.value && i(p) ? (b(), h("button", {
+              class: F(["nm-datepicker__value", { "nm-datepicker__value--placeholder": !n(f) }])
+            }, y(S.value || L.value), 3),
+            r("span", Le, [
+              j.value && n(f) ? (m(), v("button", {
                 key: 0,
                 class: "nm-datepicker__clear",
                 type: "button",
-                "aria-label": U.value,
-                onClick: ce
+                "aria-label": G.value,
+                onClick: ve
               }, [...a[6] || (a[6] = [
                 r("svg", {
                   width: "14",
@@ -357,7 +363,7 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
                 }, [
                   r("path", { d: "M18 6L6 18M6 6l12 12" })
                 ], -1)
-              ])], 8, Le)) : he("", !0),
+              ])], 8, Te)) : z("", !0),
               a[7] || (a[7] = r("svg", {
                 class: "nm-datepicker__icon",
                 width: "16",
@@ -395,17 +401,17 @@ import '../NeumorphismDatePicker.css';const Ne = { class: "nm-datepicker__wrappe
                 })
               ], -1))
             ])
-          ], 42, Be)
+          ], 42, Fe)
         ]),
         _: 1
       }, 8, ["disabled"]),
       B(Pe, {
-        id: `${i(g)}-error`,
-        message: i(oe)
+        id: `${n(g)}-error`,
+        message: n(ie)
       }, null, 8, ["id", "message"])
     ]));
   }
-}), Ze = /* @__PURE__ */ Ce(Oe, [["__scopeId", "data-v-7fc01103"]]);
+}), ea = /* @__PURE__ */ Ce(Ke, [["__scopeId", "data-v-bdf94e98"]]);
 export {
-  Ze as N
+  ea as N
 };

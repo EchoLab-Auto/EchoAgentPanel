@@ -38,9 +38,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     footer: boolean;
 }>>> & Readonly<{
     onClose?: (() => any) | undefined;
+    onCancel?: (() => any) | undefined;
     onOpen?: (() => any) | undefined;
     "onUpdate:modelValue"?: ((value: boolean) => any) | undefined;
-    onCancel?: (() => any) | undefined;
     onConfirm?: (() => any) | undefined;
 }>, {
     closable: boolean;

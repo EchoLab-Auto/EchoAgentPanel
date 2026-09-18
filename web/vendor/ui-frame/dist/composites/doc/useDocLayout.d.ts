@@ -1,8 +1,8 @@
 import { ComputedRef, Ref, WritableComputedRef } from 'vue';
 import { ProDocNode } from './types.js';
 import { createDocTree } from './doc-tree.js';
-import { TreeNodeData } from '../components/NeumorphismTree';
-import { Theme } from '../composables/useTheme';
+import { TreeNodeData } from '../../components/NeumorphismTree';
+import { Theme } from '../../composables/useTheme';
 
 export interface UseDocLayoutOptions {
     /** 文档树根节点 */

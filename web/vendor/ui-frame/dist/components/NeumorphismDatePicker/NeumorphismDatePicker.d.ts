@@ -31,9 +31,9 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     clearable: undefined;
 }>>> & Readonly<{
     onFocus?: ((event: FocusEvent) => any) | undefined;
+    onChange?: ((value: Date | null) => any) | undefined;
     onBlur?: ((event: FocusEvent) => any) | undefined;
     "onUpdate:modelValue"?: ((value: Date | null) => any) | undefined;
-    onChange?: ((value: Date | null) => any) | undefined;
 }>, {
     disabled: boolean;
     placeholder: string;

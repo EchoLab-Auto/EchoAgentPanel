@@ -29,8 +29,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     modelValue: boolean;
     disabled: boolean;
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((value: boolean) => any) | undefined;
     onChange?: ((value: boolean) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: boolean) => any) | undefined;
 }>, {
     disabled: boolean;
     modelValue: boolean;

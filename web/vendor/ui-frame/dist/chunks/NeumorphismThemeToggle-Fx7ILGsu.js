@@ -1,6 +1,6 @@
-import { defineComponent as x, computed as u, watch as T, openBlock as o, createElementBlock as s, unref as C, normalizeClass as v, Fragment as y, renderList as V, createElementVNode as r, createCommentVNode as m, toDisplayString as z } from "vue";
-import { useTheme as B } from "../composables/useTheme.js";
-import { useLocale as M } from "../composables/useLocale.js";
+import { defineComponent as x, computed as u, watch as T, openBlock as o, createElementBlock as s, unref as C, normalizeClass as p, Fragment as y, renderList as V, createElementVNode as r, createCommentVNode as m, toDisplayString as B } from "vue";
+import { useTheme as M } from "../composables/useTheme.js";
+import { useLocale as z } from "../composables/useLocale.js";
 import { u as A } from "./createComponent-jnXBYqCm.js";
 import { _ as N } from "./_plugin-vue_export-helper-CHgC5LLL.js";
 import '../NeumorphismThemeToggle.css';const L = ["aria-label"], D = ["aria-pressed", "disabled", "onClick"], S = {
@@ -34,24 +34,24 @@ import '../NeumorphismThemeToggle.css';const L = ["aria-label"], D = ["aria-pres
   },
   emits: ["update:modelValue", "change"],
   setup(a, { emit: f }) {
-    const n = a, { config: c, resolveProp: g } = A(), p = u(
+    const n = a, { config: c, resolveProp: g } = A(), h = u(
       () => {
         var e;
         return g(n.size, (e = c.value.themeToggle) == null ? void 0 : e.size, "medium");
       }
-    ), k = u(
+    ), b = u(
       () => {
         var e;
         return g(n.disableAuto, (e = c.value.themeToggle) == null ? void 0 : e.disableAuto, !1);
       }
-    ), h = f, { t: i } = M(), b = u(() => {
+    ), v = f, { t: i } = z(), k = u(() => {
       const e = [
         { value: "light", label: i("themeToggleLight") },
         { value: "auto", label: i("themeToggleAuto") },
         { value: "dark", label: i("themeToggleDark") }
       ];
-      return k.value ? e.filter((t) => t.value !== "auto") : e;
-    }), d = B();
+      return b.value ? e.filter((t) => t.value !== "auto") : e;
+    }), d = M();
     T(
       () => n.modelValue,
       (e) => {
@@ -59,30 +59,30 @@ import '../NeumorphismThemeToggle.css';const L = ["aria-label"], D = ["aria-pres
       },
       { immediate: !0 }
     );
-    const w = u(() => [
+    const _ = u(() => [
       "nm-theme-toggle",
-      `nm-theme-toggle--${p.value}`,
+      `nm-theme-toggle--${h.value}`,
       {
         "nm-theme-toggle--disabled": n.disabled
       }
     ]);
-    function _(e) {
-      n.disabled || e !== n.modelValue && (d.setTheme(e), h("update:modelValue", e), h("change", e));
+    function w(e) {
+      n.disabled || e !== n.modelValue && (d.setTheme(e), v("update:modelValue", e), v("change", e));
     }
     return (e, t) => (o(), s("div", {
-      class: v(w.value),
+      class: p(_.value),
       role: "radiogroup",
       "aria-label": C(i)("themeToggleLabel")
     }, [
-      (o(!0), s(y, null, V(b.value, (l) => (o(), s("button", {
+      (o(!0), s(y, null, V(k.value, (l) => (o(), s("button", {
         key: l.value,
         type: "button",
-        class: v(["nm-theme-toggle__btn", {
+        class: p(["nm-theme-toggle__btn", {
           "nm-theme-toggle__btn--active": a.modelValue === l.value
         }]),
         "aria-pressed": a.modelValue === l.value,
         disabled: a.disabled,
-        onClick: (I) => _(l.value)
+        onClick: (I) => w(l.value)
       }, [
         l.value === "light" ? (o(), s("svg", S, [...t[0] || (t[0] = [
           r("circle", {
@@ -134,11 +134,11 @@ import '../NeumorphismThemeToggle.css';const L = ["aria-label"], D = ["aria-pres
             d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
           }, null, -1)
         ])])) : m("", !0),
-        a.size !== "small" ? (o(), s("span", j, z(l.label), 1)) : m("", !0)
+        h.value !== "small" ? (o(), s("span", j, B(l.label), 1)) : m("", !0)
       ], 10, D))), 128))
     ], 10, L));
   }
-}), K = /* @__PURE__ */ N(F, [["__scopeId", "data-v-f9dedc69"]]);
+}), K = /* @__PURE__ */ N(F, [["__scopeId", "data-v-38bb5f86"]]);
 export {
   K as N
 };

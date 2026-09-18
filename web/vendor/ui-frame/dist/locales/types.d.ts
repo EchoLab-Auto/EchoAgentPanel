@@ -18,6 +18,8 @@ export interface LocaleMessages {
     canvasZoomOut?: string;
     canvasZoomIn?: string;
     canvasZoomReset?: string;
+    /** 无限画布模式下的视图复位（平移 + 缩放一并回到全部内容视图） */
+    canvasResetView?: string;
     canvasZoomFit?: string;
     canvasFullscreen?: string;
     canvasExitFullscreen?: string;
@@ -60,6 +62,8 @@ export interface LocaleMessages {
     paginationTotal?: string;
     paginationLabel?: string;
     paginationPageLabel?: string;
+    /** 跳页器文案，须含 {input} 占位符（组件按占位符拆为输入框前后两段） */
+    paginationJumper?: string;
     /** Toast */
     toastClose?: string;
     /** Tabs */

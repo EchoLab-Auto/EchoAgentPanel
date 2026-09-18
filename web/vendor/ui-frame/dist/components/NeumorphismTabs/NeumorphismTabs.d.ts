@@ -29,8 +29,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     modelValue: string;
     tabs: () => never[];
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((value: string) => any) | undefined;
     onChange?: ((value: string) => any) | undefined;
+    "onUpdate:modelValue"?: ((value: string) => any) | undefined;
     onTabClick?: ((tab: TabItem) => any) | undefined;
 }>, {
     tabs: TabItem[];

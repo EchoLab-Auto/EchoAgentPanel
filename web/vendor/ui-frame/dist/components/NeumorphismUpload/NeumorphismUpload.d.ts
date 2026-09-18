@@ -74,15 +74,15 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     removeLabel: string;
     previewLabel: string;
 }>>> & Readonly<{
-    "onUpdate:modelValue"?: ((files: UploadFile[]) => any) | undefined;
     onChange?: ((files: UploadFile[]) => any) | undefined;
+    "onUpdate:modelValue"?: ((files: UploadFile[]) => any) | undefined;
     onRemove?: ((file: UploadFile) => any) | undefined;
     onPreview?: ((file: UploadFile) => any) | undefined;
     onExceed?: ((excessCount: number) => any) | undefined;
 }>, {
     disabled: boolean;
-    modelValue: UploadFile[];
     drag: boolean;
+    modelValue: UploadFile[];
     multiple: boolean;
     maxCount: number;
     accept: string;

@@ -56,34 +56,34 @@ import { FormKey as Jm, RadioGroupKey as Qm, RowGutterKey as ot } from "./compos
 import { N as M } from "./chunks/NeumorphismSegmented-DriZive5.js";
 import { N as b } from "./chunks/NeumorphismStatusDot-DVKfRlP8.js";
 import { N as y } from "./chunks/NeumorphismSpinner-CecIG42-.js";
-import { N as w } from "./chunks/NeumorphismChartCandlestick-Bn4aNHNL.js";
+import { N as w } from "./chunks/NeumorphismChartCandlestick-B5bCQJod.js";
 import { N as A } from "./chunks/NeumorphismChartPie-CBVlGwTY.js";
 import { N as P } from "./chunks/NeumorphismChartLine-CD7XaWsj.js";
-import { N as R } from "./chunks/NeumorphismChartBar-C9osVs5Q.js";
+import { N as R } from "./chunks/NeumorphismChartBar-ndY2eet2.js";
 import { N as F } from "./chunks/NeumorphismAutoComplete-Cg4JfB0e.js";
 import { N as I } from "./chunks/NeumorphismUpload-B_Ce5z0X.js";
 import { N as E } from "./chunks/NeumorphismList-ByUgLAga.js";
-import { N as D } from "./chunks/NeumorphismDatePicker-B7XCHoCi.js";
+import { N as D } from "./chunks/NeumorphismDatePicker-DIjlDU9z.js";
 import { N as $ } from "./chunks/NeumorphismVirtualList-CYJsckGD.js";
-import { N as k } from "./chunks/NeumorphismSteps-Dt8oemy3.js";
+import { N as k } from "./chunks/NeumorphismSteps-BLOynGea.js";
 import { N as _ } from "./chunks/NeumorphismNavMenu-DJ_2h4xU.js";
 import { N as B } from "./chunks/NeumorphismMenu-BD2HEBQp.js";
 import { N as K } from "./chunks/NeumorphismDrawer-YugAz7JW.js";
-import { N as O } from "./chunks/NeumorphismInputNumber-CqEXe_8_.js";
+import { N as O } from "./chunks/NeumorphismInputNumber-CTkMQ80X.js";
 import { N as Y } from "./chunks/NeumorphismSlider-iL6dJ68o.js";
 import { N as X } from "./chunks/NeumorphismFieldError-BxamHjhs.js";
 import { N as G } from "./chunks/NeumorphismFieldLabel-CBF1nZs1.js";
-import { N as U } from "./chunks/NeumorphismAsciiArt-CvzwbNkv.js";
+import { N as U } from "./chunks/NeumorphismAsciiArt-BBIVoYBF.js";
 import { N as V } from "./chunks/NeumorphismArt-dTpvKClT.js";
 import { N as Z } from "./chunks/NeumorphismLogo-RF43SokA.js";
-import { N as j } from "./chunks/NeumorphismCanvas-Dkp5eA0u.js";
+import { N as j } from "./chunks/NeumorphismCanvas-_XC7PscV.js";
 import { a as z, N as q } from "./chunks/NeumorphismTree-DKdQqI-G.js";
-import { N as W } from "./chunks/NeumorphismThemeToggle-Z1Q61lr6.js";
+import { N as W } from "./chunks/NeumorphismThemeToggle-Fx7ILGsu.js";
 import { N as H } from "./chunks/NeumorphismLayout-GEx80IRW.js";
-import { N as J, a as Q } from "./chunks/NeumorphismCol-Ca0Cuvrg.js";
+import { N as J, a as Q } from "./chunks/NeumorphismCol-BiaTAjWV.js";
 import { N as oo } from "./chunks/NeumorphismContainer-CGr-px2A.js";
 import { N as ro } from "./chunks/NeumorphismCollapse-CcQEm0Jq.js";
-import { N as eo } from "./chunks/NeumorphismDivider-C571hn7Q.js";
+import { N as eo } from "./chunks/NeumorphismDivider-BYSWiIDi.js";
 import { N as mo } from "./chunks/NeumorphismTable-O0H9yKvf.js";
 import { N as to } from "./chunks/NeumorphismSkeleton-Bxt10H5L.js";
 import { _ as so } from "./chunks/NeumorphismScrollbar.vue_vue_type_script_setup_true_lang-PwK95onm.js";
@@ -95,9 +95,9 @@ import { N as uo } from "./chunks/NeumorphismAlert-yHMu8tZ7.js";
 import { N as fo } from "./chunks/NeumorphismTag-S0FZZ2i6.js";
 import { N as No } from "./chunks/NeumorphismBadge-D6f1uflq.js";
 import { N as ho } from "./chunks/NeumorphismAvatar-BBQ1Wrjq.js";
-import { N as co } from "./chunks/NeumorphismPagination-CNOeDpFp.js";
+import { N as co } from "./chunks/NeumorphismPagination-wyCEUfXF.js";
 import { N as lo } from "./chunks/NeumorphismBreadcrumb-BFyQ5tRM.js";
-import { N as xo } from "./chunks/NeumorphismTabs-DJ0sUeba.js";
+import { N as xo } from "./chunks/NeumorphismTabs-Duap_z9d.js";
 import { N as go } from "./chunks/NeumorphismTooltip-MKJQObU9.js";
 import { N as Co } from "./chunks/NeumorphismToastProvider-CSDYfOdN.js";
 import { N as vo } from "./chunks/NeumorphismModal-lMe8tfPG.js";
@@ -108,7 +108,7 @@ import { a as bo, N as yo } from "./chunks/NeumorphismRadioGroup-LbLt8St5.js";
 import { N as wo } from "./chunks/NeumorphismCheckbox-ZN_HeVOw.js";
 import { T as Ao } from "./chunks/ThemeProvider-CCR_TjUs.js";
 import { N as Po } from "./chunks/NeumorphismInput-BlgrjPEH.js";
-import { N as Ro } from "./chunks/NeumorphismCard-Bc1QAxUh.js";
+import { N as Ro } from "./chunks/NeumorphismCard-BYf9mwR0.js";
 import { N as Fo } from "./chunks/NeumorphismSwitch-Caas9-Oj.js";
 import { N as Io } from "./chunks/NeumorphismButton-DEVgFO0I.js";
 import './ui-frame.css';const c = /* @__PURE__ */ new WeakMap();
@@ -216,7 +216,7 @@ function Do(o, m) {
 }
 const Gr = {
   install: Do,
-  version: "1.3.0"
+  version: "1.3.2-dev.3"
 };
 export {
   zm as ComponentRegistry,

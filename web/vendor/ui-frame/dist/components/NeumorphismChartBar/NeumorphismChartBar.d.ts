@@ -4,6 +4,9 @@ export interface NeumorphismChartBarProps {
     series?: ChartSeries[];
     width?: string | number;
     height?: string | number;
+    orientation?: 'vertical' | 'horizontal';
+    stacked?: boolean;
+    barGap?: number;
     showTooltip?: boolean;
     showLegend?: boolean;
     showGrid?: boolean;
@@ -20,6 +23,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     series: () => never[];
     width: string;
     height: string;
+    orientation: undefined;
+    stacked: undefined;
+    barGap: undefined;
     showTooltip: undefined;
     showLegend: undefined;
     showGrid: undefined;
@@ -35,6 +41,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     series: () => never[];
     width: string;
     height: string;
+    orientation: undefined;
+    stacked: undefined;
+    barGap: undefined;
     showTooltip: undefined;
     showLegend: undefined;
     showGrid: undefined;
@@ -52,6 +61,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     height: string | number;
     showGrid: boolean;
     series: ChartSeries[];
+    orientation: "vertical" | "horizontal";
+    barGap: number;
+    stacked: boolean;
     showTooltip: boolean;
     showLegend: boolean;
     showAxis: boolean;

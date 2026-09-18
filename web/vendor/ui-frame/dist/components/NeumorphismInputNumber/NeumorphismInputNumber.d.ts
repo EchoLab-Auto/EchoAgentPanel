@@ -48,14 +48,14 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     label: undefined;
 }>>> & Readonly<{
     onFocus?: ((event: FocusEvent) => any) | undefined;
+    onChange?: ((value: number | undefined) => any) | undefined;
     onBlur?: ((event: FocusEvent) => any) | undefined;
     "onUpdate:modelValue"?: ((value: number | undefined) => any) | undefined;
-    onChange?: ((value: number | undefined) => any) | undefined;
 }>, {
     step: number;
     disabled: boolean;
-    label: string;
     max: number;
+    label: string;
     placeholder: string;
     modelValue: number;
     min: number;

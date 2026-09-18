@@ -1,7 +1,7 @@
-import { defineComponent as te, computed as c, ref as z, openBlock as i, createElementBlock as a, normalizeStyle as w, normalizeClass as N, toDisplayString as p, createCommentVNode as m, renderSlot as oe, createElementVNode as d, unref as e, Fragment as y, renderList as f, createVNode as le, Transition as ne, withCtx as ie } from "vue";
+import { defineComponent as te, computed as c, ref as G, openBlock as i, createElementBlock as a, normalizeStyle as w, normalizeClass as z, toDisplayString as g, createCommentVNode as m, renderSlot as oe, createElementVNode as d, unref as e, Fragment as y, renderList as f, createVNode as le, Transition as ne, withCtx as ie } from "vue";
 import { useBarChart as ae } from "../composables/useBarChart.js";
-import { useLocale as se } from "../composables/useLocale.js";
-import { generateId as re } from "../utils/index.js";
+import { useLocale as re } from "../composables/useLocale.js";
+import { generateId as se } from "../utils/index.js";
 import { useConfig as he } from "../composables/useConfig.js";
 import { _ as ce } from "./_plugin-vue_export-helper-CHgC5LLL.js";
 import '../NeumorphismChartBar.css';const de = {
@@ -10,12 +10,15 @@ import '../NeumorphismChartBar.css';const de = {
 }, ue = {
   key: 0,
   class: "nm-chart__title"
-}, me = ["aria-label"], ve = ["viewBox"], ge = ["id"], pe = ["x", "y", "width", "height"], ye = ["clip-path"], fe = ["x1", "y1", "x2", "y2"], _e = ["x1", "y1", "x2", "y2"], xe = { key: 1 }, we = ["x1", "y1", "x2", "y2"], ke = ["x", "y"], be = { key: 2 }, Be = ["x1", "y1", "x2", "y2"], Me = ["x", "y"], $e = ["clip-path"], Ce = ["x", "y", "width", "height", "fill", "rx", "aria-label", "onClick", "onMouseenter"], Le = ["aria-label"], Ae = { class: "nm-chart__legend-label" }, Ie = /* @__PURE__ */ te({
+}, me = ["aria-label"], ve = ["viewBox"], pe = ["id"], ge = ["x", "y", "width", "height"], ye = ["clip-path"], fe = ["x1", "y1", "x2", "y2"], _e = ["x1", "y1", "x2", "y2"], xe = { key: 1 }, we = ["x1", "y1", "x2", "y2"], ke = ["x", "y"], be = { key: 2 }, Be = ["x1", "y1", "x2", "y2"], Me = ["x", "y"], $e = ["clip-path"], Ce = ["x", "y", "width", "height", "fill", "rx", "aria-label", "onClick", "onMouseenter"], Le = ["aria-label"], Ae = { class: "nm-chart__legend-label" }, Ie = /* @__PURE__ */ te({
   __name: "NeumorphismChartBar",
   props: {
     series: { default: () => [] },
     width: { default: "100%" },
     height: { default: "300px" },
+    orientation: { default: void 0 },
+    stacked: { type: Boolean, default: void 0 },
+    barGap: { default: void 0 },
     showTooltip: { type: Boolean, default: void 0 },
     showLegend: { type: Boolean, default: void 0 },
     showGrid: { type: Boolean, default: void 0 },
@@ -26,31 +29,31 @@ import '../NeumorphismChartBar.css';const de = {
     title: {}
   },
   emits: ["bar-click"],
-  setup(v, { emit: R }) {
-    const s = v, G = R, { t: K } = se(), g = he(), V = c(
+  setup(v, { emit: N }) {
+    const r = v, R = N, { t: K } = re(), p = he(), V = c(
       () => {
         var t;
-        return s.showTooltip ?? ((t = g.value.chart) == null ? void 0 : t.showTooltip) ?? !0;
+        return r.showTooltip ?? ((t = p.value.chart) == null ? void 0 : t.showTooltip) ?? !0;
       }
     ), E = c(
       () => {
         var t;
-        return s.showLegend ?? ((t = g.value.chart) == null ? void 0 : t.showLegend) ?? !0;
+        return r.showLegend ?? ((t = p.value.chart) == null ? void 0 : t.showLegend) ?? !0;
       }
     ), F = c(() => {
       var t;
-      return s.showGrid ?? ((t = g.value.chart) == null ? void 0 : t.showGrid) ?? !0;
+      return r.showGrid ?? ((t = p.value.chart) == null ? void 0 : t.showGrid) ?? !0;
     }), B = c(() => {
       var t;
-      return s.showAxis ?? ((t = g.value.chart) == null ? void 0 : t.showAxis) ?? !0;
+      return r.showAxis ?? ((t = p.value.chart) == null ? void 0 : t.showAxis) ?? !0;
     }), Y = c(() => {
       var t;
-      return s.animate ?? ((t = g.value.chart) == null ? void 0 : t.animate) ?? !0;
-    }), _ = z(null), k = z(null), b = re("nm-bar"), {
+      return r.animate ?? ((t = p.value.chart) == null ? void 0 : t.animate) ?? !0;
+    }), _ = G(null), k = G(null), b = se("nm-bar"), {
       bars: D,
       xAxisLabels: M,
       yAxisLabels: j,
-      yAxisTicks: r,
+      yAxisTicks: s,
       gridLines: H,
       plotSize: n,
       resolvedMargin: o,
@@ -62,17 +65,20 @@ import '../NeumorphismChartBar.css';const de = {
       handleChartKeydown: C
     } = ae({
       containerRef: _,
-      series: c(() => s.series),
-      yMin: s.yMin,
-      yMax: s.yMax
+      series: c(() => r.series),
+      orientation: r.orientation,
+      stacked: r.stacked,
+      barGap: r.barGap,
+      yMin: r.yMin,
+      yMax: r.yMax
     }), X = c(
       () => n.value.width + o.value.left + o.value.right
     ), q = c(
       () => n.value.height + o.value.top + o.value.bottom
     ), J = c(() => ({
-      width: typeof s.width == "number" ? `${s.width}px` : s.width,
-      height: typeof s.height == "number" ? `${s.height}px` : s.height
-    })), Q = c(() => `Bar chart: ${s.series.map((u) => u.name).join(", ")}`), L = c(() => Y.value && !O.value), U = c(() => {
+      width: typeof r.width == "number" ? `${r.width}px` : r.width,
+      height: typeof r.height == "number" ? `${r.height}px` : r.height
+    })), Q = c(() => `Bar chart: ${r.series.map((u) => u.name).join(", ")}`), L = c(() => Y.value && !O.value), U = c(() => {
       if (!_.value) return { display: "none" };
       const t = _.value.getBoundingClientRect();
       return {
@@ -84,7 +90,7 @@ import '../NeumorphismChartBar.css';const de = {
       return `${t.dataIndex}-${t.seriesIndex}`;
     }
     function Z(t) {
-      G("bar-click", {
+      R("bar-click", {
         index: t.dataIndex,
         seriesIndex: t.seriesIndex,
         value: t.value
@@ -97,17 +103,17 @@ import '../NeumorphismChartBar.css';const de = {
       k.value = null, W();
     }
     const S = c(() => {
-      const t = r.value;
+      const t = s.value;
       if (t.length < 2) return n.value.height;
       const u = t[t.length - 1] - t[0] || 1, l = t[0] ?? 0;
       return n.value.height - (0 - l) / u * n.value.height;
     });
     return (t, u) => (i(), a("div", {
-      class: N(["nm-chart", "nm-chart--bar"]),
+      class: z(["nm-chart", "nm-chart--bar"]),
       style: w(J.value)
     }, [
       v.title || t.$slots.title ? (i(), a("div", de, [
-        v.title ? (i(), a("span", ue, p(v.title), 1)) : m("", !0),
+        v.title ? (i(), a("span", ue, g(v.title), 1)) : m("", !0),
         oe(t.$slots, "title", {}, void 0, !0)
       ])) : m("", !0),
       d("div", {
@@ -136,8 +142,8 @@ import '../NeumorphismChartBar.css';const de = {
                 y: e(o).top,
                 width: e(n).width,
                 height: e(n).height + 1
-              }, null, 8, pe)
-            ], 8, ge)
+              }, null, 8, ge)
+            ], 8, pe)
           ]),
           F.value ? (i(), a("g", {
             key: 0,
@@ -146,9 +152,9 @@ import '../NeumorphismChartBar.css';const de = {
             (i(!0), a(y, null, f(e(H), (l, h) => (i(), a("line", {
               key: "g" + h,
               x1: e(o).left,
-              y1: e(o).top + e(n).height - (l - e(r)[0]) / (e(r)[e(r).length - 1] - e(r)[0] || 1) * e(n).height,
+              y1: e(o).top + e(n).height - (l - e(s)[0]) / (e(s)[e(s).length - 1] - e(s)[0] || 1) * e(n).height,
               x2: e(o).left + e(n).width,
-              y2: e(o).top + e(n).height - (l - e(r)[0]) / (e(r)[e(r).length - 1] - e(r)[0] || 1) * e(n).height,
+              y2: e(o).top + e(n).height - (l - e(s)[0]) / (e(s)[e(s).length - 1] - e(s)[0] || 1) * e(n).height,
               stroke: "var(--nm-chart-grid-color)",
               "stroke-width": "0.5",
               "vector-effect": "non-scaling-stroke"
@@ -176,13 +182,13 @@ import '../NeumorphismChartBar.css';const de = {
             (i(!0), a(y, null, f(e(j), (l, h) => (i(), a("text", {
               key: "y" + h,
               x: e(o).left - 8,
-              y: e(o).top + e(n).height - (e(r)[h] - e(r)[0]) / (e(r)[e(r).length - 1] - e(r)[0] || 1) * e(n).height,
+              y: e(o).top + e(n).height - (e(s)[h] - e(s)[0]) / (e(s)[e(s).length - 1] - e(s)[0] || 1) * e(n).height,
               "text-anchor": "end",
               "dominant-baseline": "middle",
               fill: "var(--nm-chart-label-color)",
               "font-size": "11",
               class: "nm-chart__tick-label"
-            }, p(l), 9, ke))), 128))
+            }, g(l), 9, ke))), 128))
           ])) : m("", !0),
           B.value ? (i(), a("g", be, [
             d("line", {
@@ -202,7 +208,7 @@ import '../NeumorphismChartBar.css';const de = {
               fill: "var(--nm-chart-label-color)",
               "font-size": "11",
               class: "nm-chart__tick-label"
-            }, p(l), 9, Me))), 128))
+            }, g(l), 9, Me))), 128))
           ])) : m("", !0),
           d("g", {
             "clip-path": `url(#nm-plot-clip-bar-${e(b)})`
@@ -215,7 +221,7 @@ import '../NeumorphismChartBar.css';const de = {
               height: l.height,
               fill: l.color,
               rx: l.width <= 6 || l.height <= 6 ? 1 : 4,
-              class: N([
+              class: z([
                 "nm-chart__bar",
                 {
                   "nm-chart__bar--hovered": k.value === A(l),
@@ -240,7 +246,7 @@ import '../NeumorphismChartBar.css';const de = {
               key: 0,
               class: "nm-chart__tooltip",
               style: w(U.value)
-            }, p(e(x).content), 5)) : m("", !0)
+            }, g(e(x).content), 5)) : m("", !0)
           ]),
           _: 1
         })
@@ -260,12 +266,12 @@ import '../NeumorphismChartBar.css';const de = {
             class: "nm-chart__legend-marker",
             style: w({ backgroundColor: l.color ?? e($)[h % e($).length] })
           }, null, 4),
-          d("span", Ae, p(l.name), 1)
+          d("span", Ae, g(l.name), 1)
         ]))), 128))
       ], 8, Le)) : m("", !0)
     ], 4));
   }
-}), Ke = /* @__PURE__ */ ce(Ie, [["__scopeId", "data-v-fc850975"]]);
+}), Ke = /* @__PURE__ */ ce(Ie, [["__scopeId", "data-v-9e202d32"]]);
 export {
   Ke as N
 };

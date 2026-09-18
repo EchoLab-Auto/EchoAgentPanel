@@ -6,12 +6,12 @@ function U(t) {
     containerRef: s,
     series: a,
     margin: d,
-    curve: x = "smooth",
-    area: y = !1,
+    curve: x,
+    area: y,
     areaOpacity: I = 0.1,
-    showPoints: S = !0,
+    showPoints: S,
     pointSize: A = 6,
-    lineWidth: w = 2.5,
+    lineWidth: w,
     yMin: z,
     yMax: O
   } = t, o = V({

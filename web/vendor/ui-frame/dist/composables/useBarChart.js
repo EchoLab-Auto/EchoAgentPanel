@@ -5,9 +5,9 @@ function Y(A) {
     containerRef: B,
     series: u,
     margin: C,
-    orientation: H = "vertical",
-    barGap: W = 0.2,
-    stacked: G = !1,
+    orientation: H,
+    barGap: W,
+    stacked: G,
     yMin: O,
     yMax: T
   } = A, t = Q({
