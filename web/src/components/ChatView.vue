@@ -1162,6 +1162,10 @@ function imagesOf(message: ChatMessage): string[] {
 .chat-composer-float :deep(.nm-textarea__field) {
   max-height: calc(8em + 20px);
   overflow-y: auto;
+  /* 选择性能（2026-09-18）：把文本层提升为独立合成层，跨行拖选时
+     选区重绘封装在本层内，不再每帧波及祖先毛玻璃层的整块重栅格化。 */
+  will-change: transform;
+  transform: translateZ(0);
 }
 /* 圆角同心：外框 24px、间距 12px → 内框（textarea）左侧圆角
    = 24 - 12 = 12px，圆角曲线与外框平行（同心）。右侧保持库默认。 */
