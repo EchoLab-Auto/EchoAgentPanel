@@ -24,6 +24,7 @@ import {
   NeumorphismForm,
   NeumorphismFormItem,
   NeumorphismInput,
+  NeumorphismModal,
   NeumorphismSegmented,
   NeumorphismSwitch,
   NeumorphismTag,
@@ -39,6 +40,7 @@ import { sendCommand } from '../connection';
 import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { loopModeOf } from '../protocol';
 import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
+import { MarkdownRenderer } from '@echolab-auto/ui-frame/doc';
 import ApiSettings from './ApiSettings.vue';
 import LogView from './LogView.vue';
 
@@ -88,6 +90,15 @@ const toolbarSubtitle = computed(() => {
   if (activeCategory.value === 'logs') {
     return 'Core / Panel 运行日志 · 自动刷新 5s';
   }
+  if (activeCategory.value === 'skill') {
+    const c = skillFilterCounts.value;
+    const parts = [`共 ${c.all} 项`];
+    if (c.disabled) parts.push(`${c.disabled} 已禁用`);
+    if (c.always) parts.push(`${c.always} 常驻`);
+    if (c.system) parts.push(`${c.system} 系统提示词`);
+    if (c.git) parts.push(`${c.git} Git 来源`);
+    return parts.join(' · ');
+  }
   return `共 ${currentCategory.value.count} 项${disabledCount.value ? ` · ${disabledCount.value} 已禁用` : ''}`;
 });
 
@@ -108,6 +119,7 @@ function resetTransient() {
 
 function switchCategory(cat: CategoryKey) {
   if (activeCategory.value === cat) return;
+  if (activeCategory.value === 'skill' && !confirmDiscardSkillEdit()) return;
   activeCategory.value = cat;
   resetTransient();
 }
@@ -124,21 +136,282 @@ function isCollapsed(key: string): boolean {
   return collapsedGroups.value.has(key);
 }
 
-const skillGroups = computed(() => {
-  const groups = new Map<string, SkillInfo[]>();
-  for (const s of state.skills) {
-    const cat = s.category?.trim() ? s.category.trim() : UNCATEGORIZED;
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat)!.push(s);
+
+
+
+// ── 技能工作台（2026-09-23 重排版）：搜索 / 筛选 / 分组维度 / 使用面 ──
+//
+// 设计动机（用户反馈 + 实测）：
+// - 技能全部没有 category，原「按分类」分组只会渲染出一个「未分类」组 → 默认
+//   改为「按包」（package 是真实存在的门控单位，与智能体能力勾选区一致）；
+// - 列表只显示名字，启停要逐个点进详情 → 行内 hover 快速开关 + 双行信息；
+// - 「这技能什么时候进来」「关掉它会影响谁」答不出来 → 详情分区
+//   「生效方式（触发词/常驻/系统提示词）」「被谁使用（按 TeamsList 反查）」。
+
+/** 技能过滤维度（互斥单选） */
+type SkillFilter = 'all' | 'enabled' | 'disabled' | 'always' | 'system' | 'git';
+const skillSearch = ref('');
+const skillFilter = ref<SkillFilter>('all');
+const skillGroupBy = ref<'package' | 'category' | 'flat'>('package');
+
+const SKILL_FILTERS: { key: SkillFilter; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'enabled', label: '已启用' },
+  { key: 'disabled', label: '已禁用' },
+  { key: 'always', label: '常驻' },
+  { key: 'system', label: '系统提示词' },
+  { key: 'git', label: 'Git 来源' },
+];
+
+const SKILL_GROUP_OPTIONS = [
+  { label: '按包', value: 'package' },
+  { label: '按分类', value: 'category' },
+  { label: '平铺', value: 'flat' },
+];
+
+function skillMatchesFilter(s: SkillInfo, filter: SkillFilter): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'enabled':
+      return s.enabled;
+    case 'disabled':
+      return !s.enabled;
+    case 'always':
+      return s.always;
+    case 'system':
+      return s.system === true;
+    case 'git':
+      return !!s.source;
   }
-  return [...groups.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([cat, items]) => ({
-      cat,
-      items: items.sort((a, b) => a.name.localeCompare(b.name)),
-    }));
+}
+
+const skillFilterCounts = computed(() => {
+  const counts: Record<SkillFilter, number> = {
+    all: state.skills.length,
+    enabled: 0,
+    disabled: 0,
+    always: 0,
+    system: 0,
+    git: 0,
+  };
+  for (const s of state.skills) {
+    if (s.enabled) counts.enabled += 1;
+    else counts.disabled += 1;
+    if (s.always) counts.always += 1;
+    if (s.system) counts.system += 1;
+    if (s.source) counts.git += 1;
+  }
+  return counts;
 });
 
+const filteredSkills = computed(() => {
+  const needle = skillSearch.value.trim().toLowerCase();
+  return state.skills.filter((s) => {
+    if (!skillMatchesFilter(s, skillFilter.value)) return false;
+    if (!needle) return true;
+    return (
+      s.name.toLowerCase().includes(needle) ||
+      (s.description ?? '').toLowerCase().includes(needle) ||
+      s.keywords.some((k) => k.toLowerCase().includes(needle))
+    );
+  });
+});
+
+/** 包 → 显示名（已知门控包用中文名；自定义包名原样显示）。 */
+function skillPackageLabel(pkg: string | undefined): string {
+  if (!pkg) return '独立技能';
+  return PACKAGE_DISPLAY_NAMES[pkg] ?? pkg;
+}
+
+/** 所属包的插件是否被禁用（禁用后包内技能对模型不可见）。 */
+const disabledPluginIds = computed(
+  () => new Set(state.plugins.filter((p) => !p.enabled).map((p) => p.id)),
+);
+function skillPackageDisabled(s: SkillInfo): boolean {
+  return !!s.package && disabledPluginIds.value.has(s.package);
+}
+
+/** 工作台分组：按包 / 按分类 / 平铺（平铺 = 单组）。 */
+const skillWorkbenchGroups = computed(() => {
+  const groups = new Map<string, { title: string; hint?: string; items: SkillInfo[] }>();
+  const push = (key: string, title: string, hint: string | undefined, s: SkillInfo) => {
+    if (!groups.has(key)) groups.set(key, { title, hint, items: [] });
+    groups.get(key)!.items.push(s);
+  };
+  for (const s of filteredSkills.value) {
+    if (skillGroupBy.value === 'flat') {
+      push('__all__', '全部技能', undefined, s);
+    } else if (skillGroupBy.value === 'package') {
+      const pkg = s.package?.trim();
+      const key = pkg ? `pkg:${pkg}` : '__standalone__';
+      push(
+        key,
+        skillPackageLabel(pkg),
+        pkg && disabledPluginIds.value.has(pkg) ? '所属包已禁用，包内技能当前不可用' : undefined,
+        s,
+      );
+    } else {
+      const cat = s.category?.trim() ? s.category.trim() : UNCATEGORIZED;
+      push(`cat:${cat}`, cat, undefined, s);
+    }
+  }
+  const entries = [...groups.entries()].map(([key, v]) => ({
+    key,
+    title: v.title,
+    hint: v.hint,
+    items: v.items.sort((a, b) => a.name.localeCompare(b.name)),
+  }));
+  // 平铺不排序；其余按名称排序，但把「独立技能」放最后。
+  if (skillGroupBy.value === 'flat') return entries;
+  return entries.sort((a, b) => {
+    if (a.key === '__standalone__') return 1;
+    if (b.key === '__standalone__') return -1;
+    return a.title.localeCompare(b.title);
+  });
+});
+
+/** 技能使用面（被谁使用）：按 TeamsList 反查白名单 / 系统技能 / 禁用。 */
+const skillUsageRows = computed(() => {
+  const skill = selectedSkill.value;
+  if (!skill) return [] as { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[];
+  const rows: { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[] = [];
+  for (const t of state.teams) {
+    const name = t.name || t.id;
+    if ((t.system_skills ?? []).includes(skill.name)) {
+      rows.push({ team: name, label: '系统提示词注入', variant: 'primary' });
+    } else if ((t.disabled_skills ?? []).includes(skill.name)) {
+      rows.push({ team: name, label: '已禁用', variant: 'error' });
+    } else if ((t.enabled_skills ?? []).length && !(t.enabled_skills ?? []).includes(skill.name)) {
+      rows.push({ team: name, label: '未列入白名单', variant: 'info' });
+    } else {
+      rows.push({ team: name, label: '可用', variant: 'success' });
+    }
+  }
+  return rows;
+});
+
+/** 技能行内快速开关（不改变选中）。 */
+function quickToggleSkill(skill: SkillInfo, enabled: boolean) {
+  sendCommand({ ToggleSkill: { name: skill.name, enabled } });
+}
+
+/** 用当前技能字段打补丁后保存（详情内的就地操作：常驻/系统/触发词）。 */
+function saveSkillPatch(skill: SkillInfo, patch: Partial<SkillInfo>) {
+  const merged = { ...skill, ...patch };
+  sendCommand({
+    SaveSkill: {
+      name: merged.name,
+      description: merged.description ?? '',
+      keywords: merged.keywords ?? [],
+      always: merged.always,
+      category: merged.category ?? '',
+      content: merged.content ?? '',
+      system: merged.system ?? false,
+    },
+  });
+}
+
+function toggleSkillAlways(skill: SkillInfo, always: boolean) {
+  saveSkillPatch(skill, { always });
+}
+
+function toggleSkillSystem(skill: SkillInfo, system: boolean) {
+  if (
+    system &&
+    !window.confirm(
+      `将「${skill.name}」设为系统提示词技能？\n\n其内容会注入该智能体的 base 区（身份/规则层），影响所有启用它的智能体，而不仅是触发词命中时。`,
+    )
+  ) {
+    return;
+  }
+  saveSkillPatch(skill, { system });
+}
+
+function addSkillKeyword(skill: SkillInfo, keyword: string) {
+  const kw = keyword.trim();
+  if (!kw || skill.keywords.includes(kw)) return;
+  saveSkillPatch(skill, { keywords: [...skill.keywords, kw] });
+}
+
+function removeSkillKeyword(skill: SkillInfo, keyword: string) {
+  saveSkillPatch(skill, { keywords: skill.keywords.filter((k) => k !== keyword) });
+}
+
+// 详情 ⋯ 菜单（编辑/删除/更新/移除来源收进菜单）
+const skillMenuOpen = ref(false);
+// 内容区预览/源码切换
+const skillContentMode = ref<'preview' | 'source'>('preview');
+// 触发词就地添加输入（每个技能详情一个）
+const skillKeywordDraft = ref('');
+// 切换选中技能：清空临时态（就地输入 / 菜单 / 预览模式）
+watch(
+  () => selectedSkill.value?.name,
+  () => {
+    skillKeywordDraft.value = '';
+    skillMenuOpen.value = false;
+    skillContentMode.value = 'preview';
+  },
+);
+
+// ── 列表宽度拖拽（技能工作台：列表 ↔ 详情分栏可调）──
+const CAPS_LIST_WIDTH_KEY = 'echo-panel-caps-list-width';
+const capsListWidth = ref(loadCapsListWidth());
+function loadCapsListWidth(): number {
+  try {
+    const raw = Number(localStorage.getItem(CAPS_LIST_WIDTH_KEY));
+    if (Number.isFinite(raw) && raw >= 220 && raw <= 560) return raw;
+  } catch {
+    // ignore storage errors
+  }
+  return 320;
+}
+function startCapsListResize(event: MouseEvent) {
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = capsListWidth.value;
+  const onMove = (e: MouseEvent) => {
+    const next = Math.min(560, Math.max(220, startWidth + (e.clientX - startX)));
+    capsListWidth.value = next;
+  };
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    try {
+      localStorage.setItem(CAPS_LIST_WIDTH_KEY, String(capsListWidth.value));
+    } catch {
+      // ignore storage errors
+    }
+  };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
+
+// ── 技能编辑脏状态：切换条目前确认，页脚常显未保存提示 ──
+const skillFormSnapshot = ref('');
+function skillSnapshotOf(): string {
+  return [
+    formName.value,
+    formDescription.value,
+    formKeywords.value,
+    formCategory.value,
+    formAlways.value,
+    formSystem.value,
+    formContent.value,
+  ].join('\u0000');
+}
+const skillFormDirty = computed(
+  () =>
+    (editing.value || creating.value) &&
+    !!skillFormSnapshot.value &&
+    skillSnapshotOf() !== skillFormSnapshot.value,
+);
+
+/** 有未保存改动时询问；返回 false = 取消当前动作。 */
+function confirmDiscardSkillEdit(): boolean {
+  if (!skillFormDirty.value) return true;
+  return window.confirm('技能编辑尚未保存，放弃更改？');
+}
 
 const pluginGroups = computed(() => {
   const groups = new Map<string, PluginInfo[]>();
@@ -179,7 +452,9 @@ const teamList = computed(() => [...state.teams].sort((a, b) => a.id.localeCompa
 
 // ── 条目选中 ──
 function selectSkillItem(s: SkillInfo) {
+  if (selectedSkill.value?.name !== s.name && !confirmDiscardSkillEdit()) return;
   resetTransient();
+  skillMenuOpen.value = false;
   selectedSkill.value = s;
 }
 function selectToolItem(t: ToolInfo) {
@@ -516,10 +791,16 @@ function toggleTool(tool: ToolInfo, enabled: boolean) {
 }
 
 // ── 外部 Git 来源 skill 管理 ──
-const gitFormOpen = ref(false);
+// 2026-09-23：安装表单从工具条内联展开改为弹层——内联表单会顶掉列表，
+// 安装后又无反馈；弹层关闭即完成，列表由 SkillsList 事件自动刷新。
+const gitModalOpen = ref(false);
 const gitUrl = ref('');
 const gitName = ref('');
 const gitBranch = ref('');
+
+function openGitModal() {
+  gitModalOpen.value = true;
+}
 
 function installGitSkill() {
   if (!gitUrl.value.trim()) return;
@@ -533,15 +814,12 @@ function installGitSkill() {
   gitUrl.value = '';
   gitName.value = '';
   gitBranch.value = '';
+  gitModalOpen.value = false;
   // 稍后由 SkillsList 事件刷新
 }
 
 function updateGitSkill(skill: SkillInfo) {
   sendCommand({ UpdateSkillFromGit: { name: skill.name } });
-}
-
-function shortUrl(url: string): string {
-  return url.length > 42 ? url.slice(0, 40) + '…' : url;
 }
 
 function removeGitSource(skill: SkillInfo) {
@@ -551,6 +829,7 @@ function removeGitSource(skill: SkillInfo) {
 
 // ── 新建 / 编辑 / 保存 / 删除 ──
 function startCreate() {
+  if (!confirmDiscardSkillEdit()) return;
   activeCategory.value = 'skill';
   formAlways.value = false;
   formSystem.value = false;
@@ -565,6 +844,8 @@ function startCreate() {
   formCategory.value = '';
   formAlways.value = false;
   formContent.value = '';
+  skillMenuOpen.value = false;
+  skillFormSnapshot.value = skillSnapshotOf();
 }
 
 // ── 技能编辑表单 ──
@@ -588,11 +869,14 @@ function startEdit() {
   formContent.value = s.content;
   editing.value = true;
   creating.value = false;
+  skillMenuOpen.value = false;
+  skillFormSnapshot.value = skillSnapshotOf();
 }
 
 function cancelEdit() {
   editing.value = false;
   creating.value = false;
+  skillFormSnapshot.value = '';
 }
 
 function saveSkill() {
@@ -615,6 +899,7 @@ function saveSkill() {
   });
   editing.value = false;
   creating.value = false;
+  skillFormSnapshot.value = '';
 }
 
 function deleteSkill(skill: SkillInfo) {
@@ -702,8 +987,8 @@ watch(
         </div>
         <div class="caps-toolbar-actions">
           <template v-if="activeCategory === 'skill'">
-            <NeumorphismButton size="small" variant="glass" @click="gitFormOpen = !gitFormOpen">
-              {{ gitFormOpen ? '收起安装' : 'Git 安装' }}
+            <NeumorphismButton size="small" variant="glass" @click="openGitModal">
+              Git 安装
             </NeumorphismButton>
             <NeumorphismButton size="small" variant="glass" @click="startCreate">新建技能</NeumorphismButton>
           </template>
@@ -718,17 +1003,33 @@ watch(
         </div>
       </div>
 
-      <!-- Git 安装表单（技能分类） -->
-      <div v-if="activeCategory === 'skill' && gitFormOpen" class="git-install-form">
-        <div class="git-install-form__title">从 Git 仓库安装技能</div>
-        <NeumorphismInput v-model="gitUrl" placeholder="仓库 URL（https/ssh/本地路径）" size="small" />
-        <div class="git-install-form__row">
-          <NeumorphismInput v-model="gitName" placeholder="安装目录名（默认仓库名）" size="small" />
-          <NeumorphismInput v-model="gitBranch" placeholder="分支（默认仓库默认）" size="small" />
+      <!-- 技能筛选栏：搜索 + 状态筛选 + 分组维度（2026-09-23 重排版） -->
+      <div v-if="activeCategory === 'skill'" class="caps-filters">
+        <NeumorphismInput
+          v-model="skillSearch"
+          placeholder="搜索名称 / 描述 / 触发词"
+          size="small"
+          class="caps-filters__search"
+        />
+        <div class="caps-filters__chips">
+          <button
+            v-for="f in SKILL_FILTERS"
+            :key="f.key"
+            type="button"
+            class="caps-chip"
+            :class="{ 'caps-chip--active': skillFilter === f.key }"
+            @click="skillFilter = f.key"
+          >
+            {{ f.label }}
+            <span class="caps-chip__count">{{ skillFilterCounts[f.key] }}</span>
+          </button>
         </div>
-        <div class="git-install-form__actions">
-          <NeumorphismButton size="small" variant="primary" @click="installGitSkill">安装</NeumorphismButton>
-        </div>
+        <NeumorphismSegmented
+          v-model="skillGroupBy"
+          :options="SKILL_GROUP_OPTIONS"
+          size="small"
+          aria-label="分组维度"
+        />
       </div>
 
       <!-- API 工作区：整页表单（无条目列表） -->
@@ -748,30 +1049,74 @@ watch(
       <!-- 资源工作区：条目列表 + 详情/编辑 -->
       <div v-else class="caps-workspace">
         <!-- 条目列表 -->
-        <div class="caps-list">
-          <!-- 技能：按分类分组 -->
+        <!-- 列表宽度：技能工作台可拖拽（其余分类沿用默认 250px） -->
+        <div
+          class="caps-list"
+          :style="activeCategory === 'skill' ? { width: capsListWidth + 'px' } : undefined"
+        >
+          <!-- 技能：工作台分组（按包 / 按分类 / 平铺）+ 双行行卡 -->
           <template v-if="activeCategory === 'skill'">
-            <div v-for="g in skillGroups" :key="g.cat" class="caps-list-group">
-              <div class="caps-list-group__head" @click="toggleGroup('skill:' + g.cat)">
-                <span class="caret">{{ isCollapsed('skill:' + g.cat) ? '▸' : '▾' }}</span>
-                <span class="caps-list-group__name">{{ g.cat }}</span>
+            <div v-for="g in skillWorkbenchGroups" :key="g.key" class="caps-list-group">
+              <div class="caps-list-group__head" @click="toggleGroup('skill:' + g.key)">
+                <span class="caret">{{ isCollapsed('skill:' + g.key) ? '▸' : '▾' }}</span>
+                <span class="caps-list-group__name">{{ g.title }}</span>
                 <span class="caps-count caps-count--soft">{{ g.items.length }}</span>
               </div>
-              <template v-if="!isCollapsed('skill:' + g.cat)">
+              <template v-if="g.hint" class="caps-list-group__hint-wrap">
+                <div class="caps-list-group__hint">{{ g.hint }}</div>
+              </template>
+              <template v-if="!isCollapsed('skill:' + g.key)">
                 <div
                   v-for="s in g.items"
                   :key="s.name"
-                  class="caps-list-item"
-                  :class="{ 'caps-list-item--active': selectedSkill?.name === s.name && !creating && !editing }"
+                  class="caps-list-item caps-skill-item"
+                  :class="{
+                    'caps-list-item--active': selectedSkill?.name === s.name && !creating && !editing,
+                    'caps-skill-item--off': !s.enabled,
+                  }"
                   @click="selectSkillItem(s)"
                 >
-                  <span class="caps-list-item__name">{{ s.name }}</span>
-                  <NeumorphismTag v-if="s.source" size="small" variant="info">Git</NeumorphismTag>
-                  <span v-if="!s.enabled" class="muted caps-list-item__flag">已禁用</span>
+                  <div class="caps-skill-item__main">
+                    <span
+                      class="caps-skill-item__dot"
+                      :class="{ 'caps-skill-item__dot--on': s.enabled }"
+                      :title="s.enabled ? '已启用' : '已禁用'"
+                    />
+                    <span class="caps-list-item__name">{{ s.name }}</span>
+                    <span class="caps-skill-item__marks">
+                      <span v-if="s.always" class="caps-mark caps-mark--always" title="常驻：每轮都注入">★</span>
+                      <span v-if="s.system" class="caps-mark caps-mark--system" title="系统提示词技能">⇧</span>
+                      <span v-if="s.source" class="caps-mark caps-mark--git" title="外部 Git 来源">Git</span>
+                      <span v-if="skillPackageDisabled(s)" class="caps-mark caps-mark--warn" title="所属包已禁用">包已禁用</span>
+                    </span>
+                    <span class="caps-skill-item__quick" @click.stop>
+                      <NeumorphismSwitch
+                        :model-value="s.enabled"
+                        size="small"
+                        @change="quickToggleSkill(s, $event)"
+                      />
+                    </span>
+                  </div>
+                  <div class="caps-skill-item__sub">
+                    <span class="caps-skill-item__desc">{{ s.description || '（无描述）' }}</span>
+                    <span v-if="s.keywords.length" class="caps-skill-item__kw">
+                      {{ s.keywords.slice(0, 3).join(' · ') }}<template v-if="s.keywords.length > 3"> +{{ s.keywords.length - 3 }}</template>
+                    </span>
+                  </div>
                 </div>
               </template>
             </div>
-            <div v-if="skillGroups.length === 0" class="muted caps-list-empty">（暂无技能）</div>
+            <div v-if="skillWorkbenchGroups.length === 0" class="caps-list-empty">
+              <span class="muted">无匹配技能</span>
+              <NeumorphismButton
+                v-if="skillSearch || skillFilter !== 'all'"
+                size="small"
+                variant="glass"
+                @click="skillSearch = ''; skillFilter = 'all'"
+              >
+                清除筛选
+              </NeumorphismButton>
+            </div>
           </template>
 
           <!-- 工具：按分类分组 -->
@@ -838,64 +1183,215 @@ watch(
           </template>
         </div>
 
+        <!-- 分栏拖拽分隔条（列表宽度可调；技能工作台用） -->
+        <div
+          v-if="activeCategory === 'skill'"
+          class="caps-resizer"
+          title="拖动调整列表宽度"
+          @mousedown="startCapsListResize"
+        />
+
         <!-- 详情 / 编辑面板 -->
         <div class="caps-detail-pane">
           <!-- 空态 -->
           <NeumorphismEmpty v-if="showEmpty" :description="EMPTY_HINT[activeCategory]" />
 
-          <!-- 技能详情 -->
+          <!-- 技能详情（分区检查器：概览 / 生效方式 / 被谁使用 / 来源 / 内容） -->
           <div
             v-else-if="activeCategory === 'skill' && selectedSkill && !editing && !creating"
-            class="caps-detail"
+            class="caps-detail skill-detail"
           >
+            <!-- ── 头部：名称 + 启停 + ⋯ 菜单 ── -->
             <div class="detail-head">
-              <h3>{{ selectedSkill.name }}</h3>
+              <div class="skill-detail__title">
+                <h3>{{ selectedSkill.name }}</h3>
+                <span class="skill-detail__pkg">{{ skillPackageLabel(selectedSkill.package) }}</span>
+              </div>
               <div class="detail-actions">
-                <template v-if="selectedSkill.source">
-                  <NeumorphismButton size="small" variant="glass" @click="updateGitSkill(selectedSkill)">
-                    更新
+                <NeumorphismSwitch
+                  :model-value="selectedSkill.enabled"
+                  size="small"
+                  active-text="启用"
+                  inactive-text="禁用"
+                  @change="toggleSkill(selectedSkill!, $event)"
+                />
+                <span class="skill-menu">
+                  <NeumorphismButton
+                    size="small"
+                    variant="glass"
+                    title="更多操作"
+                    @click="skillMenuOpen = !skillMenuOpen"
+                  >
+                    ⋯
                   </NeumorphismButton>
-                  <NeumorphismButton size="small" variant="glass" @click="removeGitSource(selectedSkill)">
-                    移除来源
-                  </NeumorphismButton>
-                </template>
-                <NeumorphismButton size="small" variant="glass" @click="startEdit">编辑</NeumorphismButton>
-                <NeumorphismButton size="small" variant="glass" @click="deleteSkill(selectedSkill)">
-                  删除
-                </NeumorphismButton>
+                  <template v-if="skillMenuOpen">
+                    <div class="skill-menu__backdrop" @click="skillMenuOpen = false" />
+                    <div class="skill-menu__panel">
+                      <button type="button" class="skill-menu__item" @click="startEdit">编辑</button>
+                      <button
+                        v-if="selectedSkill.source"
+                        type="button"
+                        class="skill-menu__item"
+                        @click="skillMenuOpen = false; updateGitSkill(selectedSkill)"
+                      >
+                        更新（Git）
+                      </button>
+                      <button
+                        v-if="selectedSkill.source"
+                        type="button"
+                        class="skill-menu__item"
+                        @click="skillMenuOpen = false; removeGitSource(selectedSkill)"
+                      >
+                        移除来源
+                      </button>
+                      <button
+                        type="button"
+                        class="skill-menu__item skill-menu__item--danger"
+                        @click="skillMenuOpen = false; deleteSkill(selectedSkill)"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </template>
+                </span>
               </div>
             </div>
-            <div class="detail-meta">
-              <NeumorphismTag
-                v-if="selectedSkill.source"
-                size="small"
-                variant="info"
-                :title="`${selectedSkill.source.url} @ ${selectedSkill.source.rev}`"
-              >
-                Git · {{ shortUrl(selectedSkill.source.url) }}
-              </NeumorphismTag>
-              <NeumorphismTag v-if="selectedSkill.system" size="small" variant="primary">系统提示词</NeumorphismTag>
-              <NeumorphismTag v-if="selectedSkill.category" size="small">{{ selectedSkill.category }}</NeumorphismTag>
-              <NeumorphismTag v-if="selectedSkill.always" variant="warning" size="small">常驻</NeumorphismTag>
-              <span class="muted">{{ selectedSkill.description || '（无描述）' }}</span>
+
+            <!-- 组合并提示：所属包被禁用时技能对所有智能体不可见 -->
+            <div v-if="skillPackageDisabled(selectedSkill)" class="skill-banner skill-banner--warn">
+              「{{ skillPackageLabel(selectedSkill.package) }}」插件当前已禁用，包内技能对所有智能体不可见；
+              在「插件」分类重新启用该包后本技能才会生效。
             </div>
-            <div class="detail-field">
-              <span>启用</span>
-              <NeumorphismSwitch
-                :model-value="selectedSkill.enabled"
-                size="small"
-                @change="toggleSkill(selectedSkill!, $event)"
-              />
+            <div v-if="!selectedSkill.enabled" class="skill-banner">
+              该技能已禁用：不参与触发，也不会注入提示词（列表/详情开关可直接启用）。
             </div>
-            <div v-if="selectedSkill.keywords.length" class="detail-keywords">
-              <span class="muted">触发词：</span>
-              <NeumorphismTag v-for="k in selectedSkill.keywords" :key="k" size="small" variant="info">
-                {{ k }}
-              </NeumorphismTag>
+
+            <p class="skill-detail__desc">{{ selectedSkill.description || '（无描述）' }}</p>
+
+            <!-- ── 生效方式：什么时候进入对话 ── -->
+            <div class="detail-section">
+              <div class="detail-section__title">生效方式</div>
+
+              <div class="detail-subfield">
+                <span class="detail-subfield__label">关键词触发</span>
+                <span class="muted detail-subfield__hint">用户消息命中触发词时按需注入</span>
+              </div>
+              <div class="detail-keywords">
+                <NeumorphismTag
+                  v-for="k in selectedSkill.keywords"
+                  :key="k"
+                  size="small"
+                  variant="info"
+                  closable
+                  @close="removeSkillKeyword(selectedSkill, k)"
+                >
+                  {{ k }}
+                </NeumorphismTag>
+                <span v-if="!selectedSkill.keywords.length" class="muted">（无触发词，仅能靠手动/常驻使用）</span>
+                <span class="skill-kw-add">
+                  <NeumorphismInput
+                    v-model="skillKeywordDraft"
+                    size="small"
+                    placeholder="＋ 触发词"
+                    class="skill-kw-add__input"
+                    @keydown.enter.prevent="addSkillKeyword(selectedSkill, skillKeywordDraft); skillKeywordDraft = ''"
+                  />
+                  <NeumorphismButton
+                    size="small"
+                    variant="glass"
+                    :disabled="!skillKeywordDraft.trim()"
+                    @click="addSkillKeyword(selectedSkill, skillKeywordDraft); skillKeywordDraft = ''"
+                  >
+                    添加
+                  </NeumorphismButton>
+                </span>
+              </div>
+
+              <div class="detail-field">
+                <span>常驻注入（每轮对话都注入，不看触发词）</span>
+                <NeumorphismSwitch
+                  :model-value="selectedSkill.always"
+                  size="small"
+                  @change="toggleSkillAlways(selectedSkill!, $event)"
+                />
+              </div>
+
+              <div class="detail-field">
+                <span>
+                  系统提示词（注入 base 区，影响该智能体的身份/规则层）
+                  <span class="skill-warn-icon" title="高风险：内容会进入所有启用它的智能体的系统提示词">⚠</span>
+                </span>
+                <NeumorphismSwitch
+                  :model-value="selectedSkill.system === true"
+                  size="small"
+                  @change="toggleSkillSystem(selectedSkill!, $event)"
+                />
+              </div>
             </div>
-            <div class="detail-content">
-              <div class="muted content-title">SKILL.md 内容</div>
-              <pre class="content-pre">{{ selectedSkill.content || '（空）' }}</pre>
+
+            <!-- ── 被谁使用：关掉它会影响谁（按 TeamsList 反查） ── -->
+            <div class="detail-section">
+              <div class="detail-section__title">被谁使用</div>
+              <div v-if="skillUsageRows.length" class="skill-usage">
+                <div v-for="row in skillUsageRows" :key="row.team" class="skill-usage__row">
+                  <span class="skill-usage__team">{{ row.team }}</span>
+                  <NeumorphismTag :variant="row.variant" size="small">{{ row.label }}</NeumorphismTag>
+                </div>
+              </div>
+              <span v-else class="muted">（无智能体，或智能体列表尚未加载）</span>
+            </div>
+
+            <!-- ── 来源：内置 / Git ── -->
+            <div class="detail-section">
+              <div class="detail-section__title">来源</div>
+              <div v-if="selectedSkill.source" class="skill-source">
+                <div class="skill-source__row">
+                  <span class="muted">仓库</span>
+                  <code :title="selectedSkill.source.url">{{ selectedSkill.source.url }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">版本</span>
+                  <code>{{ selectedSkill.source.rev }}{{ selectedSkill.source.branch ? ` @ ${selectedSkill.source.branch}` : '' }}</code>
+                </div>
+                <div v-if="selectedSkill.source.installed_at" class="skill-source__row">
+                  <span class="muted">安装时间</span>
+                  <code>{{ selectedSkill.source.installed_at }}</code>
+                </div>
+                <div class="skill-source__actions">
+                  <NeumorphismButton size="small" variant="glass" @click="updateGitSkill(selectedSkill)">更新</NeumorphismButton>
+                  <NeumorphismButton size="small" variant="glass" @click="removeGitSource(selectedSkill)">移除来源</NeumorphismButton>
+                </div>
+              </div>
+              <span v-else class="muted">内置技能（随 Core 分发的 skills 目录）</span>
+            </div>
+
+            <!-- ── 内容：frontmatter 摘要 + Markdown 预览/源码 ── -->
+            <div class="detail-section detail-section--grow">
+              <div class="detail-section__title detail-section__title--row">
+                <span>内容（SKILL.md）</span>
+                <NeumorphismSegmented
+                  v-model="skillContentMode"
+                  :options="[{ label: '预览', value: 'preview' }, { label: '源码', value: 'source' }]"
+                  size="small"
+                  aria-label="内容视图"
+                />
+              </div>
+              <div class="skill-frontmatter">
+                <span class="muted">frontmatter：</span>
+                <NeumorphismTag size="small">{{ selectedSkill.category || '未分类' }}</NeumorphismTag>
+                <NeumorphismTag v-if="selectedSkill.always" variant="warning" size="small">常驻</NeumorphismTag>
+                <NeumorphismTag v-if="selectedSkill.system" variant="primary" size="small">系统提示词</NeumorphismTag>
+                <span class="muted">{{ selectedSkill.keywords.length }} 个触发词</span>
+              </div>
+              <div v-if="skillContentMode === 'preview'" class="skill-content-preview">
+                <MarkdownRenderer
+                  v-if="selectedSkill.content.trim()"
+                  :content="selectedSkill.content"
+                  :show-toc="false"
+                />
+                <span v-else class="muted">（空）</span>
+              </div>
+              <pre v-else class="content-pre skill-content-pre">{{ selectedSkill.content || '（空）' }}</pre>
             </div>
           </div>
 
@@ -932,9 +1428,15 @@ watch(
                 auto-resize
                 placeholder="# 技能说明…"
               />
-              <div class="form-actions">
-                <NeumorphismButton variant="primary" @click="saveSkill">保存</NeumorphismButton>
-                <NeumorphismButton variant="glass" @click="cancelEdit">取消</NeumorphismButton>
+              <!-- 吸底操作条：保存状态可见（未保存改动 / 已同步） -->
+              <div class="form-actions form-actions--sticky">
+                <span class="form-actions__state" :class="{ 'form-actions__state--dirty': skillFormDirty }">
+                  {{ skillFormDirty ? '● 有未保存的更改' : '○ 无更改' }}
+                </span>
+                <NeumorphismButton variant="glass" @click="cancelEdit">放弃更改</NeumorphismButton>
+                <NeumorphismButton variant="primary" :disabled="!formName.trim()" @click="saveSkill">
+                  保存
+                </NeumorphismButton>
               </div>
             </div>
           </div>
@@ -1271,6 +1773,44 @@ watch(
         </div>
       </div>
     </div>
+
+    <!-- Git 安装技能弹层（2026-09-23：从工具条内联表单改为弹层） -->
+    <NeumorphismModal
+      :model-value="gitModalOpen"
+      title="从 Git 仓库安装技能"
+      size="small"
+      :footer="false"
+      @update:model-value="gitModalOpen = $event"
+    >
+      <div class="git-modal">
+        <p class="muted caps-hint">
+          浅克隆仓库并把技能目录提升到 skills_dir；安装后可在详情页「更新 / 移除来源」。
+        </p>
+        <label class="git-modal__label">仓库 URL（https / ssh / 本地路径）<span class="git-modal__req">*</span></label>
+        <NeumorphismInput v-model="gitUrl" placeholder="https://github.com/user/my-skill.git" size="small" />
+        <div class="git-modal__row">
+          <div class="git-modal__col">
+            <label class="git-modal__label">安装目录名（默认仓库名）</label>
+            <NeumorphismInput v-model="gitName" placeholder="my-skill" size="small" />
+          </div>
+          <div class="git-modal__col">
+            <label class="git-modal__label">分支（默认仓库默认分支）</label>
+            <NeumorphismInput v-model="gitBranch" placeholder="main" size="small" />
+          </div>
+        </div>
+        <div class="git-modal__actions">
+          <NeumorphismButton size="small" variant="glass" @click="gitModalOpen = false">取消</NeumorphismButton>
+          <NeumorphismButton
+            size="small"
+            variant="primary"
+            :disabled="!gitUrl.trim()"
+            @click="installGitSkill"
+          >
+            安装
+          </NeumorphismButton>
+        </div>
+      </div>
+    </NeumorphismModal>
   </div>
 </template>
 
@@ -1627,32 +2167,413 @@ watch(
   padding-left: 26px;
 }
 
-/* Git 安装表单 */
-.git-install-form {
+/* Git 安装弹层（原工具条内联表单，2026-09-23 改为弹层） */
+.git-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 420px;
+}
+.git-modal__label {
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+}
+.git-modal__req {
+  color: var(--panel-err);
+  margin-left: 2px;
+}
+.git-modal__row {
+  display: flex;
+  gap: 10px;
+}
+.git-modal__col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.git-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ── 技能工作台（2026-09-23 重排版） ─────────────────────────── */
+
+/* 筛选栏：搜索 + 状态 chips + 分组维度 */
+.caps-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.06));
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.caps-filters__search {
+  width: 220px;
+  flex-shrink: 0;
+}
+.caps-filters__chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+.caps-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nm-text-primary) 6%, transparent);
+  color: var(--nm-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.caps-chip:hover {
+  background: var(--panel-hover);
+  color: var(--nm-text-primary);
+}
+.caps-chip--active {
+  background: var(--panel-accent-soft);
+  border-color: var(--panel-accent);
+  color: var(--nm-text-primary);
+}
+.caps-chip__count {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--nm-text-primary) 10%, transparent);
+}
+.caps-chip--active .caps-chip__count {
+  background: var(--panel-accent);
+  color: var(--nm-text-on-primary, #fff);
+}
+
+/* 列表分组提示行（如「所属包已禁用」） */
+.caps-list-group__hint {
+  padding: 2px 8px 6px 24px;
+  font-size: 10.5px;
+  color: var(--panel-warn);
+  line-height: 1.35;
+}
+
+/* 技能行卡：双行（主行 + 描述行），hover 出快速开关 */
+.caps-skill-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 8px 6px 10px;
+}
+.caps-skill-item--off .caps-skill-item__main,
+.caps-skill-item--off .caps-skill-item__sub {
+  opacity: 0.55;
+}
+.caps-skill-item__main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.caps-skill-item__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--nm-text-placeholder, #888);
+  background: transparent;
+}
+.caps-skill-item__dot--on {
+  border-color: var(--panel-ok);
+  background: var(--panel-ok);
+}
+.caps-skill-item__marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.caps-mark {
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 0 4px;
+  border-radius: 5px;
+  color: var(--nm-text-secondary);
+  background: color-mix(in srgb, var(--nm-text-primary) 7%, transparent);
+}
+.caps-mark--always {
+  color: var(--panel-warn);
+}
+.caps-mark--system {
+  color: var(--panel-accent);
+}
+.caps-mark--git {
+  color: var(--nm-text-secondary);
+}
+.caps-mark--warn {
+  color: var(--panel-err);
+}
+.caps-skill-item__quick {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.caps-skill-item:hover .caps-skill-item__quick,
+.caps-skill-item--active .caps-skill-item__quick,
+.caps-skill-item:focus-within .caps-skill-item__quick {
+  opacity: 1;
+}
+.caps-skill-item__sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-left: 13px;
+}
+.caps-skill-item__desc {
+  font-size: 11px;
+  color: var(--nm-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.caps-skill-item__kw {
+  font-size: 10px;
+  color: var(--nm-text-placeholder, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分栏拖拽分隔条 */
+.caps-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+}
+.caps-resizer:hover {
+  background: var(--panel-accent-soft);
+}
+
+/* 技能详情：分区检查器 */
+.skill-detail {
+  gap: 10px;
+}
+.skill-detail__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.skill-detail__pkg {
+  font-size: 11px;
+  color: var(--nm-text-placeholder, #888);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nm-text-primary) 6%, transparent);
+}
+.skill-detail__desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--nm-text-secondary);
+  line-height: 1.5;
+}
+.skill-banner {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--nm-text-primary) 5%, transparent);
+  color: var(--nm-text-secondary);
+}
+.skill-banner--warn {
+  background: color-mix(in srgb, var(--panel-warn) 14%, transparent);
+  color: var(--panel-warn);
+}
+.detail-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 10px 16px 0;
-  padding: 10px;
-  border: 1px dashed var(--nm-border-color);
+  padding: 10px 12px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
-  flex-shrink: 0;
+  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.06));
+  background: color-mix(in srgb, var(--nm-surface-raised) 45%, transparent);
 }
-.git-install-form__title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--nm-text-secondary);
+.detail-section--grow {
+  flex: 1;
+  min-height: 0;
 }
-.git-install-form__row {
+.detail-section__title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--nm-text-placeholder, #888);
+}
+.detail-section__title--row {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
-.git-install-form__row > * {
-  flex: 1;
-}
-.git-install-form__actions {
+.detail-subfield {
   display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.detail-subfield__label {
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+}
+.detail-subfield__hint {
+  font-size: 11px;
+}
+.skill-kw-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.skill-kw-add__input {
+  width: 130px;
+}
+.skill-warn-icon {
+  cursor: help;
+  color: var(--panel-warn);
+}
+.skill-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-usage__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skill-usage__team {
+  font-size: 12px;
+  min-width: 96px;
+}
+.skill-source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-source__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.skill-source__row code {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-source__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.skill-frontmatter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+}
+.skill-content-preview {
+  max-height: 460px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+}
+.skill-content-pre {
+  max-height: 460px;
+}
+
+/* 详情头部 ⋯ 菜单 */
+.skill-menu {
+  position: relative;
+  display: inline-flex;
+}
+.skill-menu__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+.skill-menu__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 31;
+  min-width: 132px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.12));
+  background: var(--nm-surface-raised, #2a2a2a);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+.skill-menu__item {
+  border: none;
+  background: transparent;
+  color: var(--nm-text-primary);
+  font-size: 12.5px;
+  font-family: inherit;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.skill-menu__item:hover {
+  background: var(--panel-hover);
+}
+.skill-menu__item--danger {
+  color: var(--panel-err);
+}
+
+/* 编辑表单吸底操作条（脏状态可见） */
+.form-actions--sticky {
+  position: sticky;
+  bottom: -14px;
+  align-items: center;
   justify-content: flex-end;
+  padding: 8px 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.06));
+}
+.form-actions__state {
+  margin-right: auto;
+  font-size: 11.5px;
+  color: var(--nm-text-placeholder, #888);
+}
+.form-actions__state--dirty {
+  color: var(--panel-warn);
+}
+
+/* 空列表（技能筛选无结果）：文案 + 清除按钮 */
+.caps-list-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
 }
 </style>
