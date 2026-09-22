@@ -452,7 +452,11 @@ const teamList = computed(() => [...state.teams].sort((a, b) => a.id.localeCompa
 
 // ── 条目选中 ──
 function selectSkillItem(s: SkillInfo) {
-  if (selectedSkill.value?.name !== s.name && !confirmDiscardSkillEdit()) return;
+  // 已选同一技能的只读态：无需确认。编辑中（含点回同一行）都先确认脏改动，
+  // 避免「点自己就把未保存内容丢掉」的静默数据丢失。
+  const readOnlySame =
+    selectedSkill.value?.name === s.name && !editing.value && !creating.value;
+  if (!readOnlySame && !confirmDiscardSkillEdit()) return;
   resetTransient();
   skillMenuOpen.value = false;
   selectedSkill.value = s;

@@ -259,6 +259,32 @@ describe('SettingsView 技能工作台', () => {
     expect(wrapper.find('.skill-detail').exists()).toBe(true);
   });
 
+  it('编辑中点击同一行先确认（防静默丢改动；confirm 拒绝则留在编辑态）', async () => {
+    const wrapper = await openSkills();
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('coding'))!;
+    await row.trigger('click');
+    await wrapper.find('.skill-menu .nm-button').trigger('click');
+    await wrapper
+      .findAll('.skill-menu__item')
+      .find((i) => i.text() === '编辑')!
+      .trigger('click');
+    const inputs = wrapper.findAll('.caps-form input');
+    await inputs[1].setValue('改动后的描述');
+    // confirm 拒绝放弃 → 留在编辑态（不回详情、不丢改动）
+    // 注：jsdom 未实现 confirm（undefined），用 stubGlobal 定义。
+    const confirmSpy = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirmSpy);
+    await row.trigger('click');
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(wrapper.find('.caps-form').exists()).toBe(true);
+    // confirm 同意放弃 → 退出编辑（回到只读详情）
+    confirmSpy.mockReturnValue(true);
+    await row.trigger('click');
+    expect(wrapper.find('.caps-form').exists()).toBe(false);
+    expect(wrapper.find('.skill-detail').exists()).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
   it('详情：触发词就地删除（closable tag）→ SaveSkill 携带剩余字段', async () => {
     const wrapper = await openSkills();
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('qq-transport'))!;
