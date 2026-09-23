@@ -27,12 +27,14 @@ import {
   NeumorphismModal,
   NeumorphismSegmented,
   NeumorphismSwitch,
+  NeumorphismTable,
   NeumorphismTag,
   NeumorphismTextarea,
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import {
   PACKAGE_DISPLAY_NAMES,
+  PACKAGE_GATED_PLUGIN_IDS,
   PLUGIN_KIND_LABELS,
   isPluginCheckboxVisible,
 } from '../capabilities';
@@ -97,6 +99,24 @@ const toolbarSubtitle = computed(() => {
     if (c.always) parts.push(`${c.always} 常驻`);
     if (c.system) parts.push(`${c.system} 系统提示词`);
     if (c.git) parts.push(`${c.git} Git 来源`);
+    return parts.join(' · ');
+  }
+  if (activeCategory.value === 'tool') {
+    const c = toolFilterCounts.value;
+    const packages = new Set(state.tools.map((t) => t.package).filter(Boolean)).size;
+    const parts = [`共 ${c.all} 项`];
+    if (packages) parts.push(`${packages} 个包`);
+    if (c.disabled) parts.push(`${c.disabled} 已禁用`);
+    return parts.join(' · ');
+  }
+  if (activeCategory.value === 'plugin') {
+    const c = pluginFilterCounts.value;
+    const gated = state.plugins.filter((p) => pluginSemantic(p) === 'gated').length;
+    const modes = state.plugins.filter((p) => pluginSemantic(p) === 'mode').length;
+    const parts = [`共 ${c.all} 项`];
+    if (gated) parts.push(`${gated} 包维度门控`);
+    if (modes) parts.push(`${modes} 模式插件`);
+    if (c.disabled) parts.push(`${c.disabled} 已禁用`);
     return parts.join(' · ');
   }
   return `共 ${currentCategory.value.count} 项${disabledCount.value ? ` · ${disabledCount.value} 已禁用` : ''}`;
@@ -218,9 +238,10 @@ const filteredSkills = computed(() => {
   });
 });
 
-/** 包 → 显示名（已知门控包用中文名；自定义包名原样显示）。 */
-function skillPackageLabel(pkg: string | undefined): string {
-  if (!pkg) return '独立技能';
+/** 包 → 显示名（已知门控包用中文名；自定义包名原样显示）。
+ *  `standalone` = 无包归属时的兜底文案（技能「独立技能」/ 工具「独立工具」）。 */
+function skillPackageLabel(pkg: string | undefined, standalone = '独立技能'): string {
+  if (!pkg) return standalone;
   return PACKAGE_DISPLAY_NAMES[pkg] ?? pkg;
 }
 
@@ -413,39 +434,383 @@ function confirmDiscardSkillEdit(): boolean {
   return window.confirm('技能编辑尚未保存，放弃更改？');
 }
 
-const pluginGroups = computed(() => {
-  const groups = new Map<string, PluginInfo[]>();
-  for (const p of state.plugins) {
-    const cat = PLUGIN_KIND_LABELS[p.kind] ?? p.kind;
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat)!.push(p);
+// ── 工具工作台（2026-09-23 重排版，与技能工作台同构）──
+//
+// 背景（实测）：24 个工具的 category 全是 `builtin`，「按分类」分组只剩一个
+// 「内置工具」；行内只有名字，判断用途/归属要逐个点开；无搜索无筛选。
+// 工具的真实归属是 package（门控单位），故默认按包分组。
+
+type ToolFilter = 'all' | 'enabled' | 'disabled';
+const toolSearch = ref('');
+const toolFilter = ref<ToolFilter>('all');
+const toolGroupBy = ref<'package' | 'category' | 'flat'>('package');
+
+const TOOL_FILTERS: { key: ToolFilter; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'enabled', label: '已启用' },
+  { key: 'disabled', label: '已禁用' },
+];
+
+const TOOL_GROUP_OPTIONS = [
+  { label: '按包', value: 'package' },
+  { label: '按分类', value: 'category' },
+  { label: '平铺', value: 'flat' },
+];
+
+function toolMatchesFilter(t: ToolInfo, filter: ToolFilter): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'enabled':
+      return t.enabled;
+    case 'disabled':
+      return !t.enabled;
   }
-  return [...groups.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([cat, items]) => ({
-      cat,
-      items: items.sort((a, b) => a.id.localeCompare(b.id)),
-    }));
+}
+
+const toolFilterCounts = computed(() => {
+  const counts: Record<ToolFilter, number> = {
+    all: state.tools.length,
+    enabled: 0,
+    disabled: 0,
+  };
+  for (const t of state.tools) {
+    if (t.enabled) counts.enabled += 1;
+    else counts.disabled += 1;
+  }
+  return counts;
 });
 
-const toolGroups = computed(() => {
-  const groups = new Map<string, ToolInfo[]>();
-  for (const t of state.tools) {
-    const cat = t.category?.trim()
-      ? t.category === 'builtin'
-        ? TOOL_BUILTIN
-        : t.category
-      : TOOL_OTHER;
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat)!.push(t);
-  }
-  return [...groups.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([cat, items]) => ({
-      cat,
-      items: items.sort((a, b) => a.name.localeCompare(b.name)),
-    }));
+const filteredTools = computed(() => {
+  const needle = toolSearch.value.trim().toLowerCase();
+  return state.tools.filter((t) => {
+    if (!toolMatchesFilter(t, toolFilter.value)) return false;
+    if (!needle) return true;
+    return (
+      t.name.toLowerCase().includes(needle) ||
+      (t.description ?? '').toLowerCase().includes(needle)
+    );
+  });
 });
+
+/** 工具分组：按包 / 按分类 / 平铺（无包工具归「独立工具」）。 */
+const toolWorkbenchGroups = computed(() => {
+  const groups = new Map<string, { title: string; hint?: string; items: ToolInfo[] }>();
+  const push = (key: string, title: string, hint: string | undefined, t: ToolInfo) => {
+    if (!groups.has(key)) groups.set(key, { title, hint, items: [] });
+    groups.get(key)!.items.push(t);
+  };
+  for (const t of filteredTools.value) {
+    if (toolGroupBy.value === 'flat') {
+      push('__all__', '全部工具', undefined, t);
+    } else if (toolGroupBy.value === 'package') {
+      const pkg = t.package?.trim();
+      const key = pkg ? `pkg:${pkg}` : '__standalone__';
+      push(
+        key,
+        skillPackageLabel(pkg, '独立工具'),
+        pkg && disabledPluginIds.value.has(pkg) ? '所属包已禁用，包内工具当前不可用' : undefined,
+        t,
+      );
+    } else {
+      const cat = t.category?.trim()
+        ? t.category === 'builtin'
+          ? TOOL_BUILTIN
+          : t.category
+        : TOOL_OTHER;
+      push(`cat:${cat}`, cat, undefined, t);
+    }
+  }
+  const entries = [...groups.entries()].map(([key, v]) => ({
+    key,
+    title: v.title,
+    hint: v.hint,
+    items: v.items.sort((a, b) => a.name.localeCompare(b.name)),
+  }));
+  if (toolGroupBy.value === 'flat') return entries;
+  return entries.sort((a, b) => {
+    if (a.key === '__standalone__') return 1;
+    if (b.key === '__standalone__') return -1;
+    return a.title.localeCompare(b.title);
+  });
+});
+
+/** 工具所属包是否被插件全局禁用（禁用后包内工具对模型不可见）。 */
+function toolPackageDisabled(t: ToolInfo): boolean {
+  return !!t.package && disabledPluginIds.value.has(t.package);
+}
+
+/** 工具行内快速开关（不改变选中）。 */
+function quickToggleTool(tool: ToolInfo, enabled: boolean) {
+  sendCommand({ ToggleTool: { name: tool.name, enabled } });
+}
+
+/** 工具使用面（被谁使用）：按 TeamsList 反查（与技能同一套四态）。 */
+const toolUsageRows = computed(() => {
+  const tool = selectedTool.value;
+  if (!tool) return [] as { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[];
+  const rows: { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[] = [];
+  for (const t of state.teams) {
+    const name = t.name || t.id;
+    if ((t.disabled_tools ?? []).includes(tool.name)) {
+      rows.push({ team: name, label: '已禁用', variant: 'error' });
+    } else if ((t.enabled_tools ?? []).length && !(t.enabled_tools ?? []).includes(tool.name)) {
+      rows.push({ team: name, label: '未列入白名单', variant: 'info' });
+    } else {
+      rows.push({ team: name, label: '可用', variant: 'success' });
+    }
+  }
+  return rows;
+});
+
+/** 包内成员（工具 / 技能名列表）；插件详情与工具详情的「所属包」共用。 */
+function packageMembers(pkgId: string | undefined): { tools: string[]; skills: string[] } {
+  if (!pkgId) return { tools: [], skills: [] };
+  return {
+    tools: state.tools.filter((t) => t.package === pkgId).map((t) => t.name),
+    skills: state.skills.filter((s) => s.package === pkgId).map((s) => s.name),
+  };
+}
+
+/** 参数 Schema → 表格行（object 的 properties/required；非对象返回空）。 */
+const toolParamRows = computed(() => {
+  const schema = selectedTool.value?.parameters as
+    | { properties?: Record<string, { type?: string; description?: string }>; required?: string[] }
+    | null
+    | undefined;
+  const props = schema?.properties;
+  if (!props) return [] as { name: string; type: string; required: boolean; description: string }[];
+  const required = new Set(schema?.required ?? []);
+  return Object.entries(props).map(([name, def]) => ({
+    name,
+    type: def?.type ?? '—',
+    required: required.has(name),
+    description: def?.description ?? '',
+  }));
+});
+
+// 参数视图：表格 / JSON 原文
+const toolParamMode = ref<'table' | 'json'>('table');
+watch(
+  () => selectedTool.value?.name,
+  () => {
+    toolParamMode.value = 'table';
+    toolParamText.value = '';
+    pluginInfoOpen.value = false;
+  },
+);
+const toolParamText = ref('');
+async function copyToolParams() {
+  const text = paramText(selectedTool.value as ToolInfo);
+  toolParamText.value = text;
+  try {
+    await navigator.clipboard.writeText(text);
+    window.setTimeout(() => (toolParamText.value = ''), 1500);
+  } catch {
+    // 剪贴板不可用时保留文本可见，用户可手动复制
+  }
+}
+
+// ── 插件工作台（2026-09-23 重排版）──
+//
+// 背景（实测）：9 个插件按 kind 分成 6 组，`Turn Runner`（英文）与
+// 「工具」「技能」两组名误导；三类语义完全不同的插件（整包门控 / 平台通道 /
+// 循环模式）平铺混排；详情一行塞满 ID/Package/Entry/Author。
+// 门控语义分组把「影响面最大的整包门控」提到最上，模式插件单独成组并注明
+// 「互斥；全局停用 ≠ 切换某智能体模式」。
+
+type PluginFilter = 'all' | 'enabled' | 'disabled';
+const pluginSearch = ref('');
+const pluginFilter = ref<PluginFilter>('all');
+const pluginGroupBy = ref<'semantic' | 'kind' | 'flat'>('semantic');
+
+const PLUGIN_FILTERS: { key: PluginFilter; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'enabled', label: '已启用' },
+  { key: 'disabled', label: '已禁用' },
+];
+
+const PLUGIN_GROUP_OPTIONS = [
+  { label: '按门控语义', value: 'semantic' },
+  { label: '按 kind', value: 'kind' },
+  { label: '平铺', value: 'flat' },
+];
+
+/** 门控语义分类（单一来源：分组、行内徽标、详情文案共用）。 */
+const PLUGIN_SEMANTIC_LABELS: Record<string, string> = {
+  gated: '包维度门控',
+  channel: '平台通道',
+  mode: '模式插件（互斥）',
+  other: '其它',
+};
+
+function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
+  if (p.kind === 'loop') return 'mode';
+  if (p.kind === 'adapter' || p.kind === 'management') return 'channel';
+  if ((PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(p.id)) return 'gated';
+  return 'other';
+}
+
+function pluginMatchesFilter(p: PluginInfo, filter: PluginFilter): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'enabled':
+      return p.enabled;
+    case 'disabled':
+      return !p.enabled;
+  }
+}
+
+const pluginFilterCounts = computed(() => {
+  const counts: Record<PluginFilter, number> = {
+    all: state.plugins.length,
+    enabled: 0,
+    disabled: 0,
+  };
+  for (const p of state.plugins) {
+    if (p.enabled) counts.enabled += 1;
+    else counts.disabled += 1;
+  }
+  return counts;
+});
+
+const filteredPlugins = computed(() => {
+  const needle = pluginSearch.value.trim().toLowerCase();
+  return state.plugins.filter((p) => {
+    if (!pluginMatchesFilter(p, pluginFilter.value)) return false;
+    if (!needle) return true;
+    return (
+      p.name.toLowerCase().includes(needle) ||
+      p.id.toLowerCase().includes(needle) ||
+      (p.description ?? '').toLowerCase().includes(needle)
+    );
+  });
+});
+
+/** 插件分组：门控语义 / kind / 平铺。 */
+const pluginWorkbenchGroups = computed(() => {
+  const groups = new Map<string, { title: string; hint?: string; items: PluginInfo[] }>();
+  const push = (key: string, title: string, hint: string | undefined, p: PluginInfo) => {
+    if (!groups.has(key)) groups.set(key, { title, hint, items: [] });
+    groups.get(key)!.items.push(p);
+  };
+  const SEMANTIC_HINT: Record<string, string | undefined> = {
+    gated: '禁用 = 其包内全部工具/技能对所有智能体不可见',
+    channel: '平台连接与管理通道；管理面禁用会切断 Panel 通信（受保护）',
+    mode: '互斥模式：每智能体的循环模式在「智能体」配置里选；此处全局停用 = 卸载 echo-loop 驱动（两个都停回退内置循环）',
+    other: undefined,
+  };
+  const ORDER: Record<string, number> = { gated: 0, channel: 1, mode: 2, other: 3 };
+  for (const p of filteredPlugins.value) {
+    if (pluginGroupBy.value === 'flat') {
+      push('__all__', '全部插件', undefined, p);
+    } else if (pluginGroupBy.value === 'semantic') {
+      const sem = pluginSemantic(p);
+      push(`sem:${sem}`, PLUGIN_SEMANTIC_LABELS[sem], SEMANTIC_HINT[sem], p);
+    } else {
+      const cat = PLUGIN_KIND_LABELS[p.kind] ?? p.kind;
+      push(`kind:${cat}`, cat, undefined, p);
+    }
+  }
+  const entries = [...groups.entries()].map(([key, v]) => ({
+    key,
+    title: v.title,
+    hint: v.hint,
+    items: v.items.sort((a, b) => a.id.localeCompare(b.id)),
+  }));
+  if (pluginGroupBy.value !== 'semantic') return entries;
+  return entries.sort(
+    (a, b) =>
+      (ORDER[a.key.replace('sem:', '')] ?? 9) - (ORDER[b.key.replace('sem:', '')] ?? 9),
+  );
+});
+
+/** 管理面插件受保护（禁用即断连自锁；kind 判定与 core 的拒绝对齐）。 */
+function pluginProtected(p: PluginInfo): boolean {
+  return p.id === MANAGEMENT_PANEL_PLUGIN_ID;
+}
+
+/** 插件行内快速开关（受保护的不给开关）。 */
+function quickTogglePlugin(p: PluginInfo, enabled: boolean) {
+  if (pluginProtected(p)) return;
+  togglePlugin(p, enabled);
+}
+
+/** 插件「带来什么」：包内工具/技能（供列表徽标与详情 chip 展示）。 */
+const pluginMembersById = computed(() => {
+  const map = new Map<string, { tools: string[]; skills: string[] }>();
+  for (const p of state.plugins) {
+    map.set(p.id, packageMembers(p.package || p.id));
+  }
+  return map;
+});
+
+function pluginMembers(p: PluginInfo): { tools: string[]; skills: string[] } {
+  return pluginMembersById.value.get(p.id) ?? { tools: [], skills: [] };
+}
+
+/** 插件使用面（被谁使用）：enabled_plugins 白名单反查。 */
+const pluginUsageRows = computed(() => {
+  const plugin = selectedPlugin.value;
+  if (!plugin) return [] as { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[];
+  const rows: { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[] = [];
+  for (const t of state.teams) {
+    const name = t.name || t.id;
+    const list = t.enabled_plugins ?? [];
+    if (list.length === 0 || list.includes(plugin.id)) {
+      rows.push({ team: name, label: '已启用', variant: 'success' });
+    } else {
+      rows.push({ team: name, label: '未列入白名单', variant: 'info' });
+    }
+  }
+  return rows;
+});
+
+/** 启停影响文案（按门控语义分派）。 */
+const pluginImpactText = computed(() => {
+  const p = selectedPlugin.value;
+  if (!p) return '';
+  if (pluginProtected(p)) {
+    return '「管理面」插件承载 Panel ↔ Core 的 management 通道：禁用即断连自锁（无法经界面恢复），Core 侧拒绝经 TogglePlugin 禁用。确需禁用请编辑 core.toml 的 disabled_plugins 后重启 Core。';
+  }
+  const sem = pluginSemantic(p);
+  if (sem === 'gated') {
+    const members = pluginMembers(p);
+    return `整包门控：禁用后其包内 ${members.tools.length} 个工具、${members.skills.length} 个技能对所有智能体不可见（含白名单内的智能体）。`;
+  }
+  if (sem === 'channel') {
+    return '平台通道：禁用即卸载该适配器/管理通道注册，对应平台会话与连接停止；对其他插件无影响。';
+  }
+  if (sem === 'mode') {
+    return '模式插件：全局停用 = 卸载 echo-loop 驱动（单会话与并行多会话都停用则回退内置循环，行为等同旧版内置实现）。某智能体的「单会话 / 并行多会话」在「智能体」配置的循环模式里选择，与这里的全局开关是两层。';
+  }
+  return '名义挂载插件：启停写入 disabled_plugins，重启 Core 后生效。';
+});
+
+// 详情「技术信息」折叠态 + 参数复制反馈文本（选中切换时重置，见上方 watch）
+const pluginInfoOpen = ref(false);
+
+/** 跳到指定分类并选中条目（交叉跳转：插件 ⇄ 包内工具/技能）。 */
+function jumpToCategory(cat: CategoryKey, name: string) {
+  activeCategory.value = cat;
+  resetTransient();
+  if (cat === 'tool') {
+    selectedTool.value = state.tools.find((t) => t.name === name) ?? null;
+  } else if (cat === 'skill') {
+    selectedSkill.value = state.skills.find((s) => s.name === name) ?? null;
+  } else if (cat === 'plugin') {
+    selectedPlugin.value = state.plugins.find((p) => p.id === name) ?? null;
+  }
+}
+
+/** 当前分类是否存在「工作台」（筛选栏 + 可拖宽列表）：技能/工具/插件。 */
+const hasWorkbench = computed(
+  () =>
+    activeCategory.value === 'skill' ||
+    activeCategory.value === 'tool' ||
+    activeCategory.value === 'plugin',
+);
 
 // 智能体平铺列表：一律平等，按 id 排序（去主智能体 2026-09）
 const teamList = computed(() => [...state.teams].sort((a, b) => a.id.localeCompare(b.id)));
@@ -1007,7 +1372,7 @@ watch(
         </div>
       </div>
 
-      <!-- 技能筛选栏：搜索 + 状态筛选 + 分组维度（2026-09-23 重排版） -->
+      <!-- 工作台筛选栏（技能 / 工具 / 插件）：搜索 + 状态筛选 + 分组维度 -->
       <div v-if="activeCategory === 'skill'" class="caps-filters">
         <NeumorphismInput
           v-model="skillSearch"
@@ -1036,6 +1401,62 @@ watch(
         />
       </div>
 
+      <div v-else-if="activeCategory === 'tool'" class="caps-filters">
+        <NeumorphismInput
+          v-model="toolSearch"
+          placeholder="搜索名称 / 描述"
+          size="small"
+          class="caps-filters__search"
+        />
+        <div class="caps-filters__chips">
+          <button
+            v-for="f in TOOL_FILTERS"
+            :key="f.key"
+            type="button"
+            class="caps-chip"
+            :class="{ 'caps-chip--active': toolFilter === f.key }"
+            @click="toolFilter = f.key"
+          >
+            {{ f.label }}
+            <span class="caps-chip__count">{{ toolFilterCounts[f.key] }}</span>
+          </button>
+        </div>
+        <NeumorphismSegmented
+          v-model="toolGroupBy"
+          :options="TOOL_GROUP_OPTIONS"
+          size="small"
+          aria-label="分组维度"
+        />
+      </div>
+
+      <div v-else-if="activeCategory === 'plugin'" class="caps-filters">
+        <NeumorphismInput
+          v-model="pluginSearch"
+          placeholder="搜索名称 / ID / 描述"
+          size="small"
+          class="caps-filters__search"
+        />
+        <div class="caps-filters__chips">
+          <button
+            v-for="f in PLUGIN_FILTERS"
+            :key="f.key"
+            type="button"
+            class="caps-chip"
+            :class="{ 'caps-chip--active': pluginFilter === f.key }"
+            @click="pluginFilter = f.key"
+          >
+            {{ f.label }}
+            <span class="caps-chip__count">{{ pluginFilterCounts[f.key] }}</span>
+          </button>
+        </div>
+        <NeumorphismSegmented
+          v-model="pluginGroupBy"
+          :options="PLUGIN_GROUP_OPTIONS"
+          size="small"
+          aria-label="分组维度"
+        />
+      </div>
+
       <!-- API 工作区：整页表单（无条目列表） -->
       <div v-if="activeCategory === 'api'" class="caps-workspace">
         <div class="caps-detail-pane">
@@ -1053,10 +1474,10 @@ watch(
       <!-- 资源工作区：条目列表 + 详情/编辑 -->
       <div v-else class="caps-workspace">
         <!-- 条目列表 -->
-        <!-- 列表宽度：技能工作台可拖拽（其余分类沿用默认 250px） -->
+        <!-- 列表宽度：工作台（技能/工具/插件）可拖拽（其余分类沿用默认 250px） -->
         <div
           class="caps-list"
-          :style="activeCategory === 'skill' ? { width: capsListWidth + 'px' } : undefined"
+          :style="hasWorkbench ? { width: capsListWidth + 'px' } : undefined"
         >
           <!-- 技能：工作台分组（按包 / 按分类 / 平铺）+ 双行行卡 -->
           <template v-if="activeCategory === 'skill'">
@@ -1123,52 +1544,138 @@ watch(
             </div>
           </template>
 
-          <!-- 工具：按分类分组 -->
+          <!-- 工具：工作台分组（按包 / 按分类 / 平铺）+ 双行行卡 -->
           <template v-else-if="activeCategory === 'tool'">
-            <div v-for="g in toolGroups" :key="g.cat" class="caps-list-group">
-              <div class="caps-list-group__head" @click="toggleGroup('tool:' + g.cat)">
-                <span class="caret">{{ isCollapsed('tool:' + g.cat) ? '▸' : '▾' }}</span>
-                <span class="caps-list-group__name">{{ g.cat }}</span>
+            <div v-for="g in toolWorkbenchGroups" :key="g.key" class="caps-list-group">
+              <div class="caps-list-group__head" @click="toggleGroup('tool:' + g.key)">
+                <span class="caret">{{ isCollapsed('tool:' + g.key) ? '▸' : '▾' }}</span>
+                <span class="caps-list-group__name">{{ g.title }}</span>
                 <span class="caps-count caps-count--soft">{{ g.items.length }}</span>
               </div>
-              <template v-if="!isCollapsed('tool:' + g.cat)">
+              <template v-if="g.hint">
+                <div class="caps-list-group__hint">{{ g.hint }}</div>
+              </template>
+              <template v-if="!isCollapsed('tool:' + g.key)">
                 <div
                   v-for="t in g.items"
                   :key="t.name"
-                  class="caps-list-item"
-                  :class="{ 'caps-list-item--active': selectedTool?.name === t.name }"
+                  class="caps-list-item caps-skill-item"
+                  :class="{
+                    'caps-list-item--active': selectedTool?.name === t.name,
+                    'caps-skill-item--off': !t.enabled,
+                  }"
                   @click="selectToolItem(t)"
                 >
-                  <span class="caps-list-item__name">{{ t.name }}</span>
-                  <span v-if="!t.enabled" class="muted caps-list-item__flag">已禁用</span>
+                  <div class="caps-skill-item__main">
+                    <span
+                      class="caps-skill-item__dot"
+                      :class="{ 'caps-skill-item__dot--on': t.enabled }"
+                      :title="t.enabled ? '已启用' : '已禁用'"
+                    />
+                    <span class="caps-list-item__name">{{ t.name }}</span>
+                    <span class="caps-skill-item__marks">
+                      <span v-if="toolPackageDisabled(t)" class="caps-mark caps-mark--warn" title="所属包已禁用">
+                        包已禁用
+                      </span>
+                    </span>
+                    <span class="caps-skill-item__quick" @click.stop>
+                      <NeumorphismSwitch
+                        :model-value="t.enabled"
+                        size="small"
+                        @change="quickToggleTool(t, $event)"
+                      />
+                    </span>
+                  </div>
+                  <div class="caps-skill-item__sub">
+                    <span class="caps-skill-item__desc">{{ t.description || '（无描述）' }}</span>
+                  </div>
                 </div>
               </template>
             </div>
-            <div v-if="toolGroups.length === 0" class="muted caps-list-empty">（暂无工具）</div>
+            <div v-if="toolWorkbenchGroups.length === 0" class="caps-list-empty">
+              <span class="muted">无匹配工具</span>
+              <NeumorphismButton
+                v-if="toolSearch || toolFilter !== 'all'"
+                size="small"
+                variant="glass"
+                @click="toolSearch = ''; toolFilter = 'all'"
+              >
+                清除筛选
+              </NeumorphismButton>
+            </div>
           </template>
 
-          <!-- 插件：按 kind 分组 -->
+          <!-- 插件：工作台分组（门控语义 / kind / 平铺）+ 双行行卡 -->
           <template v-else-if="activeCategory === 'plugin'">
-            <div v-for="g in pluginGroups" :key="g.cat" class="caps-list-group">
-              <div class="caps-list-group__head" @click="toggleGroup('plugin:' + g.cat)">
-                <span class="caret">{{ isCollapsed('plugin:' + g.cat) ? '▸' : '▾' }}</span>
-                <span class="caps-list-group__name">{{ g.cat }}</span>
+            <div v-for="g in pluginWorkbenchGroups" :key="g.key" class="caps-list-group">
+              <div class="caps-list-group__head" @click="toggleGroup('plugin:' + g.key)">
+                <span class="caret">{{ isCollapsed('plugin:' + g.key) ? '▸' : '▾' }}</span>
+                <span class="caps-list-group__name">{{ g.title }}</span>
                 <span class="caps-count caps-count--soft">{{ g.items.length }}</span>
               </div>
-              <template v-if="!isCollapsed('plugin:' + g.cat)">
+              <template v-if="g.hint">
+                <div class="caps-list-group__hint caps-list-group__hint--neutral">{{ g.hint }}</div>
+              </template>
+              <template v-if="!isCollapsed('plugin:' + g.key)">
                 <div
                   v-for="p in g.items"
                   :key="p.id"
-                  class="caps-list-item"
-                  :class="{ 'caps-list-item--active': selectedPlugin?.id === p.id }"
+                  class="caps-list-item caps-skill-item"
+                  :class="{
+                    'caps-list-item--active': selectedPlugin?.id === p.id,
+                    'caps-skill-item--off': !p.enabled,
+                  }"
                   @click="selectPluginItem(p)"
                 >
-                  <span class="caps-list-item__name">{{ p.name }}</span>
-                  <span v-if="!p.enabled" class="muted caps-list-item__flag">已禁用</span>
+                  <div class="caps-skill-item__main">
+                    <span
+                      class="caps-skill-item__dot"
+                      :class="{ 'caps-skill-item__dot--on': p.enabled }"
+                      :title="p.enabled ? '已启用' : '已禁用'"
+                    />
+                    <span class="caps-list-item__name">{{ p.name }}</span>
+                    <span class="caps-skill-item__marks">
+                      <span
+                        v-if="pluginMembers(p).tools.length || pluginMembers(p).skills.length"
+                        class="caps-mark"
+                        :title="`包内 ${pluginMembers(p).tools.length} 工具 · ${pluginMembers(p).skills.length} 技能`"
+                      >
+                        {{ pluginMembers(p).tools.length }} 工具 · {{ pluginMembers(p).skills.length }} 技能
+                      </span>
+                      <span v-if="pluginProtected(p)" class="caps-mark caps-mark--warn" title="禁用即断连自锁，Core 拒绝">
+                        🔒 受保护
+                      </span>
+                      <span v-else-if="pluginSemantic(p) === 'mode'" class="caps-mark caps-mark--system" title="互斥模式插件">
+                        模式
+                      </span>
+                    </span>
+                    <span class="caps-skill-item__quick" @click.stop>
+                      <span v-if="pluginProtected(p)" class="caps-lock" title="禁用即断连自锁（受保护）">🔒</span>
+                      <NeumorphismSwitch
+                        v-else
+                        :model-value="p.enabled"
+                        size="small"
+                        @change="quickTogglePlugin(p, $event)"
+                      />
+                    </span>
+                  </div>
+                  <div class="caps-skill-item__sub">
+                    <span class="caps-skill-item__desc">{{ p.description || '（无描述）' }}</span>
+                  </div>
                 </div>
               </template>
             </div>
-            <div v-if="pluginGroups.length === 0" class="muted caps-list-empty">（暂无插件）</div>
+            <div v-if="pluginWorkbenchGroups.length === 0" class="caps-list-empty">
+              <span class="muted">无匹配插件</span>
+              <NeumorphismButton
+                v-if="pluginSearch || pluginFilter !== 'all'"
+                size="small"
+                variant="glass"
+                @click="pluginSearch = ''; pluginFilter = 'all'"
+              >
+                清除筛选
+              </NeumorphismButton>
+            </div>
           </template>
 
           <!-- 智能体：平铺列表 -->
@@ -1187,9 +1694,9 @@ watch(
           </template>
         </div>
 
-        <!-- 分栏拖拽分隔条（列表宽度可调；技能工作台用） -->
+        <!-- 分栏拖拽分隔条（列表宽度可调；技能/工具/插件工作台用） -->
         <div
-          v-if="activeCategory === 'skill'"
+          v-if="hasWorkbench"
           class="caps-resizer"
           title="拖动调整列表宽度"
           @mousedown="startCapsListResize"
@@ -1719,59 +2226,223 @@ watch(
             </NeumorphismForm>
           </div>
 
-          <!-- 插件详情 -->
-          <div v-else-if="activeCategory === 'plugin' && selectedPlugin" class="caps-detail">
+          <!-- 插件详情（分区检查器：带来什么 / 被谁使用 / 启停影响 / 技术信息） -->
+          <div v-else-if="activeCategory === 'plugin' && selectedPlugin" class="caps-detail skill-detail">
             <div class="detail-head">
-              <h3>{{ selectedPlugin.name }}</h3>
-              <NeumorphismTag v-if="!selectedPlugin.builtin" variant="info" size="small">
-                外部插件
-              </NeumorphismTag>
+              <div class="skill-detail__title">
+                <h3>{{ selectedPlugin.name }}</h3>
+                <span class="skill-detail__pkg">{{ PLUGIN_SEMANTIC_LABELS[pluginSemantic(selectedPlugin)] }}</span>
+              </div>
+              <div class="detail-actions">
+                <NeumorphismTag v-if="!selectedPlugin.builtin" variant="info" size="small">
+                  外部插件
+                </NeumorphismTag>
+                <span v-if="pluginProtected(selectedPlugin)" class="caps-mark caps-mark--warn">🔒 受保护</span>
+                <NeumorphismSwitch
+                  v-else
+                  :model-value="selectedPlugin.enabled"
+                  size="small"
+                  active-text="启用"
+                  inactive-text="禁用"
+                  @change="togglePlugin(selectedPlugin!, $event)"
+                />
+              </div>
             </div>
-            <div class="detail-meta">
-              <NeumorphismTag size="small">{{ PLUGIN_KIND_LABELS[selectedPlugin.kind] ?? selectedPlugin.kind }}</NeumorphismTag>
-              <NeumorphismTag variant="info" size="small">v{{ selectedPlugin.version || '—' }}</NeumorphismTag>
-              <span class="muted">{{ selectedPlugin.description || '（无描述）' }}</span>
+
+            <p class="skill-detail__desc">{{ selectedPlugin.description || '（无描述）' }}</p>
+
+            <!-- 带来什么：包内工具/技能（可点击跳转） -->
+            <div class="detail-section">
+              <div class="detail-section__title">这个插件带来什么</div>
+              <template v-if="pluginMembers(selectedPlugin).tools.length || pluginMembers(selectedPlugin).skills.length">
+                <div v-if="pluginMembers(selectedPlugin).tools.length" class="plugin-members">
+                  <span class="muted plugin-members__label">工具</span>
+                  <button
+                    v-for="name in pluginMembers(selectedPlugin).tools"
+                    :key="name"
+                    type="button"
+                    class="plugin-member-chip"
+                    @click="jumpToCategory('tool', name)"
+                  >
+                    {{ name }}
+                  </button>
+                </div>
+                <div v-if="pluginMembers(selectedPlugin).skills.length" class="plugin-members">
+                  <span class="muted plugin-members__label">技能</span>
+                  <button
+                    v-for="name in pluginMembers(selectedPlugin).skills"
+                    :key="name"
+                    type="button"
+                    class="plugin-member-chip"
+                    @click="jumpToCategory('skill', name)"
+                  >
+                    {{ name }}
+                  </button>
+                </div>
+              </template>
+              <span v-else class="muted">该插件未注册工具或技能</span>
             </div>
-            <div class="detail-field">
-              <span>启用（禁用即卸载该插件注册）</span>
-              <NeumorphismSwitch
-                :model-value="selectedPlugin.enabled"
-                size="small"
-                @change="togglePlugin(selectedPlugin!, $event)"
-              />
+
+            <div class="detail-section">
+              <div class="detail-section__title">被谁使用</div>
+              <div v-if="pluginUsageRows.length" class="skill-usage">
+                <div v-for="row in pluginUsageRows" :key="row.team" class="skill-usage__row">
+                  <span class="skill-usage__team">{{ row.team }}</span>
+                  <NeumorphismTag :variant="row.variant" size="small">{{ row.label }}</NeumorphismTag>
+                </div>
+              </div>
+              <span v-else class="muted">（无智能体，或智能体列表尚未加载）</span>
             </div>
-            <div class="detail-keywords">
-              <span class="muted">ID:</span>
-              <code>{{ selectedPlugin.id }}</code>
-              <span class="muted">包（Package）:</span>
-              <code>{{ selectedPlugin.package || selectedPlugin.id }}</code>
-              <span class="muted">Entry:</span>
-              <code>{{ selectedPlugin.entry || '—' }}</code>
-              <span class="muted">Author:</span>
-              <code>{{ selectedPlugin.author || '—' }}</code>
+
+            <div class="detail-section">
+              <div class="detail-section__title">启停影响</div>
+              <div class="plugin-impact" :class="{ 'plugin-impact--warn': pluginProtected(selectedPlugin) }">
+                {{ pluginImpactText }}
+              </div>
+            </div>
+
+            <!-- 技术信息（折叠：低频信息不占视野） -->
+            <div class="detail-section">
+              <div
+                class="detail-section__title detail-section__title--row plugin-info__head"
+                @click="pluginInfoOpen = !pluginInfoOpen"
+              >
+                <span>技术信息</span>
+                <span class="muted">{{ pluginInfoOpen ? '▾' : '▸' }}</span>
+              </div>
+              <div v-if="pluginInfoOpen" class="skill-source">
+                <div class="skill-source__row">
+                  <span class="muted">ID</span>
+                  <code>{{ selectedPlugin.id }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">包（Package）</span>
+                  <code>{{ selectedPlugin.package || selectedPlugin.id }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">kind / 版本</span>
+                  <code>{{ selectedPlugin.kind }} · v{{ selectedPlugin.version || '—' }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">Entry</span>
+                  <code>{{ selectedPlugin.entry || '—' }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">Author</span>
+                  <code>{{ selectedPlugin.author || '—' }}</code>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- 工具详情 -->
-          <div v-else-if="activeCategory === 'tool' && selectedTool" class="caps-detail">
+          <!-- 工具详情（分区检查器：概览 / 被谁使用 / 所属包 / 参数） -->
+          <div v-else-if="activeCategory === 'tool' && selectedTool" class="caps-detail skill-detail">
             <div class="detail-head">
-              <h3>{{ selectedTool.name }}</h3>
+              <div class="skill-detail__title">
+                <h3>{{ selectedTool.name }}</h3>
+                <span class="skill-detail__pkg">{{ skillPackageLabel(selectedTool.package, '独立工具') }}</span>
+              </div>
+              <div class="detail-actions">
+                <NeumorphismSwitch
+                  :model-value="selectedTool.enabled"
+                  size="small"
+                  active-text="启用"
+                  inactive-text="禁用"
+                  @change="toggleTool(selectedTool!, $event)"
+                />
+              </div>
             </div>
-            <div class="detail-meta">
-              <NeumorphismTag size="small">{{ selectedTool.category || '内置工具' }}</NeumorphismTag>
-              <span class="muted">{{ selectedTool.description || '（无描述）' }}</span>
+
+            <div v-if="toolPackageDisabled(selectedTool)" class="skill-banner skill-banner--warn">
+              「{{ skillPackageLabel(selectedTool.package, '独立工具') }}」插件当前已禁用，包内工具对所有智能体不可见；
+              在「插件」分类重新启用该包后本工具才会生效。
             </div>
-            <div class="detail-field">
-              <span>启用（禁用后模型不可见、调用失败）</span>
-              <NeumorphismSwitch
-                :model-value="selectedTool.enabled"
-                size="small"
-                @change="toggleTool(selectedTool!, $event)"
-              />
+            <div v-if="!selectedTool.enabled" class="skill-banner">
+              该工具已禁用：模型不可见、调用会失败（列表/详情开关可直接启用）。
             </div>
-            <div class="detail-content">
-              <div class="muted content-title">参数 Schema</div>
-              <pre class="content-pre">{{ paramText(selectedTool) }}</pre>
+
+            <p class="skill-detail__desc">{{ selectedTool.description || '（无描述）' }}</p>
+
+            <div class="detail-section">
+              <div class="detail-section__title">能力说明</div>
+              <span class="muted">
+                启停是全局开关：禁用后所有智能体都看不到该工具；启用时仍受各智能体的
+                工具白名单 / 黑名单（「智能体」配置）约束——两层叠加生效。
+              </span>
+            </div>
+
+            <div class="detail-section">
+              <div class="detail-section__title">被谁使用</div>
+              <div v-if="toolUsageRows.length" class="skill-usage">
+                <div v-for="row in toolUsageRows" :key="row.team" class="skill-usage__row">
+                  <span class="skill-usage__team">{{ row.team }}</span>
+                  <NeumorphismTag :variant="row.variant" size="small">{{ row.label }}</NeumorphismTag>
+                </div>
+              </div>
+              <span v-else class="muted">（无智能体，或智能体列表尚未加载）</span>
+            </div>
+
+            <div class="detail-section">
+              <div class="detail-section__title">所属包</div>
+              <div v-if="selectedTool.package" class="skill-source">
+                <div class="skill-source__row">
+                  <span class="muted">包</span>
+                  <code>{{ selectedTool.package }}</code>
+                </div>
+                <div class="skill-source__actions">
+                  <NeumorphismButton
+                    size="small"
+                    variant="glass"
+                    @click="jumpToCategory('plugin', selectedTool!.package!)"
+                  >
+                    在「插件」中查看 →
+                  </NeumorphismButton>
+                </div>
+              </div>
+              <span v-else class="muted">独立工具（无包归属）</span>
+            </div>
+
+            <div class="detail-section detail-section--grow">
+              <div class="detail-section__title detail-section__title--row">
+                <span>参数 Schema</span>
+                <span class="skill-param-actions">
+                  <NeumorphismSegmented
+                    v-model="toolParamMode"
+                    :options="[{ label: '参数表', value: 'table' }, { label: 'JSON', value: 'json' }]"
+                    size="small"
+                    aria-label="参数视图"
+                  />
+                  <NeumorphismButton size="small" variant="glass" @click="copyToolParams">
+                    {{ toolParamText ? '已复制' : '复制' }}
+                  </NeumorphismButton>
+                </span>
+              </div>
+              <div v-if="toolParamMode === 'table'">
+                <NeumorphismTable
+                  v-if="toolParamRows.length"
+                  :columns="[
+                    { key: 'name', label: '参数' },
+                    { key: 'type', label: '类型' },
+                    { key: 'required', label: '必填' },
+                    { key: 'description', label: '说明' },
+                  ]"
+                  :data="toolParamRows"
+                  size="small"
+                >
+                  <template #cell-name="{ row }">
+                    <code>{{ row.name }}</code>
+                  </template>
+                  <template #cell-required="{ row }">
+                    <NeumorphismTag v-if="row.required" variant="warning" size="small">必填</NeumorphismTag>
+                    <span v-else class="muted">—</span>
+                  </template>
+                  <template #cell-description="{ row }">
+                    <span class="tool-param-desc">{{ row.description || '—' }}</span>
+                  </template>
+                </NeumorphismTable>
+                <pre v-else class="content-pre">{{ paramText(selectedTool) }}</pre>
+              </div>
+              <pre v-else class="content-pre skill-content-pre">{{ paramText(selectedTool) }}</pre>
             </div>
           </div>
         </div>
@@ -2579,5 +3250,73 @@ watch(
   flex-direction: column;
   gap: 8px;
   align-items: flex-start;
+}
+
+/* 分组提示行：中性色（门控语义说明等） */
+.caps-list-group__hint--neutral {
+  color: var(--nm-text-placeholder, #888);
+}
+
+/* 受保护项：行内锁标记占位（与开关同宽，保持行对齐） */
+.caps-lock {
+  font-size: 12px;
+  opacity: 0.7;
+  cursor: help;
+}
+
+/* 参数表 */
+.skill-param-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.tool-param-desc {
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+/* 插件详情：成员 chips（点击跳转到工具/技能分类并选中） */
+.plugin-members {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.plugin-members__label {
+  font-size: 11.5px;
+  min-width: 30px;
+  padding-top: 3px;
+}
+.plugin-member-chip {
+  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
+  color: var(--nm-text-primary);
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.plugin-member-chip:hover {
+  background: var(--panel-accent-soft);
+  border-color: var(--panel-accent);
+}
+
+/* 插件详情：启停影响文案块 */
+.plugin-impact {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--nm-text-secondary);
+}
+.plugin-impact--warn {
+  color: var(--panel-warn);
+}
+
+/* 技术信息折叠头可点 */
+.plugin-info__head {
+  cursor: pointer;
+  user-select: none;
 }
 </style>

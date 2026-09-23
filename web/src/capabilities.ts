@@ -78,7 +78,7 @@ export const PLUGIN_KIND_LABELS: Record<string, string> = {
   skill: '技能',
   tool: '工具',
   provider: 'LLM Provider',
-  loop: 'Turn Runner',
+  loop: '循环驱动',
   adapter: '适配器',
   orchestration: '编排',
   management: '管理面',
