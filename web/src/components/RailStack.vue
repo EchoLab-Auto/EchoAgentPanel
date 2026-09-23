@@ -11,6 +11,12 @@ export interface RailCardDef {
   title: string;
   count?: number;
   countTitle?: string;
+  /**
+   * 紧凑卡（2026-09-23）：内容为固定高度的状态摘要（如连接状态），
+   * 不参与剩余空间的 flex 分配（`flex: 0 0 auto`），也不参与分隔条
+   * 拖动比例——否则小卡片会被撑成大块、把下方卡片挤扁。
+   */
+  compact?: boolean;
 }
 
 const props = defineProps<{ cards: RailCardDef[] }>();
@@ -49,6 +55,11 @@ function save() {
 
 function isOpen(id: string): boolean {
   return openMap.value[id] !== false; // 默认展开
+}
+
+/** 分隔条两侧任一为紧凑卡时不可拖动（紧凑卡不参与 flex 比例分配）。 */
+function hasCompactNeighbor(index: number): boolean {
+  return !!props.cards[index - 1]?.compact || !!props.cards[index]?.compact;
 }
 
 function toggle(id: string) {
@@ -102,15 +113,15 @@ defineExpose({ isOpen });
         class="rail-stack__divider"
         :class="{
           'rail-stack__divider--draggable':
-            isOpen(cards[index - 1].id) && isOpen(card.id),
+            isOpen(cards[index - 1].id) && isOpen(card.id) && !hasCompactNeighbor(index),
         }"
         :title="
-          isOpen(cards[index - 1].id) && isOpen(card.id)
+          isOpen(cards[index - 1].id) && isOpen(card.id) && !hasCompactNeighbor(index)
             ? '拖动调整上下卡片空间'
             : undefined
         "
         @mousedown="
-          isOpen(cards[index - 1].id) && isOpen(card.id)
+          isOpen(cards[index - 1].id) && isOpen(card.id) && !hasCompactNeighbor(index)
             ? onDividerDragStart($event, cards[index - 1].id, card.id)
             : undefined
         "
@@ -121,8 +132,13 @@ defineExpose({ isOpen });
         glass
         no-padding
         class="rail-stack__card"
-        :class="{ 'rail-stack__card--open': isOpen(card.id) }"
-        :style="isOpen(card.id) ? { flexGrow: flexOf(card.id) } : undefined"
+        :class="{
+          'rail-stack__card--open': isOpen(card.id),
+          'rail-stack__card--compact': card.compact && isOpen(card.id),
+        }"
+        :style="
+          isOpen(card.id) && !card.compact ? { flexGrow: flexOf(card.id) } : undefined
+        "
       >
         <template #header>
           <header class="rail-stack__head" @click="toggle(card.id)">
@@ -187,6 +203,12 @@ defineExpose({ isOpen });
 .rail-stack__card--open {
   flex: 1 1 0;
   min-height: 80px;
+}
+
+/* 紧凑卡：固定高度（内容自适应），不参与剩余空间分配 */
+.rail-stack__card--compact {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .rail-stack__head {

@@ -67,14 +67,6 @@ body {
   flex: 0 0 auto;
 }
 .brand { font-weight: 700; }
-.topbar-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--nm-text-secondary);
-  font-size: 13px;
-}
-
 .topbar-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
 /* ── layout ── */

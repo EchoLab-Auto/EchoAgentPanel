@@ -5,7 +5,6 @@ import { ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismLayout,
-  NeumorphismStatusDot,
   NeumorphismToastProvider,
   ThemeProvider,
 } from '@echolab-auto/ui-frame';
@@ -279,13 +278,9 @@ watch(
         <div class="brand">EchoAgent Panel</div>
       </template>
 
-      <!-- 顶部栏中：连接状态 -->
-      <template #header-center>
-        <div class="topbar-status">
-          <NeumorphismStatusDot :status="state.connected ? 'online' : 'connecting'" size="small" />
-          {{ state.connected ? '已连接' : '连接中…' }}
-        </div>
-      </template>
+      <!-- 顶部栏中：连接状态已迁入右侧边栏「连接状态」卡（2026-09-23）——
+           面板级信息与业务导航分离；断连提示也放到了最显眼的卡片里。
+           顶栏此段保留为空（布局三段结构不破坏）。 -->
 
       <!-- 顶部栏右：导航 -->
       <template #header-right>

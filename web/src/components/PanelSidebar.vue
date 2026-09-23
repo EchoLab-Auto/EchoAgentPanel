@@ -1,8 +1,9 @@
 <script setup lang="ts">
-//! 右侧边栏卡片栈（chat-rail 内容）：文件浏览器 / Shell / 临时分支
+//! 右侧边栏卡片栈（chat-rail 内容）：连接状态 / 文件浏览器 / Shell / 临时分支
 //! 上下排列（RailStack：折叠为横条、分隔条拖动调整上下空间，持久化）。
 //!
 //! 卡片门控：
+//! - 连接状态：常驻（Core 管理通道 + 各 QQ 适配器实例；紧凑卡，固定高度）
 //! - 文件浏览器：workspace 插件可用且有激活会话（内容跟随激活会话）
 //! - Shell：常驻（与 LLM 工具共用同一会话体系）
 //! - 临时分支：仅并行多会话模式（单会话模式 Core 不发 ReplyBranch*）
@@ -12,6 +13,7 @@ import { state } from '../store';
 import { loopModeOf } from '../protocol';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import RailStack, { type RailCardDef } from './RailStack.vue';
+import ConnectionStatusCard from './ConnectionStatusCard.vue';
 import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
 import ShellList from './ShellList.vue';
 
@@ -49,6 +51,8 @@ const branchCardVisible = computed(
 
 const cards = computed<RailCardDef[]>(() => {
   const list: RailCardDef[] = [];
+  // 连接状态卡常驻置顶（紧凑卡：内容自适应高度，不占剩余空间分配）
+  list.push({ id: 'status', title: '连接状态', compact: true });
   if (workspaceCard.value) {
     list.push({
       id: 'files',
@@ -85,6 +89,9 @@ function truncateTask(task: string): string {
 
 <template>
   <RailStack :cards="cards">
+    <template #status>
+      <ConnectionStatusCard />
+    </template>
     <template #files>
       <div class="rail-files">
         <button
