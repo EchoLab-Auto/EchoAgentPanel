@@ -14,6 +14,9 @@ max_files = 5
 bind_address = "0.0.0.0:8080"
 # 构建后的前端静态目录（默认相对当前工作目录；安装器会写入绝对路径）。
 static_dir = "web/dist"
+# 媒体库目录（Core 落盘的入站图片；/media/<id> 从这里读）。
+# 留空 = ~/.local/share/echo-agent-core/media（与 Core 缺省一致）。
+media_dir = ""
 
 [core]
 # EchoAgentCore management WebSocket 地址（与 Core 的 [core] management_address 对应）。
