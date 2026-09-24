@@ -28,6 +28,9 @@ import MenuCard from './MenuCard.vue';
 import TasksPanel from './TasksPanel.vue';
 import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
+import RailDragGhost from './RailDragGhost.vue';
+import { railHasVisibleCards } from '../rail-cards';
+import { railDragEngaged } from '../rail-drag';
 
 const props = defineProps<{
   sessionId: string;
@@ -319,12 +322,36 @@ function toggleWorkspace() {
   showWorkspace.value = true;
 }
 
-// ── 右侧边栏（2026-09-19）：会话视图右侧的常驻卡片容器 ──
-// 文件浏览器常驻其中（有激活工作区会话即出现），不经入口行开关；
-// 入口行「工作区」按钮只负责会话管理/git 弹层。容器预留扩展：
-// 卡片栈（文件浏览器/Shell/临时分支）在 PanelSidebar 内部按门控组装；
-// 容器常驻，卡片折叠/空间分配由 RailStack 持久化。
-const railVisible = computed(() => true);
+// ── 双侧边栏（2026-09-24）：左右两列卡片容器，卡片可互相拖动 ──
+// 卡片（连接状态 / 文件浏览器 / Shell / 临时分支）归属哪一列由
+// `rail-layout.ts` 持有（可拖动、可持久化）；本组件只负责：
+// 1. 两列的显隐——有卡片（门控可见）或正在拖动时渲染，空列不占位；
+// 2. 消息区留白——某列有卡片时给滚动区加同宽内边距，正文不被卡片压住
+//    （此前只有右列：消息被限宽 640px 且左对齐，恰好躲开；加了左列后
+//    正文会撞上卡片，故改为按列留白）。
+// 「工作区」入口按钮仍只负责会话管理/git 弹层（与列无关）。
+const RAIL_WIDTH = 324;
+
+/** 某列是否有可见卡片（门控 × 用户排序，判据来自共享注册表）。 */
+function railHasCards(side: 'left' | 'right'): boolean {
+  return railHasVisibleCards(side, props.activeTeamId ?? null);
+}
+
+/** 列的显隐：有卡片，或拖动进行中（拖动时需要两列都作为投放区）。 */
+const leftRailVisible = computed(() => railHasCards('left') || railDragEngaged.value);
+const rightRailVisible = computed(() => railHasCards('right') || railDragEngaged.value);
+
+/**
+ * 消息滚动区的左右留白（有卡片的列 = 列宽；拖动中不留白，避免布局抖动）。
+ * 注意返回**带单位的字符串**：`v-bind()` 注入 CSS 变量时数字无单位会被
+ * 浏览器丢弃（padding-left: 324 非法）。
+ */
+const trayPadLeft = computed(() =>
+  railHasCards('left') && !railDragEngaged.value ? `${RAIL_WIDTH}px` : '0px',
+);
+const trayPadRight = computed(() =>
+  railHasCards('right') && !railDragEngaged.value ? `${RAIL_WIDTH}px` : '0px',
+);
 
 // 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
@@ -851,10 +878,15 @@ function imagesOf(message: ChatMessage): string[] {
       @close="configOpen = false"
     />
 
-    <!-- 右侧边栏（常驻容器）：PanelSidebar 卡片栈
-         （文件浏览器 / Shell / 临时分支，上下排列，可折叠/拖动分隔条） -->
-    <aside v-if="railVisible" class="chat-rail">
+    <!-- 双侧边栏（2026-09-24）：左右各一列卡片栈，卡片可在两列之间拖动
+         （机制与动画见 ../rail-drag.ts；列显隐：有卡片或拖动中） -->
+    <aside
+      v-if="leftRailVisible"
+      class="chat-rail chat-rail--left"
+      :class="{ 'chat-rail--dropzone': railDragEngaged }"
+    >
       <PanelSidebar
+        side="left"
         :active-branch-id="props.activeBranchId ?? null"
         :team-id="props.activeTeamId ?? null"
         @select-branch="(id) => emit('selectBranch', id)"
@@ -862,6 +894,23 @@ function imagesOf(message: ChatMessage): string[] {
         @open-shell-detail="(id) => emit('openShellDetail', id)"
       />
     </aside>
+    <aside
+      v-if="rightRailVisible"
+      class="chat-rail chat-rail--right"
+      :class="{ 'chat-rail--dropzone': railDragEngaged }"
+    >
+      <PanelSidebar
+        side="right"
+        :active-branch-id="props.activeBranchId ?? null"
+        :team-id="props.activeTeamId ?? null"
+        @select-branch="(id) => emit('selectBranch', id)"
+        @manage-workspace="toggleWorkspace"
+        @open-shell-detail="(id) => emit('openShellDetail', id)"
+      />
+    </aside>
+
+    <!-- 拖动拖影：跟随指针的卡片缩影（Teleport 到 body，fixed 定位） -->
+    <RailDragGhost />
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
     <div
@@ -984,12 +1033,12 @@ function imagesOf(message: ChatMessage): string[] {
   min-height: 0;
 }
 
-/* 右侧边栏：会话视图右侧的常驻悬浮区（透明容器）；卡片本体是
-   RailStack 里的悬浮圆角矩形（毛玻璃）。 */
+/* 双侧边栏（2026-09-24）：会话视图左右两侧的常驻悬浮区（透明容器）；
+   卡片本体是 RailStack 里的悬浮圆角矩形（毛玻璃）。
+   空列仅在拖动中出现（作为投放区），因此平时只剩有卡片的列。 */
 .chat-rail {
   position: absolute;
   top: 0;
-  right: 0;
   /* 下界不超过输入框外边框上方 5px：输入框上缘 = entryBottom(输入框高+24)
      - 12(底部边距) - 12(与入口行的间隔) → 再退 5px。 */
   bottom: calc(v-bind(entryBottom) - 17px);
@@ -998,9 +1047,22 @@ function imagesOf(message: ChatMessage): string[] {
   display: flex;
   flex-direction: column;
 }
+.chat-rail--left {
+  left: 0;
+}
+.chat-rail--right {
+  right: 0;
+}
 .chat-rail > :deep(.rail-stack) {
   flex: 1;
   min-height: 0;
+}
+/* 拖动中：投放区提示（列内空态另有虚线框，见 RailStack） */
+.chat-rail--dropzone > :deep(.rail-stack) {
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--panel-accent) 5%, transparent);
+  outline: 1px dashed color-mix(in srgb, var(--panel-accent) 28%, transparent);
+  outline-offset: -4px;
 }
 
 /* ChatTray 需要定高父级才能出现滚动区。
@@ -1013,9 +1075,15 @@ function imagesOf(message: ChatMessage): string[] {
   min-height: 0;
 }
 
-/* 滚动区内部底部预留：按输入框最大高度(5行,约156px) + 边距(12px) + 松量 */
+/* 滚动区内部预留：
+   - 底部：按输入框最大高度(5行,约156px) + 边距(12px) + 松量；
+   - 左右：有卡片的边栏列宽（正文不被悬浮卡片压住）；拖动中归零，
+     避免落位时行宽二次跳变。 */
 .chat-view__list :deep(.nm-chat-tray__scroll) {
   padding-bottom: 190px;
+  padding-left: v-bind(trayPadLeft);
+  padding-right: v-bind(trayPadRight);
+  transition: padding 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* 空态占位（自渲染列表后，empty 不再由库 ChatMessageList 提供） */

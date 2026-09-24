@@ -1,17 +1,22 @@
 <script setup lang="ts">
-//! 右侧边栏卡片栈（chat-rail 内容）：连接状态 / 文件浏览器 / Shell / 临时分支
-//! 上下排列（RailStack：折叠为横条、分隔条拖动调整上下空间，持久化）。
+//! 边栏卡片栈（chat-rail 内容；左右两列共用同一组件，`side` 区分）：
+//! 连接状态 / 文件浏览器 / Shell / 临时分支，上下排列
+//! （RailStack：折叠为横条、分隔条拖动调整上下空间、卡片可拖到另一列，均持久化）。
 //!
-//! 卡片门控：
+//! 卡片门控（与所在列无关）：
 //! - 连接状态：常驻（Core 管理通道 + 各 QQ 适配器实例；紧凑卡，固定高度）
 //! - 文件浏览器：workspace 插件可用且有激活会话（内容跟随激活会话）
 //! - Shell：常驻（与 LLM 工具共用同一会话体系）
 //! - 临时分支：仅并行多会话模式（单会话模式 Core 不发 ReplyBranch*）
+//!
+//! 布局（哪张卡在哪一列、列内顺序）由 `rail-layout.ts` 持有并持久化——
+//! 门控只决定「是否渲染」，不决定「放哪里」（用户拖动过的位置不因门控
+//! 抖动而漂移）。
 
 import { computed } from 'vue';
 import { state } from '../store';
-import { loopModeOf } from '../protocol';
-import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
+import { railCardsFor, workspaceCardFor } from '../rail-cards';
+import type { RailSide } from '../rail-layout';
 import RailStack, { type RailCardDef } from './RailStack.vue';
 import ConnectionStatusCard from './ConnectionStatusCard.vue';
 import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
@@ -20,66 +25,23 @@ import ShellList from './ShellList.vue';
 const props = defineProps<{
   activeBranchId: string | null;
   teamId: string | null;
+  /** 本列所在侧（决定渲染哪些卡片、以及「移到另一侧」的方向）。 */
+  side: RailSide;
 }>();
 
 const emit = defineEmits<{
   selectBranch: [id: string];
   manageWorkspace: [];
   openShellDetail: [sessionId: string];
+  /** 卡片换列（拖动或头部按钮）——由视图层做提示/持久化外的后续动作。 */
+  relocate: [id: string, side: RailSide];
 }>();
 
-const currentTeam = computed(() => {
-  const id = props.teamId ?? state.teams[0]?.id ?? null;
-  return state.teams.find((t) => t.id === id) ?? null;
-});
+/** 本列渲染的卡片：门控 × 用户排序（共享注册表 `rail-cards.ts`）。 */
+const cards = computed<RailCardDef[]>(() => railCardsFor(props.side, props.teamId));
 
-/** 文件浏览器卡：workspace 插件 + 工具可用且存在激活会话。 */
-const workspaceCard = computed(() => {
-  const ok =
-    teamPluginEnabled(currentTeam.value, 'echo-agent.workspace') &&
-    teamToolAvailable(currentTeam.value, 'workspace');
-  const synced = state.workspaceTeamId === (props.teamId ?? state.teams[0]?.id ?? null);
-  if (!ok || !synced || !state.workspaceActive) return null;
-  return (
-    state.workspaceSessions.find((s) => s.id === state.workspaceActive) ?? null
-  );
-});
-
-const branchCardVisible = computed(
-  () => loopModeOf(currentTeam.value) === 'parallel',
-);
-
-const cards = computed<RailCardDef[]>(() => {
-  const list: RailCardDef[] = [];
-  // 连接状态卡常驻置顶（紧凑卡：内容自适应高度，不占剩余空间分配）
-  list.push({ id: 'status', title: '连接状态', compact: true });
-  if (workspaceCard.value) {
-    list.push({
-      id: 'files',
-      title: `文件浏览器 · ${workspaceCard.value.name}`,
-    });
-  }
-  list.push({
-    id: 'shell',
-    title: 'Shell',
-    count: state.shellSessions.filter(
-      (s) =>
-        s.team_id === undefined ||
-        s.team_id === null ||
-        s.team_id === (props.teamId ?? state.teams[0]?.id ?? null),
-    ).length,
-    countTitle: '当前 agent 的会话数',
-  });
-  if (branchCardVisible.value) {
-    list.push({
-      id: 'branches',
-      title: '临时分支',
-      count: Object.keys(state.branchTabs).length,
-      countTitle: '运行中的分支数',
-    });
-  }
-  return list;
-});
+/** 文件浏览器卡当前绑定的工作区会话（模板里传给 WorkspaceFileBrowser）。 */
+const workspaceCard = computed(() => workspaceCardFor(props.teamId));
 
 function truncateTask(task: string): string {
   const oneLine = task.replace(/\s+/g, ' ').trim();
@@ -88,7 +50,11 @@ function truncateTask(task: string): string {
 </script>
 
 <template>
-  <RailStack :cards="cards">
+  <RailStack
+    :cards="cards"
+    :side="side"
+    @relocate="(id, target) => emit('relocate', id, target)"
+  >
     <template #status>
       <ConnectionStatusCard />
     </template>

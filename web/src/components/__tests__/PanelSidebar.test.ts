@@ -13,6 +13,7 @@ vi.mock('../../connection', () => ({
 
 import PanelSidebar from '../PanelSidebar.vue';
 import { state } from '../../store';
+import { moveToOtherSide, resetRailLayout, sideOf } from '../../rail-layout';
 import type { SessionInfo, TeamInfo } from '../../protocol';
 
 function team(over: Partial<TeamInfo>): TeamInfo {
@@ -34,15 +35,16 @@ function session(over: Partial<SessionInfo>): SessionInfo {
   } as SessionInfo;
 }
 
-function mountSidebar() {
+function mountSidebar(side: 'left' | 'right' = 'right') {
   return mount(PanelSidebar, {
-    props: { activeBranchId: null, teamId: 'alix' },
+    props: { activeBranchId: null, teamId: 'alix', side },
   });
 }
 
-describe('PanelSidebar（右侧边栏卡片栈）', () => {
+describe('PanelSidebar（边栏卡片栈）', () => {
   beforeEach(() => {
     localStorage.clear();
+    resetRailLayout();
     state.teams = [team({ loop_mode: 'single' })];
     state.activeTeamId = 'alix';
     state.sessions = [session({})];
@@ -170,6 +172,55 @@ describe('PanelSidebar（右侧边栏卡片栈）', () => {
     expect(wrapper.findAll('.rail-stack__divider')[1].classes()).not.toContain(
       'rail-stack__divider--draggable',
     );
+  });
+
+  it('左右列共用组件：side 决定渲染本列卡片（默认布局右列全有、左列为空）', () => {
+    const rightWrapper = mountSidebar('right');
+    const rightTitles = rightWrapper.findAll('.rail-stack__title').map((t) => t.text());
+    expect(rightTitles.some((t) => t.includes('连接状态'))).toBe(true);
+    expect(rightTitles.some((t) => t.startsWith('Shell'))).toBe(true);
+
+    const leftWrapper = mountSidebar('left');
+    expect(leftWrapper.findAll('.rail-stack__title').length).toBe(0);
+    expect(leftWrapper.find('.rail-stack').exists()).toBe(true);
+  });
+
+  it('卡片归属由 rail-layout 决定：换列后只在本列渲染', async () => {
+    moveToOtherSide('shell');
+    const leftWrapper = mountSidebar('left');
+    const leftTitles = leftWrapper.findAll('.rail-stack__title').map((t) => t.text());
+    expect(leftTitles.some((t) => t.startsWith('Shell'))).toBe(true);
+
+    const rightWrapper = mountSidebar('right');
+    const rightTitles = rightWrapper.findAll('.rail-stack__title').map((t) => t.text());
+    expect(rightTitles.some((t) => t.startsWith('Shell'))).toBe(false);
+    expect(rightTitles.some((t) => t.includes('连接状态'))).toBe(true);
+  });
+
+  it('卡头「移到另一侧」按钮：迁移布局并冒泡 relocate 事件', async () => {
+    const wrapper = mountSidebar('right');
+    const shellHead = wrapper
+      .findAll('.rail-stack__head')
+      .find((h) => h.text().includes('Shell'))!;
+    expect(shellHead.find('.rail-stack__relocate').attributes('title')).toBe('移到左侧栏');
+    await shellHead.find('.rail-stack__relocate').trigger('click');
+    expect(sideOf('shell')).toBe('left');
+    expect(wrapper.emitted('relocate')?.[0]).toEqual(['shell', 'left']);
+  });
+
+  it('分隔条拖动比例与折叠态按卡片 id 存（换列后保留）', async () => {
+    const rightWrapper = mountSidebar('right');
+    const shellHead = rightWrapper
+      .findAll('.rail-stack__head')
+      .find((h) => h.text().includes('Shell'))!;
+    await shellHead.trigger('click'); // 折叠
+    const saved = JSON.parse(localStorage.getItem('echo-panel-rail-cards') ?? '{}');
+    expect(saved.open?.shell).toBe(false);
+
+    moveToOtherSide('shell');
+    const leftWrapper = mountSidebar('left');
+    // 换列后仍是折叠态（状态按 id 存，与所在列无关）
+    expect(leftWrapper.find('.rail-stack__body').exists()).toBe(false);
   });
 
   it('不渲染「会话」切换卡（切换统一走入口行按钮）', () => {
