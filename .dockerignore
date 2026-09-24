@@ -1,0 +1,7 @@
+# 构建上下文排除项：宿主构建产物与文档不进镜像（web 依赖在镜像内 npm ci 重建）
+target/
+.git/
+.github/
+document/
+web/node_modules/
+web/dist/
