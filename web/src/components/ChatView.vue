@@ -569,6 +569,8 @@ function onSend(content: string) {
 }
 
 // 消息是否带图（ChatMessage 类型无 images，扩展字段来自 chat-adapter）
+// 消息图片：元素要么是可展示的 URL（Core 落盘图 `/media/<id>` 或遗留
+// data URI），要么是空串（Core 侧"图片已省略"占位，保留数组长度以便计数）。
 function imagesOf(message: ChatMessage): string[] {
   return (message as ChatMessageWithImages).images ?? [];
 }
@@ -819,13 +821,21 @@ function imagesOf(message: ChatMessage): string[] {
             :class="{ 'chat-view__item--enter': (row.message as ChatMessageWithImages).animate }"
           >
             <div v-if="imagesOf(row.message).length" class="chat-view__images">
-              <img
-                v-for="(img, i) in imagesOf(row.message)"
-                :key="i"
-                :src="img"
-                class="chat-view__image"
-                alt=""
-              />
+              <template v-for="(img, i) in imagesOf(row.message)" :key="i">
+                <!-- 可展示项：Core 落盘图的 /media/<id> 引用（同源、懒加载、
+                     强缓存）或遗留的 data URI。省略项（空串）计数占位。 -->
+                <img
+                  v-if="img"
+                  :src="img"
+                  class="chat-view__image"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                />
+                <span v-else class="chat-view__image-elided" title="图片数据过大，已省略">
+                  图片已省略
+                </span>
+              </template>
             </div>
             <ChatMessageItem :message="row.message" :format-time="formatTime" />
           </div>
@@ -1128,6 +1138,15 @@ function imagesOf(message: ChatMessage): string[] {
 }
 
 /* 消息内图片 */
+.chat-view__image-elided {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--nm-border-color, rgba(255, 255, 255, 0.2));
+  font-size: 11px;
+  color: var(--nm-text-placeholder, #888);
+}
 .chat-view__images {
   display: flex;
   flex-wrap: wrap;

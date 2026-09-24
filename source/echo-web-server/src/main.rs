@@ -56,6 +56,8 @@ async fn main() -> Result<()> {
     let cfg = PanelConfig::load(&path)?;
     init_tracing(&cfg.logging)?;
 
+    // 媒体目录要在 `cfg.server` 被部分移动前解析（effective_media_dir 借用）。
+    let media_dir = cfg.server.effective_media_dir();
     let bind = args.bind.unwrap_or(cfg.server.bind_address);
     let core_url = args.core.unwrap_or(cfg.core.connect_url);
     let static_dir = args
@@ -66,10 +68,14 @@ async fn main() -> Result<()> {
         core_url: Arc::from(core_url.as_str()),
         core_access_token: Arc::from(cfg.core.access_token.as_str()),
         static_dir: Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
+        media_dir: Arc::from(media_dir.to_string_lossy().into_owned().as_str()),
     };
 
     let app = Router::new()
         .route("/ws", get(proxy::ws_handler))
+        // 媒体库：Core 落盘的入站图片（`/media/<id>`）。必须在静态 fallback
+        // 之前注册，否则会被 SPA shell 兜底吞掉。
+        .route("/media/{name}", get(echo_web_server::media::media_handler))
         // HTTP 旁路仅有日志两条；QQ 登录状态/二维码自 2026-09-13 起由
         // Core 代理（WS 命令 RequestQqLoginStatus / RequestQqQrcode），
         // 无 /api/qq/* 路由。

@@ -49,6 +49,8 @@ pub struct AppState {
     pub core_access_token: Arc<str>,
     /// Static frontend directory (built `web/dist`).
     pub static_dir: Arc<str>,
+    /// Media library directory: Core 落盘的入站图片（`/media/<id>` 从这里读）。
+    pub media_dir: Arc<str>,
 }
 
 /// `GET /ws` — upgrade the browser connection and bridge it to Core.

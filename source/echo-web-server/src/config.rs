@@ -43,6 +43,10 @@ pub struct ServerSection {
     pub bind_address: String,
     /// 前端静态文件目录（构建后的 `web/dist`）。
     pub static_dir: String,
+    /// 媒体库目录（Core 落盘的入站图片；`/media/<id>` 路由从这里读）。
+    /// 留空 = 默认 `~/.local/share/echo-agent-core/media`（与 Core 的
+    /// `$ECHO_MEDIA_DIR` 缺省一致；两进程同机部署时开箱即用）。
+    pub media_dir: String,
 }
 
 impl Default for ServerSection {
@@ -50,6 +54,25 @@ impl Default for ServerSection {
         Self {
             bind_address: "0.0.0.0:8080".to_string(),
             static_dir: "web/dist".to_string(),
+            media_dir: String::new(),
+        }
+    }
+}
+
+impl ServerSection {
+    /// 媒体库目录（配置为空时回退 Core 数据根；HOME 不可用则工作目录）。
+    pub fn effective_media_dir(&self) -> std::path::PathBuf {
+        let configured = self.media_dir.trim();
+        if !configured.is_empty() {
+            return std::path::PathBuf::from(configured);
+        }
+        match std::env::var_os("ECHO_MEDIA_DIR") {
+            Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+            _ => match std::env::var_os("HOME") {
+                Some(home) => std::path::PathBuf::from(home)
+                    .join(".local/share/echo-agent-core/media"),
+                None => std::path::PathBuf::from("media"),
+            },
         }
     }
 }

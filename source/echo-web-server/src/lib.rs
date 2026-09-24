@@ -2,4 +2,5 @@
 
 pub mod config;
 pub mod log;
+pub mod media;
 pub mod proxy;
