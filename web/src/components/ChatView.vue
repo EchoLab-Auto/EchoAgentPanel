@@ -1040,9 +1040,10 @@ function imagesOf(message: ChatMessage): string[] {
 .chat-rail {
   position: absolute;
   top: 0;
-  /* 下界不超过输入框外边框上方 5px：输入框上缘 = entryBottom(输入框高+24)
-     - 12(底部边距) - 12(与入口行的间隔) → 再退 5px。 */
-  bottom: calc(v-bind(entryBottom) - 17px);
+  /* 下界统一让出入口行（底部功能条：活动/Agent 切换/配置/上下文/清单/会话）：
+     入口行高 37px（实测，由按钮尺寸决定）+ 8px 间隙 = 45px。两列一致
+     ——入口行按钮尺寸调整时同步此处。 */
+  bottom: calc(v-bind(entryBottom) + 45px);
   z-index: 4;
   width: 324px;
   display: flex;
@@ -1050,13 +1051,6 @@ function imagesOf(message: ChatMessage): string[] {
 }
 .chat-rail--left {
   left: 0;
-  /* 入口行（底部左对齐 20px 起、宽约 617px 的功能条：活动/Agent 切换/配置/
-     上下文/清单/会话）占据左下角，左栏必须让出：容器底抬到入口行上缘上方
-     8px。45 = 入口行高 37 + 8 —— 入口行高度由按钮尺寸决定（实测 37px），
-     若按钮尺寸调整需同步此处。
-     右栏与入口行无重叠（右栏从窗口右侧 324px 起，入口行止于约 637px），
-     保持贴输入框。 */
-  bottom: calc(v-bind(entryBottom) + 45px);
 }
 .chat-rail--right {
   right: 0;
