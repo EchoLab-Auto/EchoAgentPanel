@@ -7,25 +7,45 @@ import { ChatFold } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 
+//! 块种类 → 中文徽标（Core 侧 kind 全集的镜像；缺项会裸显英文 kind）。
+//! `displayLabel` 会据此剥掉 label 里重复的种类前缀（如「常驻技能 · xx」）。
 const KIND_LABEL: Record<string, string> = {
   base: '基础',
+  'system-skill': '系统提示词',
   skills: '技能清单',
   skill: '常驻技能',
   triggered: '触发技能',
+  workspace: '工作区会话',
   orchestration: '编排',
   boundary: '边界',
-  history: '历史',
+  history: '对话历史',
 };
 
 const KIND_CLASS: Record<string, string> = {
   base: 'ctx-base',
+  'system-skill': 'ctx-system-skill',
   skills: 'ctx-skills',
   skill: 'ctx-skill',
   triggered: 'ctx-triggered',
+  workspace: 'ctx-workspace',
   orchestration: 'ctx-orch',
   boundary: 'ctx-boundary',
   history: 'ctx-history',
 };
+
+/**
+ * 折叠头展示的 label：剥掉与徽标重复的种类前缀。
+ * Core 的 label 形如「常驻技能 · concise-dialogue」，徽标已显示「常驻技能」——
+ * 不剥就是「常驻技能常驻技能 · concise-dialogue」（此前实测的观感问题）。
+ */
+function displayLabel(kind: string, label: string): string {
+  const kindText = KIND_LABEL[kind] ?? kind;
+  if (label === kindText) return '';
+  if (label.startsWith(kindText)) {
+    return label.slice(kindText.length).replace(/^[\s·:：-]+/, '');
+  }
+  return label;
+}
 
 const showMessages = ref(false);
 const confirmClear = ref(false);
@@ -57,28 +77,52 @@ const snapshot = computed(() => {
   return snap.session_id === targetSessionId.value ? snap : null;
 });
 const blocks = computed(() => snapshot.value?.blocks ?? []);
-const maxBlockTokens = computed(() => Math.max(1, ...blocks.value.map((b) => b.tokens)));
-const pct = computed(() =>
-  snapshot.value && snapshot.value.limit_tokens > 0
-    ? Math.min(100, Math.round((snapshot.value.total_tokens / snapshot.value.limit_tokens) * 100))
-    : 0,
-);
-const gaugeVariant = computed(() =>
-  pct.value >= 90 ? 'error' : pct.value >= 70 ? 'warning' : 'primary',
-);
 const promptTokens = computed(() =>
   blocks.value.filter((b) => b.kind !== 'history').reduce((sum, b) => sum + b.tokens, 0),
 );
 const historyTokens = computed(() =>
   blocks.value.filter((b) => b.kind === 'history').reduce((sum, b) => sum + b.tokens, 0),
 );
+/**
+ * 当前上下文总占用 = 提示词块 + 历史（Core 的 total_tokens 只计历史，
+ * 单看它会出现「提示词 1091t 而总占用 0%」的错位；这里按全部块求和）。
+ */
+const contextUsed = computed(() => {
+  const sum = promptTokens.value + historyTokens.value;
+  return sum > 0 ? sum : (snapshot.value?.total_tokens ?? 0);
+});
+const pct = computed(() =>
+  snapshot.value && snapshot.value.limit_tokens > 0
+    ? Math.min(100, Math.round((contextUsed.value / snapshot.value.limit_tokens) * 100))
+    : 0,
+);
+const gaugeVariant = computed(() =>
+  pct.value >= 90 ? 'error' : pct.value >= 70 ? 'warning' : 'primary',
+);
+/** 总占用文本：<1% 与 0% 区分（小上下文里 1268t 显示 0% 会被误读为「没东西」）。 */
+const pctText = computed(() => {
+  if (pct.value >= 1) return `${pct.value}%`;
+  return contextUsed.value > 0 ? '<1%' : '0%';
+});
 const systemBlocks = computed(() => blocks.value.filter((b) => b.kind !== 'history'));
 const historyBlocks = computed(() => blocks.value.filter((b) => b.kind === 'history'));
 
+/** 块占**当前上下文总量**的比例（标准口径；此前是相对最大块，误读率高）。 */
 function blockPct(tokens: number): number {
-  return maxBlockTokens.value > 0
-    ? Math.max(1, Math.round((tokens / maxBlockTokens.value) * 100))
-    : 0;
+  return contextUsed.value > 0 ? (tokens / contextUsed.value) * 100 : 0;
+}
+
+/** 百分比文本：不足 1% 显示 `<1%`（而不是取整成 0% 或虚高的 1%）。 */
+function blockPctText(tokens: number): string {
+  const value = blockPct(tokens);
+  if (value >= 1) return `${Math.round(value)}%`;
+  return value > 0 ? '<1%' : '0%';
+}
+
+/** 块条形宽度：按比例，但给非零块一个最小可见宽度。 */
+function blockBarWidth(tokens: number): string {
+  const value = blockPct(tokens);
+  return `${value > 0 ? Math.max(value, 0.8) : 0}%`;
 }
 
 // 两步确认：第一次点击武装，第二次发送清空命令。
@@ -136,12 +180,14 @@ function compactHistory() {
       <NeumorphismButton variant="glass" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
     </div>
 
-    <div v-if="!snapshot" class="muted">（暂无快照，可在聊天中发送 /context 获取）</div>
+    <div v-if="!snapshot" class="muted">
+      （暂无快照——点右上角 ↻ 重新拉取；若持续为空，请确认已选择智能体与会话）
+    </div>
     <template v-else>
       <div class="ctx-summary">
         <NeumorphismProgress :model-value="pct" :variant="gaugeVariant" show-label />
         <div class="ctx-summary-stats">
-          <span>总占用 {{ pct }}%</span>
+          <span>总占用 {{ pctText }}</span>
           <span>提示词 {{ promptTokens }}t</span>
           <span>历史 {{ historyTokens }}t</span>
           <span>上限 {{ snapshot.limit_tokens }}t</span>
@@ -153,23 +199,23 @@ function compactHistory() {
         <ChatFold
           v-for="b in systemBlocks"
           :key="b.key"
-          :default-open="b.kind === 'base'"
+          :default-open="true"
           class="ctx-fold"
         >
           <template #head>
             <span class="ctx-kind" :class="KIND_CLASS[b.kind] ?? ''">
               {{ KIND_LABEL[b.kind] ?? b.kind }}
             </span>
-            <span class="ctx-block-label">{{ b.label }}</span>
+            <span class="ctx-block-label">{{ displayLabel(b.kind, b.label) }}</span>
             <span class="ctx-block-tokens">{{ b.tokens }}t</span>
-            <span class="ctx-block-pct">{{ blockPct(b.tokens) }}%</span>
+            <span class="ctx-block-pct">{{ blockPctText(b.tokens) }}</span>
           </template>
           <template #subhead>
             <div class="ctx-block-bar">
               <div
                 class="ctx-block-fill"
                 :class="KIND_CLASS[b.kind] ?? ''"
-                :style="{ width: `${blockPct(b.tokens)}%` }"
+                :style="{ width: blockBarWidth(b.tokens) }"
               />
             </div>
           </template>
@@ -179,21 +225,26 @@ function compactHistory() {
 
       <div class="ctx-section-title">对话历史（{{ historyBlocks.length }}）</div>
       <div class="ctx-blocks">
-        <ChatFold v-for="b in historyBlocks" :key="b.key" class="ctx-fold">
+        <ChatFold
+          v-for="b in historyBlocks"
+          :key="b.key"
+          :default-open="true"
+          class="ctx-fold"
+        >
           <template #head>
             <span class="ctx-kind" :class="KIND_CLASS[b.kind] ?? ''">
               {{ KIND_LABEL[b.kind] ?? b.kind }}
             </span>
-            <span class="ctx-block-label">{{ b.label }}</span>
+            <span class="ctx-block-label">{{ displayLabel(b.kind, b.label) }}</span>
             <span class="ctx-block-tokens">{{ b.tokens }}t</span>
-            <span class="ctx-block-pct">{{ blockPct(b.tokens) }}%</span>
+            <span class="ctx-block-pct">{{ blockPctText(b.tokens) }}</span>
           </template>
           <template #subhead>
             <div class="ctx-block-bar">
               <div
                 class="ctx-block-fill"
                 :class="KIND_CLASS[b.kind] ?? ''"
-                :style="{ width: `${blockPct(b.tokens)}%` }"
+                :style="{ width: blockBarWidth(b.tokens) }"
               />
             </div>
           </template>
