@@ -342,16 +342,17 @@ const leftRailVisible = computed(() => railHasCards('left') || railDragEngaged.v
 const rightRailVisible = computed(() => railHasCards('right') || railDragEngaged.value);
 
 /**
- * 消息滚动区的左右留白（有卡片的列 = 列宽；拖动中不留白，避免布局抖动）。
+ * 消息滚动区的左右留白（有**可见卡片**的列 = 列宽）。
+ *
+ * 拖动期间不改留白：被拖卡片已从源列摘除、尚未落入目标列，此时若让留白
+ * 跟随「列是否渲染」（拖动会使空列临时出现）会让正文行宽反复跳变；按
+ * 「有可见卡片」判断则拖动全程稳定，落位后再一次性过渡（0.24s）。
+ *
  * 注意返回**带单位的字符串**：`v-bind()` 注入 CSS 变量时数字无单位会被
  * 浏览器丢弃（padding-left: 324 非法）。
  */
-const trayPadLeft = computed(() =>
-  railHasCards('left') && !railDragEngaged.value ? `${RAIL_WIDTH}px` : '0px',
-);
-const trayPadRight = computed(() =>
-  railHasCards('right') && !railDragEngaged.value ? `${RAIL_WIDTH}px` : '0px',
-);
+const trayPadLeft = computed(() => (railHasCards('left') ? `${RAIL_WIDTH}px` : '0px'));
+const trayPadRight = computed(() => (railHasCards('right') ? `${RAIL_WIDTH}px` : '0px'));
 
 // 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
@@ -1049,6 +1050,13 @@ function imagesOf(message: ChatMessage): string[] {
 }
 .chat-rail--left {
   left: 0;
+  /* 入口行（底部左对齐 20px 起、宽约 617px 的功能条：活动/Agent 切换/配置/
+     上下文/清单/会话）占据左下角，左栏必须让出：容器底抬到入口行上缘上方
+     8px。45 = 入口行高 37 + 8 —— 入口行高度由按钮尺寸决定（实测 37px），
+     若按钮尺寸调整需同步此处。
+     右栏与入口行无重叠（右栏从窗口右侧 324px 起，入口行止于约 637px），
+     保持贴输入框。 */
+  bottom: calc(v-bind(entryBottom) + 45px);
 }
 .chat-rail--right {
   right: 0;

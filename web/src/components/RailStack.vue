@@ -316,13 +316,14 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
           </div>
         </NeumorphismCard>
       </div>
-      <!-- 末尾落点指示线（插到最后一卡之后） -->
-      <div
-        v-if="railDrag.dropSide === side && railDrag.dropIndex === visibleCards.length && visibleCards.length > 0"
-        key="__drop-end__"
-        class="rail-stack__drop-line rail-stack__drop-line--end"
-      />
     </TransitionGroup>
+    <!-- 末尾落点指示线（插到最后一卡之后）。放在 TransitionGroup **之外**：
+         组内的条件渲染会被当作 enter/leave 过渡元素（离场时 absolute + 缩放
+         动画造成错位/残影），绝对定位也不应参与 FLIP 布局计算。 -->
+    <div
+      v-if="railDrag.dropSide === side && railDrag.dropIndex === visibleCards.length && visibleCards.length > 0"
+      class="rail-stack__drop-line rail-stack__drop-line--end"
+    />
     <!-- 空列且在拖动：虚线投放框（提示可放置） -->
     <div v-if="railDrag.active && isEmpty" class="rail-stack__empty-drop">
       拖到此处放置卡片
@@ -498,11 +499,15 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   flex-direction: column;
 }
 
-/* 分隔条：卡片间隙中的隐形拖动把手（两张都展开时可拖动） */
+/* 分隔条：卡片间隙中的隐形拖动把手（两张都展开时可拖动）。
+   margin 的算法：divider 位于槽位内、卡片之前；负上边距把它提到卡间空隙
+   里（视觉中线贴空隙中心），下边距 3px 抵消自身高度，使「divider + 卡片」
+   的净占位 = 0 —— 卡片间距严格等于槽位间距（12px，见 rail-stack__list 的
+   gap）。漏掉 3px 会把卡间距压成 1px（2026-09-24 实测修复）。 */
 .rail-stack__divider {
   flex: 0 0 auto;
   height: 5px;
-  margin: -8px 8px;
+  margin: -8px 8px 3px;
   border-radius: 999px;
 }
 .rail-stack__divider--draggable {
@@ -512,17 +517,31 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   background: color-mix(in srgb, var(--panel-accent) 30%, transparent);
 }
 
-/* 落点指示线：拖动中显示插入位置（2px 主色，两端圆角，外发光） */
+/* 落点指示线：拖动中显示插入位置（2px 主色，两端圆角，外发光）。
+   绝对定位——指示线只是「提示」，不能参与布局：占位式实现会在出现/消失时
+   推挤相邻卡片（实测卡片跳动 8px）。 */
 .rail-stack__drop-line {
-  flex: 0 0 auto;
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: -7px;
+  z-index: 1; /* 压在 divider 之上（divider 仅 hover 时高亮，重叠不该遮线） */
   height: 2px;
-  margin: -7px 4px -3px;
   border-radius: 999px;
   background: var(--panel-accent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--panel-accent) 60%, transparent);
+  pointer-events: none;
 }
+/* 槽位是绝对定位线的参照（slot 顶 = 卡片顶） */
+.rail-stack__slot {
+  position: relative;
+}
+/* 末尾线（相对 rail-stack 定位；内容底 = 容器底 - 12px padding） */
 .rail-stack__drop-line--end {
-  margin: 0 4px;
+  top: auto;
+  bottom: 11px;
+  left: 16px;
+  right: 16px;
 }
 
 /* 空列投放框：拖动中提示「拖到此处」（虚线圆角，悬停高亮由容器负责） */

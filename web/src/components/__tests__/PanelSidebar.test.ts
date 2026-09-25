@@ -1,10 +1,12 @@
-//! 右侧边栏卡片栈契约（RailStack，2026-09-19）。
+//! 边栏卡片栈契约（RailStack，2026-09-19；2026-09-24 起左右两列 + 拖动换列）。
 //!
-//! 卡片：文件浏览器（workspace 插件 + 激活会话时）/ Shell（常驻）/
-//! 临时分支（并行模式）。卡片可折叠为横条；分隔条拖动调整上下空间。
-//! 本测试锁定：卡片门控、折叠行为、会话切换卡不回流。
+//! 卡片：连接状态（常驻，紧凑卡）/ 文件浏览器（workspace 插件 + 激活会话时）/
+//! Shell（常驻）/ 临时分支（并行模式）。卡片可折叠为横条；分隔条拖动调整
+//! 上下空间；卡片可在两列之间拖动（`side` + rail-layout）。
+//! 本测试锁定：卡片门控、列归属与换列、折叠行为、分隔条结构、会话切换卡不回流。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 
 vi.mock('../../connection', () => ({
@@ -221,6 +223,38 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     const leftWrapper = mountSidebar('left');
     // 换列后仍是折叠态（状态按 id 存，与所在列无关）
     expect(leftWrapper.find('.rail-stack__body').exists()).toBe(false);
+  });
+
+  it('分隔条净占位为 0：卡片间距 = 槽位间距（不因 divider 负边距被压缩）', () => {
+    // 结构不变量：轨道槽位里「divider + 卡片」的总占位必须等于 0 偏移，
+    // 否则卡间距会被 divider 的负 margin 吃掉（2026-09-24 实测回归：1px）。
+    // 这里锁定 DOM 结构与类名契约（像素级由 Playwright 实测守护）。
+    const wrapper = mountSidebar('right');
+    const slots = wrapper.findAll('.rail-stack__slot');
+    expect(slots.length).toBeGreaterThan(1);
+    // 第二个槽（含 divider 的常规槽）应同时包含 divider 与卡片，且顺序为 divider → card
+    const second = slots[1];
+    const children = Array.from(second.element.children).map((el) => el.className);
+    const dividerIndex = children.findIndex((c) => c.includes('rail-stack__divider'));
+    expect(dividerIndex).toBe(0);
+    expect(children.some((c) => c.includes('rail-stack__card'))).toBe(true);
+  });
+
+  it('落点指示线绝对定位（不参与布局，出现/消失不推挤卡片）', async () => {
+    const { railDrag } = await import('../../rail-drag');
+    const wrapper = mountSidebar('right');
+    // 制造拖动中的落点状态（dropSide 命中本列、index 0）
+    railDrag.active = true;
+    railDrag.dropSide = 'right';
+    railDrag.dropIndex = 0;
+    await nextTick();
+    const line = wrapper.find('.rail-stack__drop-line');
+    expect(line.exists()).toBe(true);
+    expect(line.classes()).toContain('rail-stack__drop-line');
+    // 类契约：CSS 里是 absolute（样式断言在快照级；此处避免读取 jsdom 未计算样式）
+    railDrag.active = false;
+    railDrag.dropSide = null;
+    railDrag.dropIndex = null;
   });
 
   it('不渲染「会话」切换卡（切换统一走入口行按钮）', () => {
