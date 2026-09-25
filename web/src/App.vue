@@ -243,10 +243,15 @@ watch(
       saveActiveTeam(next);
       const cached = state.teamTimelines[next];
       if (cached) {
-        state.trunk = cached.msgs;
+        // 副本渲染 + 归属标注：与 onTeamSelect 同一约定（trunk 与缓存解
+        // 数组别名，实时推送不污染缓存；缺少 trunkTeamId 时增量投递不会
+        // 落到实时视图）。
+        state.trunk = [...cached.msgs];
+        state.trunkTeamId = String(next ?? '');
         sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
       } else {
         state.trunk = [];
+        state.trunkTeamId = String(next ?? '');
         sendCommand({ RequestTrunkTimeline: { team_id: next } });
       }
       selectSession(localLanding(next));

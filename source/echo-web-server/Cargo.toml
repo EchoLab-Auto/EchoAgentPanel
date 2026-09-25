@@ -15,6 +15,7 @@ path = "src/main.rs"
 tokio.workspace = true
 futures-util.workspace = true
 tokio-tungstenite.workspace = true
+flate2.workspace = true
 axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,3 +27,4 @@ toml.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
+flate2.workspace = true

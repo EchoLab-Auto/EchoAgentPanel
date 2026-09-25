@@ -19,6 +19,9 @@ tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 tokio-tungstenite = "0.24"
 
+# 静态资源 gzip 协商（echo-web-server 静态路由）
+flate2 = "1"
+
 # http / ws server
 axum = { version = "0.8", features = ["ws"] }
 

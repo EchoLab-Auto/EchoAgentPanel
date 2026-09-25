@@ -8,10 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::extract::{OriginalUri, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
@@ -81,7 +77,7 @@ async fn main() -> Result<()> {
         // 无 /api/qq/* 路由。
         .route("/api/logs/panel", get(log::panel_logs))
         .route("/api/logs/core", get(log::core_logs))
-        .fallback(static_handler)
+        .fallback(echo_web_server::static_files::static_handler)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind)
@@ -90,77 +86,6 @@ async fn main() -> Result<()> {
     info!(%bind, %core_url, static_dir = %static_dir.display(), "EchoAgentPanel web server listening");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-/// Serve a static file from the frontend build; `/` maps to `index.html`.
-async fn static_handler(uri: OriginalUri, State(state): State<proxy::AppState>) -> Response {
-    let root = PathBuf::from(state.static_dir.as_ref());
-    let requested = uri.path().trim_start_matches('/');
-    let relative = if requested.is_empty() {
-        "index.html"
-    } else {
-        requested
-    };
-    let file = root.join(relative);
-    // Guard against path traversal outside the static root.
-    if !file.starts_with(&root) {
-        return not_found();
-    }
-    if file.is_dir() {
-        return not_found();
-    }
-    // HTML 永不缓存（SPA shell 每次最新）；带 hash 的静态资源（js/css）
-    // 允许短缓存并附带 ETag 校验，更新后浏览器自动取新版本。
-    let is_html = file.extension().and_then(|e| e.to_str()) == Some("html");
-    // HTML（SPA shell）禁止任何缓存：no-store 避免浏览器启发式缓存旧壳。
-    let cache_control = if is_html {
-        "no-store, no-cache, must-revalidate"
-    } else {
-        "public, max-age=300"
-    };
-    match tokio::fs::read(&file).await {
-        Ok(bytes) => Response::builder()
-            .header(CONTENT_TYPE, content_type(&file))
-            .header(CACHE_CONTROL, cache_control)
-            .body(axum::body::Body::from(bytes))
-            .unwrap_or_else(|_| not_found()),
-        Err(_) => {
-            // SPA fallback: unknown routes serve the app shell.
-            match tokio::fs::read(root.join("index.html")).await {
-                Ok(bytes) => Response::builder()
-                    .header(CONTENT_TYPE, "text/html; charset=utf-8")
-                    .header(CACHE_CONTROL, "no-store, no-cache, must-revalidate")
-                    .body(axum::body::Body::from(bytes))
-                    .unwrap_or_else(|_| not_found()),
-                Err(_) => not_found(),
-            }
-        }
-    }
-}
-
-fn content_type(file: &std::path::Path) -> HeaderValue {
-    let mime = match file.extension().and_then(|ext| ext.to_str()) {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("json") => "application/json",
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("ico") => "image/x-icon",
-        Some("woff2") => "font/woff2",
-        Some("map") => "application/json",
-        _ => "application/octet-stream",
-    };
-    HeaderValue::from_static(mime)
-}
-
-fn not_found() -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        [(CONTENT_TYPE, "text/plain; charset=utf-8")],
-        "not found",
-    )
-        .into_response()
 }
 
 fn init_tracing(logging: &echo_web_server::config::LoggingSection) -> Result<()> {

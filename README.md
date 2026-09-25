@@ -17,8 +17,12 @@
 
 - **后端**（`source/echo-web-server`）：axum 静态托管 + WS 中继。每个浏览器连接
   对应一条到 Core 的连接；sudo 密码帧（`{"type":"sudo_password",...}`）只经过
-  中继管道，与日志、命令队列完全隔离。
+  中继管道，与日志、命令队列完全隔离。静态资源 gzip 协商 + 弱 ETag/304
+  （`assets/` 带内容哈希 → 一年 immutable）；中继带写超时（对端卡死 10s 断链，
+  防止慢标签页拖出无界发送缓冲）。
 - **前端**（`web/`）：Vue 3 + TypeScript + Vite（组件库 @echolab-auto/ui-frame），零后端依赖，纯 WS 协议。
+  刷新首屏零等待：时间线快照按 team 缓存到 localStorage（挂载前 hydrate），
+  引导请求带 `since_seq` 只拉缺口（`trunk-cache.ts` + `connection.ts`）。
 
 ## 功能（对齐原 TUI）
 

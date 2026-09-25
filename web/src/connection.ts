@@ -63,17 +63,16 @@ export function startConnection(): void {
       retryMs = 500;
       lastFrameAt = Date.now();
       // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
-      // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。Timeline
-      // 会由 RequestTrunkTimeline 重新加载。
+      // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。
       state.branchTabs = {};
       state.tasks = [];
       state.activities = {};
-      // 时间线缓存一并清空：断连期间错过的实时事件/就地更新无法对齐，
-      // 全量重建是唯一可靠的恢复方式（响应带 full 标志，直接替换）。
-      state.trunk = [];
-      state.teamTimelines = {};
-      state.trunkTeamId = null;
-      // 工作区 git 状态与文件浏览器缓存同样清空（打开面板时会按当前 team 重拉）。
+      // 时间线**不再清空**（2026-09 刷新加速）：内存里的 teamTimelines 与
+      // 磁盘缓存（trunk-cache）在页面加载时已还原，清空只会让刷新后的首屏
+      // 白等一次全量。改为按游标请求增量（since_seq）：Core 侧对"窗口滚出/
+      // 游标超前"都会回退全量（响应带 full 标志时这里整体替换），
+      // 因此保留旧内容不会造成错配。
+      // 工作区 git 状态与文件浏览器缓存照旧清空（打开面板时会按当前 team 重拉）。
       state.workspaceGitBySession = {};
       state.workspaceFiles = {};
       // Bootstrap the panel state on (re)connect.
@@ -84,13 +83,16 @@ export function startConnection(): void {
       } catch {
         // ignore storage errors (private mode)
       }
+      // 有缓存（内存/磁盘还原）→ 只拉缺口（Core 的缺口检测保证安全）；
+      // 无缓存 → 全量（since_seq 0）。
+      const cachedSeq = savedTeam ? (state.teamTimelines[savedTeam]?.seq ?? 0) : 0;
       const bootstrap: BackendCommand[] = [
         'RequestState',
-        // 刷新前会话缓存不可用（内存态），这里仍走全量；切换后的增量
-        // 由 onTeamSelect 缓存逻辑负责。
         // 去主智能体后 team_id 必填：没有保存过的 Agent 时不发（发了必被
         // Core 拒绝）；等 TeamsList 到达后由 App 的 watcher 用列表首个发起。
-        ...(savedTeam ? [{ RequestTrunkTimeline: { team_id: savedTeam } } as BackendCommand] : []),
+        ...(savedTeam
+          ? [{ RequestTrunkTimeline: { team_id: savedTeam, since_seq: cachedSeq } } as BackendCommand]
+          : []),
         'RequestAdapterStatus',
         // QQ 过滤配置不在这里预取：面板打开时 QqPanel/QqLoginSection 会按实例
         // 自行刷新；无 QQ（或多实例未指定实例）时预取必被 Core 拒绝，平白

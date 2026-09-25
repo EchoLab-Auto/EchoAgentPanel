@@ -22,6 +22,13 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 /// 挂在 ESTABLISHED）因此被清理，客户端唤醒后重连拿到的是干净状态。
 const REAP_AFTER: Duration = Duration::from_secs(90);
 
+/// 写超时（2026-09）：转发一帧时若对端写阻塞超过该时限，判定该侧已死并
+/// 断开链路。没有它时，冻结的浏览器标签页会让中继的写一直挂着——中继随即
+/// 停止读取另一侧，Core 的发送缓冲对这条链路无界积压（实测一条僵尸链路
+/// 积了 4MB notsent），白占内存也让该标签页的恢复更慢。心跳的 90s 收割
+/// 只看"有没有帧路过"，写入阻塞发生在帧路过之前的转发里，两者互补。
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
 // 测试可用 ECHO_RELAY_HEARTBEAT_MS / ECHO_RELAY_REAP_AFTER_MS 缩短周期
 //（暂停时钟下运行时 idle 自动推进与真实 I/O 存在竞争，集成测试走真实时间）。
 fn heartbeat_interval() -> Duration {
@@ -131,8 +138,16 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         // Binary frames are not part of the protocol; drop the link.
                         BrowserMessage::Binary(_) | BrowserMessage::Close(_) => break,
                     };
-                    if core_tx.send(forward).await.is_err() {
-                        break;
+                    // 写超时保护：对端（Core）写阻塞过久 = 该侧已死。
+                    match tokio::time::timeout(SEND_TIMEOUT, core_tx.send(forward)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) => break,
+                        Err(_) => {
+                            warn!(
+                                "core write stalled > {SEND_TIMEOUT:?}, dropping relay link"
+                            );
+                            break;
+                        }
                     }
                 }
                 _ = up_heartbeat.tick() => {
@@ -177,8 +192,17 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         | tokio_tungstenite::tungstenite::Message::Close(_) => break,
                         _ => continue,
                     };
-                    if browser_tx.send(forward).await.is_err() {
-                        break;
+                    // 写超时保护：浏览器侧读极慢/冻结时不再无限挂起
+                    //（否则中继停止读 Core，对端发送缓冲无界积压）。
+                    match tokio::time::timeout(SEND_TIMEOUT, browser_tx.send(forward)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) => break,
+                        Err(_) => {
+                            warn!(
+                                "browser write stalled > {SEND_TIMEOUT:?}, dropping relay link"
+                            );
+                            break;
+                        }
                     }
                 }
                 _ = down_heartbeat.tick() => {
