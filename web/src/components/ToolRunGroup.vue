@@ -13,6 +13,11 @@ export interface ToolRunItem {
   input?: string;
   output?: string | null;
   status?: string;
+  /**
+   * 展示标签（缺省用 name）：`spawn_subagent` 传任务摘要，
+   * 悬停提示与展开详情头部据此显示"这次派了什么活"。
+   */
+  label?: string;
   time?: string;
 }
 
@@ -71,8 +76,8 @@ const STATUS_LABEL: Record<string, string> = {
           'tool-run-group__icon--open': openKey === item.key,
           'tool-run-group__icon--failed': item.status === 'failed',
         }"
-        :title="`${item.name}${item.status ? ' · ' + (STATUS_LABEL[item.status] ?? item.status) : ''}`"
-        :aria-label="item.name"
+        :title="`${item.label ?? item.name}${item.status ? ' · ' + (STATUS_LABEL[item.status] ?? item.status) : ''}`"
+        :aria-label="item.label ?? item.name"
         @click="toggle(item.key)"
       >
         <ToolIcon :name="item.name" :loading="item.status === 'running'" />
@@ -83,7 +88,7 @@ const STATUS_LABEL: Record<string, string> = {
     <div v-if="openItem" class="tool-run-group__detail">
       <div class="tool-run-group__detail-head">
         <ToolIcon :name="openItem.name" class="tool-run-group__detail-icon" />
-        <span class="tool-run-group__detail-name">{{ openItem.name }}</span>
+        <span class="tool-run-group__detail-name">{{ openItem.label ?? openItem.name }}</span>
         <span v-if="openItem.time" class="tool-run-group__detail-time">{{ openItem.time }}</span>
         <span
           v-if="openItem.status"
@@ -103,15 +108,16 @@ const STATUS_LABEL: Record<string, string> = {
 .tool-run-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 4px 0;
+  gap: 5px;
+  /* 外边距交给滚动容器 gap 统一控制（紧凑化：工作行 6px 紧排）。 */
+  margin: 0;
 }
 
 /* 折叠态：图标行，横向扩展、空间不足自动下移一行 */
 .tool-run-group__row {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .tool-run-group__icon {
@@ -119,9 +125,9 @@ const STATUS_LABEL: Record<string, string> = {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 30px;
-  border-radius: 10px;
+  width: 30px;
+  height: 26px;
+  border-radius: 8px;
   border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
   background: color-mix(in srgb, var(--nm-surface-raised) 40%, transparent);
   backdrop-filter: blur(12px) saturate(1.4);
@@ -189,7 +195,7 @@ const STATUS_LABEL: Record<string, string> = {
   backdrop-filter: blur(16px) saturate(1.5);
   -webkit-backdrop-filter: blur(16px) saturate(1.5);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-  padding: 10px 12px;
+  padding: 8px 10px;
   animation: tool-run-enter 0.18s ease-out both;
 }
 @keyframes tool-run-enter {

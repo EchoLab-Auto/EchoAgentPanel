@@ -135,10 +135,11 @@ watch(
 
 <style scoped>
 .reasoning-block {
-  margin: 8px 0;
-  padding: 10px 14px;
-  border-left: 3px solid color-mix(in srgb, #8b5cf6 70%, transparent);
-  border-radius: 4px 12px 12px 4px;
+  /* 外边距交给滚动容器 gap（紧凑化：工作行 6px 紧排，不再叠加 8px）。 */
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 2px solid color-mix(in srgb, #8b5cf6 70%, transparent);
+  border-radius: 3px 10px 10px 3px;
   background: color-mix(in srgb, #8b5cf6 8%, transparent);
   color: var(--nm-text-secondary);
   font-size: 12.5px;
@@ -146,10 +147,12 @@ watch(
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* 折叠态：头部一行，紧凑内边距 */
+/* 折叠态：头部一行，紧凑内边距（行高与工具行图标对齐） */
 .reasoning-block--collapsed {
-  padding-top: 6px;
-  padding-bottom: 6px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 .reasoning-block__head {
   display: flex;

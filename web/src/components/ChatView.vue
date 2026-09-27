@@ -19,6 +19,7 @@ import AgentConfigModal from './AgentConfigModal.vue';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import ReasoningBlock from './ReasoningBlock.vue';
+import SubagentEventBlock from './SubagentEventBlock.vue';
 import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import QqPanel from './QqPanel.vue';
@@ -415,7 +416,7 @@ const activityText = computed(() => {
       return '正在处理…';
     }
     case 'subagent':
-      return '子代理工作中…';
+      return a?.detail ? `子代理工作中：${a.detail}…` : '子代理工作中…';
     default:
       return '';
   }
@@ -438,6 +439,29 @@ type ChatRow =
   | { kind: 'single'; message: ChatMessage }
   | { kind: 'tool-group'; key: string; items: ToolRunItem[] };
 
+/**
+ * spawn_subagent 的参数 → 单行任务摘要（工具行悬停/详情头部展示用）。
+ *
+ * 输入有**两种形态**：
+ * - Core 时间线写入的摘要串 `{task=…… · timeout_secs=900}`（`timeline.rs`
+ *   的 `summarize_timeline_value`，非合法 JSON）；
+ * - 原始 JSON `{"task": "…"}`（其他来源/旧数据）。
+ * 两者都尝试；`task` 值在摘要里已被 Core 截断到 48 字符，仅作标签展示。
+ */
+function subagentTaskLabel(input: string): string | undefined {
+  let task: string | null = null;
+  try {
+    const parsed = JSON.parse(input) as { task?: unknown };
+    if (typeof parsed.task === 'string') task = parsed.task;
+  } catch {
+    const match = input.match(/^\{task=([\s\S]*?)(?:\s·\s[a-z_]+=|\}$)|^\{task=([\s\S]*)$/);
+    task = match ? (match[1] ?? match[2] ?? null) : null;
+  }
+  if (!task || !task.trim()) return undefined;
+  const line = task.replace(/\s+/g, ' ').trim();
+  return line.length > 80 ? `${line.slice(0, 80)}…` : line;
+}
+
 const toolRowOf = (m: ChatMessage): ToolRunItem | null => {
   const tool = m.tool;
   if (m.role !== 'tool' || !tool) return null;
@@ -447,6 +471,7 @@ const toolRowOf = (m: ChatMessage): ToolRunItem | null => {
     input: tool.input,
     output: tool.output,
     status: tool.status,
+    label: tool.name === 'spawn_subagent' ? subagentTaskLabel(tool.input ?? '') : undefined,
     time: m.time ? formatTime(m.time) : undefined,
   };
 };
@@ -810,9 +835,17 @@ function imagesOf(message: ChatMessage): string[] {
             :text="row.message.content"
             :animate="(row.message as ChatMessageWithImages).animate !== false"
           />
+          <!-- 子代理完成回报：紧凑一行（任务摘要 + 可展开结论），非 JSON 气泡 -->
+          <SubagentEventBlock
+            v-else-if="(row.message as { role: string }).role === 'subagent'"
+            :event="(row.message as ChatMessageWithImages).subagent ?? { id: '', task: '', success: true, result: '' }"
+            :time="row.message.time ? formatTime(row.message.time) : undefined"
+            class="chat-view__item"
+            :class="{ 'chat-view__item--enter': (row.message as ChatMessageWithImages).animate }"
+          />
           <div
             v-else
-            class="chat-view__item"
+            class="chat-view__item chat-view__item--msg"
             :class="{ 'chat-view__item--enter': (row.message as ChatMessageWithImages).animate }"
           >
             <div v-if="imagesOf(row.message).length" class="chat-view__images">
@@ -1047,12 +1080,24 @@ function imagesOf(message: ChatMessage): string[] {
 /* 滚动区内部预留：
    - 底部：按输入框最大高度(5行,约156px) + 边距(12px) + 松量；
    - 左右：有卡片的边栏列宽（正文不被悬浮卡片压住）；拖动中归零，
-     避免落位时行宽二次跳变。 */
+     避免落位时行宽二次跳变。
+
+   行距（2026-09-28 紧凑化）：库默认 gap 12px 对"工作行"（推理块 / 工具行）
+   过宽——一回合里推理与工具交替十几次，屏幕被空白吃掉。改为 gap 6px：
+   消息气泡用 .chat-view__item--msg 的 3px 边距补回呼吸（气泡间仍约 12px），
+   工作行保持 6px 紧排；推理块/工具行自身不再带外边距。 */
 .chat-view__list :deep(.nm-chat-tray__scroll) {
+  gap: 6px;
   padding-bottom: 190px;
   padding-left: v-bind(trayPadLeft);
   padding-right: v-bind(trayPadRight);
   transition: padding 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* 消息气泡（用户/Agent/系统/分支合并）：在 6px 容器间距上补 3px 边距，
+   与旧版 12px 行距等效；工作行不受影响。 */
+.chat-view__item--msg {
+  margin: 3px 0;
 }
 
 /* 空态占位（自渲染列表后，empty 不再由库 ChatMessageList 提供） */

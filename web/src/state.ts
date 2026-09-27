@@ -11,7 +11,7 @@ import {
   integrateBackgroundTask,
   stageOrchestrationTool,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf } from './state_domains/timeline';
+import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
@@ -53,7 +53,7 @@ export function belongsToActiveTeam(state: AppState, teamId: string | null | und
   return teamId === active;
 }
 
-export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch';
+export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch' | 'subagent';
 export type ToolStatus = 'running' | 'succeeded' | 'failed';
 
 export interface ToolMsg {
@@ -84,6 +84,8 @@ export interface DisplayMessage {
     summary: string;
     msgs: BranchMsg[];
   };
+  /** 子代理完成回报（role='subagent' 时的结构化载荷）。 */
+  subagent?: SubagentEventInfo;
   source?: {
     adapter_name: string;
     platform: string;
@@ -464,6 +466,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'SubagentStarted': {
       const e = (event as { SubagentStarted: { session_id: string; task: string } }).SubagentStarted;
       startSubagent(state, e.session_id, e.task);
+      // 派发位置插一行"子代理运行中"（执行过程就地可见；完成时就地改写为结果）。
+      startSubagentRun(state, e.session_id, e.task);
       setPhase(state, e.session_id, 'subagent', truncate(oneLine(e.task), 72));
       return state;
     }
@@ -956,6 +960,17 @@ function reduceMessage(
     });
   } else if (e.adapter_name === 'background') {
     applyBackgroundHook(state, e.content);
+  } else if (e.adapter_name === 'subagent' && parseSubagentEvent(e.content)) {
+    // 子代理完成回报：就地把派发位置的"运行中"行改写为结果行（一份委派一行）；
+    // 未命中（行已裁掉/刷新后无合成行）则追加，避免结果丢失。
+    const subagent = parseSubagentEvent(e.content) as SubagentEventInfo;
+    if (!finishSubagentRun(state, e.session_id, subagent)) {
+      pushTo(state, 'subagent', subagent.task, e.timestamp, {
+        sessionId: e.session_id,
+        subagent,
+        animate: true,
+      });
+    }
   } else {
     pushTo(state, 'user', displayContentOf(e.content), e.timestamp, {
       sessionId: e.session_id,

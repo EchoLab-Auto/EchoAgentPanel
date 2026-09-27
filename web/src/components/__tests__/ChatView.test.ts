@@ -94,6 +94,26 @@ describe('ChatView 布局契约', () => {
     expect(scoped.findAll('.stub-item').length).toBe(1);
   });
 
+  it('子代理完成回报渲染为紧凑行（.subagent-event），不落用户气泡', () => {
+    state.trunk = [
+      { key: 'u1', role: 'user', content: '普通消息', time: 1, sessionId: 'local:tui::a' },
+      {
+        key: 's1',
+        role: 'subagent',
+        content: '审计 Panel 文档',
+        time: 2,
+        sessionId: 'local:tui::a',
+        subagent: { id: 'task-1', task: '审计 Panel 文档', success: true, result: '结论', completedAtMs: null },
+      },
+    ];
+    const wrapper = mountChatView('local:tui::a');
+    expect(wrapper.find('.subagent-event').exists()).toBe(true);
+    expect(wrapper.find('.subagent-event').text()).toContain('子代理完成');
+    expect(wrapper.find('.subagent-event').text()).toContain('审计 Panel 文档');
+    // 普通消息仍走气泡（stub）；子代理行不经过 ChatMessageItem
+    expect(wrapper.findAll('.stub-item').length).toBe(1);
+  });
+
   it('输入区吸底悬浮（absolute 叠层）：样式契约', () => {
     // 解析 SFC 样式块，锁定布局实现方式。回归为 flex 占位（不再叠压）时测试失败。
     const raw = require('fs').readFileSync(

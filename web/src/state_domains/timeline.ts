@@ -41,6 +41,95 @@ export function pushTo(state: AppState, role: MsgRole, content: string, time: nu
   pushMessage(state, { key: nextKey(), role, content, time, ...extra });
 }
 
+/** `<subagent_event>`（子代理完成合并钩子）的结构化载荷。 */
+export interface SubagentEventInfo {
+  /** 子任务 id（Core 受理时分配，如 `task-…`） */
+  id: string;
+  /** 委派时的任务描述（自含背景） */
+  task: string;
+  success: boolean;
+  /** 子代理的结论正文（合并进主对话的核心内容） */
+  result: string;
+  completedAtMs: number | null;
+  /**
+   * 运行中：`SubagentStarted` 时插入的合成行（执行过程可见）；
+   * 完成钩子（`<subagent_event>`）到达时就地改写为结果行（保留派发位置）。
+   */
+  running?: boolean;
+}
+
+/**
+ * 子代理开始执行（`SubagentStarted`）→ 插入一行"运行中"（就地可见执行过程）。
+ *
+ * 该行是**派发位置的工作卡片**：完成钩子到达时由 [`finishSubagentRun`]
+ * 就地改写（任务 → 结果），不在合并回合重复出行——一份委派始终一行。
+ */
+export function startSubagentRun(state: AppState, sessionId: string, task: string): void {
+  const line = task.replace(/\s+/g, ' ').trim();
+  if (!line) return;
+  pushTo(state, 'subagent', line, Math.floor(Date.now() / 1000), {
+    sessionId,
+    subagent: {
+      id: '',
+      task: line,
+      success: true,
+      result: '',
+      completedAtMs: null,
+      running: true,
+    },
+  });
+}
+
+/**
+ * 子代理完成钩子到达 → 就地把该会话最老的"运行中"行改写为结果行。
+ * 返回是否命中；未命中（行已被窗口裁掉/刷新后无合成行）由调用方追加新行。
+ */
+export function finishSubagentRun(
+  state: AppState,
+  sessionId: string,
+  info: SubagentEventInfo,
+): boolean {
+  for (const message of state.trunk) {
+    if (
+      message.role === 'subagent' &&
+      message.sessionId === sessionId &&
+      message.subagent?.running
+    ) {
+      message.subagent = { ...info, running: false };
+      message.content = info.task || message.content;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 解析 `<subagent_event>{json}</subagent_event>` 钩子（子代理完成后经
+ * `dispatch_subagent_hook` 注入的**新入站分支**）。
+ *
+ * 该钩子此前以原始 JSON 直接渲染为 user 气泡（一条数千字符的 JSON，
+ * 既占屏又难读）；结构化解析后由 `SubagentEventBlock` 以一行摘要 +
+ * 可展开结果呈现。非该钩子 / JSON 损坏返回 null，调用方按普通消息降级。
+ */
+export function parseSubagentEvent(content: string): SubagentEventInfo | null {
+  const match = content.match(/^<subagent_event>\s*([\s\S]*?)\s*<\/subagent_event>$/);
+  if (!match) return null;
+  try {
+    const payload = JSON.parse(match[1]) as Record<string, unknown>;
+    if (payload['event'] !== 'subagent_event') return null;
+    return {
+      id: typeof payload['subagent_id'] === 'string' ? payload['subagent_id'] : '',
+      task: typeof payload['task'] === 'string' ? payload['task'] : '',
+      success: payload['success'] === true,
+      result: typeof payload['result'] === 'string' ? payload['result'] : '',
+      completedAtMs:
+        typeof payload['completed_at_ms'] === 'number' ? payload['completed_at_ms'] : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** 工具结果回填：优先按 toolCallId 精确配对（同名并行调用不再配错对）；
  * id 为空（旧 core）时回退为按名字匹配最新的 running 条目。
  * timedOut（外圈超时守卫中止）与 error: 前缀一样渲染为失败。 */
@@ -86,6 +175,11 @@ export function toDisplayMessage(message: TimelineMessage): DisplayMessage {
     animate: false,
   };
   if (message.kind === 'user') {
+    // 子代理完成回报（合并钩子）：不作为用户气泡，走专用紧凑行。
+    const subagent = parseSubagentEvent(message.content);
+    if (subagent) {
+      return { ...base, role: 'subagent' as const, content: subagent.task, subagent };
+    }
     return {
       ...base,
       role: 'user' as const,

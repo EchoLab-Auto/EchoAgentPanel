@@ -3,6 +3,7 @@
 
 import type { ChatBranchEntry, ChatMessage } from '@echolab-auto/ui-frame/chat';
 import type { BranchMsg, DisplayMessage } from './state';
+import type { SubagentEventInfo } from './state_domains/timeline';
 
 /** 与库默认一致，但显式锁定 zh-CN（库默认用浏览器 locale）。 */
 export const formatTime = (seconds: number): string =>
@@ -27,6 +28,8 @@ export interface ChatMessageWithImages extends ChatMessage {
   images?: string[];
   /** 实时消息标记（渲染层据此播放场动画/打字机；历史回放不播放） */
   animate?: boolean;
+  /** 子代理完成回报（role='subagent'）的结构化载荷。 */
+  subagent?: SubagentEventInfo;
 }
 
 /**
@@ -69,6 +72,7 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
       summary: m.branch.summary,
       entries: mergeReasoning(m.branch.msgs),
     },
+    subagent: m.subagent,
     source: m.source && {
       adapterName: m.source.adapter_name,
       platform: m.source.platform,

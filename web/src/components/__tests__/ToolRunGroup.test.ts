@@ -57,6 +57,31 @@ describe('ToolRunGroup', () => {
     expect(detail.text()).toContain('运行中');
   });
 
+  it('label：悬停提示与展开详情头部显示任务摘要（spawn_subagent）', async () => {
+    const wrapper = mount(ToolRunGroup, {
+      props: {
+        items: [
+          item({
+            key: 's1',
+            name: 'spawn_subagent',
+            label: '审计 Panel 文档',
+            input: '{"task":"审计 Panel 文档"}',
+            output: '子任务已受理',
+            status: 'succeeded',
+          }),
+        ],
+      },
+    });
+    // 悬停提示（title）= label + 状态
+    const icon = wrapper.find('.tool-run-group__icon');
+    expect(icon.attributes('title')).toContain('审计 Panel 文档');
+    expect(icon.attributes('title')).toContain('成功');
+    // 展开详情头部同样显示 label 而非工具名
+    await icon.trigger('click');
+    const name = wrapper.find('.tool-run-group__detail-name');
+    expect(name.text()).toBe('审计 Panel 文档');
+  });
+
   it('全部结束但存在失败 → 自动展开首个失败项', () => {
     const wrapper = mount(ToolRunGroup, {
       props: {
