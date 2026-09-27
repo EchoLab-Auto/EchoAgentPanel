@@ -55,3 +55,8 @@ jobs:
         working-directory: web
       - run: npm run build
         working-directory: web
+      # vitest：组件契约 + 跨仓库守护（capabilities.test.ts 校验插件清单与
+      # Core 对齐、trunk-cache/连接引导等契约）。此前只在本地跑——
+      # dev-testing 文档声称 CI 含 vitest，2026-09-26 补齐。
+      - run: npm test
+        working-directory: web
