@@ -1,8 +1,7 @@
 //! WebSocket 中继：浏览器 ↔ EchoAgentCore management WS。
 //!
 //! 每个浏览器 WS 连接对应一条到 Core 的专用连接。帧按原文转发，**不解析、
-//! 不记录负载**——sudo 密码帧（`{"type":"sudo_password",...}`）因此与日志、
-//! 命令队列完全隔离，只在中继管道里经过。
+//! 不记录负载**——因此与日志、命令队列完全隔离，只在中继管道里经过。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -115,7 +114,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
     let mut last_browser_frame = Instant::now();
     let mut last_core_frame = Instant::now();
 
-    // Browser → Core: commands and sudo-password frames, verbatim.
+    // Browser → Core: commands, verbatim.
     let to_core = async {
         loop {
             tokio::select! {

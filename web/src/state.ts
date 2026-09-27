@@ -198,23 +198,6 @@ export interface ApiConfig {
   profiles: ApiProfileInfo[];
 }
 
-export interface SudoPrompt {
-  request_id: number;
-  command: string;
-  session_id: string;
-  input: string;
-}
-
-/** 选单弹层状态（MenuRequest 事件与 MenuResolved 结束事件之间存活）。 */
-export interface MenuPrompt {
-  request_id: number;
-  session_id: string;
-  title: string;
-  description: string;
-  options: Array<{ id: string; label: string; description: string }>;
-  timeoutSecs: number;
-}
-
 export interface Toast {
   id: number;
   text: string;
@@ -266,8 +249,6 @@ export interface AppState {
   qqGroups: Array<[number, string]>;
   qqFriends: Array<[number, string]>;
   checklists: ChecklistEntry[];
-  sudoPrompt: SudoPrompt | null;
-  menuPrompt: MenuPrompt | null;
   toasts: Toast[];
   /** API 连通性测试结果（name(空=默认) → { ok, message, latencyMs }） */
   apiTests: Record<string, { ok: boolean; message: string; latencyMs: number }>;
@@ -344,8 +325,6 @@ export function initialState(): AppState {
     lastQrcode: null,
     qqByAdapter: {},
     checklists: [],
-    sudoPrompt: null,
-    menuPrompt: null,
     toasts: [],
     apiTests: {},
     apiBalances: {},
@@ -929,55 +908,6 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'FriendList': {
       const e = (event as { FriendList: { friends: Array<{ user_id: number; nickname: string }> } }).FriendList;
       state.qqFriends = e.friends.map((f) => [f.user_id, f.nickname]);
-      return state;
-    }
-    case 'SudoRequest': {
-      const e = (event as { SudoRequest: { request_id: number; command: string; session_id: string } }).SudoRequest;
-      state.sudoPrompt = { request_id: e.request_id, command: e.command, session_id: e.session_id, input: '' };
-      return state;
-    }
-    case 'SudoResolved': {
-      const e = (event as { SudoResolved: { request_id: number; accepted: boolean; message: string } }).SudoResolved;
-      if (state.sudoPrompt && state.sudoPrompt.request_id === e.request_id) {
-        state.sudoPrompt = null;
-      }
-      pushToast(state, e.message, e.accepted ? 'success' : 'error');
-      return state;
-    }
-    case 'MenuRequest': {
-      const e = (event as {
-        MenuRequest: {
-          request_id: number;
-          session_id: string;
-          title: string;
-          description?: string | null;
-          options: Array<{ id: string; label: string; description?: string | null }>;
-          timeout_secs?: number;
-        };
-      }).MenuRequest;
-      state.menuPrompt = {
-        request_id: e.request_id,
-        session_id: e.session_id,
-        title: e.title,
-        description: e.description ?? '',
-        options: e.options.map((o) => ({
-          id: o.id,
-          label: o.label,
-          description: o.description ?? '',
-        })),
-        timeoutSecs: e.timeout_secs ?? 0,
-      };
-      return state;
-    }
-    case 'MenuResolved': {
-      const e = (event as { MenuResolved: { request_id: number; accepted: boolean; message: string } }).MenuResolved;
-      if (state.menuPrompt && state.menuPrompt.request_id === e.request_id) {
-        state.menuPrompt = null;
-      }
-      // 选定由选项本身反馈（弹层关闭即信号）；取消/超时/中断才需要提示。
-      if (!e.accepted) {
-        pushToast(state, e.message, 'info');
-      }
       return state;
     }
     case 'Error': {

@@ -50,7 +50,8 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
   return {
     id: m.key, // 'm{N}' → id
     // backend → agent（库的角色命名）；reasoning 为面板扩展角色，由
-    // ChatView 的 #message slot 拦截渲染（库 ChatRole 无该角色）。
+    // ChatView 的自渲染行循环拦截渲染（2026-09-19 起列表自渲染；
+    // 库 ChatRole 无该角色）。
     role: (m.role === 'backend' ? 'agent' : m.role) as ChatMessage['role'],
     content: compactForDisplay(m.content, m.images),
     time: m.time, // 双方都是秒级 Unix 时间戳，无需换算

@@ -13,11 +13,7 @@ import { pushToast } from './state';
 import {
   parseEvent,
   serializeCommand,
-  serializeMenuAnswer,
-  serializeSudoPassword,
   type BackendCommand,
-  type MenuAnswerSubmit,
-  type SudoPasswordSubmit,
 } from './protocol';
 
 let socket: WebSocket | null = null;
@@ -181,16 +177,4 @@ export function sendCommand(command: BackendCommand): void {
     return;
   }
   pushToast(state, '未连接到 Core，命令未发送', 'error');
-}
-
-export function sendSudoPassword(submit: SudoPasswordSubmit): void {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(serializeSudoPassword(submit));
-  }
-}
-
-export function sendMenuAnswer(answer: MenuAnswerSubmit): void {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(serializeMenuAnswer(answer));
-  }
 }

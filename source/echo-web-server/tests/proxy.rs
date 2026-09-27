@@ -1,6 +1,6 @@
 //! End-to-end relay test: a fake Core WS server ↔ the panel's `/ws` endpoint
 //! ↔ a browser client. Verifies frames pass through verbatim in both
-//! directions (commands + events, including secret-carrying sudo frames).
+//! directions (commands + events, verbatim).
 
 use axum::routing::get;
 use axum::Router;
@@ -78,13 +78,6 @@ async fn relay_forwards_frames_both_ways() {
     ws.send(WsMessage::Text(event.into())).await.unwrap();
     let echoed = ws.next().await.unwrap().unwrap();
     assert_eq!(echoed.to_string(), event);
-
-    // Sudo password frame — must pass through untouched (the relay never
-    // parses or logs payloads).
-    let sudo = r#"{"type":"sudo_password","payload":{"request_id":7,"password":"s3cret"}}"#;
-    ws.send(WsMessage::Text(sudo.into())).await.unwrap();
-    let echoed = ws.next().await.unwrap().unwrap();
-    assert_eq!(echoed.to_string(), sudo);
 
     ws.close(None).await.unwrap();
 }

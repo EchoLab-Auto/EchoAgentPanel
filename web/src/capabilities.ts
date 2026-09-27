@@ -4,8 +4,8 @@
 //! 只有白名单（黑名单已移除）：包维度插件（tools.builtin/skills.dir/adapter.qq/
 //! workspace/management.panel）不在白名单即其注册表整体不可见。这里复刻同一
 //! 语义供 UI 入口显隐。
-//! 2026-09：选单（menu）与任务清单（checklist）先后降级为普通工具——插件维度
-//! 移除，开关在工具级白/黑名单（`已不再出现在「启用插件」勾选区`）。
+//! 2026-09：任务清单（checklist）降级为普通工具——插件维度移除，开关在
+//! 工具级白/黑名单（`已不再出现在「启用插件」勾选区`）。
 
 import type { TeamInfo } from './protocol';
 import type { AppState } from './state';
@@ -18,9 +18,9 @@ import type { AppState } from './state';
  * 但它们是**整类能力开关**（禁用 = 其包内全部工具/技能对 LLM 不可见），
  * 因此必须出现在智能体配置弹层（⚙ 配置）与设置视图智能体编辑器的
  * 「启用插件」勾选区里；adapter.qq 由 kind 判定即已覆盖，列在此处是为了与
- * Core 的 `GATED_PLUGIN_IDS` 保持逐项镜像（对齐测试守护）。选单
- * （present_menu）与任务清单（checklist）已降级为普通工具，不再有插件
- * 维度，其开关在工具白/黑名单里进行。
+ * Core 的 `GATED_PLUGIN_IDS` 保持逐项镜像（对齐测试守护）。任务清单
+ * （checklist）已降级为普通工具，不再有插件维度，其开关在工具白/黑名单
+ * 里进行。
  *
  * 维护规则（对应 Core 端 `echo-agent/src/plugins.rs::GATED_PLUGIN_IDS`）：
  * **新增包维度门控插件时，同步：

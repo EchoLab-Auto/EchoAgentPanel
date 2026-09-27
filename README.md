@@ -16,8 +16,8 @@
 ```
 
 - **后端**（`source/echo-web-server`）：axum 静态托管 + WS 中继。每个浏览器连接
-  对应一条到 Core 的连接；sudo 密码帧（`{"type":"sudo_password",...}`）只经过
-  中继管道，与日志、命令队列完全隔离。静态资源 gzip 协商 + 弱 ETag/304
+  对应一条到 Core 的连接；帧按原文转发、只经过中继管道，与日志、命令队列完全
+  隔离。静态资源 gzip 协商 + 弱 ETag/304
   （`assets/` 带内容哈希 → 一年 immutable）；中继带写超时（对端卡死 10s 断链，
   防止慢标签页拖出无界发送缓冲）。
 - **前端**（`web/`）：Vue 3 + TypeScript + Vite（组件库 @echolab-auto/ui-frame），零后端依赖，纯 WS 协议。
@@ -29,7 +29,6 @@
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
 - 工具调用进度、后台任务 / Subagent / 临时回复分支面板（会话视图入口行「任务」弹层，按当前会话过滤）、清单面板
 - API 设置（provider / model / base_url / api_key / profiles / system prompt）
-- 🔐 sudo 授权弹窗（遮罩密码，Enter 授权 / Esc 拒绝，专用通道提交）
 - QQ 管理（多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
 - 工作区会话管理（入口行「工作区」宽版面板：左栏文件浏览器（只读）+ 右栏多会话 / 多工作区目录 / 各目录 git 状态；`echo-agent.workspace` 插件）
 - 上下文快照、帮助与斜杠命令、深浅主题

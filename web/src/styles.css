@@ -432,17 +432,6 @@ body {
 .profile-actions { margin-left: auto; display: flex; gap: 4px; }
 .profile-new { margin-top: 10px; }
 
-/* ── sudo ── */
-.sudo-command {
-  font-family: var(--nm-font-mono, monospace);
-  background: var(--nm-bg-color);
-  border: 1px solid var(--nm-border-color);
-  border-radius: 8px;
-  padding: 10px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
 /* ── 上下文分块可视化 ── */
 .ctx-summary { margin-bottom: 10px; }
 .ctx-summary-stats {

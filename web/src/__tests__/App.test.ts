@@ -31,7 +31,6 @@ function mountApp() {
         SettingsView: Stub,
         ShellPanel: Stub,
         BranchModal: Stub,
-        SudoModal: Stub,
         ThemeToggleButton: Stub,
       },
     },

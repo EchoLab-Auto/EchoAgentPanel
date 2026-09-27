@@ -18,8 +18,6 @@ type IconKind =
   | 'subagent'
   | 'message'
   | 'settings'
-  | 'menu'
-  | 'sudo'
   | 'workspace'
   | 'orchestration'
   | 'tool';
@@ -56,10 +54,6 @@ const kind = computed<IconKind>(() => {
     case 'adapter_restart':
     case 'adapter_status':
       return 'settings';
-    case 'present_menu':
-      return 'menu';
-    case 'run_sudo':
-      return 'sudo';
     case 'workspace':
       return 'workspace';
     case 'spawn_background_task':
@@ -140,20 +134,6 @@ const animClass = computed(() => (props.loading ? `tool-icon--anim-${kind.value}
     <template v-else-if="kind === 'settings'">
       <circle cx="12" cy="12" r="3" />
       <path class="ti-settings__gear" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </template>
-    <!-- 选单 -->
-    <template v-else-if="kind === 'menu'">
-      <line class="ti-menu__l ti-menu__l--1" x1="8" y1="6" x2="21" y2="6" />
-      <line class="ti-menu__l ti-menu__l--2" x1="8" y1="12" x2="21" y2="12" />
-      <line class="ti-menu__l ti-menu__l--3" x1="8" y1="18" x2="21" y2="18" />
-      <line x1="3" y1="6" x2="3.01" y2="6" />
-      <line x1="3" y1="12" x2="3.01" y2="12" />
-      <line x1="3" y1="18" x2="3.01" y2="18" />
-    </template>
-    <!-- sudo -->
-    <template v-else-if="kind === 'sudo'">
-      <rect x="3" y="11" width="18" height="11" rx="2" />
-      <path class="ti-sudo__shackle" d="M7 11V7a5 5 0 0 1 10 0v4" />
     </template>
     <!-- 工作区 -->
     <template v-else-if="kind === 'workspace'">
@@ -279,26 +259,6 @@ const animClass = computed(() => (props.loading ? `tool-icon--anim-${kind.value}
 }
 @keyframes ti-gear-spin {
   to { transform: rotate(360deg); }
-}
-
-/* 选单：三行依次缩短-复原（逐项扫描） */
-.tool-icon--anim-menu .ti-menu__l {
-  animation: ti-menu-scan 1.2s ease-in-out infinite;
-  transform-box: view-box;
-  transform-origin: left center;
-}
-.tool-icon--anim-menu .ti-menu__l--2 { animation-delay: 0.2s; }
-.tool-icon--anim-menu .ti-menu__l--3 { animation-delay: 0.4s; }
-@keyframes ti-menu-scan {
-  50% { transform: scaleX(0.55); }
-}
-
-/* sudo：锁扣上下轻晃（开锁尝试） */
-.tool-icon--anim-sudo .ti-sudo__shackle {
-  animation: ti-sudo-bob 1.1s ease-in-out infinite;
-}
-@keyframes ti-sudo-bob {
-  50% { transform: translateY(-1.4px); }
 }
 
 /* 工作区：文件夹呼吸（访问中） */

@@ -2,7 +2,7 @@
 //!
 //! 后端是一个 axum HTTP/WS 服务：托管构建后的前端静态文件，并把浏览器的
 //! WebSocket 中继到 EchoAgentCore 的 management WS（`ws://127.0.0.1:3132`）。
-//! 中继按原文转发帧，sudo 密码帧不解析、不落日志。
+//! 中继按原文转发帧，不解析、不落日志。
 
 use std::path::PathBuf;
 use std::sync::Arc;

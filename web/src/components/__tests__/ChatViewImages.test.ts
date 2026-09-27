@@ -11,8 +11,6 @@ import { mount } from '@vue/test-utils';
 
 vi.mock('../../connection', () => ({
   sendCommand: vi.fn(),
-  sendSudoPassword: vi.fn(),
-  sendMenuAnswer: vi.fn(),
 }));
 
 import ChatView from '../ChatView.vue';
