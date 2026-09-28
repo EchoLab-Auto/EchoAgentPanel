@@ -17,10 +17,7 @@ use axum::response::{IntoResponse, Response};
 use crate::proxy::AppState;
 
 /// `GET /media/{name}`：按名读取媒体文件。
-pub async fn media_handler(
-    Path(name): Path<String>,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn media_handler(Path(name): Path<String>, State(state): State<AppState>) -> Response {
     if !valid_media_id(&name) {
         return not_found();
     }

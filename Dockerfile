@@ -20,7 +20,7 @@ COPY web/ ./
 RUN npm run build
 
 # ── Stage 2: Rust 后端构建 ──
-FROM rust:1.92-bookworm AS builder
+FROM rust:1.98-bookworm AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY source ./source

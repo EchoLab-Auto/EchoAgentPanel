@@ -69,8 +69,9 @@ impl ServerSection {
         match std::env::var_os("ECHO_MEDIA_DIR") {
             Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
             _ => match std::env::var_os("HOME") {
-                Some(home) => std::path::PathBuf::from(home)
-                    .join(".local/share/echo-agent-core/media"),
+                Some(home) => {
+                    std::path::PathBuf::from(home).join(".local/share/echo-agent-core/media")
+                }
                 None => std::path::PathBuf::from("media"),
             },
         }
