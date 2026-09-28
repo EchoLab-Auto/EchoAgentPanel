@@ -20,9 +20,15 @@
 //! （用户消息/回答/推理）的条目，它们带各自的服务器 seq 但 trunk 没有
 //! 对应游标——落盘再增量会对同一批条目重复投递（重复行）。teamTimelines
 //! 是纯服务器投影，内容与 seq 严格配对。
+//!
+//! 缓存里存的是**已转换的 DisplayMessage**，因此渲染层的升级（例如
+//! 2026-09-28 子代理回报从"原始 JSON 用户气泡"改为紧凑行）对旧缓存不生效
+//! ——[`hydrateTrunkCache`] 在还原时做一次**就格式升级补齐**（当前补齐
+//! 项：`<subagent_event>` 用户消息 → subagent 行），避免"刷新后仍是旧样子"
+//! 的困惑。新增渲染升级时在此追加补齐逻辑。
 
 import { state } from './store';
-import { nextKey } from './state_domains/timeline';
+import { nextKey, parseSubagentEvent } from './state_domains/timeline';
 import type { DisplayMessage } from './state';
 
 const STORAGE_KEY = 'echo-panel-trunk-cache';
@@ -93,7 +99,18 @@ export function hydrateTrunkCache(): void {
     const msgs: DisplayMessage[] = [];
     for (const message of entry.msgs) {
       if (!isDisplayMessageLike(message)) continue;
-      msgs.push({ ...message, key: nextKey(), animate: false });
+      const restored: DisplayMessage = { ...message, key: nextKey(), animate: false };
+      // 就格式升级：旧缓存里的子代理回报是 role='user' + 原始钩子 JSON，
+      // 补成 subagent 行（否则刷新后仍显示原始 JSON，直到缓存自然过期）。
+      if (restored.role === 'user' && !restored.subagent) {
+        const subagent = parseSubagentEvent(restored.content);
+        if (subagent) {
+          restored.role = 'subagent';
+          restored.subagent = subagent;
+          restored.content = subagent.task || restored.content;
+        }
+      }
+      msgs.push(restored);
     }
     if (!msgs.length) continue;
     state.teamTimelines[key] = { seq: entry.seq, msgs };

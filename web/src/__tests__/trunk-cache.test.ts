@@ -72,6 +72,41 @@ describe('trunk-cache 还原', () => {
     expect(state.trunk[0].content).toBe('好的');
   });
 
+  it('就格式升级：旧缓存里的子代理钩子用户消息还原为 subagent 行', async () => {
+    localStorage.setItem('echo-panel-active-team', 'A');
+    const hook = `<subagent_event>\n${JSON.stringify({
+      event: 'subagent_event',
+      subagent_id: 'task-7',
+      task: '审计 Panel 文档',
+      success: true,
+      result: '结论',
+      completed_at_ms: 1,
+    })}\n</subagent_event>`;
+    localStorage.setItem(
+      KEY,
+      payload({
+        A: {
+          seq: 9,
+          msgs: [
+            { key: 'old1', role: 'user', content: hook, time: 1 },
+            { key: 'old2', role: 'user', content: '普通消息', time: 2 },
+          ],
+        },
+      }),
+    );
+    const { hydrateTrunkCache } = await import('../trunk-cache');
+    const { state } = await import('../store');
+    hydrateTrunkCache();
+    expect(state.trunk.length).toBe(2);
+    expect(state.trunk[0].role).toBe('subagent');
+    expect(state.trunk[0].subagent?.id).toBe('task-7');
+    expect(state.trunk[0].subagent?.result).toBe('结论');
+    expect(state.trunk[0].content).toBe('审计 Panel 文档');
+    // 普通用户消息不受影响
+    expect(state.trunk[1].role).toBe('user');
+    expect(state.trunk[1].content).toBe('普通消息');
+  });
+
   it('没有活跃 team 时不还原 trunk（只填 teamTimelines）', async () => {
     localStorage.setItem(KEY, payload({ A: { seq: 3, msgs: [msg('user', 'x')] } }));
     const { hydrateTrunkCache } = await import('../trunk-cache');
