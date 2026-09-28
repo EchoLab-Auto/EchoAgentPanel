@@ -115,6 +115,57 @@ describe('WorkspaceFileBrowser 文件浏览器（右侧边栏）', () => {
     wrapper.unmount();
   });
 
+  it('多根 chip：悬停显示绝对路径速览（Teleport 到 body），离开即收起', async () => {
+    seed([{ id: 'core', name: '框架', directories: ['/srv/core', '/srv/panel'] }]);
+    const wrapper = mountBrowser();
+    await nextTick();
+    const roots = wrapper.findAll('.wfb-root');
+    expect(roots.length).toBe(2);
+    // chip 只显示 basename（多根同名时靠速览区分）
+    expect(roots[1].text()).toBe('panel');
+    // 无障碍名带完整路径
+    expect(roots[1].attributes('aria-label')).toBe('切换到 /srv/panel');
+
+    // 悬停第二个 chip → body 中渲染速览，内容为绝对路径
+    await roots[1].trigger('mouseenter');
+    await nextTick();
+    const tip = document.body.querySelector('.wfb-root-tip');
+    expect(tip, '悬停后出现速览').toBeTruthy();
+    expect(tip!.textContent).toContain('/srv/panel');
+
+    // 离开 → 收起
+    await roots[1].trigger('mouseleave');
+    await nextTick();
+    expect(document.body.querySelector('.wfb-root-tip')).toBeNull();
+
+    // 悬停第一个 → 显示第一条路径（不残留上一条）
+    await roots[0].trigger('mouseenter');
+    await nextTick();
+    const tip2 = document.body.querySelector('.wfb-root-tip');
+    expect(tip2!.textContent).toContain('/srv/core');
+
+    // 卸载（切走视图）→ 速览不残留
+    wrapper.unmount();
+    await nextTick();
+    expect(document.body.querySelector('.wfb-root-tip')).toBeNull();
+  });
+
+  it('多根 chip：窗口滚动时收起速览（fixed 定位不追随滚动）', async () => {
+    seed([{ id: 'core', name: '框架', directories: ['/srv/core', '/srv/panel'] }]);
+    const wrapper = mountBrowser();
+    await nextTick();
+    const roots = wrapper.findAll('.wfb-root');
+    await roots[0].trigger('mouseenter');
+    await nextTick();
+    expect(document.body.querySelector('.wfb-root-tip')).toBeTruthy();
+    // 捕获阶段监听：任意容器滚动都会触发
+    document.body.dispatchEvent(new Event('scroll', { bubbles: false }));
+    window.dispatchEvent(new Event('scroll'));
+    await nextTick();
+    expect(document.body.querySelector('.wfb-root-tip')).toBeNull();
+    wrapper.unmount();
+  });
+
   it('文件浏览器：team 未选择时不发任何命令', async () => {
     seed([{ id: 'core', name: '框架', directories: ['/srv/core'] }]);
     const wrapper = mount(WorkspaceFileBrowser, { props: { teamId: null, session: state.workspaceSessions[0] ?? null } });

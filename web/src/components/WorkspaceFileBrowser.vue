@@ -8,8 +8,14 @@
 //! 导航模型 = 路径栈（`stack`）：index 0 = 活动根目录，每进入一层 push；
 //! 面包屑与「上级」都由它派生——不依赖字符串前缀解析（根目录配置形态
 //! 与 canonical 路径可能不一致）。
+//!
+//! 根切换 chip 的悬停速览（2026-09-28）：chip 只显示目录 basename，多根同名
+//! 时（如两个 `source/`）无法区分；悬停显示**绝对路径**。自绘 + Teleport，
+//! 不复用原生 `title`（约 1s 延迟、样式不可控、长路径被系统截断），也不复用
+//! 库 `NeumorphismTooltip`（相对定位不 Teleport，会被 rail 卡体的
+//! `overflow-y: auto` 裁剪）。
 
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
@@ -69,6 +75,62 @@ function goUp() {
 function refresh() {
   requestFiles(currentPath.value);
 }
+
+// ── 根切换 chip 的悬停速览（绝对路径） ────────────────────────────────
+//
+// 定位用 `position: fixed` + 视口坐标：Teleport 到 body 后不受卡片滚动容器
+// 裁剪；宽上限与 CSS 的 max-width 保持一致（超长路径换行、不截断）。
+
+/** 速览宽度上限（px）——与 `.wfb-root-tip` 的 max-width 保持一致。 */
+const ROOT_TIP_MAX_WIDTH = 340;
+
+interface RootTip {
+  path: string;
+  x: number;
+  y: number;
+  /** true = 悬于 chip 上方（默认）；顶部空间不足时翻到下方。 */
+  above: boolean;
+}
+
+const rootTip = ref<RootTip | null>(null);
+
+function showRootTip(path: string, event: Event) {
+  const el = event.currentTarget as HTMLElement | null;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  // 视口内夹取：chip 在窗口右侧栏内，靠右时左移使整条路径可见。
+  const x = Math.max(
+    8,
+    Math.min(rect.left, window.innerWidth - ROOT_TIP_MAX_WIDTH - 8),
+  );
+  const above = rect.top > 72; // 上方留得下（约两行路径）就悬于上方
+  rootTip.value = { path, x, y: above ? rect.top - 6 : rect.bottom + 6, above };
+}
+
+function hideRootTip() {
+  rootTip.value = null;
+}
+
+/** 定位样式：`above` 时以上边缘为锚点整体上移。 */
+const rootTipStyle = computed(() => {
+  const tip = rootTip.value;
+  if (!tip) return undefined;
+  return {
+    left: `${tip.x}px`,
+    top: `${tip.y}px`,
+    transform: tip.above ? 'translateY(-100%)' : 'none',
+  };
+});
+
+// 滚动/缩放时 chip 的视口坐标会漂移：直接收起（重新悬停即可）。
+onMounted(() => {
+  window.addEventListener('scroll', hideRootTip, true);
+  window.addEventListener('resize', hideRootTip);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', hideRootTip, true);
+  window.removeEventListener('resize', hideRootTip);
+});
 
 // 会话切换（或目录配置变化）→ 回到第一个根目录。
 watch(
@@ -130,12 +192,27 @@ function formatSize(size: number): string {
         :key="root"
         class="wfb-root"
         :class="{ 'is-active': stack[0]?.path === root }"
-        :title="root"
+        :aria-label="`切换到 ${root}`"
+        @mouseenter="showRootTip(root, $event)"
+        @mouseleave="hideRootTip"
         @click="openRoot(root)"
       >
         {{ basename(root) }}
       </button>
     </div>
+
+    <!-- 根切换 chip 的悬停速览（绝对路径）：Teleport 到 body + fixed 定位，
+         不被卡片滚动容器（overflow: auto）裁剪（见脚本区注释） -->
+    <Teleport to="body">
+      <div
+        v-if="rootTip"
+        class="wfb-root-tip"
+        :style="rootTipStyle"
+        role="tooltip"
+      >
+        {{ rootTip.path }}
+      </div>
+    </Teleport>
 
     <!-- 面包屑（路径栈） -->
     <div v-if="stack.length" class="wfb-crumbs">
@@ -212,6 +289,28 @@ function formatSize(size: number): string {
   border-color: var(--panel-accent);
   color: var(--nm-text-primary);
   background: var(--panel-accent-soft);
+}
+
+/* 悬停速览（绝对路径）。
+   注意：本节是 Teleport 到 body 的节点，**不属于 rail 卡片**——scoped 样式
+   通过组件 id 属性仍能命中（Vue 给 teleport 内容加同一 scope id）。
+   z-index 40：高于边栏（4）/入口行（6）/清单浮层（25）/Agent 菜单（30），
+   低于模态与浮层遮罩（50+）。 */
+.wfb-root-tip {
+  position: fixed;
+  z-index: 40;
+  max-width: 340px; /* 与脚本 ROOT_TIP_MAX_WIDTH 保持一致 */
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--nm-border-color);
+  background: var(--nm-surface-color);
+  color: var(--nm-text-primary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-family: var(--nm-font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  word-break: break-all; /* 长路径按任意字符换行，不截断 */
+  pointer-events: none; /* 不抢 hover，避免闪烁 */
 }
 
 .wfb-crumbs {
