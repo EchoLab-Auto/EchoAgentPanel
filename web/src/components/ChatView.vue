@@ -378,6 +378,26 @@ watch(
   },
 );
 
+/**
+ * 是否有会话区内的浮层/弹层打开（入口行弹出层、Agent 配置、上下文弹层…）。
+ *
+ * 用途：「回到底部」悬浮按钮在这些浮层打开时**隐藏**（2026-09-28）——该
+ * 按钮浮在消息区下沿，而各弹出层恰好都从入口行向上展开（520px 宽、最高
+ * 68vh），实测在窄视口下会盖住按钮（elementFromPoint 命中 checklist-pop）。
+ * 与其用更高 z-index 把按钮压在浮层之上（视觉更糟），不如在浮层期间隐藏。
+ */
+const anyOverlayOpen = computed(() => {
+  return (
+    showChecklist.value ||
+    showSessions.value ||
+    showWorkspace.value ||
+    showAdapter.value ||
+    showTasks.value ||
+    configOpen.value ||
+    showContext.value
+  );
+});
+
 // 当前会话是否在运行任务（用于显示"取消任务"按钮）
 const busy = computed(() => {
   const a = state.activities[props.sessionId];
@@ -603,7 +623,7 @@ function imagesOf(message: ChatMessage): string[] {
 </script>
 
 <template>
-  <div class="chat-view" @paste="onPaste">
+  <div class="chat-view" :class="{ 'chat-view--overlay-open': anyOverlayOpen }" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
     <div class="entry-row">
       <div v-if="activityText" class="chat-activity">
@@ -1157,9 +1177,23 @@ function imagesOf(message: ChatMessage): string[] {
   transition-property: box-shadow, background-color, color, border-color !important;
 }
 
-/* 吸底跳转按钮上移，避免被悬浮输入框遮挡 */
+/* 吸底跳转按钮（「回到底部」）的落位（2026-09-28 重排）：
+   - 库默认贴右下角（right/bottom = 16px）——既被悬浮输入区压住，又被
+     右侧栏卡片盖住（rail 列 z-index 4，按钮 z-index auto，实测
+     elementFromPoint 命中的是 rail-stack__body）。
+   - 现落位：**右侧栏列左侧 16px**（无右栏时回到默认 16px 边距），
+     纵向与边栏列底对齐（入口行上方 8px，同 `calc(entryBottom + 45px)`）。
+   - 显式 z-index 5：高于 rail 列（4）、低于入口行（6）；纵向已错开，
+     仅作防御。 */
 .chat-view :deep(.nm-chat-tray__jump) {
-  bottom: 180px;
+  right: calc(v-bind(trayPadRight) + 16px);
+  bottom: calc(v-bind(entryBottom) + 45px);
+  z-index: 5;
+}
+/* 会话区浮层打开期间隐藏（浮层从入口行向上展开，窄视口下会盖住按钮；
+   见 anyOverlayOpen 注释——隐藏比叠层更好）。 */
+.chat-view--overlay-open :deep(.nm-chat-tray__jump) {
+  display: none;
 }
 
 /* actions 行：图片按钮 + 发送按钮底对齐、间距统一 */

@@ -134,6 +134,33 @@ describe('ChatView 布局契约', () => {
     expect(styleBlock).not.toMatch(/\.chat-view__list\s*\{[^}]*padding-bottom/s);
   });
 
+  it('「回到底部」按钮：避开右侧栏与浮层的落位契约（2026-09-28）', async () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../ChatView.vue'),
+      'utf-8',
+    );
+    const styleBlock = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    const jumpRule =
+      styleBlock.match(/\.chat-view :deep\(\.nm-chat-tray__jump\)\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    // 横向避让右侧栏列（trayPadRight）+ 纵向与边栏列底对齐（entryBottom + 45）
+    expect(jumpRule).toMatch(/right:\s*calc\(v-bind\(trayPadRight\)\s*\+\s*16px\)/);
+    expect(jumpRule).toMatch(/bottom:\s*calc\(v-bind\(entryBottom\)\s*\+\s*45px\)/);
+    expect(jumpRule).toMatch(/z-index:\s*5/);
+    // 浮层打开时隐藏（覆盖 rail 之上不再被盖住）
+    expect(styleBlock).toMatch(
+      /\.chat-view--overlay-open :deep\(\.nm-chat-tray__jump\)\s*\{[^}]*display:\s*none/s,
+    );
+
+    // 行为：打开入口行浮层（清单）→ 根节点带 overlay-open 类
+    const wrapper = mountChatView();
+    expect(wrapper.find('.chat-view--overlay-open').exists()).toBe(false);
+    const menuBtn = wrapper.findAll('.ctx-entry').find((b) => b.text().includes('清单'));
+    if (menuBtn) {
+      await menuBtn.trigger('click');
+      expect(wrapper.find('.chat-view--overlay-open').exists()).toBe(true);
+    }
+  });
+
   it('提供图片附件按钮（SVG 图标，无 emoji）与发送按钮（#actions 契约）', () => {
     const wrapper = mountChatView();
     // 附件按钮存在且内含 SVG（非 🖼 emoji 文本）
