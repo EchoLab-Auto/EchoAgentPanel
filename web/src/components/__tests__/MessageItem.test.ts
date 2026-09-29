@@ -82,6 +82,18 @@ describe('MessageItem 消息行', () => {
     expect(wrapper.text()).toContain('T1700000000');
   });
 
+  it('样式契约：气泡宽度动态化（解除库 640px 上限）+ 隐藏标题锚点', () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../MessageItem.vue'),
+      'utf-8',
+    );
+    const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    // 双写类名压过库样式，max-width 解除到 100%（短贴内容、长撑满列宽）
+    expect(style).toMatch(/\.msg-item__bubble\.msg-item__bubble\s*\{[^}]*max-width:\s*100%/s);
+    // 标题锚点（绝对定位 -22px）会撑出横向溢出，气泡内隐藏
+    expect(style).toMatch(/heading-anchor[^{]*\{[^}]*display:\s*none/s);
+  });
+
   it('群来源：群名前缀经 locale 文案渲染（群 {name}）', () => {
     const wrapper = mountItem(
       message({

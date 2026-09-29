@@ -134,6 +134,22 @@ describe('ChatView 布局契约', () => {
     expect(styleBlock).not.toMatch(/\.chat-view__list\s*\{[^}]*padding-bottom/s);
   });
 
+  it('消息行容器为 flex 列：气泡对齐与宽度动态化前提（2026-09-30）', () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../ChatView.vue'),
+      'utf-8',
+    );
+    const styleBlock = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    // .chat-view__item--msg 必须为 flex 列，否则气泡的 align-self（user 靠右 /
+    // agent 靠左 / system 居中）失效（回归曾导致全部左对齐固定宽）
+    expect(styleBlock).toMatch(
+      /\.chat-view__item--msg\s*\{[^}]*display:\s*flex/s,
+    );
+    expect(styleBlock).toMatch(
+      /\.chat-view__item--msg\s*\{[^}]*flex-direction:\s*column/s,
+    );
+  });
+
   it('「回到底部」按钮：避开右侧栏与浮层的落位契约（2026-09-28）', async () => {
     const raw = require('fs').readFileSync(
       require('path').resolve(__dirname, '../ChatView.vue'),

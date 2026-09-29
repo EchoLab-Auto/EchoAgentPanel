@@ -49,12 +49,19 @@ const timeLabel = computed(() => {
 </script>
 
 <template>
-  <ChatBubble v-if="message.role === 'system'" align="center" tone="plain" role="note">
+  <ChatBubble
+    v-if="message.role === 'system'"
+    class="msg-item__bubble"
+    align="center"
+    tone="plain"
+    role="note"
+  >
     <span class="msg-item__system-text">{{ message.content }}</span>
     <span v-if="timeLabel" class="msg-item__system-time">{{ timeLabel }}</span>
   </ChatBubble>
   <ChatBubble
     v-else
+    class="msg-item__bubble"
     :align="isUser ? 'end' : 'start'"
     :tone="isUser ? 'primary' : 'default'"
     :copy-text="message.content"
@@ -72,6 +79,23 @@ const timeLabel = computed(() => {
 </template>
 
 <style scoped>
+/* 气泡宽度动态化（2026-09-30）：解除库默认上限 `min(78%, 640px)`——
+   短消息贴内容收紧，长消息/代码/表格随**消息列可用宽度**伸展
+   （列宽本身随左右侧栏卡片显隐动态变化，见 ChatView 的托盘 padding）。
+   双写类名提高特异性，压过库样式（同特异性时加载顺序不可靠）；
+   对齐（user 靠右 / agent 靠左 / system 居中）由库的 `align-self` 语义
+   提供，前提是父级 `.chat-view__item--msg` 为 flex 列容器（见 ChatView）。 */
+.msg-item__bubble.msg-item__bubble {
+  max-width: 100%;
+}
+
+/* Markdown 标题锚点（doc 模块的 `#` 链接）在聊天气泡里没有目录导航语义，
+   且其绝对定位（标题右缘 -22px）会撑出气泡的横向 scrollWidth（实测 22px，
+   气泡贴边时视觉上探出边缘）；气泡内直接隐藏。 */
+.msg-item__bubble :deep(.heading-anchor) {
+  display: none;
+}
+
 .msg-item__role {
   font-size: 11px;
   font-weight: 600;

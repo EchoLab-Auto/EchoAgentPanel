@@ -1121,6 +1121,11 @@ function imagesOf(message: ChatMessage): string[] {
    与旧版 12px 行距等效；工作行不受影响。 */
 .chat-view__item--msg {
   margin: 3px 0;
+  /* flex 列容器：让 MessageItem 内气泡的 `align-self`（库语义）生效——
+     user 靠右 / agent 靠左 / system 居中，且短消息贴内容、长消息随列宽伸展
+     （2026-09-30 修复：此前为 block，对齐失效导致全部左对齐固定宽）。 */
+  display: flex;
+  flex-direction: column;
 }
 
 /* 空态占位（行模型自组后由面板提供） */
