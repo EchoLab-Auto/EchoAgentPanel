@@ -12,15 +12,15 @@ import { state } from '../../store';
 import { displayContentOf } from '../../state_domains/timeline';
 
 // ── 库组件 mock：不渲染真实 ui-frame/chat（避免 markdown/dom 依赖） ──
-// ChatView 自渲染消息行（ToolRunGroup 合并 + ChatMessageItem），容器为库 ChatTray。
+// ChatView 自渲染消息行（ToolRunGroup 合并 + MessageItem），容器为库 ChatTray。
 const ChatTrayStub = defineComponent({
   name: 'ChatTray',
   setup(_, { slots }) {
     return () => h('div', { class: 'stub-list' }, slots.default?.());
   },
 });
-const ChatMessageItemStub = defineComponent({
-  name: 'ChatMessageItem',
+const MessageItemStub = defineComponent({
+  name: 'MessageItem',
   props: ['message'],
   setup(props) {
     return () => h('div', { class: 'stub-item' }, String((props.message as { content?: string })?.content ?? ''));
@@ -52,7 +52,7 @@ function mountChatView(sessionId = 'local:tui::local_user') {
     global: {
       stubs: {
         ChatTray: ChatTrayStub,
-        ChatMessageItem: ChatMessageItemStub,
+        MessageItem: MessageItemStub,
         ChatComposer: ChatComposerStub,
       },
     },
@@ -110,7 +110,7 @@ describe('ChatView 布局契约', () => {
     expect(wrapper.find('.subagent-event').exists()).toBe(true);
     expect(wrapper.find('.subagent-event').text()).toContain('子代理完成');
     expect(wrapper.find('.subagent-event').text()).toContain('审计 Panel 文档');
-    // 普通消息仍走气泡（stub）；子代理行不经过 ChatMessageItem
+    // 普通消息仍走气泡（stub）；子代理行不经过 MessageItem
     expect(wrapper.findAll('.stub-item').length).toBe(1);
   });
 
@@ -273,7 +273,7 @@ describe('ChatView 布局契约', () => {
       global: {
         stubs: {
           ChatTray: ChatTrayStub,
-          ChatMessageItem: ChatMessageItemStub,
+          MessageItem: MessageItemStub,
           ChatComposer: ChatComposerStub,
           TasksPanel: TasksPanelStub,
         },
@@ -305,7 +305,7 @@ describe('ChatView 布局契约', () => {
       global: {
         stubs: {
           ChatTray: ChatTrayStub,
-          ChatMessageItem: ChatMessageItemStub,
+          MessageItem: MessageItemStub,
           ChatComposer: ChatComposerStub,
         },
       },

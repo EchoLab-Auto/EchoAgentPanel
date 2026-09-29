@@ -1,14 +1,16 @@
 <script setup lang="ts">
 //! 聊天主视图：消息列表 + 固定底部输入区（flex 布局，输入区占位不遮挡消息）。
-//! 渲染层整体由 @echolab-auto/ui-frame/chat 承担（吸底滚动、回到底部、
-//! IME 组合保护、Markdown、工具/思考/分支合并块），这里只做数据适配。
+//! 分工（2026-09-30）：机制层来自 ui-frame 元组件——`ChatTray`（吸底滚动、
+//! 回到底部）、`ChatComposer`（IME 组合保护）；**行模型与组合由面板自组**：
+//! 连续工具调用合并（ToolRunGroup）、推理（ReasoningBlock）、子代理
+//! （SubagentEventBlock）、消息行（MessageItem，内部用库 `ChatBubble` +
+//! doc `MarkdownRenderer`）。库的 chat 组合组件已移除（组合权归产品）。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismBadge, NeumorphismButton } from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
-  ChatMessageItem,
   ChatTray,
   type ChatMessage,
 } from '@echolab-auto/ui-frame/chat';
@@ -18,6 +20,7 @@ import AgentSwitcher from './AgentSwitcher.vue';
 import AgentConfigModal from './AgentConfigModal.vue';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
+import MessageItem from './MessageItem.vue';
 import ReasoningBlock from './ReasoningBlock.vue';
 import SubagentEventBlock from './SubagentEventBlock.vue';
 import ContextView from './ContextView.vue';
@@ -518,7 +521,7 @@ function rowKey(row: ChatRow): string {
   return row.kind === 'tool-group' ? row.key : String(row.message.id);
 }
 
-/** ChatTray 吸底观察源：最后一条消息的尾部内容（与库 ChatMessageList 同源）。 */
+/** ChatTray 吸底观察源：最后一条消息的尾部内容（托盘内容同源）。 */
 function trayWatchSource(): unknown {
   const last = messages.value[messages.value.length - 1];
   return [
@@ -834,9 +837,9 @@ function imagesOf(message: ChatMessage): string[] {
       </div>
     </div>
     <!-- 消息列表：flex:1，内部 ChatTray 独立滚动。
-         连续工具调用合并为一行图标（ToolRunGroup）；其余消息照旧逐条渲染。
-         （不交给 ChatMessageList 的逐条 #message 插槽：工具行需要跨条合并，
-         这里自渲染，滚动/吸底沿用库的 ChatTray。） -->
+         行模型由面板自组：连续工具调用合并为一行图标（ToolRunGroup），
+         推理/子代理走各自组件，其余消息逐条 MessageItem。
+         （库 chat 组合件已移除；滚动/吸底沿用库元组件 ChatTray。） -->
     <ChatTray
       class="chat-view__list"
       :watch-source="trayWatchSource"
@@ -885,7 +888,7 @@ function imagesOf(message: ChatMessage): string[] {
                 </span>
               </template>
             </div>
-            <ChatMessageItem :message="row.message" :format-time="formatTime" />
+            <MessageItem :message="row.message" :format-time="formatTime" />
           </div>
         </template>
       </template>
@@ -1120,7 +1123,7 @@ function imagesOf(message: ChatMessage): string[] {
   margin: 3px 0;
 }
 
-/* 空态占位（自渲染列表后，empty 不再由库 ChatMessageList 提供） */
+/* 空态占位（行模型自组后由面板提供） */
 .chat-view__empty {
   margin: auto;
   padding: 24px;

@@ -1,12 +1,18 @@
 <script setup lang="ts">
 //! 临时分支查看器：展示分支运行期间的实时活动
 //! （推理、工具调用、临时内容、最终输出）。
+//!
+//! 渲染复用主时间线的面板组件（2026-09-30）：工具调用走 `ToolRunGroup`
+//! （单条即一行图标 + 点击展开），推理走 `ReasoningBlock`——与主视图
+//! 「同概念同实现」，不再依赖库的 chat 组合组件（已移除）。
 
 import { computed, nextTick, ref, watch } from 'vue';
 import { NeumorphismModal, NeumorphismTag } from '@echolab-auto/ui-frame';
-import { ChatReasoningBlock, ChatToolCallBlock } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
+import type { BranchTab } from '../state';
 import { formatTime } from '../chat-adapter';
+import ReasoningBlock from './ReasoningBlock.vue';
+import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
 
 const props = defineProps<{ branchId: string }>();
 const emit = defineEmits<{ close: [] }>();
@@ -46,6 +52,35 @@ const STATUS_VARIANT: Record<string, 'primary' | 'success' | 'warning' | 'error'
 function onModalToggle(open: boolean) {
   if (!open) emit('close');
 }
+
+type BranchMsg = BranchTab['msgs'][number];
+
+/** 行模型与主时间线同构：连续工具调用合并为一组图标行。 */
+type BranchRow =
+  | { kind: 'tool-group'; key: string; items: ToolRunItem[] }
+  | { kind: 'msg'; key: string; msg: BranchMsg };
+
+const rows = computed<BranchRow[]>(() => {
+  const out: BranchRow[] = [];
+  (tab.value?.msgs ?? []).forEach((m, index) => {
+    if (m.kind !== 'tool') {
+      out.push({ kind: 'msg', key: `m:${index}`, msg: m });
+      return;
+    }
+    const item: ToolRunItem = {
+      key: `${index}`,
+      name: m.toolName ?? m.text,
+      input: m.input,
+      output: m.output ?? null,
+      status: m.status,
+      time: formatTime(m.time),
+    };
+    const last = out[out.length - 1];
+    if (last && last.kind === 'tool-group') last.items.push(item);
+    else out.push({ kind: 'tool-group', key: `tools:${index}`, items: [item] });
+  });
+  return out;
+});
 </script>
 
 <template>
@@ -76,22 +111,17 @@ function onModalToggle(open: boolean) {
       </div>
       <div ref="viewerRef" class="branch-viewer">
         <div v-if="tab.msgs.length === 0" class="muted">（暂无活动，等待分支执行…）</div>
-        <template v-for="(m, index) in tab.msgs" :key="index">
-          <ChatToolCallBlock
-            v-if="m.kind === 'tool'"
-            :name="m.toolName ?? m.text"
-            :input="m.input"
-            :output="m.output ?? null"
-            :status="m.status"
-            :time="formatTime(m.time)"
+        <template v-for="row in rows" :key="row.key">
+          <ToolRunGroup v-if="row.kind === 'tool-group'" :items="row.items" />
+          <ReasoningBlock
+            v-else-if="row.msg.kind === 'reasoning'"
+            :text="row.msg.text"
+            :animate="false"
           />
-          <ChatReasoningBlock
-            v-else-if="m.kind === 'reasoning'"
-            :parts="[m.text]"
-            :time="formatTime(m.time)"
-          />
-          <div v-else-if="m.kind === 'content'" class="branch-msg-content">{{ m.text }}</div>
-          <div v-else class="muted">{{ m.text }}</div>
+          <div v-else-if="row.msg.kind === 'content'" class="branch-msg-content">
+            {{ row.msg.text }}
+          </div>
+          <div v-else class="muted">{{ row.msg.text }}</div>
         </template>
         <div v-if="tab.status === 'running'" class="muted branch-running-hint">分支执行中…</div>
       </div>
