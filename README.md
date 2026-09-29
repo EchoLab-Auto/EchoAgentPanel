@@ -27,7 +27,7 @@
 ## 功能（对齐原 TUI）
 
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
-- 工具调用进度、后台任务 / Subagent / 临时回复分支面板（会话视图入口行「任务」弹层，按当前会话过滤）、清单面板
+- 工具调用进度（连续调用合并为图标行；2026-09 紧凑化）、子代理委派行（运行中/完成/失败一行呈现、点击展开结论）、临时回复分支面板（入口行「任务」弹层，按当前会话过滤）、清单面板
 - API 设置（provider / model / base_url / api_key / profiles / system prompt）
 - QQ 管理（多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
 - 工作区会话管理（入口行「工作区」宽版面板：左栏文件浏览器（只读）+ 右栏多会话 / 多工作区目录 / 各目录 git 状态；`echo-agent.workspace` 插件）
@@ -46,6 +46,35 @@ cargo run -p echo-web-server -- --config config/echo-agent-panel.toml --static-d
 
 # 3. 打开 http://<你的服务器IP>:8080（本机可用 http://localhost:8080）
 ```
+
+### ui-frame 组件库引用方式（本地快照 ⇄ npm 包）
+
+前端默认以**仓库内提交的本地快照**引用 `@echolab-auto/ui-frame`
+（`web/vendor/ui-frame`，上游源码仓库的构建产物），也可一键切到 **npm 已发布包**：
+
+```bash
+npm run ui-frame:status          # 当前模式 + 安装形态 + npm dist-tags 对照
+npm run ui-frame:npm             # 切到 npm 包（默认跟随当前通道：预发布用 dev、否则 latest）
+npm run ui-frame:npm -- 1.3.2    # 或指定版本 / 标签 / 范围（一律解析为精确版本写入）
+npm run ui-frame:local           # 切回本地快照（file:./vendor/ui-frame）
+npm run ui-frame:sync            # 用 ui-frame 源码仓库刷新快照（默认 ~/code_file/gitlab/echo-tech/ui-frame，可用 UI_FRAME_REPO 覆盖）
+npm run ui-frame:sync -- --build # 先构建源码仓库再刷新（联合开发 UI 库时用）
+npm run ui-frame:diff            # 对比快照与 npm 版本——查看尚未发版的改动
+npm run ui-frame:diff -- 1.3.2   # 对比指定版本 / 标签
+```
+
+约定与提示：
+
+- **依赖行是唯一事实来源**（`web/package.json` 的 `@echolab-auto/ui-frame`）；
+  切换会改写该行与 `package-lock.json`——**会出现在 git diff 里**，按需提交或回滚。
+- 切到 npm 前先跑 `npm run ui-frame:diff`：本地快照常含**尚未发版**的修复
+  （如 `useClipboard` 非安全上下文兜底），diff 会列出切过去会丢哪些文件。
+- 本地联调 UI 库的循环：改 `ui-frame` 源码 → `npm run ui-frame:sync -- --build`
+  → Panel dev server 若未热更新则重启（或 `npm run dev -- --force`）。
+- 本地快照模式（`file:` 目录依赖）会连带安装快照 `package.json` 的
+  devDependencies（storybook 等工具链，约 560 包）——首次安装偏慢属正常；
+  切到 npm 模式会移除它们。
+- CI 用 `npm ci` + 提交的 vendor 快照，无需任何切换动作。
 
 ## 安装（Linux，用户级）
 
