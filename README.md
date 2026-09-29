@@ -1,6 +1,6 @@
 # EchoAgentPanel — Web 面板（Rust 后端 + Vue 3 前端）
 
-对接 [EchoAgentCore](https://gitlab.com/echo_tech/EchoAgentCore) 的 Web UI 面板：
+对接 [EchoAgentCore](https://github.com/EchoLab-Auto/EchoAgentCore) 的 Web UI 面板：
 一个 axum HTTP/WS 后端把浏览器 WebSocket 中继到 Core 的 management WS
 （默认 `ws://127.0.0.1:3132`），并托管构建后的 Vue 3 前端。
 
