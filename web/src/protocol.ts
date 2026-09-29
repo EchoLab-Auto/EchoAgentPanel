@@ -397,7 +397,7 @@ export type BackendEvent =
         team_id?: string | null;
       };
     }
-  | { AgentThinking: { session_id: string } }
+  | { AgentThinking: { session_id: string; team_id?: string | null } }
   | { LlmRequest: { session_id: string; model: string } }
   | {
       LlmResponse: {
@@ -407,7 +407,7 @@ export type BackendEvent =
         completion_tokens: number;
       };
     }
-  | { AgentReasoning: { session_id: string; branch_id: string; content: string } }
+  | { AgentReasoning: { session_id: string; branch_id: string; content: string; team_id?: string | null } }
   | { SubagentStarted: { session_id: string; task: string } }
   | { SubagentCompleted: { session_id: string; success: boolean } }
   | {
