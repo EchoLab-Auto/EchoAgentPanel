@@ -7,10 +7,12 @@
 //! Core 以 `WorkspaceSessions` / `WorkspaceGitStatus` 事件回推。
 //! 弹层几何由 ChatView 的 `.checklist-pop` 提供。
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
+import { releasePending, usePending } from '../pending';
+import LoadHint from './LoadHint.vue';
 import type { WorkspaceSessionInfo } from '../protocol';
 
 const props = defineProps<{ teamId: string | null }>();
@@ -40,7 +42,7 @@ watch(
 
 function requestSessions() {
   if (!props.teamId) return; // 未选择智能体：不发（Core 会拒绝无 team_id 的会话类命令）
-  sendCommand({ RequestWorkspaceSessions: { team_id: props.teamId } });
+  sendPending({ RequestWorkspaceSessions: { team_id: props.teamId } }, 'workspace:sessions');
 }
 
 // ── git 状态 ──
@@ -122,11 +124,15 @@ function remove(session: WorkspaceSessionInfo) {
   sendCommand({ DeleteWorkspaceSession: { team_id: props.teamId, id: session.id } });
 }
 
+const { phase: sessionsPhase } = usePending('workspace:sessions');
+
 onMounted(() => {
   if (!state.connected) return;
   requestSessions();
   requestGit();
 });
+
+onUnmounted(() => releasePending('workspace:sessions'));
 
 watch(
   () => state.connected,
@@ -223,7 +229,8 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
           <NeumorphismButton size="small" variant="glass" @click="remove(session)">删除</NeumorphismButton>
         </div>
       </div>
-      <div v-if="teamId && !sessions.length" class="muted ws-empty">
+      <LoadHint :phase="sessionsPhase" label="工作区会话" @retry="requestSessions" />
+      <div v-if="teamId && !sessions.length && sessionsPhase === 'idle'" class="muted ws-empty">
         （暂无工作区会话，点击「新建」创建第一个）
       </div>
     </div>

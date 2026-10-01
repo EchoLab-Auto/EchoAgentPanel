@@ -11,9 +11,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 
-vi.mock('../../connection', () => ({
-  sendCommand: vi.fn(),
-}));
+vi.mock('../../connection', () => {
+  const sendCommand = vi.fn();
+  return {
+    sendCommand,
+    // sendPending = 登记加载跟踪 + 发命令（生产语义）：测试等价转发，
+    // 调用记录并入 sendCommand 的 mock，请求类断言无需两处查。
+    sendPending: vi.fn((command: unknown) => sendCommand(command as never)),
+  };
+});
 
 import QqPanel from '../QqPanel.vue';
 import { state } from '../../store';

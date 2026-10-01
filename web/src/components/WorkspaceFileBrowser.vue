@@ -16,7 +16,7 @@
 //! `overflow-y: auto` 裁剪）。
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import { NeumorphismSpinner, NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import type { WorkspaceFileEntry, WorkspaceSessionInfo } from '../protocol';
@@ -233,7 +233,9 @@ function formatSize(size: number): string {
     <div class="wfb-list">
       <div v-if="!session" class="muted wfb-empty">（暂无工作区会话）</div>
       <div v-else-if="error" class="wfb-error" :title="error">{{ error }}</div>
-      <div v-else-if="!listing" class="muted wfb-empty">读取中…</div>
+      <div v-else-if="!listing" class="muted wfb-empty">
+        <NeumorphismSpinner size="small" /> 读取中…
+      </div>
       <div v-else-if="!entries.length" class="muted wfb-empty">（空目录）</div>
       <button
         v-for="entry in entries"

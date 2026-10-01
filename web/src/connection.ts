@@ -10,6 +10,7 @@
 
 import { state, dispatch } from './store';
 import { pushToast } from './state';
+import { trackRequest } from './pending';
 import {
   parseEvent,
   serializeCommand,
@@ -58,6 +59,9 @@ export function startConnection(): void {
       state.connected = true;
       retryMs = 500;
       lastFrameAt = Date.now();
+      // 时间线到达标志按"本次连接"计：重连后若无缓存需要重新加载，
+      // 聊天区据此显示「正在加载时间线…」而不是「暂无消息」（见 ChatView）。
+      state.timelineArrivedOnce = false;
       // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
       // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。
       state.branchTabs = {};
@@ -162,6 +166,17 @@ export function startConnection(): void {
   window.addEventListener('online', heal);
 
   connect();
+}
+
+/**
+ * 发送一次「有响应等待」的请求：登记加载跟踪 + 发命令（见 pending.ts）。
+ *
+ * `key` 是视图本地命名（如 `'context'`、`'settings:teams'`），同一 key
+ * 重复发送即覆盖（重试/切换重拉语义）。
+ */
+export function sendPending(command: BackendCommand, key: string): void {
+  trackRequest(key, command);
+  sendCommand(command);
 }
 
 export function sendCommand(command: BackendCommand): void {

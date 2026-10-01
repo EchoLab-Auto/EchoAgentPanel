@@ -1,11 +1,18 @@
 <script setup lang="ts">
 //! 上下文分块视图（内嵌于 SessionPanel，取代原 ContextModal 弹窗）。
 
-import { computed, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton, NeumorphismProgress } from '@echolab-auto/ui-frame';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  NeumorphismButton,
+  NeumorphismProgress,
+  NeumorphismSkeleton,
+  NeumorphismSpinner,
+} from '@echolab-auto/ui-frame';
 import { ChatFold } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
+import { releasePending, usePending } from '../pending';
+import LoadHint from './LoadHint.vue';
 
 //! 块种类 → 中文徽标（Core 侧 kind 全集的镜像；缺项会裸显英文 kind）。
 //! `displayLabel` 会据此剥掉 label 里重复的种类前缀（如「常驻技能 · xx」）。
@@ -60,13 +67,20 @@ onMounted(() => {
 
 /** 拉取当前（team, session）的上下文快照（多会话，2026-09）。 */
 function requestSnapshot() {
-  sendCommand({
-    RequestContext: { team_id: targetTeamId.value, session_id: targetSessionId.value },
-  });
+  sendPending(
+    { RequestContext: { team_id: targetTeamId.value, session_id: targetSessionId.value } },
+    'context',
+  );
 }
 
 // 会话切换/挂载后重拉；忽略归属其他会话的陈旧快照（避免切换瞬间串显）。
 watch([targetTeamId, targetSessionId], () => requestSnapshot());
+
+onUnmounted(() => releasePending('context'));
+
+const connected = computed(() => state.connected);
+/** 加载三态（见 pending.ts）：快照未到达时区分 连接中 / 加载中 / 超时 / 真空态。 */
+const { phase: ctxPhase, loading: ctxLoading, failed: ctxFailed } = usePending('context');
 
 const snapshot = computed(() => {
   const snap = state.context;
@@ -177,11 +191,37 @@ function compactHistory() {
       <NeumorphismButton variant="glass" size="small" @click="archiveHistory">归档</NeumorphismButton>
       <NeumorphismButton variant="glass" size="small" @click="compactHistory">压缩</NeumorphismButton>
       <NeumorphismButton variant="glass" size="small" title="重新发现技能目录中的 SKILL.md 并刷新注入" @click="reloadSkills">重载技能</NeumorphismButton>
-      <NeumorphismButton variant="glass" size="small" title="刷新" @click="refresh">↻</NeumorphismButton>
+      <NeumorphismButton
+        variant="glass"
+        size="small"
+        title="刷新"
+        :loading="ctxLoading"
+        @click="refresh"
+      >↻</NeumorphismButton>
     </div>
 
-    <div v-if="!snapshot" class="muted">
-      （暂无快照——点右上角 ↻ 重新拉取；若持续为空，请确认已选择智能体与会话）
+    <div v-if="!snapshot" class="ctx-state">
+      <template v-if="!connected">
+        <NeumorphismSpinner size="large" />
+        <span class="muted">正在连接 Core…</span>
+      </template>
+      <template v-else-if="ctxLoading">
+        <!-- 骨架：仪表盘 + 块卡片（防闪烁：150ms 内到达不显示） -->
+        <div class="ctx-skeleton">
+          <NeumorphismSkeleton variant="rect" height="52" />
+          <NeumorphismSkeleton variant="rect" height="88" />
+          <NeumorphismSkeleton variant="rect" height="88" />
+        </div>
+      </template>
+      <LoadHint
+        v-else-if="ctxFailed"
+        :phase="ctxPhase"
+        label="上下文快照"
+        @retry="requestSnapshot"
+      />
+      <span v-else class="muted">
+        （暂无快照——点右上角 ↻ 重新拉取；若持续为空，请确认已选择智能体与会话）
+      </span>
     </div>
     <template v-else>
       <div class="ctx-summary">
@@ -267,6 +307,21 @@ function compactHistory() {
 </template>
 
 <style scoped>
+/* 无快照时的三态容器：连接中 / 骨架 / 超时（text-align 与间距） */
+.ctx-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 0;
+}
+.ctx-skeleton {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .ctx-view-head {
   display: flex;
   align-items: center;

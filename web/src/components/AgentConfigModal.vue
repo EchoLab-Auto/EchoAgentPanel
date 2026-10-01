@@ -6,7 +6,7 @@
 //! Collapse/Table/Tag/Divider/Select/Segmented/Button）；外壳是库
 //! `NeumorphismCard glass`（磨砂配方见样式区）。
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismCard,
@@ -24,7 +24,9 @@ import {
 import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
+import { releasePending, usePending } from '../pending';
+import LoadHint from './LoadHint.vue';
 import type { LoopMode, TeamInfo } from '../protocol';
 import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
 
@@ -37,10 +39,31 @@ const emit = defineEmits<{ close: [] }>();
 
 // 弹层每次打开都会重新挂载（v-if）：挂载时拉取能力列表，
 // 确保工具/技能/插件表格有数据（未进过资源页时 state 为空）。
+// 三类清单独立登记加载跟踪（表格骨架 / 超时重试，见 pending.ts）。
+const { phase: pluginPhase, loading: pluginLoading } = usePending('agent-config:plugins');
+const { phase: toolPhase, loading: toolLoading } = usePending('agent-config:tools');
+const { phase: skillPhase, loading: skillLoading } = usePending('agent-config:skills');
+
+function requestPlugins() {
+  sendPending('RequestPluginsList', 'agent-config:plugins');
+}
+function requestTools() {
+  sendPending('RequestToolsList', 'agent-config:tools');
+}
+function requestSkills() {
+  sendPending('RequestSkillsList', 'agent-config:skills');
+}
+
 onMounted(() => {
-  sendCommand('RequestSkillsList');
-  sendCommand('RequestToolsList');
-  sendCommand('RequestPluginsList');
+  requestSkills();
+  requestTools();
+  requestPlugins();
+});
+
+onUnmounted(() => {
+  releasePending('agent-config:plugins');
+  releasePending('agent-config:tools');
+  releasePending('agent-config:skills');
 });
 
 // ── 表单字段（打开时从 team 初始化） ──
@@ -319,10 +342,11 @@ function save() {
         <NeumorphismCollapse v-model="openSections" :items="CAP_SECTIONS" size="small">
           <template #header-plugins>
             <span class="agent-config__sec-title">启用插件</span>
-            <span class="agent-config__sec-summary">{{ pluginItems.length }} 项</span>
+            <span class="agent-config__sec-summary">{{ pluginLoading ? '…' : `${pluginItems.length} 项` }}</span>
           </template>
           <template #plugins>
-            <div v-if="!pluginGroups.length" class="muted">（无）</div>
+            <LoadHint :phase="pluginPhase" label="插件清单" @retry="requestPlugins" />
+            <div v-if="!pluginGroups.length && pluginPhase === 'idle'" class="muted">（无）</div>
             <div v-for="g in pluginGroups" :key="g.group" class="agent-config__pkg">
               <div class="agent-config__pkg-head">
                 <NeumorphismCheckbox
@@ -359,10 +383,11 @@ function save() {
 
           <template #header-tools>
             <span class="agent-config__sec-title">启用工具（按 pkg 分组）</span>
-            <span class="agent-config__sec-summary">{{ toolItems.length }} 项</span>
+            <span class="agent-config__sec-summary">{{ toolLoading ? '…' : `${toolItems.length} 项` }}</span>
           </template>
           <template #tools>
-            <div v-if="!toolGroups.length" class="muted">（无）</div>
+            <LoadHint :phase="toolPhase" label="工具清单" @retry="requestTools" />
+            <div v-if="!toolGroups.length && toolPhase === 'idle'" class="muted">（无）</div>
             <div v-for="g in toolGroups" :key="g.group" class="agent-config__pkg">
               <div class="agent-config__pkg-head">
                 <NeumorphismCheckbox
@@ -399,10 +424,11 @@ function save() {
 
           <template #header-skills>
             <span class="agent-config__sec-title">启用技能（按 pkg 分组）</span>
-            <span class="agent-config__sec-summary">{{ skillItems.length }} 项</span>
+            <span class="agent-config__sec-summary">{{ skillLoading ? '…' : `${skillItems.length} 项` }}</span>
           </template>
           <template #skills>
-            <div v-if="!skillGroups.length" class="muted">（无）</div>
+            <LoadHint :phase="skillPhase" label="技能清单" @retry="requestSkills" />
+            <div v-if="!skillGroups.length && skillPhase === 'idle'" class="muted">（无）</div>
             <div v-for="g in skillGroups" :key="g.group" class="agent-config__pkg">
               <div class="agent-config__pkg-head">
                 <NeumorphismCheckbox

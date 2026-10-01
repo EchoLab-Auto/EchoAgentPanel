@@ -8,7 +8,7 @@
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { NeumorphismBadge, NeumorphismButton } from '@echolab-auto/ui-frame';
+import { NeumorphismBadge, NeumorphismButton, NeumorphismSpinner } from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
   ChatTray,
@@ -539,6 +539,17 @@ const emptyText = computed(() =>
     : `（会话 ${props.sessionId} 暂无消息，从下方输入开始对话）`,
 );
 
+/**
+ * 首屏/重连加载态（2026-09-30）：消息列为空时的三态区分——
+ *   1. 未连接     → 「正在连接 Core…」；
+ *   2. 已连接但本次连接尚未收到过 TrunkTimeline → 「正在加载时间线…」；
+ *   3. 收到过（哪怕空快照）→ 真正空态的「（暂无消息…）」（emptyText）。
+ * 有磁盘缓存时时间线在挂载前已 hydrate（trunk 非空），直接进入正常渲染。
+ */
+const timelineLoading = computed(
+  () => connected.value && !state.timelineArrivedOnce && state.trunk.length === 0,
+);
+
 // 空串占位 → 库回退到 locale 默认（输入消息，Enter 发送…）。
 const placeholder = computed(() => (connected.value ? '' : '未连接到 Core，暂时无法发送'));
 
@@ -844,7 +855,17 @@ function imagesOf(message: ChatMessage): string[] {
       class="chat-view__list"
       :watch-source="trayWatchSource"
     >
-      <div v-if="messageRows.length === 0" class="chat-view__empty">{{ emptyText }}</div>
+      <div v-if="messageRows.length === 0" class="chat-view__empty">
+        <template v-if="!connected">
+          <NeumorphismSpinner size="large" />
+          <span>正在连接 Core…</span>
+        </template>
+        <template v-else-if="timelineLoading">
+          <NeumorphismSpinner size="large" />
+          <span>正在加载时间线…</span>
+        </template>
+        <span v-else>{{ emptyText }}</span>
+      </div>
       <template v-for="row in messageRows" :key="rowKey(row)">
         <ToolRunGroup
           v-if="row.kind === 'tool-group'"
@@ -1128,12 +1149,16 @@ function imagesOf(message: ChatMessage): string[] {
   flex-direction: column;
 }
 
-/* 空态占位（行模型自组后由面板提供） */
+/* 空态占位（行模型自组后由面板提供）；加载三态：转圈 + 文案垂直堆叠 */
 .chat-view__empty {
   margin: auto;
   padding: 24px;
   color: var(--nm-text-placeholder);
   font-size: var(--nm-font-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上；

@@ -6,8 +6,10 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismSegmented, NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { defaultQqInstanceState } from '../state';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
+import { usePending, type PendingPhase } from '../pending';
 import type { GateMode } from '../protocol';
+import LoadHint from './LoadHint.vue';
 import QqLoginSection from './QqLoginSection.vue';
 
 const props = defineProps<{
@@ -87,13 +89,33 @@ function refreshLists() {
   if (!instanceNames.value.length) return;
   for (const adapter of instanceNames.value) {
     const key = adapter || null;
-    sendCommand({ RequestGroupList: { adapter: key } });
-    sendCommand({ RequestFriendList: { adapter: key } });
-    sendCommand({ RequestQqFilterConfig: { adapter: key } });
-    sendCommand({ RequestQqOwner: { adapter: key } });
-    sendCommand({ RequestQqLoginStatus: { adapter: key } });
+    const pk = (name: string) => `qq:${name}:${key ?? '_'}`;
+    // 逐查询登记加载跟踪（按实例分 key；面板只展示 active 实例的阶段）。
+    sendPending({ RequestGroupList: { adapter: key } }, pk('groups'));
+    sendPending({ RequestFriendList: { adapter: key } }, pk('friends'));
+    sendPending({ RequestQqFilterConfig: { adapter: key } }, pk('filter'));
+    sendPending({ RequestQqOwner: { adapter: key } }, pk('owner'));
+    sendPending({ RequestQqLoginStatus: { adapter: key } }, pk('login'));
   }
 }
+
+// 名单/门控区的组合加载阶段（active 实例的 4 个查询取最高阶段）。
+const { phase: qqFilterPhase } = usePending(() => `qq:filter:${activeName.value || '_'}`);
+const { phase: qqGroupsPhase } = usePending(() => `qq:groups:${activeName.value || '_'}`);
+const { phase: qqFriendsPhase } = usePending(() => `qq:friends:${activeName.value || '_'}`);
+const { phase: qqOwnerPhase } = usePending(() => `qq:owner:${activeName.value || '_'}`);
+const qqListsPhase = computed<PendingPhase>(() => {
+  const phases = [
+    qqFilterPhase.value,
+    qqGroupsPhase.value,
+    qqFriendsPhase.value,
+    qqOwnerPhase.value,
+  ];
+  if (phases.includes('timeout')) return 'timeout';
+  if (phases.includes('slow')) return 'slow';
+  if (phases.includes('pending')) return 'pending';
+  return 'idle';
+});
 
 onMounted(() => {
   if (state.connected) refreshLists();
@@ -166,7 +188,13 @@ function toggleDenyGroup(id: number) {
         <h2>适配器管理</h2>
         <p class="qq-head__sub">连接状态 · 门控策略 · 名单配置</p>
       </div>
-      <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="refreshLists">
+      <NeumorphismButton
+        size="small"
+        variant="glass"
+        :disabled="!state.connected"
+        :loading="qqListsPhase === 'pending' || qqListsPhase === 'slow'"
+        @click="refreshLists"
+      >
         刷新列表
       </NeumorphismButton>
     </div>
@@ -238,6 +266,12 @@ function toggleDenyGroup(id: number) {
     </div>
 
     <!-- 名单：2 × 2 卡片 -->
+    <LoadHint
+      v-if="qqAdapters.length"
+      :phase="qqListsPhase"
+      label="QQ 名单与配置"
+      @retry="refreshLists"
+    />
     <div class="qq-grid">
       <div class="qq-list-card">
         <div class="qq-list-card__head">

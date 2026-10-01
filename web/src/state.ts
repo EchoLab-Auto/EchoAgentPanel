@@ -217,6 +217,12 @@ export interface ContextSnapshotData {
 
 export interface AppState {
   connected: boolean;
+  /**
+   * 本次连接是否已收到过 TrunkTimeline（聊天区首屏加载态判定，2026-09-30）。
+   * onopen 重置为 false；任一 TrunkTimeline 到达置 true——为空时区分
+   * 「还在加载」与「确实无消息」。
+   */
+  timelineArrivedOnce: boolean;
   sessions: SessionInfo[];
   trunk: DisplayMessage[];
   activities: Record<string, AgentActivity>;
@@ -306,6 +312,7 @@ export interface AppState {
 export function initialState(): AppState {
   return {
     connected: false,
+    timelineArrivedOnce: false,
     sessions: [],
     trunk: [],
     activities: {},
@@ -621,6 +628,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'TrunkTimeline': {
       const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }).TrunkTimeline;
+      // 首屏加载态：收到过即说明 Core 已回（哪怕为空）——「暂无消息」只在此时展示。
+      state.timelineArrivedOnce = true;
       // ⚠️ 响应归属由后端标注（team_id = 请求值），绝不能拿当前
       // activeTeamId 猜测：其他 agent 的兜底请求若按当前视图路由会
       // 污染 trunk（串显 alix 会话/误清空 self-coding 内容）。

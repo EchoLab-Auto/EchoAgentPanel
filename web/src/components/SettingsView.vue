@@ -13,7 +13,7 @@
 //! 数据来自后端 SkillsList / ToolsList / PluginsList / TeamsList 事件，打开时主动拉取；
 //! API 配置随 state.api 事件更新。
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismCard,
@@ -38,7 +38,9 @@ import {
   PLUGIN_KIND_LABELS,
   isPluginCheckboxVisible,
 } from '../capabilities';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
+import { releasePending, usePending } from '../pending';
+import LoadHint from './LoadHint.vue';
 import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { loopModeOf } from '../protocol';
 import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
@@ -54,13 +56,30 @@ const TOOL_OTHER = '扩展工具';
 type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
 
+// ── 列表加载跟踪（pending.ts）：四类清单各自的加载/慢/超时三态 ──
+const { phase: skillPhase, loading: skillLoading } = usePending('settings:skills');
+const { phase: toolPhase, loading: toolLoading } = usePending('settings:tools');
+const { phase: pluginPhase, loading: pluginLoading } = usePending('settings:plugins');
+const { phase: teamPhase, loading: teamLoading } = usePending('settings:teams');
+const settingsLoading = computed(
+  () =>
+    skillLoading.value || toolLoading.value || pluginLoading.value || teamLoading.value,
+);
+onUnmounted(() => {
+  releasePending('settings:skills');
+  releasePending('settings:tools');
+  releasePending('settings:plugins');
+  releasePending('settings:teams');
+});
+
 // count 为 null 的分类不显示计数徽标（日志无条目概念）
 const categories = computed(() => [
   { key: 'api' as const, label: 'API 设置', count: (state.api?.profiles?.length ?? 0) as number | null },
-  { key: 'skill' as const, label: '技能', count: state.skills.length as number | null },
-  { key: 'tool' as const, label: '工具', count: state.tools.length as number | null },
-  { key: 'plugin' as const, label: '插件', count: state.plugins.length as number | null },
-  { key: 'team' as const, label: '智能体', count: state.teams.length as number | null },
+  // 清单加载中（loading）暂隐计数徽标——显示旧计数/0 都会被误读。
+  { key: 'skill' as const, label: '技能', count: (skillLoading.value ? null : state.skills.length) as number | null },
+  { key: 'tool' as const, label: '工具', count: (toolLoading.value ? null : state.tools.length) as number | null },
+  { key: 'plugin' as const, label: '插件', count: (pluginLoading.value ? null : state.plugins.length) as number | null },
+  { key: 'team' as const, label: '智能体', count: (teamLoading.value ? null : state.teams.length) as number | null },
   { key: 'logs' as const, label: '日志', count: null as number | null },
 ]);
 const currentCategory = computed(
@@ -1287,12 +1306,25 @@ function paramText(tool: ToolInfo): string {
   }
 }
 
-// 数据刷新：面板需要时拉取（列表也可能由后端变更事件自动更新）
+// 数据刷新：面板需要时拉取（列表也可能由后端变更事件自动更新）。
+// 各清单独立登记加载跟踪（徽标暂隐 / 列表骨架 / 超时重试，见 pending.ts）。
+function refreshSkills() {
+  sendPending('RequestSkillsList', 'settings:skills');
+}
+function refreshTools() {
+  sendPending('RequestToolsList', 'settings:tools');
+}
+function refreshPlugins() {
+  sendPending('RequestPluginsList', 'settings:plugins');
+}
+function refreshTeams() {
+  sendPending('RequestTeamsList', 'settings:teams');
+}
 function refresh() {
-  sendCommand('RequestSkillsList');
-  sendCommand('RequestToolsList');
-  sendCommand('RequestPluginsList');
-  sendCommand('RequestTeamsList');
+  refreshSkills();
+  refreshTools();
+  refreshPlugins();
+  refreshTeams();
 }
 
 onMounted(refresh);
@@ -1344,7 +1376,7 @@ watch(
         <span v-if="cat.count !== null" class="caps-count">{{ cat.count }}</span>
       </div>
       <div class="caps-nav-spacer" />
-      <NeumorphismButton size="small" variant="glass" @click="refresh">刷新</NeumorphismButton>
+      <NeumorphismButton size="small" variant="glass" :loading="settingsLoading" @click="refresh">刷新</NeumorphismButton>
     </nav>
 
     <!-- 分类工作区 -->
@@ -1481,6 +1513,7 @@ watch(
         >
           <!-- 技能：工作台分组（按包 / 按分类 / 平铺）+ 双行行卡 -->
           <template v-if="activeCategory === 'skill'">
+            <LoadHint :phase="skillPhase" label="技能清单" @retry="refreshSkills" />
             <div v-for="g in skillWorkbenchGroups" :key="g.key" class="caps-list-group">
               <div class="caps-list-group__head" @click="toggleGroup('skill:' + g.key)">
                 <span class="caret">{{ isCollapsed('skill:' + g.key) ? '▸' : '▾' }}</span>
@@ -1531,7 +1564,7 @@ watch(
                 </div>
               </template>
             </div>
-            <div v-if="skillWorkbenchGroups.length === 0" class="caps-list-empty">
+            <div v-if="skillWorkbenchGroups.length === 0 && skillPhase === 'idle'" class="caps-list-empty">
               <span class="muted">无匹配技能</span>
               <NeumorphismButton
                 v-if="skillSearch || skillFilter !== 'all'"
@@ -1546,6 +1579,7 @@ watch(
 
           <!-- 工具：工作台分组（按包 / 按分类 / 平铺）+ 双行行卡 -->
           <template v-else-if="activeCategory === 'tool'">
+            <LoadHint :phase="toolPhase" label="工具清单" @retry="refreshTools" />
             <div v-for="g in toolWorkbenchGroups" :key="g.key" class="caps-list-group">
               <div class="caps-list-group__head" @click="toggleGroup('tool:' + g.key)">
                 <span class="caret">{{ isCollapsed('tool:' + g.key) ? '▸' : '▾' }}</span>
@@ -1592,7 +1626,7 @@ watch(
                 </div>
               </template>
             </div>
-            <div v-if="toolWorkbenchGroups.length === 0" class="caps-list-empty">
+            <div v-if="toolWorkbenchGroups.length === 0 && toolPhase === 'idle'" class="caps-list-empty">
               <span class="muted">无匹配工具</span>
               <NeumorphismButton
                 v-if="toolSearch || toolFilter !== 'all'"
@@ -1607,6 +1641,7 @@ watch(
 
           <!-- 插件：工作台分组（门控语义 / kind / 平铺）+ 双行行卡 -->
           <template v-else-if="activeCategory === 'plugin'">
+            <LoadHint :phase="pluginPhase" label="插件清单" @retry="refreshPlugins" />
             <div v-for="g in pluginWorkbenchGroups" :key="g.key" class="caps-list-group">
               <div class="caps-list-group__head" @click="toggleGroup('plugin:' + g.key)">
                 <span class="caret">{{ isCollapsed('plugin:' + g.key) ? '▸' : '▾' }}</span>
@@ -1665,7 +1700,7 @@ watch(
                 </div>
               </template>
             </div>
-            <div v-if="pluginWorkbenchGroups.length === 0" class="caps-list-empty">
+            <div v-if="pluginWorkbenchGroups.length === 0 && pluginPhase === 'idle'" class="caps-list-empty">
               <span class="muted">无匹配插件</span>
               <NeumorphismButton
                 v-if="pluginSearch || pluginFilter !== 'all'"
@@ -1680,6 +1715,7 @@ watch(
 
           <!-- 智能体：平铺列表 -->
           <template v-else>
+            <LoadHint :phase="teamPhase" label="智能体清单" @retry="refreshTeams" />
             <div
               v-for="t in teamList"
               :key="t.id"
@@ -1690,7 +1726,7 @@ watch(
               <span class="caps-list-item__name">{{ t.name }}</span>
               <span v-if="!t.enabled" class="muted caps-list-item__flag">已禁用</span>
             </div>
-            <div v-if="teamList.length === 0" class="muted caps-list-empty">（暂无智能体）</div>
+            <div v-if="teamList.length === 0 && teamPhase === 'idle'" class="muted caps-list-empty">（暂无智能体）</div>
           </template>
         </div>
 

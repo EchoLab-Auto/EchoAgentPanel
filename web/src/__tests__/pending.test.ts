@@ -1,0 +1,165 @@
+//! 请求-响应跟踪（pending.ts）契约：三态推进、防闪烁、销账、覆盖登记。
+//!
+//! 时间线（fake timers）：
+//!   0ms ──(150ms)──▶ pending ──(6s)──▶ slow ──(20s)──▶ timeout
+//! 响应到达即销账；已可见的加载态保证 ≥400ms 最短可见。
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ref } from 'vue';
+import {
+  PENDING_MIN_VISIBLE_MS,
+  PENDING_SLOW_AFTER_MS,
+  PENDING_TIMEOUT_AFTER_MS,
+  PENDING_VISIBLE_AFTER_MS,
+  REQUEST_RESPONSES,
+  commandName,
+  releasePending,
+  resolvePendingEvent,
+  trackRequest,
+  usePending,
+} from '../pending';
+import type { BackendCommand } from '../protocol';
+
+const contextCommand = (): BackendCommand =>
+  ({ RequestContext: { team_id: 't', session_id: 's' } }) as BackendCommand;
+
+describe('pending：阶段推进', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('时间线：150ms 前 idle → pending → 6s slow → 20s timeout', () => {
+    trackRequest('t', contextCommand());
+    const { phase, loading, failed } = usePending('t');
+
+    expect(phase.value).toBe('idle');
+    expect(loading.value).toBe(false);
+
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS - 1);
+    expect(phase.value).toBe('idle');
+
+    vi.advanceTimersByTime(1);
+    expect(phase.value).toBe('pending');
+    expect(loading.value).toBe(true);
+
+    vi.advanceTimersByTime(PENDING_SLOW_AFTER_MS - PENDING_VISIBLE_AFTER_MS);
+    expect(phase.value).toBe('slow');
+    expect(loading.value).toBe(true);
+
+    vi.advanceTimersByTime(PENDING_TIMEOUT_AFTER_MS - PENDING_SLOW_AFTER_MS);
+    expect(phase.value).toBe('timeout');
+    expect(failed.value).toBe(true);
+    expect(loading.value).toBe(false);
+  });
+
+  it('快请求不闪：150ms 内完成 → 全程 idle', () => {
+    trackRequest('t', 'RequestSkillsList');
+    const { phase } = usePending('t');
+    vi.advanceTimersByTime(80);
+    expect(phase.value).toBe('idle');
+
+    resolvePendingEvent({ SkillsList: { skills: [] } });
+    vi.advanceTimersByTime(5_000);
+    expect(phase.value).toBe('idle');
+  });
+
+  it('已可见的加载态：最短 400ms 可见，之后销账', () => {
+    trackRequest('t', contextCommand());
+    const { phase } = usePending('t');
+    vi.advanceTimersByTime(200); // 已可见（visibleAt=150，elapsed=50）
+    expect(phase.value).toBe('pending');
+
+    resolvePendingEvent({ ContextSnapshot: { messages: [], blocks: [], total_tokens: 0, limit_tokens: 0 } });
+    // 最短可见窗口未走完：保持 pending
+    vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS - 50 - 1);
+    expect(phase.value).toBe('pending');
+
+    vi.advanceTimersByTime(1);
+    expect(phase.value).toBe('idle');
+  });
+
+  it('无关事件不销账', () => {
+    trackRequest('t', 'RequestPluginsList');
+    const { phase } = usePending('t');
+    resolvePendingEvent({ Error: { session_id: null, message: 'x' } });
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(phase.value).toBe('pending');
+  });
+
+  it('重复登记（重试）覆盖旧计时：从未可见窗口重新开始', () => {
+    trackRequest('t', contextCommand());
+    const { phase } = usePending('t');
+    vi.advanceTimersByTime(5_000);
+    expect(phase.value).toBe('pending');
+
+    trackRequest('t', contextCommand());
+    expect(phase.value).toBe('idle');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS - 1);
+    expect(phase.value).toBe('idle');
+    vi.advanceTimersByTime(1);
+    expect(phase.value).toBe('pending');
+  });
+
+  it('releasePending：卸载即清理（超时 error 面板随之关闭）', () => {
+    trackRequest('t', contextCommand());
+    const { phase } = usePending('t');
+    vi.advanceTimersByTime(PENDING_TIMEOUT_AFTER_MS);
+    expect(phase.value).toBe('timeout');
+
+    releasePending('t');
+    expect(phase.value).toBe('idle');
+  });
+
+  it('动态 key（getter）：切换后自动追踪新 key 的登记', () => {
+    // getter 内读响应式源（真实场景：QqPanel 的 activeName ref）——
+    // ref 变化使 computed 失效并改追踪新 key。
+    const name = ref('a');
+    const { phase } = usePending(() => `qq:filter:${name.value}`);
+    trackRequest('qq:filter:a', contextCommand());
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(phase.value).toBe('pending');
+
+    // 切到实例 b：b 未登记 → idle；登记后可见。
+    name.value = 'b';
+    expect(phase.value).toBe('idle');
+    trackRequest('qq:filter:b', contextCommand());
+    expect(phase.value).toBe('idle');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(phase.value).toBe('pending');
+  });
+
+  it('多个 key 独立跟踪：一个销账不影响另一个', () => {
+    trackRequest('a', contextCommand());
+    trackRequest('b', 'RequestTeamsList');
+    const a = usePending('a');
+    const b = usePending('b');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+
+    resolvePendingEvent({ ContextSnapshot: { messages: [], blocks: [], total_tokens: 0, limit_tokens: 0 } });
+    vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS);
+    expect(a.phase.value).toBe('idle');
+    expect(b.phase.value).toBe('pending');
+  });
+});
+
+describe('pending：关联表与命令名', () => {
+  it('commandName 支持裸串与对象两种命令形态', () => {
+    expect(commandName('RequestState')).toBe('RequestState');
+    expect(commandName(contextCommand())).toBe('RequestContext');
+  });
+
+  it('关联表覆盖面板的请求类命令（抽查关键项）', () => {
+    // 这些是各视图打开时的数据请求：映射错了加载态就永远等不到销账。
+    expect(REQUEST_RESPONSES.RequestContext).toBe('ContextSnapshot');
+    expect(REQUEST_RESPONSES.RequestTeamsList).toBe('TeamsList');
+    expect(REQUEST_RESPONSES.RequestShellSessions).toBe('ShellSessionsList');
+    expect(REQUEST_RESPONSES.RequestWorkspaceSessions).toBe('WorkspaceSessions');
+    expect(REQUEST_RESPONSES.RequestQqLoginStatus).toBe('QqLoginStatus');
+    // 刻意不收：时间线（状态标志判定）与 RequestState（多事件响应）
+    expect(REQUEST_RESPONSES.RequestTrunkTimeline).toBeUndefined();
+    expect(REQUEST_RESPONSES.RequestState).toBeUndefined();
+  });
+});

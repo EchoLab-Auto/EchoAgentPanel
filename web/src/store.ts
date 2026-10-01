@@ -7,9 +7,12 @@
 import { reactive } from 'vue';
 import { initialState, reduce, type AppState } from './state';
 import type { BackendEvent } from './protocol';
+import { resolvePendingEvent } from './pending';
 
 export const state = reactive(initialState()) as AppState;
 
 export function dispatch(event: BackendEvent): void {
+  // 请求-响应跟踪：响应事件到达即销账（各视图加载态，见 pending.ts）。
+  resolvePendingEvent(event);
   reduce(state, event);
 }

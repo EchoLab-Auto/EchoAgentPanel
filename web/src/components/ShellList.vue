@@ -2,10 +2,12 @@
 //! 后台 Shell 会话列表（右侧边栏「Shell」卡内容）：只保留会话行 + 详情按钮。
 //! 终端内容不在此展示——点「详情」经 `openDetail` 事件打开 Shell 详情卡。
 
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
+import { releasePending, usePending } from '../pending';
+import LoadHint from './LoadHint.vue';
 
 /** 当前 agent（team）：Shell 列表只显示该 agent 的后台会话，
  *  不串显其他 agent（去主智能体：team_id 必填）。 */
@@ -22,12 +24,15 @@ const sessions = computed(() =>
   ),
 );
 
+const { phase: listPhase } = usePending('shell:sessions');
+
 function refresh() {
-  sendCommand({ RequestShellSessions: { team_id: teamKey.value } });
+  sendPending({ RequestShellSessions: { team_id: teamKey.value } }, 'shell:sessions');
 }
 onMounted(refresh);
 // 切换 agent 后重拉（列表归属变化）。
 watch(teamKey, refresh);
+onUnmounted(() => releasePending('shell:sessions'));
 
 </script>
 
@@ -41,7 +46,8 @@ watch(teamKey, refresh);
         刷新
       </NeumorphismButton>
     </div>
-    <div v-if="sessions.length === 0" class="muted shell-list__empty">
+    <LoadHint :phase="listPhase" label="Shell 会话" @retry="refresh" />
+    <div v-if="sessions.length === 0 && listPhase === 'idle'" class="muted shell-list__empty">
       （当前 agent 暂无 shell 会话）
     </div>
     <div v-for="session in sessions" :key="session.session_id" class="shell-row">
