@@ -121,6 +121,26 @@ export interface BranchTab {
 
 export type AgentPhase = 'thinking' | 'tool' | 'subagent' | 'completed' | 'failed';
 
+/** 联邦 peer（`FederationStatus` 列表元素；线格式同 echo-protocol）。 */
+export interface FederationPeerInfo {
+  name: string;
+  url: string;
+  token_set: boolean;
+  allow_tools: string[];
+  allow_subagent: boolean;
+  require_confirm: string[];
+  link: 'Online' | 'Offline';
+}
+
+/** 联邦状态快照。 */
+export interface FederationStatus {
+  enabled: boolean;
+  node_id: string;
+  node_name?: string | null;
+  listen: string;
+  peers: FederationPeerInfo[];
+}
+
 /// QQ 实例管理态的空白初值（多实例面板按实例填充）。
 export function defaultQqInstanceState() {
   return {
@@ -223,9 +243,17 @@ export interface AppState {
    * 「还在加载」与「确实无消息」。
    */
   timelineArrivedOnce: boolean;
-  sessions: SessionInfo[];
+  sessions: (SessionInfo & { core?: string | null })[];
   trunk: DisplayMessage[];
   activities: Record<string, AgentActivity>;
+  /// 联邦状态快照（`FederationStatus` 事件；None = 未加载或联邦关闭）。
+  federation: FederationStatus | null;
+  /// 本机邀请串（`FederationInvite` 响应；一次性展示，离开联邦页清除）。
+  federationInvite: string | null;
+  /// 当前命令去向的上游 Core（多上游聚合视图；null = 单上游/无壳）。
+  activeCore: string | null;
+  /// 已发现的上游名集合（连接层由事件信封登记；Core 切换器展示）。
+  knownCores: Set<string>;
   tasks: OrchActivity[];
   adapters: AdapterStatus[];
   model: string;
@@ -316,6 +344,10 @@ export function initialState(): AppState {
     sessions: [],
     trunk: [],
     activities: {},
+    federation: null,
+    federationInvite: null,
+    activeCore: null,
+    knownCores: new Set(),
     tasks: [],
     adapters: [],
     model: '',
@@ -435,6 +467,39 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { AgentThinking: { session_id: string; team_id?: string | null } }).AgentThinking;
       if (!belongsToActiveTeam(state, e.team_id)) return state;
       activity(state, e.session_id);
+      return state;
+    }
+    case 'ActiveTurnsSnapshot': {
+      // 刷新恢复（2026-10）：运行状态本是瞬时事件流，刷新重连后 Core 在
+      // TrunkTimeline 之后补发本快照。按列表重建 running 集合——本地已有
+      // 但快照中不存在的 activity 置 completed（多为刷新前已结束的残留）。
+      const e = (event as unknown as { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }).ActiveTurnsSnapshot;
+      if (!belongsToActiveTeam(state, e.team_id)) return state;
+      const running = new Set(e.session_ids);
+      for (const [sessionId, act] of Object.entries(state.activities)) {
+        if (running.has(sessionId)) {
+          if (act.phase === 'completed' || act.phase === 'failed') {
+            act.phase = 'thinking';
+            act.detail = null;
+          }
+        } else if (act.phase === 'thinking' || act.phase === 'tool' || act.phase === 'subagent') {
+          act.phase = 'completed';
+          act.detail = null;
+        }
+      }
+      for (const sessionId of e.session_ids) {
+        activity(state, sessionId);
+      }
+      return state;
+    }
+    case 'FederationStatus': {
+      const e = (event as unknown as { FederationStatus: FederationStatus }).FederationStatus;
+      state.federation = e;
+      return state;
+    }
+    case 'FederationInvite': {
+      const e = (event as unknown as { FederationInvite: { invite: string } }).FederationInvite;
+      state.federationInvite = e.invite;
       return state;
     }
     case 'LlmRequest': {
@@ -721,8 +786,12 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // `local:tui::local_user` 等）——按 (team_id, id) 复合键匹配，
       // 否则先到的智能体会话会被后到者覆盖（多会话下导致切换器/侧栏丢项）。
       const teamOf = (session: SessionInfo) => session.team_id ?? null;
+      const coreOf = (session: SessionInfo & { core?: string | null }) => session.core ?? null;
       const index = state.sessions.findIndex(
-        (s) => s.id === e.session.id && teamOf(s) === teamOf(e.session),
+        (s) =>
+          s.id === e.session.id &&
+          teamOf(s) === teamOf(e.session) &&
+          coreOf(s) === coreOf(e.session),
       );
       if (index >= 0) {
         state.sessions[index] = e.session;

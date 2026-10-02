@@ -81,7 +81,7 @@ impl ServerSection {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CoreSection {
-    /// EchoAgentCore management WebSocket 地址。
+    /// EchoAgentCore management WebSocket 地址（单上游形态）。
     pub connect_url: String,
     /// Optional bearer token expected by Core's management WebSocket.
     pub access_token: String,
@@ -96,6 +96,17 @@ impl Default for CoreSection {
     }
 }
 
+/// `[[cores]]` 条目（多上游形态，2026-10 聚合视图）。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct UpstreamSection {
+    /// 上游名（UI 展示 + 帧打标键）。
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub access_token: String,
+}
+
 /// Panel 侧配置：日志、HTTP 服务与 Core 连接。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -103,6 +114,28 @@ pub struct PanelConfig {
     pub logging: LoggingSection,
     pub server: ServerSection,
     pub core: CoreSection,
+    /// 多上游列表（`[[cores]]`）。
+    pub cores: Vec<UpstreamSection>,
+    /// `cores` 键是否在配置中出现过（serde 捕获——区分「未配置」与
+    /// 「显式空数组」：前者兜底 [core]，后者尊重在线管理的清空）。
+    #[serde(skip)]
+    pub cores_touched: bool,
+}
+
+impl PanelConfig {
+    /// 物化上游列表：`cores` 键**出现过**（哪怕空数组——在线管理写
+    /// 过的标记）即用之；否则 `[core]` 单上游物化为一条（名为 "core"）。
+    /// 命令行 `--core` 覆盖在最后应用（main.rs）。
+    pub fn upstreams(&self) -> Vec<UpstreamSection> {
+        if self.cores_touched {
+            return self.cores.clone();
+        }
+        vec![UpstreamSection {
+            name: "core".to_string(),
+            url: self.core.connect_url.clone(),
+            access_token: self.core.access_token.clone(),
+        }]
+    }
 }
 
 impl PanelConfig {
@@ -110,8 +143,11 @@ impl PanelConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read config file {}", path.display()))?;
-        let config: PanelConfig = toml::from_str(&raw)
+        let mut config: PanelConfig = toml::from_str(&raw)
             .with_context(|| format!("invalid config in {}", path.display()))?;
+        // `cores` 键是否出现过（serde 无法自捕获——用原始文本粗判；
+        // TOML 语义上 `[[cores]]` 出现即表头命中）。
+        config.cores_touched = raw.contains("[[cores]]");
         validate_logging_level(&config.logging)?;
         Ok(config)
     }

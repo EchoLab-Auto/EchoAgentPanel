@@ -46,17 +46,56 @@ fn reap_after() -> Duration {
         .unwrap_or(REAP_AFTER)
 }
 
+/// 一个上游 Core（`[[cores]]` 或单上游物化）。
+#[derive(Clone)]
+pub struct Upstream {
+    pub name: Arc<str>,
+    pub url: Arc<str>,
+    pub access_token: Arc<str>,
+}
+
 /// Shared server state handed to handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// Core management WebSocket address (e.g. `ws://127.0.0.1:3132`).
-    pub core_url: Arc<str>,
-    /// Bearer token sent only on the server-to-Core hop.
-    pub core_access_token: Arc<str>,
+    /// 上游注册表（管理面 + 运行时唯一事实来源；中继经它拿初始集合
+    /// 并订阅变更）。
+    pub registry: Arc<crate::upstreams::UpstreamRegistry>,
+    /// 在线上游名集合（中继编排层上报，管理 API 读取）。
+    online: Arc<std::sync::RwLock<std::collections::HashSet<String>>>,
     /// Static frontend directory (built `web/dist`).
     pub static_dir: Arc<str>,
     /// Media library directory: Core 落盘的入站图片（`/media/<id>` 从这里读）。
     pub media_dir: Arc<str>,
+}
+
+impl AppState {
+    pub fn new(
+        registry: Arc<crate::upstreams::UpstreamRegistry>,
+        static_dir: Arc<str>,
+        media_dir: Arc<str>,
+    ) -> Self {
+        Self {
+            registry,
+            online: Arc::new(std::sync::RwLock::new(std::collections::HashSet::new())),
+            static_dir,
+            media_dir,
+        }
+    }
+
+    /// 在线上游快照（管理 API 用）。
+    pub fn online_upstreams(&self) -> std::collections::HashSet<String> {
+        self.online.read().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    fn set_online(&self, name: &str, online: bool) {
+        if let Ok(mut set) = self.online.write() {
+            if online {
+                set.insert(name.to_string());
+            } else {
+                set.remove(name);
+            }
+        }
+    }
 }
 
 /// `GET /ws` — upgrade the browser connection and bridge it to Core.
@@ -64,18 +103,24 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> 
     ws.on_upgrade(move |socket| bridge(socket, state))
 }
 
-async fn bridge(browser: WebSocket, state: AppState) {
-    let core_request = match state.core_url.as_ref().into_client_request() {
+/// 连一个上游；失败返回 None（其他上游不受影响——聚合视图下
+/// 单上游离线不应拖垮整条浏览器链路）。
+async fn connect_upstream(
+    upstream: &Upstream,
+) -> Option<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+> {
+    let core_request = match upstream.url.as_ref().into_client_request() {
         Ok(mut request) => {
-            if !state.core_access_token.is_empty() {
-                let value = format!("Bearer {}", state.core_access_token);
+            if !upstream.access_token.is_empty() {
+                let value = format!("Bearer {}", upstream.access_token);
                 match value.parse() {
                     Ok(value) => {
                         request.headers_mut().insert("authorization", value);
                     }
                     Err(error) => {
                         warn!(%error, "invalid Core access token");
-                        return;
+                        return None;
                     }
                 }
             }
@@ -83,132 +128,315 @@ async fn bridge(browser: WebSocket, state: AppState) {
         }
         Err(error) => {
             warn!(%error, "invalid Core WebSocket URL");
-            return;
+            return None;
         }
     };
-    let (core, _) = match connect_async(core_request).await {
-        Ok(pair) => pair,
+    match connect_async(core_request).await {
+        Ok((core, _)) => Some(core),
         Err(error) => {
             warn!(
-                core = %state.core_url,
+                core = %upstream.url,
                 %error,
-                "cannot connect to Core management WS; browser connection dropped"
+                "cannot connect to Core management WS; upstream skipped"
             );
-            return;
+            None
+        }
+    }
+}
+
+/// 给上游事件帧加壳：`{core: "<上游名>", frame: <原 WsMessage>}`。
+/// 解析只为加壳（serde_json Value 级），不触碰业务载荷。
+fn wrap_event(upstream_name: &str, text: &str) -> Option<String> {
+    let frame: serde_json::Value = serde_json::from_str(text).ok()?;
+    Some(
+        serde_json::json!({
+            "core": upstream_name,
+            "frame": frame,
+        })
+        .to_string(),
+    )
+}
+
+/// 拆浏览器命令帧的壳：`{core: "...", frame: {...}}` → 目标上游名 + 原文；
+/// 无壳（单上游旧前端）→ 广播给全部上游（单上游时即唯一上游）。
+fn unwrap_command(text: &str) -> (Option<String>, String) {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
+        if let (Some(core), Some(frame)) = (v.get("core"), v.get("frame")) {
+            if let Some(name) = core.as_str() {
+                return (Some(name.to_string()), frame.to_string());
+            }
+        }
+    }
+    (None, text.to_string())
+}
+
+/// 一条活跃上游链路的句柄（命令写端 + 任务中止键）。
+struct CoreLink {
+    cmd_tx: tokio::sync::mpsc::Sender<String>,
+    abort: tokio::task::AbortHandle,
+}
+
+async fn bridge(browser: WebSocket, state: AppState) {
+    let (mut browser_tx, mut browser_rx) = browser.split();
+    // 每上游一条「浏览器→Core」转发任务（命令按壳路由/无壳广播）与
+    // 「Core→浏览器」加壳转发任务（汇合进单一 mpsc 出口）。
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<BrowserMessage>(256);
+    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<(Option<String>, String)>(256);
+
+    let reap_after = reap_after();
+    let links: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CoreLink>>> =
+        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
+    // ── 动态上游接入（RelayHub 编排，2026-10）──
+    // spawn_link：连一个上游并注册进 links（读泵 + 写泵两件套）；
+    // 之后订阅注册表变更：Upsert 接入/重连，Removed 摘除。
+    // 加壳开关：注册表上游数 > 1（动态——管理面增删即时生效）。
+    let multi = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let spawn_link = {
+        let links = links.clone();
+        let event_tx = event_tx.clone();
+        let state2 = state.clone();
+        let spawn_multi = multi.clone();
+        move |cfg: crate::upstreams::UpstreamConfig| {
+            let links = links.clone();
+            let event_tx = event_tx.clone();
+            let state = state2.clone();
+            let multi = spawn_multi.clone();
+            tokio::spawn(async move {
+                let upstream = Upstream {
+                    name: Arc::from(cfg.name.as_str()),
+                    url: Arc::from(cfg.url.as_str()),
+                    access_token: Arc::from(cfg.access_token.as_str()),
+                };
+                let Some(core) = connect_upstream(&upstream).await else {
+                    return;
+                };
+                let name = cfg.name.clone();
+                let (mut core_tx, mut core_rx) = core.split();
+                let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<String>(256);
+                let heartbeat_tx = cmd_tx.clone();
+                let writer = tokio::spawn(async move {
+                    while let Some(text) = cmd_rx.recv().await {
+                        // 空字符串 = 心跳占位
+                        if text.is_empty() {
+                            if core_tx
+                                .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                            continue;
+                        }
+                        let frame = tokio_tungstenite::tungstenite::Message::Text(text);
+                        match tokio::time::timeout(SEND_TIMEOUT, core_tx.send(frame)).await {
+                            Ok(Ok(())) => {}
+                            _ => break,
+                        }
+                    }
+                    let _ = core_tx.close().await;
+                });
+                let name2 = name.clone();
+                let reader = tokio::spawn(async move {
+                    let mut last_frame = Instant::now();
+                    let mut hb = tokio::time::interval(heartbeat_interval());
+                    hb.tick().await;
+                    loop {
+                        tokio::select! {
+                            message = core_rx.next() => {
+                                let message = match message {
+                                    Some(Ok(m)) => m,
+                                    _ => break,
+                                };
+                                last_frame = Instant::now();
+                                let forward = match message {
+                                    tokio_tungstenite::tungstenite::Message::Text(text) => {
+                                        let out = if multi.load(std::sync::atomic::Ordering::Relaxed) {
+                                            match wrap_event(&name2, &text) {
+                                                Some(w) => w,
+                                                None => continue, // 非 JSON 帧：丢弃
+                                            }
+                                        } else {
+                                            text.to_string()
+                                        };
+                                        BrowserMessage::Text(out.into())
+                                    }
+                                    tokio_tungstenite::tungstenite::Message::Ping(p) => {
+                                        BrowserMessage::Ping(p.to_vec().into())
+                                    }
+                                    tokio_tungstenite::tungstenite::Message::Pong(p) => {
+                                        BrowserMessage::Pong(p.to_vec().into())
+                                    }
+                                    tokio_tungstenite::tungstenite::Message::Binary(_)
+                                    | tokio_tungstenite::tungstenite::Message::Close(_) => break,
+                                    _ => continue,
+                                };
+                                if event_tx.send(forward).await.is_err() {
+                                    break;
+                                }
+                            }
+                            _ = hb.tick() => {
+                                if last_frame.elapsed() > reap_after {
+                                    warn!(core = %name2, "core side silent, reaping relay link");
+                                    break;
+                                }
+                                let _ = heartbeat_tx.send(String::new()).await;
+                            }
+                        }
+                    }
+                });
+                let abort = reader.abort_handle();
+                let writer_abort = writer.abort_handle();
+                links
+                    .write()
+                    .await
+                    .insert(name.clone(), CoreLink { cmd_tx, abort });
+                state.set_online(&name, true);
+                // 读泵退出 = 链路死亡：清理（写泵一并中止）。
+                let links2 = links.clone();
+                let state3 = state.clone();
+                let name3 = name.clone();
+                tokio::spawn(async move {
+                    let _ = reader.await;
+                    writer_abort.abort();
+                    links2.write().await.remove(&name3);
+                    state3.set_online(&name3, false);
+                });
+            })
         }
     };
-    let (mut browser_tx, mut browser_rx) = browser.split();
-    let (mut core_tx, mut core_rx) = core.split();
 
-    // 心跳保活 + Ping/Pong 透传 + 半死收割：Core 服务端的心跳 Ping 经本中继
-    // 转发给浏览器（浏览器内核自动回 Pong，再经本中继转回 Core）；本中继自身
-    // 也每 30s 向两侧各发一次 Ping，空闲连接不会被中间层（NAT/反代）悄悄
-    // 断开。一侧超过 REAP_AFTER 没有任何帧（含 Pong）即判半死、断开链路。
-    // 注意 tungstenite 在 split 后自动回的 Pong 不保证及时 flush，
-    // 因此显式透传而不是依赖隐式应答。
-    let mut up_heartbeat = tokio::time::interval(heartbeat_interval());
-    up_heartbeat.tick().await; // 首次 tick 立即返回，跳过
-    let mut down_heartbeat = tokio::time::interval(heartbeat_interval());
-    down_heartbeat.tick().await;
-    let reap_after = reap_after();
-    let mut last_browser_frame = Instant::now();
-    let mut last_core_frame = Instant::now();
+    async fn refresh_multi(
+        registry: &Arc<crate::upstreams::UpstreamRegistry>,
+        multi: &Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        multi.store(
+            registry.list().await.len() > 1,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
 
-    // Browser → Core: commands, verbatim.
-    let to_core = async {
+    // 初始上游接入（零上游 = 空转等待——管理面添加后变更泵接入）。
+    for cfg in state.registry.list().await {
+        if !cfg.url.is_empty() {
+            spawn_link(cfg);
+        }
+    }
+    refresh_multi(&state.registry, &multi).await;
+
+    // 注册表变更泵：Upsert →（旧链路摘除后）接入；Removed → 摘除。
+    {
+        let mut events = state.registry.subscribe();
+        let links2 = links.clone();
+        let state2 = state.clone();
+        let multi2 = multi.clone();
+        let spawn_link2 = spawn_link.clone();
+        tokio::spawn(async move {
+            while let Ok(event) = events.recv().await {
+                match event {
+                    crate::upstreams::UpstreamEvent::Upsert(cfg) => {
+                        if let Some(old) = links2.write().await.remove(&cfg.name) {
+                            old.abort.abort();
+                        }
+                        state2.set_online(&cfg.name, false);
+                        if !cfg.url.is_empty() {
+                            spawn_link2(cfg);
+                        }
+                        refresh_multi(&state2.registry, &multi2).await;
+                    }
+                    crate::upstreams::UpstreamEvent::Removed { name } => {
+                        if let Some(old) = links2.write().await.remove(&name) {
+                            old.abort.abort();
+                        }
+                        state2.set_online(&name, false);
+                        refresh_multi(&state2.registry, &multi2).await;
+                    }
+                }
+            }
+        });
+    }
+
+    drop(event_tx);
+
+    // 命令路由泵：浏览器命令 → 目标上游（无壳 = 广播全部在线上游）。
+    // 目标表是动态 links（管理面增删即时生效）。
+    let route_pump = {
+        let links = links.clone();
+        tokio::spawn(async move {
+            while let Some((target, text)) = cmd_rx.recv().await {
+                let links = links.read().await;
+                match target {
+                    Some(name) => {
+                        if let Some(link) = links.get(&name) {
+                            let _ =
+                                tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text)).await;
+                        }
+                    }
+                    None => {
+                        for link in links.values() {
+                            let _ =
+                                tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text.clone()))
+                                    .await;
+                        }
+                    }
+                }
+            }
+        })
+    };
+
+    // 浏览器 → 命令通道（读浏览器帧 → 拆壳 → cmd_tx）+ 浏览器侧心跳
+    // 与半死收割（与原单上游中继同语义：收割阈值内浏览器无任何帧
+    // （含 Pong）即断开整条链路；每 30s 向浏览器发 Ping）。
+    let (browser_ping_tx, mut browser_ping_rx) = tokio::sync::mpsc::channel::<()>(8);
+    let browser_read = tokio::spawn(async move {
+        let mut last_frame = Instant::now();
+        let mut hb = tokio::time::interval(heartbeat_interval());
+        hb.tick().await;
         loop {
             tokio::select! {
                 message = browser_rx.next() => {
                     let message = match message {
-                        Some(Ok(message)) => message,
+                        Some(Ok(m)) => m,
                         _ => break,
                     };
-                    last_browser_frame = Instant::now();
-                    let forward = match message {
+                    last_frame = Instant::now();
+                    match message {
                         BrowserMessage::Text(text) => {
-                            tokio_tungstenite::tungstenite::Message::Text(text.to_string())
+                            let (target, frame) = unwrap_command(&text);
+                            if cmd_tx.send((target, frame)).await.is_err() {
+                                break;
+                            }
                         }
-                        BrowserMessage::Ping(payload) => {
-                            tokio_tungstenite::tungstenite::Message::Ping(payload.to_vec())
-                        }
-                        BrowserMessage::Pong(payload) => {
-                            tokio_tungstenite::tungstenite::Message::Pong(payload.to_vec())
-                        }
-                        // Binary frames are not part of the protocol; drop the link.
+                        BrowserMessage::Ping(_) | BrowserMessage::Pong(_) => {}
                         BrowserMessage::Binary(_) | BrowserMessage::Close(_) => break,
-                    };
-                    // 写超时保护：对端（Core）写阻塞过久 = 该侧已死。
-                    match tokio::time::timeout(SEND_TIMEOUT, core_tx.send(forward)).await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(_)) => break,
-                        Err(_) => {
-                            warn!(
-                                "core write stalled > {SEND_TIMEOUT:?}, dropping relay link"
-                            );
-                            break;
-                        }
                     }
                 }
-                _ = up_heartbeat.tick() => {
-                    if last_browser_frame.elapsed() > reap_after {
-                        warn!("browser side silent > {reap_after:?}, reaping relay link");
+                _ = hb.tick() => {
+                    if last_frame.elapsed() > reap_after {
+                        warn!("browser side silent, reaping relay link");
                         break;
                     }
-                    if core_tx
-                        .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new()))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
+                    // 向浏览器发 Ping（经事件出口统一写端）；出口满/关
+                    // 不判死（事件流可能正忙），下周期重试。
+                    let _ = browser_ping_tx.try_send(());
                 }
             }
         }
-        let _ = core_tx.close().await;
-    };
+        drop(cmd_tx);
+    });
 
-    // Core → Browser: events, verbatim.
-    let to_browser = async {
+    // 事件出口：event_rx + 心跳 Ping → 浏览器（带写超时）。
+    let browser_write = tokio::spawn(async move {
         loop {
             tokio::select! {
-                message = core_rx.next() => {
-                    let message = match message {
-                        Some(Ok(message)) => message,
-                        _ => break,
-                    };
-                    last_core_frame = Instant::now();
-                    let forward = match message {
-                        tokio_tungstenite::tungstenite::Message::Text(text) => {
-                            BrowserMessage::Text(text.to_string().into())
-                        }
-                        tokio_tungstenite::tungstenite::Message::Ping(payload) => {
-                            BrowserMessage::Ping(payload.to_vec().into())
-                        }
-                        tokio_tungstenite::tungstenite::Message::Pong(payload) => {
-                            BrowserMessage::Pong(payload.to_vec().into())
-                        }
-                        tokio_tungstenite::tungstenite::Message::Binary(_)
-                        | tokio_tungstenite::tungstenite::Message::Close(_) => break,
-                        _ => continue,
-                    };
-                    // 写超时保护：浏览器侧读极慢/冻结时不再无限挂起
-                    //（否则中继停止读 Core，对端发送缓冲无界积压）。
-                    match tokio::time::timeout(SEND_TIMEOUT, browser_tx.send(forward)).await {
+                frame = event_rx.recv() => {
+                    let Some(frame) = frame else { break };
+                    match tokio::time::timeout(SEND_TIMEOUT, browser_tx.send(frame)).await {
                         Ok(Ok(())) => {}
-                        Ok(Err(_)) => break,
-                        Err(_) => {
-                            warn!(
-                                "browser write stalled > {SEND_TIMEOUT:?}, dropping relay link"
-                            );
-                            break;
-                        }
+                        _ => break,
                     }
                 }
-                _ = down_heartbeat.tick() => {
-                    if last_core_frame.elapsed() > reap_after {
-                        warn!("core side silent > {reap_after:?}, reaping relay link");
-                        break;
-                    }
+                _ = browser_ping_rx.recv() => {
                     if browser_tx
                         .send(BrowserMessage::Ping(Vec::new().into()))
                         .await
@@ -220,7 +448,17 @@ async fn bridge(browser: WebSocket, state: AppState) {
             }
         }
         let _ = browser_tx.close().await;
-    };
+    });
 
-    tokio::join!(to_core, to_browser);
+    // 任一方向退出即整条链路收尾（显式 abort 其余——spawn 任务在
+    // select! 取消后仍独立运行，不 abort 则 browser_write 挂在
+    // event_rx（链路读泵持有 event_tx）永远不退出）。
+    let route_abort = route_pump.abort_handle();
+    let read_abort = browser_read.abort_handle();
+    let write_abort = browser_write.abort_handle();
+    tokio::select! {
+        _ = route_pump => { read_abort.abort(); write_abort.abort(); }
+        _ = browser_read => { route_abort.abort(); write_abort.abort(); }
+        _ = browser_write => { route_abort.abort(); read_abort.abort(); }
+    }
 }

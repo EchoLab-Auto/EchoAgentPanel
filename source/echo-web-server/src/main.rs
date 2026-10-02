@@ -54,18 +54,56 @@ async fn main() -> Result<()> {
 
     // 媒体目录要在 `cfg.server` 被部分移动前解析（effective_media_dir 借用）。
     let media_dir = cfg.server.effective_media_dir();
+    // 上游列表同样在任何部分移动前物化（见下「上游物化」注释）。
+    let upstream_list = cfg.upstreams();
+    let config_path_for_persist = args.config_path();
+    let cli_core: Option<String> = args.core.clone();
+    let cli_override = cli_core.is_some();
     let bind = args.bind.unwrap_or(cfg.server.bind_address);
-    let core_url = args.core.unwrap_or(cfg.core.connect_url);
     let static_dir = args
         .static_dir
         .unwrap_or_else(|| PathBuf::from(&cfg.server.static_dir));
-
-    let state = proxy::AppState {
-        core_url: Arc::from(core_url.as_str()),
-        core_access_token: Arc::from(cfg.core.access_token.as_str()),
-        static_dir: Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
-        media_dir: Arc::from(media_dir.to_string_lossy().into_owned().as_str()),
+    // 上游注册表（管理面 + 运行时唯一事实来源，2026-10）：命令行
+    // --core 覆盖全部配置（单上游，且**不**写回配置文件——临时覆盖语义）；
+    // 否则 [[cores]]（可空 = 零上游部署，设置页在线添加）；[core] 单上游
+    // 物化为名为 "core" 的一条。
+    let initial: Vec<echo_web_server::upstreams::UpstreamConfig> = match cli_core {
+        Some(url) => vec![echo_web_server::upstreams::UpstreamConfig {
+            name: "core".to_string(),
+            url,
+            access_token: cfg.core.access_token.clone(),
+        }],
+        None => upstream_list
+            .into_iter()
+            .map(|u| echo_web_server::upstreams::UpstreamConfig {
+                name: u.name,
+                url: u.url,
+                access_token: u.access_token,
+            })
+            .collect(),
     };
+    let upstream_desc = if initial.is_empty() {
+        "(none — 在设置·Core 连接中添加)".to_string()
+    } else {
+        initial
+            .iter()
+            .map(|u| format!("{}={}", u.name, u.url))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    // 命令行 --core 为临时覆盖：不写回配置（persist = None）。
+    let persist_path = if cli_override {
+        None
+    } else {
+        Some(config_path_for_persist)
+    };
+    let registry = echo_web_server::upstreams::UpstreamRegistry::new(initial, persist_path);
+
+    let state = proxy::AppState::new(
+        registry,
+        Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
+        Arc::from(media_dir.to_string_lossy().into_owned().as_str()),
+    );
 
     let app = Router::new()
         .route("/ws", get(proxy::ws_handler))
@@ -77,13 +115,14 @@ async fn main() -> Result<()> {
         // 无 /api/qq/* 路由。
         .route("/api/logs/panel", get(log::panel_logs))
         .route("/api/logs/core", get(log::core_logs))
+        .merge(echo_web_server::upstreams_api::routes())
         .fallback(echo_web_server::static_files::static_handler)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
         .unwrap_or_else(|error| panic!("cannot bind {bind}: {error}"));
-    info!(%bind, %core_url, static_dir = %static_dir.display(), "EchoAgentPanel web server listening");
+    info!(%bind, upstreams = %upstream_desc, static_dir = %static_dir.display(), "EchoAgentPanel web server listening");
     axum::serve(listener, app).await?;
     Ok(())
 }

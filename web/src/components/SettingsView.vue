@@ -47,13 +47,15 @@ import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
 import { MarkdownRenderer } from '@echolab-auto/ui-frame/doc';
 import ApiSettings from './ApiSettings.vue';
 import LogView from './LogView.vue';
+import FederationSettings from './FederationSettings.vue';
+import UpstreamsSettings from './UpstreamsSettings.vue';
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
 const TOOL_OTHER = '扩展工具';
 
 // ── 一级菜单：当前分类 ──
-type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'logs';
+type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'cores' | 'federation' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
 
 // ── 列表加载跟踪（pending.ts）：四类清单各自的加载/慢/超时三态 ──
@@ -80,6 +82,8 @@ const categories = computed(() => [
   { key: 'tool' as const, label: '工具', count: (toolLoading.value ? null : state.tools.length) as number | null },
   { key: 'plugin' as const, label: '插件', count: (pluginLoading.value ? null : state.plugins.length) as number | null },
   { key: 'team' as const, label: '智能体', count: (teamLoading.value ? null : state.teams.length) as number | null },
+  { key: 'cores' as const, label: 'Core 连接', count: null as number | null },
+  { key: 'federation' as const, label: '联邦', count: (state.federation?.peers.length ?? null) as number | null },
   { key: 'logs' as const, label: '日志', count: null as number | null },
 ]);
 const currentCategory = computed(
@@ -89,6 +93,8 @@ const disabledCount = computed(() => {
   switch (activeCategory.value) {
     case 'api':
     case 'logs':
+    case 'cores':
+    case 'federation':
       return 0;
     case 'skill':
       return state.skills.filter((s) => !s.enabled).length;
@@ -868,6 +874,8 @@ const EMPTY_HINT: Record<CategoryKey, string> = {
   tool: '在左侧列表选择工具，查看参数 Schema 与启停',
   plugin: '在左侧列表选择插件查看详情与启停',
   team: '在左侧列表选择智能体进行配置；或点右上角「新建智能体」',
+  cores: '',
+  federation: '',
   logs: '',
 };
 const showEmpty = computed(() => {
@@ -1493,6 +1501,20 @@ watch(
       <div v-if="activeCategory === 'api'" class="caps-workspace">
         <div class="caps-detail-pane">
           <ApiSettings />
+        </div>
+      </div>
+
+      <!-- Core 连接工作区：上游管理（多上游聚合视图） -->
+      <div v-else-if="activeCategory === 'cores'" class="caps-workspace">
+        <div class="caps-detail-pane">
+          <UpstreamsSettings />
+        </div>
+      </div>
+
+      <!-- 联邦工作区：整页设置（peers 管理 + 邀请串配对） -->
+      <div v-else-if="activeCategory === 'federation'" class="caps-workspace">
+        <div class="caps-detail-pane">
+          <FederationSettings />
         </div>
       </div>
 

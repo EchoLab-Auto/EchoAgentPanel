@@ -12,12 +12,20 @@ use echo_web_server::static_files::static_handler;
 async fn spawn_panel(static_dir: String) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let app = Router::new().fallback(static_handler).with_state(AppState {
-        core_url: "ws://127.0.0.1:1".into(),
-        core_access_token: "".into(),
-        static_dir: static_dir.into(),
-        media_dir: "/nonexistent".into(),
-    });
+    let app = Router::new()
+        .fallback(static_handler)
+        .with_state(AppState::new(
+            echo_web_server::upstreams::UpstreamRegistry::new(
+                vec![echo_web_server::upstreams::UpstreamConfig {
+                    name: "core".to_string(),
+                    url: "ws://127.0.0.1:1".to_string(),
+                    access_token: String::new(),
+                }],
+                None,
+            ),
+            static_dir.into(),
+            "/nonexistent".into(),
+        ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });

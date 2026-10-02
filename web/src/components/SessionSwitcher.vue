@@ -90,8 +90,15 @@ const globalVisible = computed(() => {
   return loopModeOf(team) === 'parallel';
 });
 
-function pick(session: SessionInfo) {
+function pick(session: SessionInfo & { core?: string | null }) {
+  // 聚合视图：选择他 Core 的会话时同步切换命令去向（发送目标上游）。
+  if (session.core) state.activeCore = session.core;
   emit('select', session.id);
+}
+
+/** 会话来源 Core（多上游聚合视图；null = 单上游不显示徽标）。 */
+function coreBadge(session: SessionInfo & { core?: string | null }): string | null {
+  return state.knownCores.size > 0 && session.core ? session.core : null;
 }
 
 function pickGlobal() {
@@ -132,6 +139,7 @@ function pickGlobal() {
       >
         <span class="sw-tag" :class="`tag-${sessionTag(session).tagKey}`">{{ sessionTag(session).tag }}</span>
         <span class="sw-label">{{ sessionTag(session).label }}</span>
+        <span v-if="coreBadge(session)" class="sw-core">{{ coreBadge(session) }}</span>
         <span v-if="isBusy(session)" class="sw-busy">●</span>
       </button>
     </div>
@@ -139,6 +147,15 @@ function pickGlobal() {
 </template>
 
 <style scoped>
+.sw-core {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--nf-bg-inset, #0002);
+  color: var(--nf-text-secondary, #888);
+  flex-shrink: 0;
+}
+
 .session-switcher {
   display: flex;
   flex-direction: column;

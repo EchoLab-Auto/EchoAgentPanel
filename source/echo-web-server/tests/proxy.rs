@@ -43,12 +43,18 @@ async fn spawn_panel(core_url: String) -> String {
     let address = listener.local_addr().unwrap();
     let app = Router::new()
         .route("/ws", get(ws_handler))
-        .with_state(AppState {
-            core_url: core_url.into(),
-            core_access_token: "".into(),
-            static_dir: "/nonexistent".into(),
-            media_dir: "/nonexistent-media".into(),
-        });
+        .with_state(AppState::new(
+            echo_web_server::upstreams::UpstreamRegistry::new(
+                vec![echo_web_server::upstreams::UpstreamConfig {
+                    name: "core".to_string(),
+                    url: core_url.to_string(),
+                    access_token: String::new(),
+                }],
+                None,
+            ),
+            "/nonexistent".into(),
+            "/nonexistent-media".into(),
+        ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });

@@ -112,8 +112,14 @@ export function startConnection(): void {
 
     ws.onmessage = (message) => {
       lastFrameAt = Date.now();
-      const event = parseEvent(String(message.data));
-      if (event) dispatch(event);
+      // 多上游信封（聚合视图，2026-10）：`{core: "<上游名>", frame: <WsMessage>}`。
+      // 单上游时中继不加壳，parseEvent 直接命中。
+      const { core, event } = parseFrame(String(message.data));
+      if (event) {
+        state.activeCore = core ?? state.activeCore;
+        if (core) state.knownCores.add(core);
+        dispatch(event, core);
+      }
     };
 
     ws.onclose = () => {
@@ -179,15 +185,32 @@ export function sendPending(command: BackendCommand, key: string): void {
   sendCommand(command);
 }
 
-export function sendCommand(command: BackendCommand): void {
+/** 解一帧下行消息：多上游信封拆壳（core 名 + 内层事件），无壳 = 单上游。 */
+function parseFrame(text: string): { core: string | null; event: ReturnType<typeof parseEvent> } {
+  try {
+    const parsed = JSON.parse(text) as { core?: unknown; frame?: unknown };
+    if (parsed && typeof parsed.core === 'string' && parsed.frame) {
+      return { core: parsed.core, event: parseEvent(JSON.stringify(parsed.frame)) };
+    }
+  } catch {
+    // 非信封：按单上游原格式解析
+  }
+  return { core: null, event: parseEvent(text) };
+}
+
+export function sendCommand(command: BackendCommand, targetCore?: string): void {
+  const core = targetCore ?? state.activeCore;
+  const payload = core
+    ? JSON.stringify({ core, frame: { type: 'command', payload: command } })
+    : serializeCommand(command);
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(serializeCommand(command));
+    socket.send(payload);
     return;
   }
   if (socket && socket.readyState === WebSocket.CONNECTING) {
     // 握手期（页面刚加载/重连窗口）：静默排队，连接建立后补发。
     if (pendingCommands.length < PENDING_LIMIT) {
-      pendingCommands.push(serializeCommand(command));
+      pendingCommands.push(payload);
     }
     return;
   }

@@ -14,12 +14,18 @@ async fn spawn_panel(media_dir: String) -> String {
     let address = listener.local_addr().unwrap();
     let app = Router::new()
         .route("/media/{name}", get(media_handler))
-        .with_state(AppState {
-            core_url: "ws://127.0.0.1:1".into(),
-            core_access_token: "".into(),
-            static_dir: "/nonexistent".into(),
-            media_dir: media_dir.into(),
-        });
+        .with_state(AppState::new(
+            echo_web_server::upstreams::UpstreamRegistry::new(
+                vec![echo_web_server::upstreams::UpstreamConfig {
+                    name: "core".to_string(),
+                    url: "ws://127.0.0.1:1".to_string(),
+                    access_token: String::new(),
+                }],
+                None,
+            ),
+            "/nonexistent".into(),
+            media_dir.into(),
+        ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });

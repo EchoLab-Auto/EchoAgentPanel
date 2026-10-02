@@ -8,11 +8,19 @@ import { reactive } from 'vue';
 import { initialState, reduce, type AppState } from './state';
 import type { BackendEvent } from './protocol';
 import { resolvePendingEvent } from './pending';
+import type { SessionInfo } from './protocol';
 
 export const state = reactive(initialState()) as AppState;
 
-export function dispatch(event: BackendEvent): void {
+export function dispatch(event: BackendEvent, core: string | null = null): void {
   // 请求-响应跟踪：响应事件到达即销账（各视图加载态，见 pending.ts）。
   resolvePendingEvent(event);
+  // 多上游聚合视图：会话事件注入来源 core（复合键第三维度，防止
+  // A/B 两 Core 上同名会话（如各自的 local:tui）互相覆盖）。
+  if (core && 'SessionUpdated' in (event as object)) {
+    const e = (event as { SessionUpdated: { session: SessionInfo & { core?: string | null } } })
+      .SessionUpdated;
+    e.session.core = core;
+  }
   reduce(state, event);
 }
