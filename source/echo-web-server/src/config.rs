@@ -145,9 +145,13 @@ impl PanelConfig {
             .with_context(|| format!("failed to read config file {}", path.display()))?;
         let mut config: PanelConfig = toml::from_str(&raw)
             .with_context(|| format!("invalid config in {}", path.display()))?;
-        // `cores` 键是否出现过（serde 无法自捕获——用原始文本粗判；
-        // TOML 语义上 `[[cores]]` 出现即表头命中）。
-        config.cores_touched = raw.contains("[[cores]]");
+        // `cores` 键是否出现过（serde 无法自捕获——逐行判非注释表头；
+        // 纯文本 contains 会被注释掉的示例 `# [[cores]]` 误命中，导致
+        // [core] 兜底静默失效）。
+        config.cores_touched = raw.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("[[cores]]")
+        });
         validate_logging_level(&config.logging)?;
         Ok(config)
     }
@@ -169,6 +173,45 @@ fn validate_logging_level(logging: &LoggingSection) -> Result<()> {
         anyhow::bail!("[logging] max_files must be greater than zero");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod cores_touched_tests {
+    use super::PanelConfig;
+
+    /// 注释掉的 `# [[cores]]` 示例不得触发 cores_touched（否则 [core]
+    /// 兜底静默失效——种子配置即含注释示例）。
+    #[test]
+    fn commented_cores_header_does_not_touch() {
+        let dir = std::env::temp_dir().join(format!("echo-cfg-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("panel.toml");
+        std::fs::write(
+            &path,
+            "[core]\nconnect_url = \"ws://x:1\"\n# [[cores]]\n# name = \"a\"\n",
+        )
+        .unwrap();
+        let cfg = PanelConfig::load(&path).unwrap();
+        assert!(!cfg.cores_touched);
+        assert_eq!(cfg.upstreams()[0].url, "ws://x:1");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn explicit_empty_cores_is_touched() {
+        let dir = std::env::temp_dir().join(format!("echo-cfg-test2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("panel.toml");
+        std::fs::write(
+            &path,
+            "[core]\nconnect_url = \"ws://x:1\"\n[[cores]]\nname=\"a\"\nurl=\"ws://y:2\"\n",
+        )
+        .unwrap();
+        let cfg = PanelConfig::load(&path).unwrap();
+        assert!(cfg.cores_touched);
+        assert_eq!(cfg.upstreams()[0].url, "ws://y:2");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 #[cfg(test)]

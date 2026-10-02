@@ -1,4 +1,4 @@
-//! EchoAgentPanel — Web 面板（React 前端 + Rust 后端）。
+//! EchoAgentPanel — Web 面板（Vue 3 前端 + Rust 后端）。
 //!
 //! 后端是一个 axum HTTP/WS 服务：托管构建后的前端静态文件，并把浏览器的
 //! WebSocket 中继到 EchoAgentCore 的 management WS（`ws://127.0.0.1:3132`）。
