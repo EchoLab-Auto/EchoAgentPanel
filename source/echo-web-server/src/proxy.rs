@@ -159,6 +159,26 @@ fn wrap_event(upstream_name: &str, text: &str) -> Option<String> {
 
 /// 拆浏览器命令帧的壳：`{core: "...", frame: {...}}` → 目标上游名 + 原文；
 /// 无壳（单上游旧前端）→ 广播给全部上游（单上游时即唯一上游）。
+/// 无壳命令（未选中会话/上游）仅允许只读白名单广播；写/删除类必须
+/// 显式指定目标 core——否则一次点击扇出到全部上游（批量清历史）。
+fn is_readonly_command(type_str: &str) -> bool {
+    matches!(
+        type_str,
+        "RequestTeamsList"
+            | "RequestAdapterList"
+            | "RequestState"
+            | "RequestConfig"
+            | "RequestWorkspaces"
+            | "RequestSessions"
+            | "RequestTrunkTimeline"
+            | "RequestActiveTurns"
+            | "RequestFederationStatus"
+            | "RequestFederationInvite"
+            | "RequestNodeStatus"
+            | "Ping"
+    )
+}
+
 fn unwrap_command(text: &str) -> (Option<String>, String) {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
         if let (Some(core), Some(frame)) = (v.get("core"), v.get("frame")) {
@@ -192,118 +212,134 @@ async fn bridge(browser: WebSocket, state: AppState) {
     // 之后订阅注册表变更：Upsert 接入/重连，Removed 摘除。
     // 加壳开关：注册表上游数 > 1（动态——管理面增删即时生效）。
     let multi = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let spawn_link = {
+    let spawn_link: std::sync::Arc<dyn Fn(crate::upstreams::UpstreamConfig) + Send + Sync> = {
         let links = links.clone();
         let event_tx = event_tx.clone();
         let state2 = state.clone();
         let spawn_multi = multi.clone();
-        move |cfg: crate::upstreams::UpstreamConfig| {
+        std::sync::Arc::new(move |cfg: crate::upstreams::UpstreamConfig| {
             let links = links.clone();
             let event_tx = event_tx.clone();
             let state = state2.clone();
             let multi = spawn_multi.clone();
-            tokio::spawn(async move {
+            let _handle = tokio::spawn(async move {
                 let upstream = Upstream {
                     name: Arc::from(cfg.name.as_str()),
                     url: Arc::from(cfg.url.as_str()),
                     access_token: Arc::from(cfg.access_token.as_str()),
                 };
-                let Some(core) = connect_upstream(&upstream).await else {
-                    return;
-                };
                 let name = cfg.name.clone();
-                let (mut core_tx, mut core_rx) = core.split();
-                let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<String>(256);
-                let heartbeat_tx = cmd_tx.clone();
-                let writer = tokio::spawn(async move {
-                    while let Some(text) = cmd_rx.recv().await {
-                        // 空字符串 = 心跳占位
-                        if text.is_empty() {
-                            if core_tx
-                                .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new()))
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                            continue;
-                        }
-                        let frame = tokio_tungstenite::tungstenite::Message::Text(text);
-                        match tokio::time::timeout(SEND_TIMEOUT, core_tx.send(frame)).await {
-                            Ok(Ok(())) => {}
-                            _ => break,
-                        }
-                    }
-                    let _ = core_tx.close().await;
-                });
-                let name2 = name.clone();
-                let reader = tokio::spawn(async move {
-                    let mut last_frame = Instant::now();
-                    let mut hb = tokio::time::interval(heartbeat_interval());
-                    hb.tick().await;
-                    loop {
-                        tokio::select! {
-                            message = core_rx.next() => {
-                                let message = match message {
-                                    Some(Ok(m)) => m,
-                                    _ => break,
-                                };
-                                last_frame = Instant::now();
-                                let forward = match message {
-                                    tokio_tungstenite::tungstenite::Message::Text(text) => {
-                                        let out = if multi.load(std::sync::atomic::Ordering::Relaxed) {
-                                            match wrap_event(&name2, &text) {
-                                                Some(w) => w,
-                                                None => continue, // 非 JSON 帧：丢弃
-                                            }
-                                        } else {
-                                            text.to_string()
-                                        };
-                                        BrowserMessage::Text(out.into())
-                                    }
-                                    tokio_tungstenite::tungstenite::Message::Ping(p) => {
-                                        BrowserMessage::Ping(p.to_vec().into())
-                                    }
-                                    tokio_tungstenite::tungstenite::Message::Pong(p) => {
-                                        BrowserMessage::Pong(p.to_vec().into())
-                                    }
-                                    tokio_tungstenite::tungstenite::Message::Binary(_)
-                                    | tokio_tungstenite::tungstenite::Message::Close(_) => break,
-                                    _ => continue,
-                                };
-                                if event_tx.send(forward).await.is_err() {
+                // 断连重连循环：Core 重启/闪断后退避重试（1s→30s），不再
+                // 一断即永久离线。浏览器断开（event_tx 关闭）即停止。
+                let mut backoff = std::time::Duration::from_secs(1);
+                loop {
+                    let Some(core) = connect_upstream(&upstream).await else {
+                        state.set_online(&name, false);
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                        continue;
+                    };
+                    backoff = std::time::Duration::from_secs(1);
+                    state.set_online(&name, true);
+                    // 每轮克隆句柄——reader/心跳任务 move 走本轮副本，
+                    // 下轮重连仍可用。
+                    let event_tx = event_tx.clone();
+                    let multi = multi.clone();
+                    let (mut core_tx, mut core_rx) = core.split();
+                    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<String>(256);
+                    let heartbeat_tx = cmd_tx.clone();
+                    let writer = tokio::spawn(async move {
+                        while let Some(text) = cmd_rx.recv().await {
+                            // 空字符串 = 心跳占位
+                            if text.is_empty() {
+                                if core_tx
+                                    .send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new()))
+                                    .await
+                                    .is_err()
+                                {
                                     break;
                                 }
+                                continue;
                             }
-                            _ = hb.tick() => {
-                                if last_frame.elapsed() > reap_after {
-                                    warn!(core = %name2, "core side silent, reaping relay link");
-                                    break;
-                                }
-                                let _ = heartbeat_tx.send(String::new()).await;
+                            let frame = tokio_tungstenite::tungstenite::Message::Text(text);
+                            match tokio::time::timeout(SEND_TIMEOUT, core_tx.send(frame)).await {
+                                Ok(Ok(())) => {}
+                                _ => break,
                             }
                         }
-                    }
-                });
-                let abort = reader.abort_handle();
-                let writer_abort = writer.abort_handle();
-                links
-                    .write()
-                    .await
-                    .insert(name.clone(), CoreLink { cmd_tx, abort });
-                state.set_online(&name, true);
-                // 读泵退出 = 链路死亡：清理（写泵一并中止）。
-                let links2 = links.clone();
-                let state3 = state.clone();
-                let name3 = name.clone();
-                tokio::spawn(async move {
-                    let _ = reader.await;
-                    writer_abort.abort();
-                    links2.write().await.remove(&name3);
-                    state3.set_online(&name3, false);
-                });
-            })
-        }
+                        let _ = core_tx.close().await;
+                    });
+                    let name2 = name.clone();
+                    let reader = tokio::spawn(async move {
+                        let mut last_frame = Instant::now();
+                        let mut hb = tokio::time::interval(heartbeat_interval());
+                        hb.tick().await;
+                        loop {
+                            tokio::select! {
+                                message = core_rx.next() => {
+                                    let message = match message {
+                                        Some(Ok(m)) => m,
+                                        _ => break,
+                                    };
+                                    last_frame = Instant::now();
+                                    let forward = match message {
+                                        tokio_tungstenite::tungstenite::Message::Text(text) => {
+                                            let out = if multi.load(std::sync::atomic::Ordering::Relaxed) {
+                                                match wrap_event(&name2, &text) {
+                                                    Some(w) => w,
+                                                    None => continue, // 非 JSON 帧：丢弃
+                                                }
+                                            } else {
+                                                text.to_string()
+                                            };
+                                            BrowserMessage::Text(out.into())
+                                        }
+                                        tokio_tungstenite::tungstenite::Message::Ping(p) => {
+                                            BrowserMessage::Ping(p.to_vec().into())
+                                        }
+                                        tokio_tungstenite::tungstenite::Message::Pong(p) => {
+                                            BrowserMessage::Pong(p.to_vec().into())
+                                        }
+                                        tokio_tungstenite::tungstenite::Message::Binary(_)
+                                        | tokio_tungstenite::tungstenite::Message::Close(_) => break,
+                                        _ => continue,
+                                    };
+                                    if event_tx.send(forward).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                _ = hb.tick() => {
+                                    if last_frame.elapsed() > reap_after {
+                                        warn!(core = %name2, "core side silent, reaping relay link");
+                                        break;
+                                    }
+                                    let _ = heartbeat_tx.send(String::new()).await;
+                                }
+                            }
+                        }
+                    });
+                    let abort = reader.abort_handle();
+                    let writer_abort = writer.abort_handle();
+                    links
+                        .write()
+                        .await
+                        .insert(name.clone(), CoreLink { cmd_tx, abort });
+                    state.set_online(&name, true);
+                    // 读泵退出 = 链路死亡：清理（写泵一并中止）。
+                    let links2 = links.clone();
+                    let state3 = state.clone();
+                    let name3 = name.clone();
+                    tokio::spawn(async move {
+                        let _ = reader.await;
+                        writer_abort.abort();
+                        links2.write().await.remove(&name3);
+                        state3.set_online(&name3, false);
+                    });
+                    // 读泵退出后等待其完成（短暂），再回到 loop 顶部退避重连。
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            });
+        })
     };
 
     async fn refresh_multi(
@@ -373,10 +409,32 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         }
                     }
                     None => {
-                        for link in links.values() {
-                            let _ =
-                                tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text.clone()))
-                                    .await;
+                        // 无目标：只读白名单广播；写/删除类拒绝
+                        // （避免一次点击扇出到全部上游——批量清历史）。
+                        let readonly = serde_json::from_str::<serde_json::Value>(&text)
+                            .ok()
+                            .and_then(|v| {
+                                v.get("payload")
+                                    .and_then(|p| p.get("type"))
+                                    .and_then(|t| t.as_str())
+                                    .map(str::to_owned)
+                                    .or_else(|| {
+                                        v.get("type").and_then(|t| t.as_str()).map(str::to_owned)
+                                    })
+                            })
+                            .is_some_and(|t| is_readonly_command(&t));
+                        if readonly {
+                            for link in links.values() {
+                                let _ = tokio::time::timeout(
+                                    SEND_TIMEOUT,
+                                    link.cmd_tx.send(text.clone()),
+                                )
+                                .await;
+                            }
+                        } else {
+                            warn!(
+                                "rejected untargeted non-readonly command (no active core selected)"
+                            );
                         }
                     }
                 }

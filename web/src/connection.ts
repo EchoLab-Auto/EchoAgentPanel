@@ -116,8 +116,10 @@ export function startConnection(): void {
       // 单上游时中继不加壳，parseEvent 直接命中。
       const { core, event } = parseFrame(String(message.data));
       if (event) {
-        state.activeCore = core ?? state.activeCore;
+        // 注意：activeCore 只由用户显式选择驱动（选会话/选上游），
+        // 绝不能随事件流漂移——否则破坏性命令会打错目标 core。
         if (core) state.knownCores.add(core);
+        if (!state.activeCore && core) state.activeCore = core;
         dispatch(event, core);
       }
     };

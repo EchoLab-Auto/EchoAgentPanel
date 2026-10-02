@@ -136,12 +136,22 @@ impl UpstreamRegistry {
     }
 }
 
-/// 整树写回：读 → 替换 `cores` 数组 → tmp+rename。配置缺失时从空树起步。
+/// 整树写回：读 → 替换 `cores` 数组 → tmp+rename。
+/// 读不到/解析失败时**绝不从空树起步覆写**——那会静默抹掉
+/// [server]/[core]/[logging] 等其他段。宁可本次持久化失败（内存态
+/// 仍生效），把决定权留给下一次变更/人工介入。仅"文件不存在"才允许
+/// 从空树起步（首次持久化场景）。
 fn persist_to_file(path: &Path, upstreams: &[UpstreamConfig]) -> Result<(), String> {
-    let mut root: toml::Table = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| toml::from_str(&text).ok())
-        .unwrap_or_default();
+    let mut root: toml::Table = match std::fs::read_to_string(path) {
+        Ok(text) => toml::from_str(&text).map_err(|e| {
+            format!(
+                "parse {} for persist (refusing to clobber): {e}",
+                path.display()
+            )
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
+        Err(e) => return Err(format!("read {} for persist: {e}", path.display())),
+    };
     let array = toml::Value::Array(
         upstreams
             .iter()
