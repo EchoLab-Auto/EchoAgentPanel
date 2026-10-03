@@ -73,14 +73,29 @@ async fn main() -> Result<()> {
             url,
             access_token: cfg.core.access_token.clone(),
         }],
-        None => upstream_list
-            .into_iter()
-            .map(|u| echo_web_server::upstreams::UpstreamConfig {
-                name: u.name,
-                url: u.url,
-                access_token: u.access_token,
-            })
-            .collect(),
+        None => {
+            // 启动物化校验：空名/非法名拒绝、重名去重（保留首条）——
+            // 重名上游会让 links 表互相覆盖、清理任务误删活者表项。
+            let mut seen = std::collections::HashSet::new();
+            upstream_list
+                .into_iter()
+                .filter_map(|u| {
+                    if u.name.is_empty() || u.name.chars().any(|c| c.is_whitespace() || c == ':') {
+                        warn!(name = %u.name, "invalid upstream name in config, skipped");
+                        return None;
+                    }
+                    if !seen.insert(u.name.clone()) {
+                        warn!(name = %u.name, "duplicate upstream name in config, kept first");
+                        return None;
+                    }
+                    Some(echo_web_server::upstreams::UpstreamConfig {
+                        name: u.name,
+                        url: u.url,
+                        access_token: u.access_token,
+                    })
+                })
+                .collect()
+        }
     };
     let upstream_desc = if initial.is_empty() {
         "(none — 在设置·Core 连接中添加)".to_string()

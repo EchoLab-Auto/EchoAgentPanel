@@ -369,12 +369,16 @@ async fn bridge(browser: WebSocket, state: AppState) {
         })
     };
 
+    /// 加壳开关按**在线链路数**（而非注册表条数）：两条配置一条
+    /// 离线时，唯一在线上游的帧不再无谓加壳（语义对齐"聚合视图"）。
     async fn refresh_multi(
         registry: &Arc<crate::upstreams::UpstreamRegistry>,
         multi: &Arc<std::sync::atomic::AtomicBool>,
+        links: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, CoreLink>>>,
     ) {
+        let _ = registry; // 注册表保留参数位（后续可按需混合判定）
         multi.store(
-            registry.list().await.len() > 1,
+            links.read().await.len() > 1,
             std::sync::atomic::Ordering::Relaxed,
         );
     }
@@ -385,7 +389,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
             spawn_link(cfg);
         }
     }
-    refresh_multi(&state.registry, &multi).await;
+    refresh_multi(&state.registry, &multi, &links).await;
 
     // 注册表变更泵：Upsert →（旧链路摘除后）接入；Removed → 摘除。
     {
@@ -395,7 +399,28 @@ async fn bridge(browser: WebSocket, state: AppState) {
         let multi2 = multi.clone();
         let spawn_link2 = spawn_link.clone();
         tokio::spawn(async move {
-            while let Ok(event) = events.recv().await {
+            loop {
+                // Lagged（广播溢出）不退出——继续收最新事件（链路表以
+                // 注册表当前态为准，丢中间变更可接受；泵死了才是
+                // links 与注册表永久分叉）。
+                let event = match events.recv().await {
+                    Ok(e) => e,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("upstream event pump lagged {n}, resyncing links");
+                        // 以注册表当前态重放 Upsert（幂等接入/重连）。
+                        for cfg in state2.registry.list().await {
+                            if links2.read().await.contains_key(&cfg.name) {
+                                continue;
+                            }
+                            if !cfg.url.is_empty() {
+                                spawn_link2(cfg);
+                            }
+                        }
+                        refresh_multi(&state2.registry, &multi2, &links2).await;
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
                 match event {
                     crate::upstreams::UpstreamEvent::Upsert(cfg) => {
                         if let Some(old) = links2.write().await.remove(&cfg.name) {
@@ -405,14 +430,14 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         if !cfg.url.is_empty() {
                             spawn_link2(cfg);
                         }
-                        refresh_multi(&state2.registry, &multi2).await;
+                        refresh_multi(&state2.registry, &multi2, &links2).await;
                     }
                     crate::upstreams::UpstreamEvent::Removed { name } => {
                         if let Some(old) = links2.write().await.remove(&name) {
                             old.abort.abort();
                         }
                         state2.set_online(&name, false);
-                        refresh_multi(&state2.registry, &multi2).await;
+                        refresh_multi(&state2.registry, &multi2, &links2).await;
                     }
                 }
             }

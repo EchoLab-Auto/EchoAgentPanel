@@ -476,13 +476,26 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as unknown as { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }).ActiveTurnsSnapshot;
       if (!belongsToActiveTeam(state, e.team_id)) return state;
       const running = new Set(e.session_ids);
+      // 快照范围：有 team_id 时只覆盖该 team 会话的 activity（其他
+      // team/core 正在运行的活动不能被误杀——此前全局 entries 清扫把
+      // 不在本快照里的全部置 completed）。
+      const scopedIds = e.team_id
+        ? new Set(
+            state.sessions
+              .filter(s => (s.team_id ?? null) === (e.team_id ?? null))
+              .map(s => s.id),
+          )
+        : null;
       for (const [sessionId, act] of Object.entries(state.activities)) {
         if (running.has(sessionId)) {
           if (act.phase === 'completed' || act.phase === 'failed') {
             act.phase = 'thinking';
             act.detail = null;
           }
-        } else if (act.phase === 'thinking' || act.phase === 'tool' || act.phase === 'subagent') {
+        } else if (
+          (act.phase === 'thinking' || act.phase === 'tool' || act.phase === 'subagent') &&
+          (scopedIds === null || scopedIds.has(sessionId))
+        ) {
           act.phase = 'completed';
           act.detail = null;
         }
@@ -1150,6 +1163,19 @@ export function cancelSessionWork(state: AppState, sessionId: string) {
       }
     }
   }
+}
+
+/** 上游删除的会话清理（2026-10 🟡 修复）：该 core 名下的会话、
+ * 活动、选中态一并移除——此前侧栏残留死会话且不会自行消失。 */
+export function removeSessionsOfCore(state: AppState, core: string): void {
+  const removed = state.sessions.filter(s => (s as { core?: string | null }).core === core);
+  if (removed.length === 0) return;
+  const removedIds = new Set(removed.map(s => s.id));
+  state.sessions = state.sessions.filter(s => !removedIds.has(s.id));
+  for (const id of removedIds) {
+    delete state.activities[id];
+  }
+  if (state.activeCore === core) state.activeCore = null;
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {

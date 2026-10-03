@@ -39,4 +39,19 @@ describe('ActiveTurnsSnapshot', () => {
     state = reduce(state, snap(['local:tui::local_user']));
     expect(state.activities['local:tui::local_user']?.phase).toBe('thinking');
   });
+  it('team 维度快照不误杀其他 team 的运行中活动', () => {
+    // 快照带 team_id=a：只收尾 team a 的残留；team b 正在运行的活动
+    // 不得被误置 completed（此前全局清扫会误杀）。
+    let state = initialState();
+    state.activeTeamId = 'a';
+    state.sessions.push(
+      { id: 'sa1', team_id: 'a', platform: 'p', scope: 's', user_id: 'u', nickname: '', group_name: null, last_active: 0, last_message: '' },
+      { id: 'sb1', team_id: 'b', platform: 'p', scope: 's', user_id: 'u', nickname: '', group_name: null, last_active: 0, last_message: '' },
+    );
+    state = thinking(state, 'sa1');
+    state = thinking(state, 'sb1');
+    state = reduce(state, { ActiveTurnsSnapshot: { session_ids: [], team_id: 'a' } } as unknown as BackendEvent);
+    expect(state.activities['sa1']?.phase).toBe('completed'); // team a 残留收尾
+    expect(state.activities['sb1']?.phase).toBe('thinking'); // team b 不受影响
+  });
 });

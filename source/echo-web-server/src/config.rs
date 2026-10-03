@@ -157,7 +157,11 @@ impl PanelConfig {
         // [core] 兜底静默失效）。
         config.cores_touched = raw.lines().any(|line| {
             let line = line.trim_start();
-            line.starts_with("[[cores]]")
+            // 表头判定：[[ 开头、]] 结尾、中间内容 trim 后恰为 "cores"
+            // （兼容 TOML 合法的空格变体 `[[ cores ]]`；注释行 # 开头不命中）。
+            line.starts_with("[[")
+                && line.ends_with("]]")
+                && line[2..line.len() - 2].trim() == "cores"
         });
         validate_logging_level(&config.logging)?;
         Ok(config)
@@ -201,6 +205,28 @@ mod cores_touched_tests {
         let cfg = PanelConfig::load(&path).unwrap();
         assert!(!cfg.cores_touched);
         assert_eq!(cfg.upstreams()[0].url, "ws://x:1");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn spaced_cores_header_is_touched() {
+        let dir = std::env::temp_dir().join(format!("echo-cfg-test3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("panel.toml");
+        // TOML 合法的 [[ cores ]]（带空格）必须判定 touched——否则静默回退 [core]。
+        std::fs::write(
+            &path,
+            "[core]
+connect_url = \"ws://x:1\"
+[[ cores ]]
+name=\"a\"
+url=\"ws://y:2\"
+",
+        )
+        .unwrap();
+        let cfg = PanelConfig::load(&path).unwrap();
+        assert!(cfg.cores_touched);
+        assert_eq!(cfg.upstreams()[0].url, "ws://y:2");
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -86,6 +86,9 @@ impl UpstreamRegistry {
         };
         {
             let mut inner = self.inner.write().await;
+            // 先快照旧状态——persist 失败时回滚内存，保持内存/磁盘一致
+            // （此前 persist 失败返回 Err 但内存已改，重启即丢且三方分叉）。
+            let backup = inner.clone();
             match inner.iter_mut().find(|u| u.name == config.name) {
                 // token 留空 = 保留旧值（编辑场景）。
                 Some(existing) => {
@@ -101,7 +104,10 @@ impl UpstreamRegistry {
                 }
                 None => inner.push(config.clone()),
             }
-            self.persist_locked(&inner)?;
+            if let Err(e) = self.persist_locked(&inner) {
+                *inner = backup;
+                return Err(e);
+            }
         }
         let _ = self.events.send(UpstreamEvent::Upsert(config));
         Ok(())
@@ -112,10 +118,14 @@ impl UpstreamRegistry {
         let removed = {
             let mut inner = self.inner.write().await;
             let before = inner.len();
+            let backup = inner.clone();
             inner.retain(|u| u.name != name);
             let removed = inner.len() != before;
             if removed {
-                self.persist_locked(&inner)?;
+                if let Err(e) = self.persist_locked(&inner) {
+                    *inner = backup;
+                    return Err(e);
+                }
             }
             removed
         };

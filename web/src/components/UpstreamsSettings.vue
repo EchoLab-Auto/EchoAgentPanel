@@ -20,6 +20,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import { panelFetch } from '../connection';
 import { state } from '../store';
+import { removeSessionsOfCore } from '../state';
 
 interface UpstreamStatus {
   name: string;
@@ -106,6 +107,8 @@ async function save() {
 
 async function remove(name: string) {
   const res = await panelFetch(`/api/upstreams/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  // 侧栏清理：该上游名下会话/活动/选中态一并移除（🟡 修复死会话残留）。
+  removeSessionsOfCore(state, name);
   if (!res.ok && res.status !== 404) {
     error.value = `删除失败：HTTP ${res.status}`;
     return;

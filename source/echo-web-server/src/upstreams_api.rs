@@ -36,10 +36,22 @@ pub async fn list_upstreams(State(state): State<AppState>) -> impl IntoResponse 
             online: online.contains(&u.name),
             token_set: !u.access_token.is_empty(),
             name: u.name,
-            url: u.url,
+            url: sanitize_url(&u.url),
         })
         .collect();
     Json(out)
+}
+
+/// URL 凭据脱敏：`ws://user:pass@host` → `ws://***@host`——凭据
+/// 绝不回传给任何能打开面板的人（🟡 修复）。
+fn sanitize_url(url: &str) -> String {
+    match url.split_once("://") {
+        Some((scheme, rest)) => match rest.split_once('@') {
+            Some((_creds, host)) => format!("{scheme}://***@{host}"),
+            None => url.to_string(),
+        },
+        None => url.to_string(),
+    }
 }
 
 /// `POST /api/upstreams` 请求体。
