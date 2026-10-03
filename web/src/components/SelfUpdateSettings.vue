@@ -12,6 +12,37 @@ import {
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
+import { schedulePolicy, setSchedulePolicy, type SchedulePolicy } from '../scheduler';
+import { NeumorphismSegmented } from '@echolab-auto/ui-frame';
+
+// ── 节点调度（P2/P4）──
+const policy = ref<SchedulePolicy>(schedulePolicy());
+const policyOptions = [
+  { label: '负载均衡', value: 'least_busy' },
+  { label: '轮询', value: 'round_robin' },
+];
+
+function onPolicyChange(value: string | number) {
+  policy.value = String(value) as SchedulePolicy;
+  setSchedulePolicy(policy.value);
+}
+
+/** 节点负载一览（本机 + 联邦在线 peers）。 */
+const nodeLoads = () => {
+  const rows: Array<{ name: string; load: number; online: boolean }> = [];
+  const local = Object.values(state.activities).filter(
+    a => a.phase === 'thinking' || a.phase === 'tool' || a.phase === 'subagent',
+  ).length;
+  rows.push({ name: `${state.federation?.node_name ?? '本机'}（本机）`, load: local, online: true });
+  for (const peer of state.federation?.peers ?? []) {
+    rows.push({
+      name: peer.name,
+      load: peer.active_turns ?? 0,
+      online: peer.link === 'Online',
+    });
+  }
+  return rows;
+};
 
 interface SelfUpdateStatus {
   state: string;
@@ -157,6 +188,41 @@ onUnmounted(stopPoll);
     </NeumorphismCard>
 
     <div v-if="error" class="su-error">{{ error }}</div>
+
+    <!-- 节点调度（2026-10 深度融合 P2/P4） -->
+    <div class="su-title" style="margin-top: 8px">节点调度</div>
+    <div class="su-sub">
+      新会话/任务的节点分配策略。已有归属的会话仍按归属自动路由；调度只决定
+      「无归属新会话」落在哪个节点。
+    </div>
+    <NeumorphismCard class="su-status" :elevation="1">
+      <div class="su-status-row">
+        <span class="su-label">调度策略</span>
+        <NeumorphismSegmented
+          :model-value="policy"
+          :options="policyOptions"
+          size="small"
+          @update:model-value="onPolicyChange"
+        />
+      </div>
+      <div class="su-nodes">
+        <div
+          v-for="n in nodeLoads()"
+          :key="n.name"
+          class="su-node"
+          :class="{ 'su-node--offline': !n.online }"
+        >
+          <span class="su-node-name">{{ n.name }}</span>
+          <NeumorphismTag :variant="n.online ? 'default' : 'error'" size="small">
+            {{ n.online ? '在线' : '离线' }}
+          </NeumorphismTag>
+          <span class="su-node-load">负载 {{ n.load }}</span>
+        </div>
+        <div v-if="!state.federation?.enabled" class="su-node-hint">
+          联邦未启用——仅本机参与调度（启用联邦后远程节点自动加入）。
+        </div>
+      </div>
+    </NeumorphismCard>
   </div>
 </template>
 
@@ -205,6 +271,19 @@ onUnmounted(stopPoll);
 }
 
 .su-message { font-size: 12px; }
+
+.su-nodes { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.su-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.su-node--offline { opacity: 0.5; }
+.su-node-name { flex: 1; font-weight: 500; }
+.su-node-load { opacity: 0.7; min-width: 60px; text-align: right; }
+.su-node-hint { font-size: 12px; opacity: 0.6; padding: 4px 0; }
 
 @keyframes su-pulse {
   0%, 100% { opacity: 1; }
