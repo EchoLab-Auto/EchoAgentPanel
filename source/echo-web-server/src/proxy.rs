@@ -276,6 +276,21 @@ fn is_readonly_command(type_str: &str) -> bool {
     )
 }
 
+/// 从浏览器命令帧 `{"type":"command","payload":<命令>}` 提取命令名：
+/// payload 为字符串（单元变体，如 `"RequestState"`）时即该串；为对象
+/// （携带参数，如 `{"SwitchModel":{...}}`）时取唯一键。
+///
+/// 注意：绝不能取信封自身的 `type`（恒为 `"command"`）——旧实现这么取，
+/// 导致只读白名单永远匹配不上，裸命令被一律当作"非只读"拒收。
+fn command_name(text: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let payload = v.get("payload")?;
+    if let Some(s) = payload.as_str() {
+        return Some(s.to_string());
+    }
+    payload.as_object()?.keys().next().cloned()
+}
+
 fn unwrap_command(text: &str) -> (Option<String>, String) {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
         if let (Some(core), Some(frame)) = (v.get("core"), v.get("frame")) {
@@ -368,7 +383,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     state.set_online_ok(&name);
                     // 每轮克隆句柄——reader/心跳任务 move 走本轮副本，
                     // 下轮重连仍可用。
-                    let event_tx = event_tx.clone();
+                    let event_tx_reader = event_tx.clone();
                     let multi = multi.clone();
                     let (mut core_tx, mut core_rx) = core.split();
                     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<String>(256);
@@ -429,7 +444,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                         | tokio_tungstenite::tungstenite::Message::Close(_) => break,
                                         _ => continue,
                                     };
-                                    if event_tx.send(forward).await.is_err() {
+                                    if event_tx_reader.send(forward).await.is_err() {
                                         break;
                                     }
                                 }
@@ -450,17 +465,20 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         .await
                         .insert(name.clone(), CoreLink { cmd_tx, abort });
                     state.set_online_ok(&name);
-                    // 读泵退出 = 链路死亡：清理（写泵一并中止）。
-                    let links2 = links.clone();
-                    let state3 = state.clone();
-                    let name3 = name.clone();
-                    tokio::spawn(async move {
-                        let _ = reader.await;
-                        writer_abort.abort();
-                        links2.write().await.remove(&name3);
-                        state3.set_offline(&name3, None);
-                    });
-                    // 读泵退出后等待其完成（短暂），再回到 loop 顶部退避重连。
+                    // 读泵退出 = 链路死亡：**必须在本循环内 await**，绝不能
+                    // 丢进 spawn 分流——否则外层 loop 每 ~50ms 无脑重连，而
+                    // 旧 socket 的读半边一直被 reader 持有、永不关闭，到 Core
+                    // 的连接持续泄漏直至进程 FD 耗尽（EMFILE，Panel 表现为
+                    // "cannot connect ... Too many open files"）。
+                    let _ = reader.await;
+                    writer_abort.abort();
+                    links.write().await.remove(&name);
+                    state.set_offline(&name, None);
+                    // 浏览器已断开（event_tx 无接收方）→ 结束重连循环，避免
+                    // 空转建连。
+                    if event_tx.is_closed() {
+                        break;
+                    }
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
             });
@@ -559,32 +577,34 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         }
                     }
                     None => {
-                        // 无目标：只读白名单广播；写/删除类拒绝
-                        // （避免一次点击扇出到全部上游——批量清历史）。
-                        let readonly = serde_json::from_str::<serde_json::Value>(&text)
-                            .ok()
-                            .and_then(|v| {
-                                v.get("payload")
-                                    .and_then(|p| p.get("type"))
-                                    .and_then(|t| t.as_str())
-                                    .map(str::to_owned)
-                                    .or_else(|| {
-                                        v.get("type").and_then(|t| t.as_str()).map(str::to_owned)
-                                    })
-                            })
-                            .is_some_and(|t| is_readonly_command(&t));
-                        if readonly {
-                            for link in links.values() {
-                                let _ = tokio::time::timeout(
-                                    SEND_TIMEOUT,
-                                    link.cmd_tx.send(text.clone()),
-                                )
-                                .await;
+                        // 无目标（前端未选定上游）：
+                        // - 仅一条在线链路 = 单上游语义，直接转发。此时中继
+                        //   不加壳，前端 activeCore 为空、发的就是裸命令，必须
+                        //   放行；否则全部命令被拒（表现为 Panel 连不上 Core）。
+                        // - 多条在线链路：只读白名单广播；写/删除类拒绝
+                        //   （避免一次点击扇出到全部上游——批量清历史）。
+                        if links.len() == 1 {
+                            if let Some(link) = links.values().next() {
+                                let _ =
+                                    tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text))
+                                        .await;
                             }
                         } else {
-                            warn!(
-                                "rejected untargeted non-readonly command (no active core selected)"
-                            );
+                            let readonly =
+                                command_name(&text).is_some_and(|t| is_readonly_command(&t));
+                            if readonly {
+                                for link in links.values() {
+                                    let _ = tokio::time::timeout(
+                                        SEND_TIMEOUT,
+                                        link.cmd_tx.send(text.clone()),
+                                    )
+                                    .await;
+                                }
+                            } else {
+                                warn!(
+                                    "rejected untargeted non-readonly command (no active core selected)"
+                                );
+                            }
                         }
                     }
                 }

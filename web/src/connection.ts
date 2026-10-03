@@ -15,6 +15,7 @@ import {
   parseEvent,
   serializeCommand,
   type BackendCommand,
+  type SessionInfo,
 } from './protocol';
 
 let socket: WebSocket | null = null;
@@ -204,8 +205,24 @@ function parseFrame(text: string): { core: string | null; event: ReturnType<type
   return { core: null, event: parseEvent(text) };
 }
 
+/** 命令的会话归属解析（2026-10 深度融合 P1）：命令 payload 里带
+ * session_id 时，按会话所属 core 自动路由——不再依赖"先设目标"。 */
+function coreForCommand(command: BackendCommand): string | null {
+  const payload = command as unknown as Record<string, unknown>;
+  // BackendCommand 是单键对象（{ CmdName: {...} }）——取第一个值里的
+  // session_id（如有）。
+  const body = Object.values(payload)[0] as Record<string, unknown> | undefined;
+  const sessionId = body?.session_id;
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+  const session = state.sessions.find(s => s.id === sessionId) as
+    | (SessionInfo & { core?: string | null })
+    | undefined;
+  return session?.core ?? null;
+}
+
 export function sendCommand(command: BackendCommand, targetCore?: string): void {
-  const core = targetCore ?? state.activeCore;
+  // 路由优先级：显式 targetCore > 会话归属（自动） > activeCore 兜底。
+  const core = targetCore ?? coreForCommand(command) ?? state.activeCore;
   const payload = core
     ? JSON.stringify({ core, frame: { type: 'command', payload: command } })
     : serializeCommand(command);

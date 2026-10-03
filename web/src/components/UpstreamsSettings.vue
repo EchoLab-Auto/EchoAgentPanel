@@ -131,8 +131,6 @@ async function save() {
       return;
     }
     showAdd.value = false;
-    // 新上游接入后设为当前命令目标（多数用户的意图）。
-    state.activeCore = formName.value.trim();
     await refresh();
   } finally {
     saving.value = false;
@@ -151,9 +149,6 @@ async function remove(name: string) {
   await refresh();
 }
 
-function setActive(name: string) {
-  state.activeCore = name;
-}
 
 onMounted(() => {
   refresh();
@@ -215,14 +210,11 @@ onMounted(() => {
         v-for="u in list"
         :key="u.name"
         class="up-item"
-        :class="{ 'up-item--active': state.activeCore === u.name }"
-        :elevation="state.activeCore === u.name ? 3 : 1"
       >
         <NeumorphismStatusDot :status="connectivityMeta(u).status" size="small" />
         <div class="up-item-main">
           <div class="up-item-name">
             {{ u.name }}
-            <NeumorphismTag v-if="state.activeCore === u.name" variant="primary" size="small">当前目标</NeumorphismTag>
           </div>
           <div class="up-item-url">{{ u.url || '（未配置地址）' }}</div>
           <!-- 健康详情（2026-10 连通性/认证可视性） -->
@@ -236,7 +228,6 @@ onMounted(() => {
           {{ authMeta(u).label }}
         </NeumorphismTag>
         <div class="up-item-actions">
-          <NeumorphismButton v-if="state.activeCore !== u.name" size="small" @click="setActive(u.name)">设为目标</NeumorphismButton>
           <NeumorphismButton size="small" @click="openEdit(u)">编辑</NeumorphismButton>
           <NeumorphismButton size="small" @click="remove(u.name)">删除</NeumorphismButton>
         </div>
