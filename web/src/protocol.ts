@@ -373,6 +373,8 @@ export type BackendCommand =
   | { UpdateQqDenylist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
   | { RequestQqFilterConfig: { adapter?: string | null } }
   | { SetQqGateMode: { mode: GateMode; adapter?: string | null } }
+  | 'RequestSelfUpdate'
+  | 'RequestSelfUpdateStatus'
   | { RequestQqOwner: { adapter?: string | null } }
   | { SetQqOwner: { owner_qq: number; adapter?: string | null } };
 

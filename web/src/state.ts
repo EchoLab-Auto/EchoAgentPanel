@@ -250,6 +250,8 @@ export interface AppState {
   activities: Record<string, AgentActivity>;
   /// 联邦状态快照（`FederationStatus` 事件；None = 未加载或联邦关闭）。
   federation: FederationStatus | null;
+  /** 自更新状态（`SelfUpdateStatus` 事件；None = 未加载）。 */
+  selfUpdateStatus: { state: string; revision?: string | null; message?: string | null; updated_at?: string | null } | null;
   /// 本机邀请串（`FederationInvite` 响应；一次性展示，离开联邦页清除）。
   federationInvite: string | null;
   /// 当前命令去向的上游 Core（多上游聚合视图；null = 单上游/无壳）。
@@ -347,6 +349,7 @@ export function initialState(): AppState {
     trunk: [],
     activities: {},
     federation: null,
+    selfUpdateStatus: null,
     federationInvite: null,
     activeCore: null,
     knownCores: new Set(),
@@ -505,6 +508,10 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       for (const sessionId of e.session_ids) {
         activity(state, sessionId);
       }
+      return state;
+    }
+    case 'SelfUpdateStatus': {
+      state.selfUpdateStatus = (event as unknown as { SelfUpdateStatus: AppState['selfUpdateStatus'] }).SelfUpdateStatus;
       return state;
     }
     case 'FederationStatus': {

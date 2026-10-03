@@ -49,13 +49,14 @@ import ApiSettings from './ApiSettings.vue';
 import LogView from './LogView.vue';
 import FederationSettings from './FederationSettings.vue';
 import UpstreamsSettings from './UpstreamsSettings.vue';
+import SelfUpdateSettings from './SelfUpdateSettings.vue';
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
 const TOOL_OTHER = '扩展工具';
 
 // ── 一级菜单：当前分类 ──
-type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'cores' | 'federation' | 'logs';
+type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'cores' | 'federation' | 'system' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
 
 // ── 列表加载跟踪（pending.ts）：四类清单各自的加载/慢/超时三态 ──
@@ -84,6 +85,7 @@ const categories = computed(() => [
   { key: 'team' as const, label: '智能体', count: (teamLoading.value ? null : state.teams.length) as number | null },
   { key: 'cores' as const, label: 'Core 连接', count: null as number | null },
   { key: 'federation' as const, label: '联邦', count: (state.federation?.peers.length ?? null) as number | null },
+  { key: 'system' as const, label: '系统', count: null as number | null },
   { key: 'logs' as const, label: '日志', count: null as number | null },
 ]);
 const currentCategory = computed(
@@ -876,6 +878,7 @@ const EMPTY_HINT: Record<CategoryKey, string> = {
   team: '在左侧列表选择智能体进行配置；或点右上角「新建智能体」',
   cores: '',
   federation: '',
+  system: '',
   logs: '',
 };
 const showEmpty = computed(() => {
@@ -1515,6 +1518,13 @@ watch(
       <div v-else-if="activeCategory === 'federation'" class="caps-workspace">
         <div class="caps-detail-pane">
           <FederationSettings />
+        </div>
+      </div>
+
+      <!-- 系统工作区：框架自更新 -->
+      <div v-else-if="activeCategory === 'system'" class="caps-workspace">
+        <div class="caps-detail-pane">
+          <SelfUpdateSettings />
         </div>
       </div>
 
