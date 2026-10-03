@@ -25,18 +25,37 @@ pub struct UpstreamStatus {
     pub token_set: bool,
     /// 当前是否有活跃中继链路（任一浏览器连接的任一上游链路在线即算）。
     pub online: bool,
+    /// 连通性：`online` / `connecting` / `offline`。
+    pub connectivity: String,
+    /// 认证：`ok` / `failed` / `unknown`。
+    pub auth: String,
+    /// 最近一次连接错误描述（成功时 None）。
+    pub last_error: Option<String>,
+    /// 最近检查时间（unix 秒）。
+    pub last_checked: u64,
 }
 
 pub async fn list_upstreams(State(state): State<AppState>) -> impl IntoResponse {
     let list = state.registry.list().await;
-    let online = state.online_upstreams();
+    let health = state.upstream_health();
     let out: Vec<UpstreamStatus> = list
         .into_iter()
-        .map(|u| UpstreamStatus {
-            online: online.contains(&u.name),
-            token_set: !u.access_token.is_empty(),
-            name: u.name,
-            url: sanitize_url(&u.url),
+        .map(|u| {
+            let h = health.get(&u.name);
+            UpstreamStatus {
+                online: h.map(|x| x.connectivity == "online").unwrap_or(false),
+                connectivity: h
+                    .map(|x| x.connectivity.clone())
+                    .unwrap_or_else(|| "offline".into()),
+                auth: h
+                    .map(|x| x.auth.clone())
+                    .unwrap_or_else(|| "unknown".into()),
+                last_error: h.and_then(|x| x.last_error.clone()),
+                last_checked: h.map(|x| x.last_checked).unwrap_or(0),
+                token_set: !u.access_token.is_empty(),
+                name: u.name,
+                url: sanitize_url(&u.url),
+            }
         })
         .collect();
     Json(out)

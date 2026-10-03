@@ -8,7 +8,7 @@
 //! - `DELETE /api/upstreams/{name}` → 删除
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismInput,
@@ -27,6 +27,40 @@ interface UpstreamStatus {
   url: string;
   token_set: boolean;
   online: boolean;
+  connectivity: 'online' | 'connecting' | 'offline';
+  auth: 'ok' | 'failed' | 'unknown';
+  last_error: string | null;
+  last_checked: number;
+}
+
+/** 连通性文案与状态点映射。 */
+function connectivityMeta(u: UpstreamStatus): { status: 'online' | 'offline' | 'busy'; label: string } {
+  switch (u.connectivity) {
+    case 'online':
+      return { status: 'online', label: '已连接' };
+    case 'connecting':
+      return { status: 'busy', label: '连接中…' };
+    default:
+      return { status: 'offline', label: '离线' };
+  }
+}
+
+/** 认证文案与徽标变体。 */
+function authMeta(u: UpstreamStatus): { variant: 'success' | 'error' | 'default'; label: string } {
+  switch (u.auth) {
+    case 'ok':
+      return { variant: 'success', label: '认证通过' };
+    case 'failed':
+      return { variant: 'error', label: '认证失败' };
+    default:
+      return { variant: 'default', label: u.token_set ? '未验证' : '无令牌' };
+  }
+}
+
+function formatChecked(unix: number): string {
+  if (!unix) return '';
+  const d = new Date(unix * 1000);
+  return d.toLocaleTimeString();
 }
 
 const list = ref<UpstreamStatus[]>([]);
@@ -121,7 +155,12 @@ function setActive(name: string) {
   state.activeCore = name;
 }
 
-onMounted(refresh);
+onMounted(() => {
+  refresh();
+  // 健康轮询：连接状态随重连循环实时变化，3s 拉一次保持可视。
+  const timer = window.setInterval(refresh, 3000);
+  onUnmounted(() => window.clearInterval(timer));
+});
 </script>
 
 <template>
@@ -179,16 +218,22 @@ onMounted(refresh);
         :class="{ 'up-item--active': state.activeCore === u.name }"
         :elevation="state.activeCore === u.name ? 3 : 1"
       >
-        <NeumorphismStatusDot :status="u.online ? 'online' : 'offline'" size="small" />
+        <NeumorphismStatusDot :status="connectivityMeta(u).status" size="small" />
         <div class="up-item-main">
           <div class="up-item-name">
             {{ u.name }}
             <NeumorphismTag v-if="state.activeCore === u.name" variant="primary" size="small">当前目标</NeumorphismTag>
           </div>
           <div class="up-item-url">{{ u.url || '（未配置地址）' }}</div>
+          <!-- 健康详情（2026-10 连通性/认证可视性） -->
+          <div class="up-item-health">
+            <span class="up-health-label">{{ connectivityMeta(u).label }}</span>
+            <span v-if="u.last_checked" class="up-health-time">· {{ formatChecked(u.last_checked) }}</span>
+            <div v-if="u.last_error" class="up-health-error" :title="u.last_error">{{ u.last_error }}</div>
+          </div>
         </div>
-        <NeumorphismTag :variant="u.token_set ? 'info' : 'default'" size="small">
-          {{ u.token_set ? '已配置令牌' : '无令牌' }}
+        <NeumorphismTag :variant="authMeta(u).variant" size="small">
+          {{ authMeta(u).label }}
         </NeumorphismTag>
         <div class="up-item-actions">
           <NeumorphismButton v-if="state.activeCore !== u.name" size="small" @click="setActive(u.name)">设为目标</NeumorphismButton>
@@ -221,4 +266,20 @@ onMounted(refresh);
 .up-item-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .up-item-url { font-size: 12px; color: var(--nm-text-secondary, #888); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .up-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.up-item-health {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+.up-health-error {
+  color: var(--nm-color-error, #d64545);
+  font-size: 11px;
+  margin-top: 2px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>

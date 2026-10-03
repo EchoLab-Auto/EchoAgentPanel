@@ -54,14 +54,36 @@ pub struct Upstream {
     pub access_token: Arc<str>,
 }
 
+/// 上游健康状态（管理 API 返回；2026-10 Core 连接可视性）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpstreamHealth {
+    /// 连通性：`online`（链路活跃）/ `connecting`（重连中）/ `offline`。
+    pub connectivity: String,
+    /// 认证：`ok`（握手成功即通过）/ `failed`（401/403 明确拒绝）/
+    /// `unknown`（未验证或失败原因非认证）。
+    pub auth: String,
+    /// 最近一次错误描述（连接失败原因；成功时 None）。
+    pub last_error: Option<String>,
+    /// 最近检查时间（unix 秒）。
+    pub last_checked: u64,
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Shared server state handed to handlers.
 #[derive(Clone)]
 pub struct AppState {
     /// 上游注册表（管理面 + 运行时唯一事实来源；中继经它拿初始集合
     /// 并订阅变更）。
     pub registry: Arc<crate::upstreams::UpstreamRegistry>,
-    /// 在线上游名集合（中继编排层上报，管理 API 读取）。
-    online: Arc<std::sync::RwLock<std::collections::HashSet<String>>>,
+    /// 上游健康表（中继编排层上报，管理 API 读取）：连通性 + 认证 +
+    /// 最近错误 + 最近检查时间。
+    health: Arc<std::sync::RwLock<std::collections::HashMap<String, UpstreamHealth>>>,
     /// Static frontend directory (built `web/dist`).
     pub static_dir: Arc<str>,
     /// Media library directory: Core 落盘的入站图片（`/media/<id>` 从这里读）。
@@ -79,7 +101,7 @@ impl AppState {
     ) -> Self {
         Self {
             registry,
-            online: Arc::new(std::sync::RwLock::new(std::collections::HashSet::new())),
+            health: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             static_dir,
             media_dir,
             access_token,
@@ -100,19 +122,40 @@ impl AppState {
             || query_token == Some(self.access_token.as_ref())
     }
 
-    /// 在线上游快照（管理 API 用）。
-    pub fn online_upstreams(&self) -> std::collections::HashSet<String> {
-        self.online.read().map(|s| s.clone()).unwrap_or_default()
+    /// 上游健康快照（管理 API 用）。
+    pub fn upstream_health(&self) -> std::collections::HashMap<String, UpstreamHealth> {
+        self.health.read().map(|m| m.clone()).unwrap_or_default()
     }
 
-    fn set_online(&self, name: &str, online: bool) {
-        if let Ok(mut set) = self.online.write() {
-            if online {
-                set.insert(name.to_string());
-            } else {
-                set.remove(name);
-            }
+    fn set_health(&self, name: &str, health: UpstreamHealth) {
+        if let Ok(mut map) = self.health.write() {
+            map.insert(name.to_string(), health);
         }
+    }
+
+    fn set_offline(&self, name: &str, error: Option<String>) {
+        self.set_health(
+            name,
+            UpstreamHealth {
+                connectivity: "offline".into(),
+                auth: "unknown".into(),
+                last_error: error,
+                last_checked: now_unix(),
+            },
+        );
+    }
+
+    fn set_online_ok(&self, name: &str) {
+        // WS 握手成功 = TCP+HTTP 通且认证通过（失败握手不会走到这里）。
+        self.set_health(
+            name,
+            UpstreamHealth {
+                connectivity: "online".into(),
+                auth: "ok".into(),
+                last_error: None,
+                last_checked: now_unix(),
+            },
+        );
     }
 }
 
@@ -132,10 +175,18 @@ pub async fn ws_handler(
 
 /// 连一个上游；失败返回 None（其他上游不受影响——聚合视图下
 /// 单上游离线不应拖垮整条浏览器链路）。
+/// 连接失败分类（健康上报用）：配置错误 / 网络不可达 / 认证拒绝 /
+/// 其他协议错误。
+struct ConnectFailure {
+    kind: &'static str, // "config" | "network" | "auth" | "protocol"
+    message: String,
+}
+
 async fn connect_upstream(
     upstream: &Upstream,
-) -> Option<
+) -> Result<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ConnectFailure,
 > {
     let core_request = match upstream.url.as_ref().into_client_request() {
         Ok(mut request) => {
@@ -147,7 +198,10 @@ async fn connect_upstream(
                     }
                     Err(error) => {
                         warn!(%error, "invalid Core access token");
-                        return None;
+                        return Err(ConnectFailure {
+                            kind: "config",
+                            message: format!("访问令牌格式非法: {error}"),
+                        });
                     }
                 }
             }
@@ -155,18 +209,34 @@ async fn connect_upstream(
         }
         Err(error) => {
             warn!(%error, "invalid Core WebSocket URL");
-            return None;
+            return Err(ConnectFailure {
+                kind: "config",
+                message: format!("WebSocket 地址非法: {error}"),
+            });
         }
     };
     match connect_async(core_request).await {
-        Ok((core, _)) => Some(core),
+        Ok((core, _)) => Ok(core),
         Err(error) => {
+            // 分类：HTTP 401/403 → 认证失败；连接拒绝/超时/DNS → 网络；
+            // 其余按协议错误。tokio-tungstenite 的 Http(Response) 携带状态码。
+            let kind = match &error {
+                tokio_tungstenite::tungstenite::Error::Http(resp) => match resp.status().as_u16() {
+                    401 | 403 => "auth",
+                    _ => "protocol",
+                },
+                tokio_tungstenite::tungstenite::Error::Io(_) => "network",
+                _ => "protocol",
+            };
             warn!(
                 core = %upstream.url,
-                %error,
+                %error, kind,
                 "cannot connect to Core management WS; upstream skipped"
             );
-            None
+            Err(ConnectFailure {
+                kind,
+                message: error.to_string(),
+            })
         }
     }
 }
@@ -260,14 +330,42 @@ async fn bridge(browser: WebSocket, state: AppState) {
                 // 一断即永久离线。浏览器断开（event_tx 关闭）即停止。
                 let mut backoff = std::time::Duration::from_secs(1);
                 loop {
-                    let Some(core) = connect_upstream(&upstream).await else {
-                        state.set_online(&name, false);
-                        tokio::time::sleep(backoff).await;
-                        backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
-                        continue;
+                    // 重连中状态（首次与每次重试前）——前端可见"正在连接"。
+                    state.set_health(
+                        &name,
+                        UpstreamHealth {
+                            connectivity: "connecting".into(),
+                            auth: "unknown".into(),
+                            last_error: None,
+                            last_checked: now_unix(),
+                        },
+                    );
+                    let core = match connect_upstream(&upstream).await {
+                        Ok(core) => core,
+                        Err(failure) => {
+                            state.set_health(
+                                &name,
+                                UpstreamHealth {
+                                    connectivity: "offline".into(),
+                                    auth: if failure.kind == "auth" {
+                                        "failed".into()
+                                    } else {
+                                        "unknown".into()
+                                    },
+                                    last_error: Some(format!(
+                                        "[{}] {}",
+                                        failure.kind, failure.message
+                                    )),
+                                    last_checked: now_unix(),
+                                },
+                            );
+                            tokio::time::sleep(backoff).await;
+                            backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                            continue;
+                        }
                     };
                     backoff = std::time::Duration::from_secs(1);
-                    state.set_online(&name, true);
+                    state.set_online_ok(&name);
                     // 每轮克隆句柄——reader/心跳任务 move 走本轮副本，
                     // 下轮重连仍可用。
                     let event_tx = event_tx.clone();
@@ -351,7 +449,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         .write()
                         .await
                         .insert(name.clone(), CoreLink { cmd_tx, abort });
-                    state.set_online(&name, true);
+                    state.set_online_ok(&name);
                     // 读泵退出 = 链路死亡：清理（写泵一并中止）。
                     let links2 = links.clone();
                     let state3 = state.clone();
@@ -360,7 +458,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         let _ = reader.await;
                         writer_abort.abort();
                         links2.write().await.remove(&name3);
-                        state3.set_online(&name3, false);
+                        state3.set_offline(&name3, None);
                     });
                     // 读泵退出后等待其完成（短暂），再回到 loop 顶部退避重连。
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -426,7 +524,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         if let Some(old) = links2.write().await.remove(&cfg.name) {
                             old.abort.abort();
                         }
-                        state2.set_online(&cfg.name, false);
+                        state2.set_offline(&cfg.name, None);
                         if !cfg.url.is_empty() {
                             spawn_link2(cfg);
                         }
@@ -436,7 +534,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         if let Some(old) = links2.write().await.remove(&name) {
                             old.abort.abort();
                         }
-                        state2.set_online(&name, false);
+                        state2.set_offline(&name, None);
                         refresh_multi(&state2.registry, &multi2, &links2).await;
                     }
                 }
