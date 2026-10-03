@@ -18,6 +18,7 @@ import {
   NeumorphismTag,
   NeumorphismSpinner,
 } from '@echolab-auto/ui-frame';
+import { panelFetch } from '../connection';
 import { state } from '../store';
 
 interface UpstreamStatus {
@@ -43,7 +44,7 @@ async function refresh() {
   loading.value = true;
   error.value = '';
   try {
-    const res = await fetch('/api/upstreams');
+    const res = await panelFetch('/api/upstreams');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     list.value = await res.json();
     // knownCores 与管理面同步（徽标显示/命令路由候选）。
@@ -81,7 +82,7 @@ async function save() {
   }
   saving.value = true;
   try {
-    const res = await fetch('/api/upstreams', {
+    const res = await panelFetch('/api/upstreams', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -104,7 +105,7 @@ async function save() {
 }
 
 async function remove(name: string) {
-  const res = await fetch(`/api/upstreams/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  const res = await panelFetch(`/api/upstreams/${encodeURIComponent(name)}`, { method: 'DELETE' });
   if (!res.ok && res.status !== 404) {
     error.value = `删除失败：HTTP ${res.status}`;
     return;

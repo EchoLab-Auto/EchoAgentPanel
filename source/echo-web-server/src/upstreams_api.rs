@@ -95,6 +95,25 @@ pub fn routes() -> axum::Router<AppState> {
         )
 }
 
+/// Bearer 认证中间件（2026-10 安全收紧）：token 非空时校验
+/// `Authorization: Bearer` 或 `?token=`，未通过 401。由 main.rs 挂载
+/// 到 /api/*、/media、/logs 路由（WS 握手在 handler 内单独校验）。
+pub async fn require_auth(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let token = req
+        .uri()
+        .query()
+        .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=")))
+        .map(str::to_string);
+    if !state.authorized(req.headers(), token.as_deref()) {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+    next.run(req).await
+}
+
 // 保持 Arc 链接（文档用）
 #[allow(dead_code)]
 fn _assert_arc(_: Arc<UpstreamConfig>) {}

@@ -48,7 +48,11 @@ export function startConnection(): void {
       retryTimer = undefined;
     }
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+    // Bearer 认证（2026-10）：token 存 localStorage，首访可用
+    // ?token=<token> 播种（随后从 URL 擦除防泄漏）。
+    const token = ensurePanelToken();
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws${qs}`);
     socket = ws;
 
     ws.onopen = () => {
@@ -217,4 +221,28 @@ export function sendCommand(command: BackendCommand, targetCore?: string): void 
     return;
   }
   pushToast(state, '未连接到 Core，命令未发送', 'error');
+}
+
+/** 面板访问令牌：URL ?token= 播种一次后存 localStorage；fetch 经
+ * `panelFetch`（自动带 Authorization 头）。 */
+export function ensurePanelToken(): string {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('token');
+  if (fromUrl) {
+    window.localStorage.setItem('echo-panel-token', fromUrl);
+    params.delete('token');
+    const rest = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    return fromUrl;
+  }
+  return window.localStorage.getItem('echo-panel-token') ?? '';
+}
+
+/** 带认证头的 fetch（token 非空时自动加 Bearer）。 */
+export function panelFetch(input: string, init?: RequestInit): Promise<Response> {
+  const token = window.localStorage.getItem('echo-panel-token');
+  if (!token) return fetch(input, init);
+  const headers = new Headers(init?.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
 }

@@ -25,6 +25,7 @@ async fn spawn_panel(static_dir: String) -> String {
             ),
             static_dir.into(),
             "/nonexistent".into(),
+            "".into(),
         ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

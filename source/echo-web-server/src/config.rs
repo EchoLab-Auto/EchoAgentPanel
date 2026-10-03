@@ -47,6 +47,12 @@ pub struct ServerSection {
     /// 留空 = 默认 `~/.local/share/echo-agent-core/media`（与 Core 的
     /// `$ECHO_MEDIA_DIR` 缺省一致；两进程同机部署时开箱即用）。
     pub media_dir: String,
+    /// 访问令牌（2026-10 安全收紧）：非空时全站（WS/HTTP API/媒体）
+    /// 要求 `Authorization: Bearer <token>` 或 `?token=` 查询参数；
+    /// 静态前端资源豁免（登录页可加载）。空 = 无认证（仅建议绑
+    /// 127.0.0.1 场景使用）。
+    #[serde(default)]
+    pub access_token: String,
 }
 
 impl Default for ServerSection {
@@ -55,6 +61,7 @@ impl Default for ServerSection {
             bind_address: "0.0.0.0:8080".to_string(),
             static_dir: "web/dist".to_string(),
             media_dir: String::new(),
+            access_token: String::new(),
         }
     }
 }

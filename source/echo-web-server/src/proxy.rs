@@ -66,6 +66,8 @@ pub struct AppState {
     pub static_dir: Arc<str>,
     /// Media library directory: Core 落盘的入站图片（`/media/<id>` 从这里读）。
     pub media_dir: Arc<str>,
+    /// 访问令牌（空 = 无认证；见 config::ServerSection::access_token）。
+    pub access_token: Arc<str>,
 }
 
 impl AppState {
@@ -73,13 +75,29 @@ impl AppState {
         registry: Arc<crate::upstreams::UpstreamRegistry>,
         static_dir: Arc<str>,
         media_dir: Arc<str>,
+        access_token: Arc<str>,
     ) -> Self {
         Self {
             registry,
             online: Arc::new(std::sync::RwLock::new(std::collections::HashSet::new())),
             static_dir,
             media_dir,
+            access_token,
         }
+    }
+
+    /// 校验请求凭据：token 为空（未配置）恒放行；否则比对 Bearer 头或
+    /// `?token=` 查询参数（WS 握手场景浏览器无法自定义头）。
+    pub fn authorized(&self, headers: &axum::http::HeaderMap, query_token: Option<&str>) -> bool {
+        if self.access_token.is_empty() {
+            return true;
+        }
+        let bearer = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        bearer == Some(self.access_token.as_ref())
+            || query_token == Some(self.access_token.as_ref())
     }
 
     /// 在线上游快照（管理 API 用）。
@@ -99,8 +117,17 @@ impl AppState {
 }
 
 /// `GET /ws` — upgrade the browser connection and bridge it to Core.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    if !state.authorized(&headers, params.get("token").map(String::as_str)) {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
     ws.on_upgrade(move |socket| bridge(socket, state))
+        .into_response()
 }
 
 /// 连一个上游；失败返回 None（其他上游不受影响——聚合视图下

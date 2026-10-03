@@ -54,6 +54,7 @@ async fn spawn_panel(core_url: String) -> String {
             ),
             "/nonexistent".into(),
             "/nonexistent-media".into(),
+            "".into(),
         ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

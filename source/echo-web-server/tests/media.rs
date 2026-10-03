@@ -25,6 +25,7 @@ async fn spawn_panel(media_dir: String) -> String {
             ),
             "/nonexistent".into(),
             media_dir.into(),
+            "".into(),
         ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

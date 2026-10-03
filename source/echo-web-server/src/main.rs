@@ -14,7 +14,7 @@ use clap::Parser;
 use echo_web_server::config::PanelConfig;
 use echo_web_server::log;
 use echo_web_server::proxy;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 /// EchoAgentPanel — web UI server for a remote EchoAgentCore.
@@ -103,7 +103,13 @@ async fn main() -> Result<()> {
         registry,
         Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
         Arc::from(media_dir.to_string_lossy().into_owned().as_str()),
+        Arc::from(cfg.server.access_token.as_str()),
     );
+    if !cfg.server.access_token.is_empty() {
+        info!("access token auth enabled for WS/HTTP API");
+    } else if !bind.starts_with("127.0.0.1") && !bind.starts_with("localhost") {
+        warn!("no access token configured and not bound to localhost — panel is OPEN to the network; set [server] access_token");
+    }
 
     let app = Router::new()
         .route("/ws", get(proxy::ws_handler))
@@ -116,6 +122,11 @@ async fn main() -> Result<()> {
         .route("/api/logs/panel", get(log::panel_logs))
         .route("/api/logs/core", get(log::core_logs))
         .merge(echo_web_server::upstreams_api::routes())
+        // Bearer 认证（token 非空时；静态前端豁免以加载登录页）。
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            echo_web_server::upstreams_api::require_auth,
+        ))
         .fallback(echo_web_server::static_files::static_handler)
         .with_state(state);
 
