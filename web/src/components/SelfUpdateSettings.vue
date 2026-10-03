@@ -15,9 +15,35 @@ import { sendCommand } from '../connection';
 
 interface SelfUpdateStatus {
   state: string;
+  phase?: string | null;
   revision?: string | null;
   message?: string | null;
   updated_at?: string | null;
+}
+
+/** 更新阶段序列（与 update.sh PHASE 对应；进度条高亮当前/已完成）。 */
+const PHASES: Array<{ key: string; label: string }> = [
+  { key: 'initializing', label: '初始化' },
+  { key: 'building', label: '构建' },
+  { key: 'installing', label: '安装' },
+  { key: 'restarting', label: '重启' },
+  { key: 'verifying', label: '验证' },
+];
+
+/** 当前阶段序号（用于进度条；未知阶段 -1）。 */
+function phaseIndex(phase: string | null | undefined): number {
+  if (!phase) return -1;
+  const i = PHASES.findIndex(p => p.key === phase);
+  // PHASE 名与 update.sh 一致（fetching/building/installing/restarting/
+  // verifying）——building 前的 fetching 视为 initializing 之后。
+  if (i >= 0) return i;
+  if (phase === 'fetching') return 0;
+  return -1;
+}
+
+/** 阶段是否已完成（在序列当前阶段之前）。 */
+function phaseDone(idx: number, current: number): boolean {
+  return current >= 0 && idx < current;
 }
 
 const status = ref<SelfUpdateStatus | null>(null);
@@ -107,8 +133,23 @@ onUnmounted(stopPoll);
         </NeumorphismTag>
         <NeumorphismSpinner v-if="status?.state === 'running'" size="small" />
       </div>
+      <!-- 阶段进度条（state=running/restarting 时显示） -->
+      <div v-if="status && (status.state === 'running' || status.state === 'restarting')" class="su-phases">
+        <div
+          v-for="(p, i) in PHASES"
+          :key="p.key"
+          class="su-phase"
+          :class="{
+            'su-phase--current': phaseIndex(status.phase) === i,
+            'su-phase--done': phaseDone(i, phaseIndex(status.phase)),
+          }"
+        >
+          <span class="su-phase-dot" />
+          <span class="su-phase-label">{{ p.label }}</span>
+        </div>
+      </div>
+      <div v-if="status?.message" class="su-field su-message"><span>进度</span>{{ status.message }}</div>
       <div v-if="status?.revision" class="su-field"><span>版本</span>{{ status.revision }}</div>
-      <div v-if="status?.message" class="su-field"><span>说明</span>{{ status.message }}</div>
       <div v-if="status?.updated_at" class="su-field"><span>时间</span>{{ status.updated_at }}</div>
       <div class="su-actions">
         <NeumorphismButton size="small" @click="refreshStatus">刷新状态</NeumorphismButton>
@@ -131,4 +172,42 @@ onUnmounted(stopPoll);
 .su-field span { display: inline-block; width: 40px; opacity: 0.6; }
 .su-actions { margin-top: 10px; }
 .su-error { color: var(--nm-color-error, #d64545); font-size: 12px; }
+
+.su-phases {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0;
+}
+
+.su-phase {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--nm-text-secondary, #999);
+}
+
+.su-phase-dot {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--nm-surface-inset, rgba(0, 0, 0, 0.08));
+}
+
+.su-phase--done { color: var(--nm-color-success, #4a8); }
+.su-phase--done .su-phase-dot { background: var(--nm-color-success, #4a8); }
+.su-phase--current { color: var(--nm-primary, #4a7dff); font-weight: 600; }
+.su-phase--current .su-phase-dot {
+  background: var(--nm-primary, #4a7dff);
+  animation: su-pulse 1.2s ease-in-out infinite;
+}
+
+.su-message { font-size: 12px; }
+
+@keyframes su-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 </style>

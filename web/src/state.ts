@@ -251,7 +251,7 @@ export interface AppState {
   /// 联邦状态快照（`FederationStatus` 事件；None = 未加载或联邦关闭）。
   federation: FederationStatus | null;
   /** 自更新状态（`SelfUpdateStatus` 事件；None = 未加载）。 */
-  selfUpdateStatus: { state: string; revision?: string | null; message?: string | null; updated_at?: string | null } | null;
+  selfUpdateStatus: { state: string; phase?: string | null; revision?: string | null; message?: string | null; updated_at?: string | null } | null;
   /// 本机邀请串（`FederationInvite` 响应；一次性展示，离开联邦页清除）。
   federationInvite: string | null;
   /// 当前命令去向的上游 Core（多上游聚合视图；null = 单上游/无壳）。
