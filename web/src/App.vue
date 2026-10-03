@@ -11,6 +11,7 @@ import {
 import { state } from './store';
 import { cancelSessionWork } from './state';
 import { sendCommand, startConnection } from './connection';
+import { scheduleNode } from './scheduler';
 import { loopModeOf } from './protocol';
 import { teamPluginEnabled } from './capabilities';
 import {
@@ -124,15 +125,25 @@ state.activeTeamId = activeTeamId.value;
 function send(content: string, images: string[] = []) {
   const target =
     activeSessionId.value === 'global' ? 'local:tui::local_user' : activeSessionId.value;
-  sendCommand({
-    SendMessage: {
-      session_id: target,
-      content,
-      images,
-      // 去主智能体：team_id 必填（core 无"默认人格"兜底）。
-      team_id: activeTeamId.value ?? undefined,
+  // 深度融合 P2 调度：目标会话无 core 归属（新会话/默认本地会话）时，
+  // 由调度器按策略（least_busy 默认）选节点；已有归属的会话经
+  // coreForCommand 自动路由（P1），调度不参与。
+  const targetSession = state.sessions.find(s => s.id === target) as
+    | { core?: string | null }
+    | undefined;
+  const scheduled = targetSession?.core ? null : scheduleNode();
+  sendCommand(
+    {
+      SendMessage: {
+        session_id: target,
+        content,
+        images,
+        // 去主智能体：team_id 必填（core 无"默认人格"兜底）。
+        team_id: activeTeamId.value ?? undefined,
+      },
     },
-  });
+    scheduled ?? undefined,
+  );
 }
 
 function cancelWork() {

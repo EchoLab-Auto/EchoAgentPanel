@@ -130,6 +130,8 @@ export interface FederationPeerInfo {
   allow_subagent: boolean;
   require_confirm: string[];
   link: 'Online' | 'Offline';
+  /** 节点负载（活跃 turn 数；P2 调度器输入，Core status_event 回传）。 */
+  active_turns?: number;
 }
 
 /** 联邦状态快照。 */
