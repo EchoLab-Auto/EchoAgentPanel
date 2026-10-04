@@ -69,6 +69,8 @@ export interface WorkspaceGitInfo {
 
 export interface SessionInfo {
   id: string;
+  /** 归属上游区域（非线上字段：由 store.dispatch 从信封注入，供前端分组/路由）。 */
+  core?: string | null;
   /** 来源节点身份（federation NodeId；多节点聚合时区分同名会话）。 */
   node_id?: string | null;
   /** 运行区域展示名（`[core].region_name`；空 = 回退上游名）。 */

@@ -1005,20 +1005,29 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'SessionUpdated': {
       const e = (event as { SessionUpdated: { session: SessionInfo } }).SessionUpdated;
-      // 会话 id 在**团队维度**唯一（不同智能体各有自己的
-      // `local:tui::local_user` 等）——按 (team_id, id) 复合键匹配，
-      // 否则先到的智能体会话会被后到者覆盖（多会话下导致切换器/侧栏丢项）。
+      // 会话身份 = (id, team_id)；`core` 只是**归属标注**，不是身份的一部分。
+      // ⚠️ 曾经的 bug：去重要求 core 精确相等，于是中继加壳抖动期间同一会话
+      // 会以 `core=null` 与 `core='core'` 两份并存 → 切换器出现同名重复会话。
+      // 现在：无归属的旧副本被"收编"（替换为带归属的），或收到无归属副本时
+      // 直接丢弃（已有带归属的同名会话）；同时清掉同身份的多余副本。
       const teamOf = (session: SessionInfo) => session.team_id ?? null;
       const coreOf = (session: SessionInfo & { core?: string | null }) => session.core ?? null;
-      const index = state.sessions.findIndex(
-        (s) =>
-          s.id === e.session.id &&
-          teamOf(s) === teamOf(e.session) &&
-          coreOf(s) === coreOf(e.session),
-      );
-      if (index >= 0) {
-        state.sessions[index] = e.session;
-      } else {
+      const isSame = (s: SessionInfo & { core?: string | null }) =>
+        s.id === e.session.id && teamOf(s) === teamOf(e.session);
+      const incomingCore = coreOf(e.session);
+      const same = state.sessions.filter(isSame);
+      const adoptIdx = (() => {
+        const exact = same.find((s) => coreOf(s) === incomingCore);
+        if (exact) return state.sessions.indexOf(exact);
+        const orphan = same.find((s) => coreOf(s) == null);
+        if (orphan) return state.sessions.indexOf(orphan);
+        return -1;
+      })();
+      if (adoptIdx >= 0) {
+        state.sessions = state.sessions
+          .map((s, index) => (index === adoptIdx ? e.session : s))
+          .filter((s, index) => index === adoptIdx || !isSame(s));
+      } else if (incomingCore != null || same.length === 0) {
         state.sessions.push(e.session);
       }
       return state;

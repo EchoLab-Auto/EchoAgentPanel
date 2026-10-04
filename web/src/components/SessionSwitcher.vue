@@ -132,7 +132,7 @@ function pickGlobal() {
       <div class="sw-group__title">{{ group.label }}</div>
       <button
         v-for="session in group.sessions"
-        :key="session.id"
+        :key="`${session.core ?? ''}:${session.id}`"
         class="sw-item"
         :class="{ 'is-active': session.id === props.activeSessionId }"
         :title="session.id"
