@@ -114,6 +114,38 @@ function evtCore(e: unknown): string | null {
   return (e as { core?: string | null } | null | undefined)?.core ?? null;
 }
 
+/** 从整帧事件里取载荷的 core（管理面过滤用，早于具体 cast）。 */
+function payloadCore(event: unknown): string | null {
+  const body = Object.values(event as Record<string, unknown>)[0];
+  return (body as { core?: string | null } | null | undefined)?.core ?? null;
+}
+
+/**
+ * 管理面事件是否属于当前选中 core（多上游）。单上游 / 未指定 activeCore 时
+ * 放行；这样"设置页看到的配置"始终是 activeCore 那一份，不会被广播响应里
+ * 其他 core 的配置覆盖。
+ */
+function managementCoreCurrent(state: AppState, core: string | null): boolean {
+  return core == null || state.activeCore == null || core === state.activeCore;
+}
+
+/** 切换 activeCore 时清空"单值管理面"缓存，避免短暂显示上一个 core 的值。 */
+export function resetManagementState(state: AppState): void {
+  state.model = '';
+  state.api = null;
+  state.systemPrompt = '';
+  state.skills = [];
+  state.tools = [];
+  state.plugins = [];
+  state.adapters = [];
+  state.federation = null;
+  state.federationInvite = null;
+  state.selfUpdateStatus = null;
+  state.apiTests = {};
+  state.apiBalances = {};
+  state.checklists = [];
+}
+
 export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch' | 'subagent';
 export type ToolStatus = 'running' | 'succeeded' | 'failed';
 
@@ -334,8 +366,8 @@ export interface AppState {
     denylist_users: number[];
     denylist_groups: number[];
   };
-  /** 最近一次二维码回推（Core 代理登录；按实例过滤消费）。 */
-  lastQrcode: { adapter: string; png_base64: string; error?: string | null } | null;
+  /** 最近一次二维码回推（Core 代理登录；按 (core, 实例) 过滤消费）。 */
+  lastQrcode: { adapter: string; png_base64: string; error?: string | null; core?: string | null } | null;
   /** 多实例（2026-09）：按 QQ 实例名存放的 QQ 管理态；单实例时键为 "qq"。 */
   qqByAdapter: Record<
     string,
@@ -476,6 +508,7 @@ export function initialState(): AppState {
 export function reduce(state: AppState, event: BackendEvent): AppState {
   switch (Object.keys(event)[0]) {
     case 'AdapterStateChanged': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { AdapterStateChanged: { adapter_name: string; connected: boolean; self_id: string | null } }).AdapterStateChanged;
       upsertAdapter(state, {
         name: e.adapter_name,
@@ -491,6 +524,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'AdapterList': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { AdapterList: { adapters: AdapterStatus[] } }).AdapterList;
       state.adapters = e.adapters;
       return state;
@@ -596,15 +630,18 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'SelfUpdateStatus': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       state.selfUpdateStatus = (event as unknown as { SelfUpdateStatus: AppState['selfUpdateStatus'] }).SelfUpdateStatus;
       return state;
     }
     case 'FederationStatus': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as unknown as { FederationStatus: FederationStatus }).FederationStatus;
       state.federation = e;
       return state;
     }
     case 'FederationInvite': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as unknown as { FederationInvite: { invite: string } }).FederationInvite;
       state.federationInvite = e.invite;
       return state;
@@ -937,6 +974,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ApiConfigUpdated': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { ApiConfigUpdated: ApiConfig }).ApiConfigUpdated;
       state.api = {
         provider: e.provider,
@@ -952,6 +990,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ApiProfilesUpdated': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { ApiProfilesUpdated: { active_api: string; profiles: ApiProfileInfo[] } }).ApiProfilesUpdated;
       if (state.api) {
         state.api.active_api = e.active_api;
@@ -991,16 +1030,19 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'SkillsList': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { SkillsList: { skills: SkillInfo[] } }).SkillsList;
       state.skills = e.skills;
       return state;
     }
     case 'ToolsList': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { ToolsList: { tools: ToolInfo[] } }).ToolsList;
       state.tools = e.tools;
       return state;
     }
     case 'PluginsList': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { PluginsList: { plugins: PluginInfo[] } }).PluginsList;
       state.plugins = e.plugins;
       return state;
@@ -1103,16 +1145,19 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'SystemPrompt': {
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { SystemPrompt: { text: string } }).SystemPrompt;
       state.systemPrompt = e.text;
       return state;
     }
     case 'QqFilterConfig': {
-      const e = (event as { QqFilterConfig: AppState['qqFilter'] & { adapter?: string | null } })
-        .QqFilterConfig;
-      const { adapter: _a, ...filter } = e;
+      const e = (event as {
+        QqFilterConfig: AppState['qqFilter'] & { adapter?: string | null; core?: string | null };
+      }).QqFilterConfig;
+      const { adapter: _a, core: _c, ...filter } = e;
       state.qqFilter = filter;
-      const key = e.adapter ?? 'qq';
+      // 多上游：QQ 实例名跨 core 可重复（默认都叫 qq），按 (core, adapter) 键。
+      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
         ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
         filter,
@@ -1120,9 +1165,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'QqGateMode': {
-      const e = (event as { QqGateMode: { mode: GateMode; adapter?: string | null } }).QqGateMode;
+      const e = (event as { QqGateMode: { mode: GateMode; adapter?: string | null; core?: string | null } }).QqGateMode;
       state.qqGateMode = e.mode;
-      const key = e.adapter ?? 'qq';
+      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
         ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
         gateMode: e.mode,
@@ -1130,9 +1175,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'QqOwner': {
-      const e = (event as { QqOwner: { owner_qq: number; adapter?: string | null } }).QqOwner;
+      const e = (event as { QqOwner: { owner_qq: number; adapter?: string | null; core?: string | null } }).QqOwner;
       state.qqOwner = e.owner_qq;
-      const key = e.adapter ?? 'qq';
+      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
         ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
         owner: e.owner_qq,
@@ -1141,17 +1186,18 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'QqQrcode': {
       const e = (event as {
-        QqQrcode: { adapter: string; png_base64: string; error?: string | null };
+        QqQrcode: { adapter: string; png_base64: string; error?: string | null; core?: string | null };
       }).QqQrcode;
-      state.lastQrcode = { ...e };
+      state.lastQrcode = { ...e, core: evtCore(e) };
       return state;
     }
     case 'QqLoginStatus': {
       const e = (event as {
-        QqLoginStatus: { adapter: string; online: boolean; user_id?: string | null };
+        QqLoginStatus: { adapter: string; online: boolean; user_id?: string | null; core?: string | null };
       }).QqLoginStatus;
-      state.qqByAdapter[e.adapter] = {
-        ...(state.qqByAdapter[e.adapter] ?? defaultQqInstanceState()),
+      const key = scopedKey(evtCore(e), e.adapter);
+      state.qqByAdapter[key] = {
+        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
         online: e.online,
         selfId: e.user_id ?? null,
       };
@@ -1159,10 +1205,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'GroupList': {
       const e = (event as {
-        GroupList: { groups: Array<{ group_id: number; group_name: string }>; adapter?: string | null };
+        GroupList: {
+          groups: Array<{ group_id: number; group_name: string }>;
+          adapter?: string | null;
+          core?: string | null;
+        };
       }).GroupList;
       state.qqGroups = e.groups.map((g) => [g.group_id, g.group_name]);
-      const key = e.adapter ?? 'qq';
+      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
         ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
         groups: state.qqGroups,

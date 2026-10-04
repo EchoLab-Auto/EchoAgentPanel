@@ -26,6 +26,14 @@ interface AdapterRow {
 
 const coreDot = computed<DotStatus>(() => (state.connected ? 'online' : 'connecting'));
 
+/** 可切换的上游 core（多上游聚合视图；单上游为空隐藏选择器）。 */
+const coreOptions = computed(() => Array.from(state.knownCores).sort());
+
+/** 切换"管理目标 core"：清缓存 + 重拉由 App.vue 的 activeCore watcher 统一处理。 */
+function onCoreChange(event: Event) {
+  state.activeCore = (event.target as HTMLSelectElement).value || null;
+}
+
 const adapters = computed<AdapterRow[]>(() =>
   state.adapters.map((a) => ({
     key: a.name,
@@ -50,6 +58,14 @@ const adapters = computed<AdapterRow[]>(() =>
     <p v-if="!state.connected" class="conn-hint">
       与 Core 断开，正在自动重连（期间命令不会发送）
     </p>
+
+    <!-- 管理目标 core（多上游）：设置/QQ/联邦等管理面作用于所选 core。 -->
+    <div v-if="coreOptions.length > 0" class="conn-row">
+      <span class="conn-row__label" title="管理面（设置/QQ/联邦）作用的目标 core">管理目标</span>
+      <select class="conn-core-select" :value="state.activeCore ?? ''" @change="onCoreChange">
+        <option v-for="c in coreOptions" :key="c" :value="c">{{ c }}</option>
+      </select>
+    </div>
 
     <!-- QQ 适配器实例 -->
     <div v-if="adapters.length" class="conn-group">
@@ -104,6 +120,16 @@ const adapters = computed<AdapterRow[]>(() =>
 }
 .conn-row__value.is-pending {
   color: var(--panel-warn);
+}
+.conn-core-select {
+  flex-shrink: 0;
+  max-width: 120px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.12));
+  background: var(--nm-bg-raised, rgba(255, 255, 255, 0.06));
+  color: var(--nm-text-primary);
+  font-size: 11.5px;
 }
 .conn-hint {
   margin: 0;

@@ -242,6 +242,22 @@ function coreForCommand(command: BackendCommand): string | null {
   return null;
 }
 
+/**
+ * 切换到某个 core 后重新拉取"单值管理面"数据（配置/技能/工具/插件/适配器/
+ * shell/联邦）。这些响应会被 `managementCoreCurrent` 过滤到 activeCore，
+ * 所以切 core 必须重拉一次，否则会短暂显示上一个 core 的值。
+ */
+export function requestActiveCoreManagement(): void {
+  sendCommand('RequestState'); // → ApiConfigUpdated / ApiProfilesUpdated
+  sendCommand('RequestSystemPrompt');
+  sendCommand('RequestAdapterStatus');
+  sendCommand('RequestSkillsList');
+  sendCommand('RequestToolsList');
+  sendCommand('RequestPluginsList');
+  sendCommand({ RequestShellSessions: {} });
+  sendCommand({ RequestFederationStatus: null } as unknown as BackendCommand);
+}
+
 export function sendCommand(command: BackendCommand, targetCore?: string): void {
   // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > activeCore 兜底。
   let core = targetCore ?? coreForCommand(command) ?? state.activeCore;

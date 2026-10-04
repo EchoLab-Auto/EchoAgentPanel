@@ -6,6 +6,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton, NeumorphismSegmented, NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { defaultQqInstanceState } from '../state';
+import { scopedKey } from '../keys';
 import { sendCommand, sendPending } from '../connection';
 import { usePending, type PendingPhase } from '../pending';
 import type { GateMode } from '../protocol';
@@ -49,8 +50,11 @@ const activeAdapter = computed(
 );
 const qqAdapter = computed(() => activeAdapter.value);
 /** 当前实例的 QQ 管理态（门控/名单/owner/群/好友）。 */
+// 实例名跨 core 可重复（默认都叫 qq）：按 (activeCore, 实例) 取态。
 const instanceState = computed(
-  () => state.qqByAdapter[activeAdapter.value?.name ?? 'qq'] ?? defaultQqInstanceState(),
+  () =>
+    state.qqByAdapter[scopedKey(state.activeCore, activeAdapter.value?.name ?? 'qq')] ??
+    defaultQqInstanceState(),
 );
 const activeName = computed(() => activeAdapter.value?.name ?? '');
 /** 多实例时才显示实例切换（单实例零变化）。 */

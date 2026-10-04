@@ -9,9 +9,9 @@ import {
   ThemeProvider,
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
-import { cancelSessionWork, coreForTeam } from './state';
+import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';
-import { sendCommand, startConnection } from './connection';
+import { requestActiveCoreManagement, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
 import { loopModeOf } from './protocol';
 import { currentTeam, teamPluginEnabled } from './capabilities';
@@ -375,6 +375,18 @@ watch(
     }, 1200);
   },
   { immediate: true },
+);
+
+// ── 管理目标 core 切换：清空单值管理面缓存 + 定向重拉 ──
+// 覆盖所有 activeCore 变更来源（连接骨架选择器 / 会话切换 / 事件驱动），
+// 保证设置/QQ/联邦页"看到的=改的"都是同一个 core。
+watch(
+  () => state.activeCore,
+  (next, prev) => {
+    if (next === prev) return;
+    resetManagementState(state);
+    requestActiveCoreManagement();
+  },
 );
 
 // ── Toast 桥：state.toasts 只是转发队列，立刻泵进库 ToastProvider 并排空 ──

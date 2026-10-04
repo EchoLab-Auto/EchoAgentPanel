@@ -41,18 +41,13 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
       .ShellSessionsList;
     for (const s of e.sessions) s.core = core;
   }
-  // 让 reducer 的 team/session 过滤与复合键能区分"同名跨 core"事件：给任何
-  // 带 team_id 或 session_id 的事件载荷注入来源 core（单上游/旧 core 不注入
-  // = undefined）。覆盖 AgentCompleted / ContextSnapshot 等只有 session_id 的
-  // 事件——它们同样需要 (core, session_id) 复合键。
+  // 让 reducer 的 team/session 过滤、复合键与管理面归属都能区分来源 core：
+  // 给**任何对象载荷**注入 core（单上游/旧 core 不注入）。这样 team_id /
+  // session_id 事件、以及 ApiConfigUpdated/SkillsList/FederationStatus 等
+  // 无 team/session 的管理事件都能带上归属 core。
   if (core) {
     const body = Object.values(event as unknown as Record<string, unknown>)[0];
-    if (
-      body &&
-      typeof body === 'object' &&
-      ('team_id' in (body as Record<string, unknown>) ||
-        'session_id' in (body as Record<string, unknown>))
-    ) {
+    if (body && typeof body === 'object') {
       (body as Record<string, unknown>).core = core;
     }
   }
