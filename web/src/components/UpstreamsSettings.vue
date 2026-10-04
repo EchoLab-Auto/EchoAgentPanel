@@ -8,7 +8,7 @@
 //! - `DELETE /api/upstreams/{name}` → 删除
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismInput,
@@ -20,18 +20,8 @@ import {
 } from '@echolab-auto/ui-frame';
 import { panelFetch } from '../connection';
 import { state } from '../store';
-import { removeSessionsOfCore } from '../state';
-
-interface UpstreamStatus {
-  name: string;
-  url: string;
-  token_set: boolean;
-  online: boolean;
-  connectivity: 'online' | 'connecting' | 'offline';
-  auth: 'ok' | 'failed' | 'unknown';
-  last_error: string | null;
-  last_checked: number;
-}
+import { removeSessionsOfCore, type UpstreamStatus } from '../state';
+import { refreshUpstreams } from '../upstreams';
 
 /** 连通性文案与状态点映射。 */
 function connectivityMeta(u: UpstreamStatus): { status: 'online' | 'offline' | 'busy'; label: string } {
@@ -63,7 +53,8 @@ function formatChecked(unix: number): string {
   return d.toLocaleTimeString();
 }
 
-const list = ref<UpstreamStatus[]>([]);
+// 与连接状态卡共用同一份轮询结果（单一数据源）。
+const list = computed(() => state.upstreams);
 const loading = ref(false);
 const error = ref('');
 
@@ -79,11 +70,10 @@ async function refresh() {
   loading.value = true;
   error.value = '';
   try {
-    const res = await panelFetch('/api/upstreams');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    list.value = await res.json();
+    await refreshUpstreams();
     // knownCores 与管理面同步（徽标显示/命令路由候选）。
-    for (const u of list.value) state.knownCores.add(u.name);
+    for (const u of state.upstreams) state.knownCores.add(u.name);
+    if (state.upstreams.length === 0) error.value = '（未配置上游）';
   } catch (e) {
     error.value = `加载失败：${e}`;
   } finally {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-//! 连接状态卡（右侧边栏卡片栈）：Core 管理通道 + 各 QQ 适配器实例的实时状态。
+//! 连接状态卡（右侧边栏卡片栈）：浏览器↔Panel 通道 + **每个上游 Core** 的
+//! 连通性/认证 + 当前管理目标 core 的 QQ 适配器实例。
 //!
 //! 2026-09-23 从顶栏中段迁入：连接状态是"面板级"信息，放顶栏会与业务导航
 //! 混在一起，且断连时最该被看见的提示被压在顶栏中线；迁入右侧栏后与
@@ -26,8 +27,46 @@ interface AdapterRow {
 
 const coreDot = computed<DotStatus>(() => (state.connected ? 'online' : 'connecting'));
 
-/** 可切换的上游 core（多上游聚合视图；单上游为空隐藏选择器）。 */
-const coreOptions = computed(() => Array.from(state.knownCores).sort());
+/** 可切换的上游 core：已发现（有事件）+ 已配置上游（含离线）的并集。 */
+const coreOptions = computed(() => {
+  const names = new Set<string>(state.knownCores);
+  for (const u of state.upstreams) names.add(u.name);
+  return Array.from(names).sort();
+});
+
+/** 逐 core 连接状态（Panel 后端 /api/upstreams 周期轮询）。 */
+const upstreams = computed(() => state.upstreams);
+
+interface CoreRow {
+  name: string;
+  url: string;
+  dot: DotStatus;
+  stateText: string;
+  detail: string;
+  isTarget: boolean;
+}
+const coreRows = computed<CoreRow[]>(() =>
+  upstreams.value.map((u) => {
+    const dot: DotStatus =
+      u.connectivity === 'online' ? 'online' : u.connectivity === 'connecting' ? 'connecting' : 'offline';
+    const stateText =
+      u.connectivity === 'online'
+        ? '已连接'
+        : u.connectivity === 'connecting'
+          ? '连接中'
+          : u.auth === 'failed'
+            ? '认证失败'
+            : '离线';
+    return {
+      name: u.name,
+      url: u.url,
+      dot,
+      stateText,
+      detail: u.last_error ?? u.url,
+      isTarget: state.activeCore === u.name,
+    };
+  }),
+);
 
 /** 切换"管理目标 core"：清缓存 + 重拉由 App.vue 的 activeCore watcher 统一处理。 */
 function onCoreChange(event: Event) {
@@ -54,17 +93,39 @@ const adapters = computed<AdapterRow[]>(() =>
 
 <template>
   <div class="conn-card">
-    <!-- Core 管理通道（management WS） -->
+    <!-- 浏览器 ↔ Panel 通道 -->
     <div class="conn-row">
       <NeumorphismStatusDot :status="coreDot" size="small" />
-      <span class="conn-row__label">Core</span>
+      <span class="conn-row__label">Panel 通道</span>
       <span class="conn-row__value" :class="state.connected ? 'is-ok' : 'is-pending'">
         {{ state.connected ? '已连接' : '连接中…' }}
       </span>
     </div>
     <p v-if="!state.connected" class="conn-hint">
-      与 Core 断开，正在自动重连（期间命令不会发送）
+      与 Panel 断开，正在自动重连（期间命令不会发送）
     </p>
+
+    <!-- 上游 Core：逐 core 连接状态（全部上游，含离线） -->
+    <div class="conn-group">
+      <div class="conn-group__title">上游 Core（{{ coreRows.length }}）</div>
+      <div v-if="coreRows.length === 0" class="conn-hint muted">（未配置上游）</div>
+      <div
+        v-for="row in coreRows"
+        :key="row.name"
+        class="conn-row conn-row--core"
+        :class="{ 'conn-row--target': row.isTarget }"
+        :title="row.detail"
+      >
+        <NeumorphismStatusDot :status="row.dot" size="small" />
+        <span class="conn-row__label">
+          {{ row.name }}
+          <span v-if="row.isTarget" class="conn-core-target">管理目标</span>
+        </span>
+        <span class="conn-row__value" :class="row.dot === 'online' ? 'is-ok' : row.dot === 'offline' ? 'is-off' : 'is-pending'">
+          {{ row.stateText }}
+        </span>
+      </div>
+    </div>
 
     <!-- 管理目标 core（多上游）：设置/QQ/联邦等管理面作用于所选 core。 -->
     <div v-if="coreOptions.length > 0" class="conn-row">
@@ -78,7 +139,9 @@ const adapters = computed<AdapterRow[]>(() =>
 
     <!-- QQ 适配器实例 -->
     <div v-if="adapters.length" class="conn-group">
-      <div class="conn-group__title">QQ 适配器</div>
+      <div class="conn-group__title">
+        QQ 适配器（{{ state.activeCore ?? '本机' }}）
+      </div>
       <div v-for="row in adapters" :key="row.key" class="conn-row">
         <NeumorphismStatusDot :status="row.dot" size="small" />
         <span class="conn-row__label" :title="row.label">{{ row.label }}</span>
@@ -129,6 +192,21 @@ const adapters = computed<AdapterRow[]>(() =>
 }
 .conn-row__value.is-pending {
   color: var(--panel-warn);
+}
+.conn-row--core.conn-row--target .conn-row__label {
+  font-weight: 600;
+}
+.conn-core-target {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  opacity: 0.75;
+  background: rgba(127, 127, 127, 0.18);
+  white-space: nowrap;
+}
+.conn-row__value.is-off {
+  color: var(--nm-text-placeholder, #888);
 }
 .conn-core-select {
   flex-shrink: 0;

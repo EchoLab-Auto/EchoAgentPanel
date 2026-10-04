@@ -336,6 +336,18 @@ export interface ContextSnapshotData {
   limit_tokens: number;
 }
 
+/// 一个上游 Core 的连接状态（Panel 后端 `/api/upstreams` 的元素）。
+export interface UpstreamStatus {
+  name: string;
+  url: string;
+  token_set: boolean;
+  online: boolean;
+  connectivity: 'online' | 'connecting' | 'offline';
+  auth: 'ok' | 'failed' | 'unknown';
+  last_error: string | null;
+  last_checked: number;
+}
+
 export interface AppState {
   connected: boolean;
   /**
@@ -357,6 +369,8 @@ export interface AppState {
   activeCore: string | null;
   /// 已发现的上游名集合（连接层由事件信封登记；Core 切换器展示）。
   knownCores: Set<string>;
+  /// 上游 Core 连接状态（`/api/upstreams` 周期轮询；连接状态卡逐 core 展示）。
+  upstreams: UpstreamStatus[];
   /// 上游名 → 本机 NodeId（从载荷内建 node_id 学习；诊断/展示用）。
   coreNodeIds: Record<string, string>;
   tasks: OrchActivity[];
@@ -463,6 +477,7 @@ export function initialState(): AppState {
     federationInvite: null,
     activeCore: null,
     knownCores: new Set(),
+    upstreams: [],
     coreNodeIds: {},
     tasks: [],
     adapters: [],
