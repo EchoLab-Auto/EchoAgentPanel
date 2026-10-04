@@ -14,6 +14,11 @@
 //! API 配置随 state.api 事件更新。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+
+const props = defineProps<{
+  activeSessionId?: string | null;
+  activeTeamId?: string | null;
+}>();
 import {
   NeumorphismButton,
   NeumorphismCard,
@@ -1517,7 +1522,10 @@ watch(
       <!-- 联邦工作区：整页设置（peers 管理 + 邀请串配对） -->
       <div v-else-if="activeCategory === 'federation'" class="caps-workspace">
         <div class="caps-detail-pane">
-          <FederationSettings />
+          <FederationSettings
+            :active-session-id="props.activeSessionId"
+            :active-team-id="props.activeTeamId"
+          />
         </div>
       </div>
 

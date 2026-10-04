@@ -94,7 +94,7 @@ export function startConnection(): void {
         'RequestTeamsList',
       ];
       for (const command of broadcastBootstrap) {
-        ws.send(serializeCommand(command));
+        ws.send(broadcastEnvelope(command));
       }
       // 定向引导：多上游下必须带 core，否则非只读命令会被中继拒收。core 未知
       // 时 sendCommand 兜底裸发，中继白名单已放行这两条（广播各 core）。
@@ -169,7 +169,7 @@ export function startConnection(): void {
     // 5s 内无任何下行帧 → 判死，主动关闭走标准重连（全量重建）。
     const sentAt = Date.now();
     try {
-      current.send(serializeCommand('RequestTeamsList'));
+      current.send(broadcastEnvelope('RequestTeamsList'));
     } catch {
       current.close();
       return;
@@ -186,6 +186,14 @@ export function startConnection(): void {
   window.addEventListener('online', heal);
 
   connect();
+}
+
+/**
+ * 显式广播信封：只读发现命令（`RequestState`/`RequestTeamsList`）需要发往
+ * 全部在线上游。中继不再按命令名猜只读，改由客户端声明 `broadcast: true`。
+ */
+function broadcastEnvelope(command: BackendCommand): string {
+  return JSON.stringify({ broadcast: true, frame: { type: 'command', payload: command } });
 }
 
 /**
@@ -268,8 +276,10 @@ export function resolveTargetCore(
   command: BackendCommand,
   targetCore?: string,
 ): string | null | undefined {
-  // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > activeCore 兜底。
-  let core = targetCore ?? coreForCommand(command) ?? state.activeCore;
+  // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > activeCore >
+  // 首个已知上游。多上游下必须落到具体 core——无壳命令会被中继拒收。
+  const firstKnownCore = state.knownCores.size > 0 ? [...state.knownCores].sort()[0] : null;
+  let core = targetCore ?? coreForCommand(command) ?? state.activeCore ?? firstKnownCore;
   // 一致性守卫：命令带 team_id 时目标 core 必须确实拥有该人格，否则重定向
   // 到拥有人格的 core。多上游下调度/会话归属若选到没有人格的节点，会把
   // A core 的 agent 发给 B core，B 回「智能体 X 不存在」——这里提前纠正。

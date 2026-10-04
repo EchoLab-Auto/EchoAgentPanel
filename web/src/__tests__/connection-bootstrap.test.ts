@@ -66,6 +66,18 @@ describe('重连引导命令（去主智能体）', () => {
     expect(sent.some((c) => c.includes('RequestTrunkTimeline'))).toBe(false);
   });
 
+  it('只读发现命令用显式 broadcast 信封（中继不再按命令名猜只读）', async () => {
+    const sent = await bootstrapCommands();
+    const state = sent.find((c) => c.includes('RequestState'));
+    const teams = sent.find((c) => c.includes('RequestTeamsList'));
+    for (const payload of [state, teams]) {
+      expect(payload).toBeTruthy();
+      const parsed = JSON.parse(payload as string) as { broadcast?: boolean; frame?: unknown };
+      expect(parsed.broadcast).toBe(true);
+      expect(parsed.frame).toBeTruthy();
+    }
+  });
+
   it('不预取 QQ 过滤配置（无 QQ 部署下必被拒）', async () => {
     const sent = await bootstrapCommands();
     expect(sent.some((c) => c.includes('RequestQqFilterConfig'))).toBe(false);

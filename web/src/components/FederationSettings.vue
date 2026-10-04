@@ -15,6 +15,11 @@ import { sendCommand } from '../connection';
 import type { BackendCommand } from '../protocol';
 import type { FederationPeerInfo } from '../state';
 
+const props = defineProps<{
+  activeSessionId?: string | null;
+  activeTeamId?: string | null;
+}>();
+
 // ── 状态（reduce 注入 state.federation / state.federationInvite）──
 const fed = computed(() => state.federation);
 const enabled = computed(() => fed.value?.enabled ?? false);
@@ -29,6 +34,32 @@ const formUrl = ref('');
 const formToken = ref('');
 const formAllowAll = ref(true);
 const inviteInput = ref('');
+// ── 会话迁移（P3-2b）：把当前会话的历史搬到某个在线 peer ──
+const migratePeer = ref('');
+const onlinePeers = computed(() => peers.value.filter((p: FederationPeerInfo) => p.link === 'Online'));
+/** 迁移要求前端持有的当前会话（global 聚合视图无单一归属，不支持）。 */
+const canMigrate = computed(
+  () =>
+    enabled.value &&
+    !!props.activeSessionId &&
+    props.activeSessionId !== 'global' &&
+    peers.value.some((p: FederationPeerInfo) => p.link === 'Online'),
+);
+function migrateSession() {
+  const sessionId = props.activeSessionId;
+  if (!sessionId || sessionId === 'global') return;
+  const target =
+    migratePeer.value ||
+    peers.value.find((p: FederationPeerInfo) => p.link === 'Online')?.name;
+  if (!target) return;
+  sendCommand({
+    MigrateSession: {
+      session_id: sessionId,
+      team_id: props.activeTeamId ?? null,
+      target_peer: target,
+    },
+  });
+}
 const inviteError = ref('');
 
 // ── 邀请串（本机生成）──
@@ -162,6 +193,27 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- 会话迁移（P3-2b）：导出当前会话事件日志 → 分块搬运到目标 peer -->
+    <div class="fed-migrate">
+      <div class="fed-migrate__text">
+        <div class="fed-migrate__title">迁移当前会话</div>
+        <div class="fed-sub">
+          会话：
+          {{ props.activeSessionId && props.activeSessionId !== 'global' ? props.activeSessionId : '（全局视图无单一会话）' }}
+          · 人格：{{ props.activeTeamId ?? '（未指定）' }}
+        </div>
+      </div>
+      <select v-model="migratePeer" class="fed-input fed-migrate__peer">
+        <option value="">（自动：首个在线节点）</option>
+        <option v-for="peer in onlinePeers" :key="peer.name" :value="peer.name">
+          {{ peer.name }}
+        </option>
+      </select>
+      <button class="fed-btn fed-btn--primary" :disabled="!canMigrate" @click="migrateSession">
+        迁移
+      </button>
+    </div>
+
     <!-- 邀请串输出 -->
     <div v-if="inviteText" class="fed-invite">
       <div class="fed-invite-label">
@@ -246,6 +298,27 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 14px;
   font-size: 13px;
+}
+.fed-migrate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.1));
+}
+.fed-migrate__text {
+  flex: 1;
+  min-width: 0;
+}
+.fed-migrate__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--nm-text-primary);
+}
+.fed-migrate__peer {
+  max-width: 180px;
 }
 .fed-header {
   display: flex;

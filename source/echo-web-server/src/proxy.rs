@@ -332,56 +332,35 @@ fn wrap_event(upstream_name: &str, text: &str) -> Option<String> {
 /// 无壳（单上游旧前端）→ 广播给全部上游（单上游时即唯一上游）。
 /// 无壳命令（未选中会话/上游）仅允许只读白名单广播；写/删除类必须
 /// 显式指定目标 core——否则一次点击扇出到全部上游（批量清历史）。
-/// 可"无壳广播"的只读命令白名单（中继本地副本）。
+/// 浏览器命令帧的投递意图——中继**不做命令语义分类**（纯透传）。
 ///
-/// 权威定义在 Core 的 `echo_protocol::BROADCAST_READONLY_COMMANDS`（本仓库
-/// 是纯透传中继，不依赖 echo-protocol crate）。**改动必须与 Core 同步**；
-/// 两边各有快照测试（此处 `readonly_whitelist_snapshot`，Core
-/// `broadcast_readonly_contract_snapshot`）防止单边漂移。
-fn is_readonly_command(type_str: &str) -> bool {
-    matches!(
-        type_str,
-        "RequestTeamsList"
-            | "RequestAdapterList"
-            | "RequestAdapterStatus"
-            | "RequestState"
-            | "RequestConfig"
-            | "RequestShellSessions"
-            | "RequestWorkspaces"
-            | "RequestSessions"
-            | "RequestTrunkTimeline"
-            | "RequestActiveTurns"
-            | "RequestFederationStatus"
-            | "RequestFederationInvite"
-            | "RequestNodeStatus"
-            | "Ping"
-    )
+/// 由客户端显式声明投递范围：
+/// - `{"core": "<name>", "frame": {...}}` → 定向该上游；
+/// - `{"broadcast": true, "frame": {...}}` → 显式广播给全部在线上游
+///   （仅用于只读发现命令，如 `RequestState`/`RequestTeamsList`）；
+/// - 无壳 → 单上游语义下直接转发；多上游下拒绝（无意图不猜测）。
+///
+/// 旧的"中继按命令名猜只读"白名单已删除——它需要与 Core 的
+/// `echo_protocol::BROADCAST_READONLY_COMMANDS` 手动同步，是重复的语义来源。
+enum CommandRoute {
+    Target(String),
+    Broadcast,
+    Unwrapped,
 }
 
-/// 从浏览器命令帧 `{"type":"command","payload":<命令>}` 提取命令名：
-/// payload 为字符串（单元变体，如 `"RequestState"`）时即该串；为对象
-/// （携带参数，如 `{"SwitchModel":{...}}`）时取唯一键。
-///
-/// 注意：绝不能取信封自身的 `type`（恒为 `"command"`）——旧实现这么取，
-/// 导致只读白名单永远匹配不上，裸命令被一律当作"非只读"拒收。
-fn command_name(text: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(text).ok()?;
-    let payload = v.get("payload")?;
-    if let Some(s) = payload.as_str() {
-        return Some(s.to_string());
-    }
-    payload.as_object()?.keys().next().cloned()
-}
-
-fn unwrap_command(text: &str) -> (Option<String>, String) {
+/// 拆浏览器命令帧：返回投递意图 + 内层命令原文。
+fn unwrap_command(text: &str) -> (CommandRoute, String) {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
-        if let (Some(core), Some(frame)) = (v.get("core"), v.get("frame")) {
-            if let Some(name) = core.as_str() {
-                return (Some(name.to_string()), frame.to_string());
+        if let Some(frame) = v.get("frame") {
+            if let Some(name) = v.get("core").and_then(|c| c.as_str()) {
+                return (CommandRoute::Target(name.to_string()), frame.to_string());
+            }
+            if v.get("broadcast").and_then(|b| b.as_bool()) == Some(true) {
+                return (CommandRoute::Broadcast, frame.to_string());
             }
         }
     }
-    (None, text.to_string())
+    (CommandRoute::Unwrapped, text.to_string())
 }
 
 /// 一条活跃上游链路的句柄（命令写端 + 任务中止键）。
@@ -395,7 +374,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
     // 每上游一条「浏览器→Core」转发任务（命令按壳路由/无壳广播）与
     // 「Core→浏览器」加壳转发任务（汇合进单一 mpsc 出口）。
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<BrowserMessage>(256);
-    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<(Option<String>, String)>(256);
+    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<(CommandRoute, String)>(256);
 
     let reap_after = reap_after();
     let links: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CoreLink>>> =
@@ -649,43 +628,37 @@ async fn bridge(browser: WebSocket, state: AppState) {
     let route_pump = {
         let links = links.clone();
         tokio::spawn(async move {
-            while let Some((target, text)) = cmd_rx.recv().await {
+            while let Some((route, text)) = cmd_rx.recv().await {
                 let links = links.read().await;
-                match target {
-                    Some(name) => {
+                match route {
+                    CommandRoute::Target(name) => {
                         if let Some(link) = links.get(&name) {
                             let _ =
                                 tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text)).await;
                         }
                     }
-                    None => {
-                        // 无目标（前端未选定上游）：
-                        // - 仅一条在线链路 = 单上游语义，直接转发。此时中继
-                        //   不加壳，前端 activeCore 为空、发的就是裸命令，必须
-                        //   放行；否则全部命令被拒（表现为 Panel 连不上 Core）。
-                        // - 多条在线链路：只读白名单广播；写/删除类拒绝
-                        //   （避免一次点击扇出到全部上游——批量清历史）。
+                    CommandRoute::Broadcast => {
+                        // 客户端显式声明的广播（只读发现命令）。
+                        for link in links.values() {
+                            let _ = tokio::time::timeout(
+                                SEND_TIMEOUT,
+                                link.cmd_tx.send(text.clone()),
+                            )
+                            .await;
+                        }
+                    }
+                    CommandRoute::Unwrapped => {
+                        // 无意图壳：仅单上游语义下放行（此时加壳开关为 false，
+                        // 前端发的就是裸帧）；多上游下拒绝——不猜测命令语义。
                         if links.len() == 1 {
                             if let Some(link) = links.values().next() {
                                 let _ = tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text))
                                     .await;
                             }
                         } else {
-                            let readonly =
-                                command_name(&text).is_some_and(|t| is_readonly_command(&t));
-                            if readonly {
-                                for link in links.values() {
-                                    let _ = tokio::time::timeout(
-                                        SEND_TIMEOUT,
-                                        link.cmd_tx.send(text.clone()),
-                                    )
-                                    .await;
-                                }
-                            } else {
-                                warn!(
-                                    "rejected untargeted non-readonly command (no active core selected)"
-                                );
-                            }
+                            warn!(
+                                "rejected untargeted command (need {{core}} or {{broadcast:true}} envelope)"
+                            );
                         }
                     }
                 }
@@ -711,8 +684,8 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     last_frame = Instant::now();
                     match message {
                         BrowserMessage::Text(text) => {
-                            let (target, frame) = unwrap_command(&text);
-                            if cmd_tx.send((target, frame)).await.is_err() {
+                            let (route, frame) = unwrap_command(&text);
+                            if cmd_tx.send((route, frame)).await.is_err() {
                                 break;
                             }
                         }
@@ -776,52 +749,35 @@ async fn bridge(browser: WebSocket, state: AppState) {
 mod tests {
     use super::*;
 
-    /// 引导期裸发的只读命令必须命中白名单——否则多上游下被中继拒收
-    /// （RequestAdapterStatus / RequestShellSessions 是 2026-10 补入的）。
+    /// 定向壳：解析出目标上游名。
     #[test]
-    fn bootstrap_readonly_commands_are_whitelisted() {
-        for name in [
-            "RequestState",
-            "RequestTeamsList",
-            "RequestAdapterStatus",
-            "RequestShellSessions",
-        ] {
-            assert!(is_readonly_command(name), "{name} must be broadcast-allowed");
-        }
+    fn unwrap_targets_named_core() {
+        let (route, frame) = unwrap_command(r#"{"core":"core-a","frame":{"type":"command","payload":"RequestState"}}"#);
+        assert!(matches!(route, CommandRoute::Target(name) if name == "core-a"));
+        assert!(frame.contains("RequestState"));
     }
 
-    /// 全量快照：与 Core `BROADCAST_READONLY_COMMANDS` 逐项一致。
+    /// 显式广播壳：只有 `broadcast: true` 才广播，不再按命令名猜。
     #[test]
-    fn readonly_whitelist_snapshot() {
-        let mut names = [
-            "RequestTeamsList",
-            "RequestAdapterList",
-            "RequestAdapterStatus",
-            "RequestState",
-            "RequestConfig",
-            "RequestShellSessions",
-            "RequestWorkspaces",
-            "RequestSessions",
-            "RequestTrunkTimeline",
-            "RequestActiveTurns",
-            "RequestFederationStatus",
-            "RequestFederationInvite",
-            "RequestNodeStatus",
-            "Ping",
-        ];
-        names.sort();
-        for name in names {
-            assert!(is_readonly_command(name), "{name} must be broadcast-allowed");
-        }
-        assert!(!is_readonly_command("SendMessage"));
-        assert!(!is_readonly_command("ClearHistory"));
+    fn unwrap_honours_explicit_broadcast() {
+        let (route, frame) = unwrap_command(
+            r#"{"broadcast":true,"frame":{"type":"command","payload":"RequestTeamsList"}}"#,
+        );
+        assert!(matches!(route, CommandRoute::Broadcast));
+        assert!(frame.contains("RequestTeamsList"));
+
+        // 即使命令名"看起来只读"，没有 broadcast 意图也不是广播。
+        let (route, _) = unwrap_command(
+            r#"{"frame":{"type":"command","payload":"RequestTeamsList"}}"#,
+        );
+        assert!(matches!(route, CommandRoute::Unwrapped));
     }
 
-    /// 写/删除类命令绝不能裸广播（会被拒收，要求显式 core）。
+    /// 无壳裸命令：交给单上游兜底（多上游由 route pump 拒绝）。
     #[test]
-    fn mutating_commands_are_not_broadcast() {
-        for name in ["SendMessage", "ClearHistory", "TogglePlugin", "SaveTeam"] {
-            assert!(!is_readonly_command(name), "{name} must require an explicit core");
-        }
+    fn unwrap_plain_command_is_unwrapped() {
+        let (route, frame) = unwrap_command(r#"{"type":"command","payload":"RequestState"}"#);
+        assert!(matches!(route, CommandRoute::Unwrapped));
+        assert!(frame.contains("RequestState"));
     }
 }

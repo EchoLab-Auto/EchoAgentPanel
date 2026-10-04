@@ -454,7 +454,11 @@ watch(
           @select-branch="(id) => (activeBranchId = id)"
           @open-shell-detail="openShellDetail"
         />
-        <SettingsView v-else-if="view === 'settings'" />
+        <SettingsView
+          v-else-if="view === 'settings'"
+          :active-session-id="activeSessionId"
+          :active-team-id="activeTeamId"
+        />
         <ShellPanel
           v-else-if="shellDetailId"
           :session-id="shellDetailId"

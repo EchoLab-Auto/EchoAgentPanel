@@ -386,6 +386,7 @@ export type BackendCommand =
   | { SetQqGateMode: { mode: GateMode; adapter?: string | null } }
   | 'RequestSelfUpdate'
   | 'RequestSelfUpdateStatus'
+  | { MigrateSession: { session_id: string; team_id?: string | null; target_peer: string } }
   | { RequestQqOwner: { adapter?: string | null } }
   | { SetQqOwner: { owner_qq: number; adapter?: string | null } };
 
@@ -533,6 +534,15 @@ export type BackendEvent =
   | { TeamsList: { teams: TeamInfo[] } }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
+  | {
+      SessionMigrated: {
+        session_id: string;
+        target_peer: string;
+        new_session_id?: string | null;
+        message: string;
+        success: boolean;
+      };
+    }
   | { AdapterList: { adapters: AdapterStatus[] } }
   | { GroupList: { groups: GroupInfo[]; adapter?: string | null } }
   | {

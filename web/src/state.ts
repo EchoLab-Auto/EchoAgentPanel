@@ -1230,6 +1230,19 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       state.qqFriends = e.friends.map((f) => [f.user_id, f.nickname]);
       return state;
     }
+    case 'SessionMigrated': {
+      const e = (event as {
+        SessionMigrated: {
+          session_id: string;
+          target_peer: string;
+          message: string;
+          success: boolean;
+        };
+      }).SessionMigrated;
+      // 迁移受理 + 终态两条事件都经此提示；成功/失败给不同语气。
+      pushToast(state, e.message, e.success ? 'success' : 'error');
+      return state;
+    }
     case 'Error': {
       const e = (event as { Error: { session_id: string | null; message: string } }).Error;
       pushToast(state, e.message, 'info');
