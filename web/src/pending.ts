@@ -74,6 +74,8 @@ const RESPONSE_TO_COMMANDS: Record<string, string[]> = (() => {
 interface PendingEntry {
   /** 登记的请求命令名（裸串变体或 `{ Variant: … }` 的首键）。 */
   command: string;
+  /** 登记时解析出的目标 core（多上游；null = 单上游/未解析）。 */
+  core: string | null;
   visible: boolean;
   slow: boolean;
   timedOut: boolean;
@@ -105,10 +107,15 @@ function drop(key: string): void {
  * 登记一次请求（发送命令前调用；`connection.ts::sendPending` 已封装）。
  * 同一 key 重复登记即覆盖（重试/切换会话重拉的语义）。
  */
-export function trackRequest(key: string, command: BackendCommand | string): void {
+export function trackRequest(
+  key: string,
+  command: BackendCommand | string,
+  core: string | null = null,
+): void {
   drop(key);
   entries[key] = {
     command: commandName(command),
+    core,
     visible: false,
     slow: false,
     timedOut: false,
@@ -162,14 +169,17 @@ function finish(key: string): void {
  * 误销窗口：同一响应事件也被其他操作触发时（如 SaveTeam 后的 TeamsList），
  * 会把正在等待的登记一并销账——低频且无害（数据确实是最新的）。
  */
-export function resolvePendingEvent(event: object): void {
+export function resolvePendingEvent(event: object, core: string | null = null): void {
   const name = Object.keys(event)[0];
   if (!name) return;
   const commands = RESPONSE_TO_COMMANDS[name];
   if (!commands) return;
   for (const key of Object.keys(entries)) {
     const entry = entries[key];
-    if (commands.includes(entry.command)) finish(key);
+    if (!commands.includes(entry.command)) continue;
+    // 多上游：只销"目标 core 相同"的登记（任一侧未知时宽容放行，避免挂死）。
+    if (entry.core != null && core != null && entry.core !== core) continue;
+    finish(key);
   }
 }
 

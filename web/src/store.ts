@@ -12,22 +12,34 @@ import type { SessionInfo, TeamInfo } from './protocol';
 
 export const state = reactive(initialState()) as AppState;
 
+/** 学习"上游名 → NodeId"映射（载荷内建 node_id；用于诊断/展示）。 */
+function learnCoreNodeId(core: string | null, nodeId: unknown): void {
+  if (core && typeof nodeId === 'string' && nodeId) {
+    state.coreNodeIds[core] = nodeId;
+  }
+}
+
 export function dispatch(event: BackendEvent, core: string | null = null): void {
   // 请求-响应跟踪：响应事件到达即销账（各视图加载态，见 pending.ts）。
-  resolvePendingEvent(event);
+  // 带 core 传入，多上游下只销目标 core 相同的登记。
+  resolvePendingEvent(event, core);
   // 多上游聚合视图：会话事件注入来源 core（复合键第三维度，防止
   // A/B 两 Core 上同名会话（如各自的 local:tui）互相覆盖）。
   if (core && 'SessionUpdated' in (event as object)) {
     const e = (event as { SessionUpdated: { session: SessionInfo & { core?: string | null } } })
       .SessionUpdated;
     e.session.core = core;
+    learnCoreNodeId(core, e.session.node_id);
   }
   // 多上游聚合视图：人格（TeamInfo）同样注入来源 core——人格身份是
   // (core, id)，不标注就无法把"选中的 agent"路由回它所属的 core，
   // 会出现把 A core 的 default 发给 B core →「智能体 default 不存在」。
   if (core && 'TeamsList' in (event as object)) {
     const e = (event as { TeamsList: { teams: TeamInfo[] } }).TeamsList;
-    for (const t of e.teams) t.core = core;
+    for (const t of e.teams) {
+      t.core = core;
+      learnCoreNodeId(core, t.node_id);
+    }
   }
   // Shell 事件：会话 id 是 per-core 的 `sh-{seq}`（每个 core 都从 sh-1 起），
   // 必须给会话/列表条目注入 core，否则终端输出会串到另一个 core。
@@ -49,6 +61,8 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
     const body = Object.values(event as unknown as Record<string, unknown>)[0];
     if (body && typeof body === 'object') {
       (body as Record<string, unknown>).core = core;
+      const embedded = (body as { node_id?: unknown }).node_id;
+      if (typeof embedded === 'string') learnCoreNodeId(core, embedded);
     }
   }
   reduce(state, event);

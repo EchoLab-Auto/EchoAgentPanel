@@ -204,6 +204,8 @@ export interface BranchMsg {
 /** 运行中的临时回复分支（侧边临时会话标签） */
 export interface BranchTab {
   sessionId: string;
+  /** 归属上游 core（多上游；null = 单上游/未标注）。 */
+  core?: string | null;
   task: string;
   target: string;
   startedAtMs: number;
@@ -355,6 +357,8 @@ export interface AppState {
   activeCore: string | null;
   /// 已发现的上游名集合（连接层由事件信封登记；Core 切换器展示）。
   knownCores: Set<string>;
+  /// 上游名 → 本机 NodeId（从载荷内建 node_id 学习；诊断/展示用）。
+  coreNodeIds: Record<string, string>;
   tasks: OrchActivity[];
   adapters: AdapterStatus[];
   model: string;
@@ -459,6 +463,7 @@ export function initialState(): AppState {
     federationInvite: null,
     activeCore: null,
     knownCores: new Set(),
+    coreNodeIds: {},
     tasks: [],
     adapters: [],
     model: '',
@@ -673,7 +678,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           animate: true,
         });
       }
-      const tab = state.branchTabs[e.branch_id];
+      const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
       if (tab) {
         tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
       }
@@ -702,8 +707,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       startReplyBranch(state, e.session_id, evtCore(e), e.branch_id, e.message_sequence, e.task, e.target, e.started_at_ms);
       // 单开一个侧边临时会话标签：分支运行期间的活动都路由到这里，
       // 不进入主会话 trunk。
-      state.branchTabs[e.branch_id] = {
+      state.branchTabs[scopedKey(evtCore(e), e.branch_id)] = {
         sessionId: e.session_id,
+        core: evtCore(e),
         task: e.task,
         target: e.target,
         startedAtMs: e.started_at_ms,
@@ -719,7 +725,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       if (task && task.branches[0]) {
         task.branches[0].result = bounded(e.content, 4000);
       }
-      const tab = state.branchTabs[e.branch_id];
+      const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
       if (tab) {
         tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
       }
@@ -742,10 +748,10 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       }
       // 分支结束：主时间线已实时展示推理/工具/回答（时序交错），
       // 不再归档折叠合并块（避免重复内容）；仅清理临时标签。
-      const tab = state.branchTabs[e.branch_id];
+      const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
       if (tab) {
         tab.status = e.cancelled ? 'cancelled' : e.success ? 'completed' : 'failed';
-        delete state.branchTabs[e.branch_id];
+        delete state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
       }
       return state;
     }
@@ -776,7 +782,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       setPhase(state, sessionKey(evtCore(e), e.session_id), e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
       // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
-      const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
+      const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
           sessionId: e.session_id,
@@ -806,7 +812,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'ToolResult': {
       const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null } }).ToolResult;
       // 工具结果实时回填主时间线（与 ToolCall 精确配对）；分支 tab 同步更新。
-      const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
+      const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out);
       }
@@ -915,7 +921,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         });
       }
       if (e.branch_id) {
-        const tab = state.branchTabs[e.branch_id];
+        const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
         if (tab) {
           tab.finalContent = e.content;
           tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
@@ -1373,7 +1379,7 @@ export function cancelSessionWork(state: AppState, sessionId: string, core: stri
   }
   // 4) 分支 tab 同步标记
   for (const tab of Object.values(state.branchTabs)) {
-    if (tab.sessionId === sessionId && tab.status === 'running') {
+    if (tab.sessionId === sessionId && (tab.core ?? null) === core && tab.status === 'running') {
       tab.status = 'cancelled';
       for (const m of tab.msgs) {
         if (m.kind === 'tool' && m.status === 'running') {
@@ -1391,6 +1397,7 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   // 该 core 下线/移除：人格列表、会话、活动、选中态一并清理——否则残留的
   // 人格条目会让路由继续把命令发往已消失的 core（「智能体 X 不存在」）。
   state.teams = state.teams.filter(t => (t.core ?? null) !== core);
+  delete state.coreNodeIds[core];
   if (state.activeTeamCore === core) state.activeTeamCore = null;
   if (state.activeCore === core) state.activeCore = null;
   const removed = state.sessions.filter(s => (s as { core?: string | null }).core === core);

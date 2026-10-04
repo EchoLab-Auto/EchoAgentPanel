@@ -69,6 +69,8 @@ export interface WorkspaceGitInfo {
 
 export interface SessionInfo {
   id: string;
+  /** 来源节点身份（federation NodeId；多节点聚合时区分同名会话）。 */
+  node_id?: string | null;
   team_id?: string | null;
   platform: string;
   scope: string;
@@ -115,6 +117,8 @@ export interface ToolInfo {
 
 export interface TeamInfo {
   id: string;
+  /** 来源节点身份（federation NodeId；多节点聚合时人格身份 = (node_id, id)）。 */
+  node_id?: string | null;
   name: string;
   description: string;
   /**

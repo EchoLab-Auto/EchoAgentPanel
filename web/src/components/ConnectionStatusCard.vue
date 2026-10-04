@@ -34,6 +34,13 @@ function onCoreChange(event: Event) {
   state.activeCore = (event.target as HTMLSelectElement).value || null;
 }
 
+/** 展示用短 NodeId（载荷内建身份；无则空）。 */
+function shortNode(core: string): string {
+  const id = state.coreNodeIds[core];
+  if (!id) return '';
+  return id.length > 12 ? `${id.slice(0, 9)}…` : id;
+}
+
 const adapters = computed<AdapterRow[]>(() =>
   state.adapters.map((a) => ({
     key: a.name,
@@ -63,7 +70,9 @@ const adapters = computed<AdapterRow[]>(() =>
     <div v-if="coreOptions.length > 0" class="conn-row">
       <span class="conn-row__label" title="管理面（设置/QQ/联邦）作用的目标 core">管理目标</span>
       <select class="conn-core-select" :value="state.activeCore ?? ''" @change="onCoreChange">
-        <option v-for="c in coreOptions" :key="c" :value="c">{{ c }}</option>
+        <option v-for="c in coreOptions" :key="c" :value="c" :title="state.coreNodeIds[c] ?? ''">
+          {{ c }}{{ shortNode(c) ? ` · ${shortNode(c)}` : '' }}
+        </option>
       </select>
     </div>
 

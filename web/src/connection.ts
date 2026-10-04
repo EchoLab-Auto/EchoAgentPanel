@@ -195,7 +195,9 @@ export function startConnection(): void {
  * 重复发送即覆盖（重试/切换重拉语义）。
  */
 export function sendPending(command: BackendCommand, key: string): void {
-  trackRequest(key, command);
+  // 登记时带上解析出的目标 core：多上游下广播/竞态响应不会误销账别的 core
+  // 的等待（见 pending.ts::resolvePendingEvent）。
+  trackRequest(key, command, resolveTargetCore(command) ?? null);
   sendCommand(command);
 }
 
@@ -258,7 +260,14 @@ export function requestActiveCoreManagement(): void {
   sendCommand({ RequestFederationStatus: null } as unknown as BackendCommand);
 }
 
-export function sendCommand(command: BackendCommand, targetCore?: string): void {
+/**
+ * 解析一条命令的目标 core（路由优先级 + 人格一致性守卫）。`sendCommand` 与
+ * `sendPending`（等待态登记）共用，保证"发送目标"和"等待目标"一致。
+ */
+export function resolveTargetCore(
+  command: BackendCommand,
+  targetCore?: string,
+): string | null | undefined {
   // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > activeCore 兜底。
   let core = targetCore ?? coreForCommand(command) ?? state.activeCore;
   // 一致性守卫：命令带 team_id 时目标 core 必须确实拥有该人格，否则重定向
@@ -278,6 +287,11 @@ export function sendCommand(command: BackendCommand, targetCore?: string): void 
       }
     }
   }
+  return core;
+}
+
+export function sendCommand(command: BackendCommand, targetCore?: string): void {
+  const core = resolveTargetCore(command, targetCore);
   const payload = core
     ? JSON.stringify({ core, frame: { type: 'command', payload: command } })
     : serializeCommand(command);
