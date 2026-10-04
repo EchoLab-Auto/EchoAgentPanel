@@ -219,7 +219,7 @@ onUnmounted(stopPoll);
           <span class="su-node-load">负载 {{ n.load }}</span>
         </div>
         <div v-if="!state.federation?.enabled" class="su-node-hint">
-          联邦未启用——仅本机参与调度（启用联邦后远程节点自动加入）。
+          联邦状态未就绪——暂仅本机参与调度（该区域暂无 peer / 状态未加载）。
         </div>
       </div>
     </NeumorphismCard>

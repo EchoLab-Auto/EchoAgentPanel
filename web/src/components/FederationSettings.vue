@@ -183,7 +183,7 @@ onUnmounted(() => {
           · {{ onlineCount }}/{{ peers.length }} 在线
         </div>
         <div class="fed-sub fed-sub--warn" v-else>
-          联邦未启用——在 Core 配置中设置 [federation] enabled = true 后重启
+          联邦状态不可用——该区域未响应或尚未加载（确认 Core 在线后点「刷新」）
         </div>
       </div>
       <div class="fed-actions" v-if="enabled">
