@@ -39,7 +39,7 @@ function connectivityMeta(u: UpstreamStatus): { status: 'online' | 'offline' | '
     case 'online':
       return { status: 'online', label: '已连接' };
     case 'connecting':
-      return { status: 'busy', label: '连接中…' };
+      return { status: 'busy', label: '连接中' };
     default:
       return { status: 'offline', label: '离线' };
   }
@@ -217,11 +217,17 @@ onMounted(() => {
             {{ u.name }}
           </div>
           <div class="up-item-url">{{ u.url || '（未配置地址）' }}</div>
-          <!-- 健康详情（2026-10 连通性/认证可视性） -->
+          <!-- 健康详情（2026-10 连通性/认证可视性）：固定高度+占位，
+               状态变化不引起布局跳动 -->
           <div class="up-item-health">
-            <span class="up-health-label">{{ connectivityMeta(u).label }}</span>
-            <span v-if="u.last_checked" class="up-health-time">· {{ formatChecked(u.last_checked) }}</span>
-            <div v-if="u.last_error" class="up-health-error" :title="u.last_error">{{ u.last_error }}</div>
+            <span class="up-health-label">
+              <NeumorphismSpinner v-if="u.connectivity === 'connecting'" size="small" class="up-health-spinner" />
+              {{ connectivityMeta(u).label }}
+            </span>
+            <span class="up-health-time">{{ u.last_checked ? `· ${formatChecked(u.last_checked)}` : '' }}</span>
+            <div class="up-health-error" :class="{ 'up-health-error--empty': !u.last_error }" :title="u.last_error ?? ''">
+              {{ u.last_error ?? '\u00a0' }}
+            </div>
           </div>
         </div>
         <NeumorphismTag :variant="authMeta(u).variant" size="small">
@@ -251,7 +257,8 @@ onMounted(() => {
 .up-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .up-list { display: flex; flex-direction: column; gap: 8px; }
 .up-loading { display: flex; justify-content: center; padding: 12px; }
-.up-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.up-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; min-height: 68px; }
+.up-item > :first-child { transition: opacity 0.3s ease; }
 .up-item--active { outline: 1px solid var(--nm-primary, #4a7dff); }
 .up-item-main { flex: 1; min-width: 0; }
 .up-item-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
@@ -262,7 +269,14 @@ onMounted(() => {
   font-size: 12px;
   opacity: 0.75;
   margin-top: 2px;
+  min-height: 32px; /* 两行（状态+错误占位）固定高度——无错误时不塌 */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
+
+.up-health-label { display: inline-flex; align-items: center; gap: 6px; }
+.up-health-spinner { opacity: 0.8; }
 
 .up-health-error {
   color: var(--nm-color-error, #d64545);
@@ -272,5 +286,14 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+
+.up-health-error--empty {
+  visibility: hidden; /* 占位但不可见——布局高度保持稳定 */
+}
+
+.up-item-name, .up-item-url, .up-item-health {
+  transition: color 0.3s ease, opacity 0.3s ease;
 }
 </style>
