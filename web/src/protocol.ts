@@ -117,6 +117,11 @@ export interface TeamInfo {
   id: string;
   name: string;
   description: string;
+  /**
+   * 归属上游 core 名（多上游聚合视图下由 store.dispatch 注入；null = 单上游
+   * 裸帧 / 未标注）。同一 id 可能出现在多个 core 上，人格身份是 (core, id)。
+   */
+  core?: string | null;
   enabled: boolean;
   sessions: number;
   system_prompt?: string;

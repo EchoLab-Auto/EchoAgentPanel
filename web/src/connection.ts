@@ -9,7 +9,7 @@
 //!   5s 内无任何下行帧则判死、走标准重连。
 
 import { state, dispatch } from './store';
-import { pushToast } from './state';
+import { coreForTeam, pushToast } from './state';
 import { trackRequest } from './pending';
 import {
   parseEvent,
@@ -81,23 +81,12 @@ export function startConnection(): void {
       state.workspaceGitBySession = {};
       state.workspaceFiles = {};
       // Bootstrap the panel state on (re)connect.
-      // Timeline 按上次使用的 Agent（localStorage）加载，刷新/重连后不跳回默认。
-      let savedTeam: string | null = null;
-      try {
-        savedTeam = localStorage.getItem('echo-panel-active-team');
-      } catch {
-        // ignore storage errors (private mode)
-      }
-      // 有缓存（内存/磁盘还原）→ 只拉缺口（Core 的缺口检测保证安全）；
-      // 无缓存 → 全量（since_seq 0）。
-      const cachedSeq = savedTeam ? (state.teamTimelines[savedTeam]?.seq ?? 0) : 0;
+      // ⚠️ timeline 不在这里预取：多上游下 TeamsList 尚未到达，无法知道
+      // 上次使用的 agent 属于哪个 core；裸广播会让多个 core 各回一份、
+      // 按同一个 team_id 互相覆盖（同名 team 跨 core）。改由 App 的 teams
+      // watcher 在 core 解析完成后定向请求（见 App.vue）。
       const bootstrap: BackendCommand[] = [
         'RequestState',
-        // 去主智能体后 team_id 必填：没有保存过的 Agent 时不发（发了必被
-        // Core 拒绝）；等 TeamsList 到达后由 App 的 watcher 用列表首个发起。
-        ...(savedTeam
-          ? [{ RequestTrunkTimeline: { team_id: savedTeam, since_seq: cachedSeq } } as BackendCommand]
-          : []),
         'RequestAdapterStatus',
         // QQ 过滤配置不在这里预取：面板打开时 QqPanel/QqLoginSection 会按实例
         // 自行刷新；无 QQ（或多实例未指定实例）时预取必被 Core 拒绝，平白
@@ -107,6 +96,19 @@ export function startConnection(): void {
       ];
       for (const command of bootstrap) {
         ws.send(serializeCommand(command));
+      }
+      // 上次使用的 Agent 的 timeline：经 sendCommand 走统一路由（多上游下
+      // core 已从 localStorage 还原/teams 已知时定向；未知则裸广播，
+      // TeamsList 到达后 App watcher 会再定向补拉，覆盖竞态结果）。
+      let savedTeam: string | null = null;
+      try {
+        savedTeam = localStorage.getItem('echo-panel-active-team');
+      } catch {
+        // ignore storage errors (private mode)
+      }
+      if (savedTeam) {
+        const cachedSeq = state.teamTimelines[savedTeam]?.seq ?? 0;
+        sendCommand({ RequestTrunkTimeline: { team_id: savedTeam, since_seq: cachedSeq } });
       }
       // 补发握手期暂存的命令（见 pendingCommands 注释）。
       for (const payload of pendingCommands) {
@@ -210,19 +212,45 @@ function parseFrame(text: string): { core: string | null; event: ReturnType<type
 function coreForCommand(command: BackendCommand): string | null {
   const payload = command as unknown as Record<string, unknown>;
   // BackendCommand 是单键对象（{ CmdName: {...} }）——取第一个值里的
-  // session_id（如有）。
+  // session_id / team_id。
   const body = Object.values(payload)[0] as Record<string, unknown> | undefined;
   const sessionId = body?.session_id;
-  if (typeof sessionId !== 'string' || !sessionId) return null;
-  const session = state.sessions.find(s => s.id === sessionId) as
-    | (SessionInfo & { core?: string | null })
-    | undefined;
-  return session?.core ?? null;
+  if (typeof sessionId === 'string' && sessionId) {
+    const session = state.sessions.find(s => s.id === sessionId) as
+      | (SessionInfo & { core?: string | null })
+      | undefined;
+    if (session?.core) return session.core;
+  }
+  // 无会话归属（新会话/切换 agent）时按人格所属 core 路由——人格身份是
+  // (core, id)，不能只凭裸 team_id 猜。
+  const teamId = body?.team_id;
+  if (typeof teamId === 'string' && teamId) {
+    const owner = coreForTeam(state, teamId);
+    if (owner != null) return owner;
+  }
+  return null;
 }
 
 export function sendCommand(command: BackendCommand, targetCore?: string): void {
-  // 路由优先级：显式 targetCore > 会话归属（自动） > activeCore 兜底。
-  const core = targetCore ?? coreForCommand(command) ?? state.activeCore;
+  // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > activeCore 兜底。
+  let core = targetCore ?? coreForCommand(command) ?? state.activeCore;
+  // 一致性守卫：命令带 team_id 时目标 core 必须确实拥有该人格，否则重定向
+  // 到拥有人格的 core。多上游下调度/会话归属若选到没有人格的节点，会把
+  // A core 的 agent 发给 B core，B 回「智能体 X 不存在」——这里提前纠正。
+  const body = Object.values(command as unknown as Record<string, unknown>)[0] as
+    | Record<string, unknown>
+    | undefined;
+  const teamId = body?.team_id;
+  if (typeof teamId === 'string' && teamId) {
+    const matches = state.teams.filter(t => t.id === teamId);
+    if (matches.length) {
+      const targetHosts = core != null && matches.some(t => (t.core ?? null) === core);
+      if (!targetHosts) {
+        const owner = coreForTeam(state, teamId);
+        if (owner !== undefined) core = owner;
+      }
+    }
+  }
   const payload = core
     ? JSON.stringify({ core, frame: { type: 'command', payload: command } })
     : serializeCommand(command);

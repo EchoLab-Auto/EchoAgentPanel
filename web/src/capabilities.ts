@@ -8,7 +8,7 @@
 //! 工具级白/黑名单（`已不再出现在「启用插件」勾选区`）。
 
 import type { TeamInfo } from './protocol';
-import type { AppState } from './state';
+import { activeTeam, type AppState } from './state';
 
 /**
  * 包维度门控插件 id（单一来源）——「启用插件」勾选区除 adapter/management/
@@ -113,9 +113,7 @@ export function teamPluginEnabled(team: TeamInfo | null | undefined, pluginId: s
   return true;
 }
 
-/** 当前 agent 的 team（去主智能体：无 id 时回退列表首个）。 */
+/** 当前 agent 的 team（去主智能体：无 id 时回退列表首个；(core, id) 精确匹配）。 */
 export function currentTeam(state: AppState): TeamInfo | null | undefined {
-  const id = state.activeTeamId;
-  if (!id) return state.teams[0] ?? null;
-  return state.teams.find((t) => t.id === id) ?? null;
+  return activeTeam(state);
 }

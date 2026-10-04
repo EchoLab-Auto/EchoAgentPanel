@@ -39,18 +39,77 @@ import type {
 
 export const TRUNK_SESSION_ID = 'trunk';
 
+/** 某 team id 出现在哪些 core 上（去重；null = 单上游/未标注）。 */
+export function teamCores(state: AppState, teamId: string): Array<string | null> {
+  const out: Array<string | null> = [];
+  for (const t of state.teams) {
+    if (t.id !== teamId) continue;
+    const c = t.core ?? null;
+    if (!out.includes(c)) out.push(c);
+  }
+  return out;
+}
+
+/**
+ * 解析某 team 应路由到哪个 core：优先 activeTeamCore（同名跨 core 时消歧），
+ * 否则取首个带明确 core 的条目；team 未出现在列表返回 undefined。
+ */
+export function coreForTeam(
+  state: AppState,
+  teamId: string,
+  preferCore?: string | null,
+): string | null | undefined {
+  const matches = state.teams.filter((t) => t.id === teamId);
+  if (!matches.length) return undefined;
+  const preferred = preferCore ?? state.activeTeamCore;
+  if (preferred != null && matches.some((t) => (t.core ?? null) === preferred)) {
+    return preferred;
+  }
+  const withCore = matches.find((t) => t.core != null);
+  return (withCore?.core ?? matches[0].core) ?? null;
+}
+
 /** 实时事件是否属于当前显示的 team 时间线。
- * Panel 的 activeTeamId 用 null 表示主/默认 agent；core 端 team_id 为
- * null 或默认 team id 都归一化为主 agent（与入口行会话切换的
- * sessionBelongsToActiveTeam 同一套归一化）。事件未带 team_id（旧 core）
- * 或 TeamsList 尚未到达时不过滤。 */
-export function belongsToActiveTeam(state: AppState, teamId: string | null | undefined): boolean {
+ * Panel 的 activeTeamId 用 null 表示主/默认 agent；事件未带 team_id（旧
+ * core）或 TeamsList 尚未到达时不过滤。多上游下同名 team 跨 core，必须同时
+ * 比较来源 core（`core` 由 store.dispatch 注入），否则 A/B core 的推送会串显。 */
+/**
+ * 当前选中的人格条目：优先 (activeTeamId, activeTeamCore) 精确匹配，其次
+ * 同 id 的首个；同名 team 跨 core 时不会取错 core 的画像（能力门控/循环模式）。
+ */
+export function activeTeam(state: AppState): TeamInfo | null {
+  const id = state.activeTeamId;
+  if (!id) return state.teams[0] ?? null;
+  const matches = state.teams.filter((t) => t.id === id);
+  if (!matches.length) return null;
+  if (state.activeTeamCore != null) {
+    return matches.find((t) => (t.core ?? null) === state.activeTeamCore) ?? matches[0];
+  }
+  return matches[0];
+}
+
+export function belongsToActiveTeam(
+  state: AppState,
+  teamId: string | null | undefined,
+  core?: string | null,
+): boolean {
   if (teamId === undefined) return true;
   if (state.teams.length === 0) return true;
   // 去主智能体（2026-09）：没有"主 agent"归属；未指定 active 时按列表首个。
   const active = state.activeTeamId ?? state.teams[0]?.id ?? null;
   if (active === null) return true;
-  return teamId === active;
+  if (teamId !== active) return false;
+  // 多上游：同名 team 跨 core 时靠 activeTeamCore 区分；事件未带 core
+  // （旧 core / 单上游）时不过滤，保持向后兼容。
+  if (core != null && state.activeTeamCore != null && core !== state.activeTeamCore) {
+    return false;
+  }
+  return true;
+}
+
+/** 事件载荷的来源 core（dispatch 注入；旧 core / 单上游 = undefined）。 */
+function evtCore(e: unknown): string | null | undefined {
+  return (e as { core?: string | null } | null | undefined)?.core;
 }
 
 export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch' | 'subagent';
@@ -317,6 +376,13 @@ export interface AppState {
   workspaceFiles: Record<string, { entries: WorkspaceFileEntry[]; error: string | null }>;
   /** 当前激活 team（null = default/未指定），用于实时事件隔离 */
   activeTeamId: string | null;
+  /**
+   * 当前激活 team 归属的上游 core（多上游聚合视图）。
+   * 人格身份是 (core, id)：同名 team 可能同时存在于多个 core，路由/过滤
+   * 必须带上 core，否则会把一个 core 的 agent 发给另一个 core。
+   * null = 单上游裸帧 / 未标注。
+   */
+  activeTeamCore: string | null;
   /** 后台 shell 会话列表（Shell 面板） */
   shellSessions: import('./protocol').ShellSessionInfo[];
   /** 每会话的终端条目（seq → entry），Shell 面板流式输出 */
@@ -384,6 +450,7 @@ export function initialState(): AppState {
     workspaceGitBySession: {},
     workspaceFiles: {},
     activeTeamId: null,
+    activeTeamCore: null,
     shellSessions: [],
     shellTerminals: {},
     context: null,
@@ -470,7 +537,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'AgentThinking': {
       const e = (event as { AgentThinking: { session_id: string; team_id?: string | null } }).AgentThinking;
-      if (!belongsToActiveTeam(state, e.team_id)) return state;
+      if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
       activity(state, e.session_id);
       return state;
     }
@@ -479,7 +546,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // TrunkTimeline 之后补发本快照。按列表重建 running 集合——本地已有
       // 但快照中不存在的 activity 置 completed（多为刷新前已结束的残留）。
       const e = (event as unknown as { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }).ActiveTurnsSnapshot;
-      if (!belongsToActiveTeam(state, e.team_id)) return state;
+      if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
       const running = new Set(e.session_ids);
       // 快照范围：有 team_id 时只覆盖该 team 会话的 activity（其他
       // team/core 正在运行的活动不能被误杀——此前全局 entries 清扫把
@@ -545,7 +612,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 推理块会出现在之前/之后的工具调用之间，而不是等回复完成
       // 后附加在末尾（分支合并块因此不再需要在结束时归档）。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
-      if (belongsToActiveTeam(state, e.team_id)) {
+      if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         pushTo(state, 'reasoning', content, Math.floor(Date.now() / 1000), {
           sessionId: e.session_id,
           animate: true,
@@ -644,7 +711,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
       const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
-      if (belongsToActiveTeam(state, e.team_id)) {
+      if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
           sessionId: e.session_id,
           animate: true,
@@ -674,7 +741,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null } }).ToolResult;
       // 工具结果实时回填主时间线（与 ToolCall 精确配对）；分支 tab 同步更新。
       const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
-      if (belongsToActiveTeam(state, e.team_id)) {
+      if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out);
       }
       if (tab) {
@@ -714,7 +781,13 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'TrunkTimeline': {
-      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }).TrunkTimeline;
+      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean; core?: string | null } }).TrunkTimeline;
+      // 多上游：同名 team 跨 core 时只接受当前 activeTeamCore 的响应——
+      // 广播请求（TeamsList 尚未到达时）会让多个 core 各回一份，key 相同
+      // 会互相覆盖/串显。core 未标注（单上游/旧 core）时不过滤。
+      if (e.core != null && state.activeTeamCore != null && e.core !== state.activeTeamCore) {
+        return state;
+      }
       // 首屏加载态：收到过即说明 Core 已回（哪怕为空）——「暂无消息」只在此时展示。
       state.timelineArrivedOnce = true;
       // ⚠️ 响应归属由后端标注（team_id = 请求值），绝不能拿当前
@@ -765,7 +838,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 正式回答仅当属于当前 team 时进主时间线（跨 agent 不串显）。
       // 回答丢失的历史问题由 AgentCompleted 的兜底拉取补齐（core 的
       // full 标志 + 条目级 seq 使兜底拉取不再重复/串显）。
-      if (belongsToActiveTeam(state, e.team_id)) {
+      if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         // 正式回答实时进主时间线（推理已按序穿插，无需再附加尾巴）。
         pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
           sessionId: e.session_id,
@@ -893,7 +966,32 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'TeamsList': {
       const e = (event as { TeamsList: { teams: TeamInfo[] } }).TeamsList;
-      state.teams = e.teams;
+      // 多上游聚合：每份 TeamsList 只代表一个来源 core 的人格集合，按
+      // (core, id) 合并——整体覆盖会让 A/B 两 core 的列表互相顶掉，选中态
+      // 与路由随之错乱（把 A core 的 default 发给 B core →
+      // 「智能体 default 不存在」）。单上游时 core 恒为 null，等价于整体替换。
+      const incoming = e.teams;
+      const incomingCores = new Set<unknown>();
+      for (const t of incoming) incomingCores.add(t.core ?? null);
+      const kept = state.teams.filter((t) => !incomingCores.has(t.core ?? null));
+      const seen = new Set<string>();
+      const merged: TeamInfo[] = [];
+      for (const t of [...kept, ...incoming]) {
+        const key = `${t.core ?? ''}\u0000${t.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(t);
+      }
+      // 当前 active core 的条目排前：`teams[0]` 兜底默认时不会跳到别的 core。
+      const activeCore = state.activeTeamCore;
+      if (activeCore != null) {
+        merged.sort((a, b) => {
+          const ac = (a.core ?? null) === activeCore ? 0 : 1;
+          const bc = (b.core ?? null) === activeCore ? 0 : 1;
+          return ac - bc;
+        });
+      }
+      state.teams = merged;
       return state;
     }
     case 'ShellSessionsList': {
@@ -1053,7 +1151,7 @@ function reduceMessage(
 ) {
   // 其他 team 的实时消息不进当前主时间线（跨 agent 不串显）；
   // 其历史会在切换到对应 team 时由增量/全量同步补齐。
-  if (!belongsToActiveTeam(state, e.team_id)) return state;
+  if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
   if (e.adapter_name === 'timer') {
     pushTo(state, 'system', summarizeTimerEvent(e.content), e.timestamp, {
       sessionId: e.session_id,
@@ -1177,6 +1275,11 @@ export function cancelSessionWork(state: AppState, sessionId: string) {
 /** 上游删除的会话清理（2026-10 🟡 修复）：该 core 名下的会话、
  * 活动、选中态一并移除——此前侧栏残留死会话且不会自行消失。 */
 export function removeSessionsOfCore(state: AppState, core: string): void {
+  // 该 core 下线/移除：人格列表、会话、活动、选中态一并清理——否则残留的
+  // 人格条目会让路由继续把命令发往已消失的 core（「智能体 X 不存在」）。
+  state.teams = state.teams.filter(t => (t.core ?? null) !== core);
+  if (state.activeTeamCore === core) state.activeTeamCore = null;
+  if (state.activeCore === core) state.activeCore = null;
   const removed = state.sessions.filter(s => (s as { core?: string | null }).core === core);
   if (removed.length === 0) return;
   const removedIds = new Set(removed.map(s => s.id));
@@ -1184,7 +1287,6 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   for (const id of removedIds) {
     delete state.activities[id];
   }
-  if (state.activeCore === core) state.activeCore = null;
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {

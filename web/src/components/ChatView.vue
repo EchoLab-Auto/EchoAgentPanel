@@ -43,7 +43,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   send: [content: string, images: string[]];
   cancel: [];
-  selectTeam: [id: string | null];
+  selectTeam: [id: string | null, core: string | null];
   selectSession: [id: string];
   selectBranch: [id: string];
   openShellDetail: [sessionId: string];
@@ -646,7 +646,7 @@ function imagesOf(message: ChatMessage): string[] {
       </div>
       <AgentSwitcher
         :active-team-id="props.activeTeamId ?? null"
-        @select="emit('selectTeam', $event)"
+        @select="(id, core) => emit('selectTeam', id, core)"
       />
       <!-- 配置当前 Agent：跳转到资源页并打开该 team 的配置编辑 -->
       <NeumorphismButton

@@ -9,18 +9,38 @@ import { NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 
 const props = defineProps<{ activeTeamId: string | null }>();
-const emit = defineEmits<{ select: [id: string | null] }>();
+const emit = defineEmits<{ select: [id: string | null, core: string | null] }>();
 
 const open = ref(false);
 const rootRef = ref<HTMLElement | null>(null);
 
-// 当前展示的 Agent：优先 activeTeamId 匹配；为空时取第一个 team（默认）。
+// 当前展示的 Agent：优先 (activeTeamId, activeTeamCore) 匹配；为空时取
+// 第一个 team（默认）。同名 team 跨 core 时用 core 消歧。
 const current = computed(() => {
   const teams = state.teams;
   if (!teams.length) return null;
-  const active = props.activeTeamId ? teams.find((t) => t.id === props.activeTeamId) : undefined;
+  const active = props.activeTeamId
+    ? teams.find(
+        (t) =>
+          t.id === props.activeTeamId &&
+          (state.activeTeamCore == null || (t.core ?? null) === state.activeTeamCore),
+      ) ?? teams.find((t) => t.id === props.activeTeamId)
+    : undefined;
   return active ?? teams[0];
 });
+
+/** 选中高亮：同名 team 跨 core 时只高亮 activeTeamCore 那一条。 */
+function isActive(team: { id: string; core?: string | null }): boolean {
+  const activeId = props.activeTeamId ?? state.teams[0]?.id ?? null;
+  if (team.id !== activeId) return false;
+  if (state.activeTeamCore == null) return true;
+  return (team.core ?? null) === state.activeTeamCore;
+}
+
+/** 是否展示 core 徽标（多上游聚合，且该 team 标注了 core）。 */
+function showCore(core: string | null | undefined): boolean {
+  return state.knownCores.size > 0 && !!core;
+}
 
 // 头像颜色：按名字 hash 从色板选色
 const PALETTE = ['#5b8def', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#ef4444'];
@@ -46,9 +66,9 @@ function currentModel(team: NonNullable<typeof state.teams>[number] | null): str
   return team ? resolveModel(team) : '';
 }
 
-function select(id: string) {
+function select(id: string, core: string | null) {
   open.value = false;
-  emit('select', id);
+  emit('select', id, core);
 }
 
 // 点击卡片外部关闭菜单
@@ -105,10 +125,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
       <div v-if="state.teams.length === 0" class="agent-menu__empty">（未配置 Team 成员）</div>
       <div
         v-for="team in state.teams"
-        :key="team.id"
+        :key="`${team.core ?? ''}:${team.id}`"
         class="agent-menu__item"
-        :class="{ 'agent-menu__item--active': (activeTeamId ?? state.teams[0]?.id) === team.id }"
-        @click="select(team.id)"
+        :class="{ 'agent-menu__item--active': isActive(team) }"
+        @click="select(team.id, team.core ?? null)"
       >
         <span
           class="agent-card__avatar agent-menu__avatar"
@@ -118,6 +138,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
           {{ avatarText(team.name) }}
         </span>
         <span class="agent-menu__name">{{ team.name }}</span>
+        <span v-if="showCore(team.core)" class="agent-menu__core">{{ team.core }}</span>
         <span v-if="teamModel(team)" class="agent-menu__model" :title="teamModel(team)!">
           {{ teamModel(team) }}
         </span>
@@ -254,6 +275,16 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   width: 24px;
   height: 24px;
   font-size: 12px;
+}
+.agent-menu__core {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 16px;
+  opacity: 0.7;
+  background: rgba(127, 127, 127, 0.18);
+  white-space: nowrap;
 }
 .agent-menu__name {
   flex: 1;

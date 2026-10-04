@@ -9,11 +9,11 @@ import {
   ThemeProvider,
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
-import { cancelSessionWork } from './state';
+import { cancelSessionWork, coreForTeam } from './state';
 import { sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
 import { loopModeOf } from './protocol';
-import { teamPluginEnabled } from './capabilities';
+import { currentTeam, teamPluginEnabled } from './capabilities';
 import {
   LOCAL_DEFAULT_SESSION,
   localSessionProjection,
@@ -53,6 +53,7 @@ function loadView(): View {
 
 // ── 记住上次使用的 Agent（Team）：刷新/重连后恢复，避免回到默认 agent ──
 const ACTIVE_TEAM_KEY = 'echo-panel-active-team';
+const ACTIVE_TEAM_CORE_KEY = 'echo-panel-active-team-core';
 
 function loadActiveTeam(): string | null {
   try {
@@ -62,22 +63,48 @@ function loadActiveTeam(): string | null {
   }
 }
 
-function saveActiveTeam(id: string | null) {
+function loadActiveTeamCore(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_TEAM_CORE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveActiveTeam(id: string | null, core: string | null) {
   try {
     if (id) {
       localStorage.setItem(ACTIVE_TEAM_KEY, id);
     } else {
       localStorage.removeItem(ACTIVE_TEAM_KEY);
     }
+    if (core) {
+      localStorage.setItem(ACTIVE_TEAM_CORE_KEY, core);
+    } else {
+      localStorage.removeItem(ACTIVE_TEAM_CORE_KEY);
+    }
   } catch {
     // ignore storage errors (private mode)
   }
 }
 
-function onTeamSelect(next: string | null) {
-  activeTeamId.value = next;
-  state.activeTeamId = next;
-  saveActiveTeam(next);
+/** 统一更新「当前 agent」选中态（人格身份 = id + 归属 core）+ 持久化。 */
+function applyActiveTeam(id: string | null, core: string | null) {
+  activeTeamId.value = id;
+  activeTeamCore.value = core;
+  state.activeTeamId = id;
+  state.activeTeamCore = core;
+  saveActiveTeam(id, core);
+}
+
+function onTeamSelect(next: string | null, core?: string | null) {
+  // 同名 team 可能存在于多个 core：优先用切换器传来的 core，其次保留当前
+  // core，再取首个带 core 标注的条目，最后回落单上游（null）。core 锁定后
+  // 命令不再发错节点。
+  const resolved = next
+    ? core ?? coreForTeam(state, next, state.activeTeamCore ?? state.activeCore) ?? null
+    : null;
+  applyActiveTeam(next, resolved);
   // 分支 tab 属于上一个 agent 的运行期状态：切换后清空，避免在
   // 未启用回执分支的 agent（侧边栏无分支卡）下残留/串显。
   state.branchTabs = {};
@@ -115,10 +142,12 @@ const activeBranchId = ref<string | null>(null);
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
 // 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
 const activeTeamId = ref<string | null>(loadActiveTeam());
-// ⚠️ 关键：刷新时同步 state.activeTeamId（reducer 与入口行会话切换都读它）。
-// 若不同步，state.activeTeamId 保持 null → 会话列表按"主 agent"过滤，
-// 会串显 alix 的会话（此前只在 onTeamSelect 里赋值，刷新即丢失）。
+const activeTeamCore = ref<string | null>(loadActiveTeamCore());
+// ⚠️ 关键：刷新时同步 state.activeTeamId/Core（reducer 与入口行会话切换都
+// 读它）。若不同步，state.activeTeamId 保持 null → 会话列表按"主 agent"
+// 过滤，会串显别人的会话（此前只在 onTeamSelect 里赋值，刷新即丢失）。
 state.activeTeamId = activeTeamId.value;
+state.activeTeamCore = activeTeamCore.value;
 
 
 
@@ -185,6 +214,20 @@ function sendWorkspaceActivate(id: string | null) {
 
 /** 用户在「会话」切换器点选（用户意图；程序化切换走 selectSession）。 */
 function onSessionPick(id: string) {
+  // 会话归属 core 即当前 agent 的归属 core：同名 team 跨 core 时，选中
+  // 另一 core 的会话必须同步钉住 core，否则事件过滤会漏掉该会话的推送。
+  if (id !== 'global') {
+    const candidates = state.sessions.filter((s) => s.id === id) as Array<{
+      core?: string | null;
+    }>;
+    const picked =
+      candidates.find((s) => s.core && s.core === state.activeCore) ??
+      candidates.find((s) => s.core) ??
+      candidates[0];
+    if (picked?.core && picked.core !== activeTeamCore.value) {
+      applyActiveTeam(activeTeamId.value, picked.core);
+    }
+  }
   const synced = state.workspaceTeamId === activeTeamId.value;
   const intent = workspacePickIntent(id, state.workspaceActive, synced);
   if (intent.kind === 'activate') sendWorkspaceActivate(intent.workspaceId);
@@ -216,10 +259,11 @@ watch(
       workspaceFetchKey = '';
       return;
     }
-    const team = state.teams.find((t) => t.id === activeTeamId.value);
+    const team = currentTeam(state);
     if (!team || !teamPluginEnabled(team, 'echo-agent.workspace')) return;
-    if (workspaceFetchKey === team.id) return;
-    workspaceFetchKey = team.id;
+    const teamKey = `${team.core ?? ''}:${team.id}`;
+    if (workspaceFetchKey === teamKey) return;
+    workspaceFetchKey = teamKey;
     sendCommand({ RequestWorkspaceSessions: { team_id: team.id } });
   },
   { immediate: true },
@@ -229,7 +273,7 @@ watch(
 watch(
   [() => state.teams, () => activeTeamId.value],
   () => {
-    const team = state.teams.find((t) => t.id === activeTeamId.value);
+    const team = currentTeam(state);
     if (activeSessionId.value === 'global' && team && loopModeOf(team) !== 'parallel') {
       selectSession(localLanding(activeTeamId.value));
     }
@@ -239,33 +283,87 @@ watch(
 // ── Team 兜底：无选中或选中项已删除时，选列表首个并持久化 ──
 // 去主智能体（2026-09）：没有"默认/主 agent"；`activeTeamId` 始终指向一个
 // 具体智能体（首次连接取列表首个，纯客户端初始选择）。
+// 每个 (core, team) 只做一次引导 timeline 请求（避免 TeamsList 重复推送时
+// 反复全量拉取）。初始值取 localStorage 还原的 (id, core)：若引导期已按同一
+// 组合定向请求过，这里不重复；core 由 TeamsList 校正后 key 变化 → 补拉一次。
+let resolvedTimelineKey = activeTeamId.value
+  ? `${activeTeamCore.value ?? ''}\u0000${activeTeamId.value}`
+  : '';
+
+let teamResetTimer: number | undefined;
+
+/** 选第一条 agent 并加载它的 timeline（保存的 agent 确认消失后调用）。 */
+function resetToFirstTeam() {
+  const first = state.teams[0];
+  if (!first) return;
+  const next = first.id;
+  applyActiveTeam(next, first.core ?? null);
+  resolvedTimelineKey = `${first.core ?? ''}\u0000${next}`;
+  const cached = state.teamTimelines[next];
+  if (cached) {
+    // 副本渲染 + 归属标注：与 onTeamSelect 同一约定（trunk 与缓存解
+    // 数组别名，实时推送不污染缓存；缺少 trunkTeamId 时增量投递不会
+    // 落到实时视图）。
+    state.trunk = [...cached.msgs];
+    state.trunkTeamId = String(next ?? '');
+    sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
+  } else {
+    state.trunk = [];
+    state.trunkTeamId = String(next ?? '');
+    sendCommand({ RequestTrunkTimeline: { team_id: next } });
+  }
+  selectSession(localLanding(next));
+}
+
 watch(
   () => state.teams,
   () => {
     // 列表尚未加载完成（空数组）时不校验，避免误清刚从 localStorage 恢复的 id。
     if (!state.teams.length) return;
     const id = activeTeamId.value;
-    const stillExists = !!id && state.teams.some((t) => t.id === id);
-    if (!stillExists) {
-      const next = state.teams[0].id;
-      activeTeamId.value = next;
-      state.activeTeamId = next;
-      saveActiveTeam(next);
-      const cached = state.teamTimelines[next];
-      if (cached) {
-        // 副本渲染 + 归属标注：与 onTeamSelect 同一约定（trunk 与缓存解
-        // 数组别名，实时推送不污染缓存；缺少 trunkTeamId 时增量投递不会
-        // 落到实时视图）。
-        state.trunk = [...cached.msgs];
-        state.trunkTeamId = String(next ?? '');
-        sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
-      } else {
-        state.trunk = [];
-        state.trunkTeamId = String(next ?? '');
-        sendCommand({ RequestTrunkTimeline: { team_id: next } });
-      }
-      selectSession(localLanding(next));
+    if (!id) {
+      resetToFirstTeam();
+      return;
     }
+    const matches = state.teams.filter((t) => t.id === id);
+    if (matches.length) {
+      if (teamResetTimer !== undefined) {
+        window.clearTimeout(teamResetTimer);
+        teamResetTimer = undefined;
+      }
+      // 选中项存在：把 core 钉到合并列表里对应的那一条——首次从
+      // localStorage 恢复时 core 为空，这里补全；同名跨 core 时保留已钉住的
+      // core（缺失则取首个带明确 core 的条目）。
+      const cur = activeTeamCore.value;
+      const picked =
+        (cur != null && matches.find((t) => (t.core ?? null) === cur)) ||
+        matches.find((t) => t.core != null) ||
+        matches[0];
+      if (activeTeamCore.value !== (picked.core ?? null)) {
+        activeTeamCore.value = picked.core ?? null;
+        state.activeTeamCore = picked.core ?? null;
+        saveActiveTeam(picked.id, picked.core ?? null);
+      }
+      // core 解析完成后定向拉取 timeline（引导期不再裸广播）。
+      const key = `${picked.core ?? ''}\u0000${picked.id}`;
+      if (resolvedTimelineKey !== key) {
+        resolvedTimelineKey = key;
+        const cached = state.teamTimelines[picked.id];
+        if (cached) {
+          sendCommand({ RequestTrunkTimeline: { team_id: picked.id, since_seq: cached.seq } });
+        } else {
+          sendCommand({ RequestTrunkTimeline: { team_id: picked.id } });
+        }
+      }
+      return;
+    }
+    // 未找到：多上游下其他 core 的 TeamsList 可能还没到（广播响应有先后）。
+    // 延迟一小段再确认，避免把 localStorage 保存的 agent 误切走。
+    if (teamResetTimer !== undefined) return;
+    teamResetTimer = window.setTimeout(() => {
+      teamResetTimer = undefined;
+      if (!state.teams.some((t) => t.id === activeTeamId.value)) resetToFirstTeam();
+    }, 1200);
   },
   { immediate: true },
 );

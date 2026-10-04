@@ -8,7 +8,7 @@ import { reactive } from 'vue';
 import { initialState, reduce, type AppState } from './state';
 import type { BackendEvent } from './protocol';
 import { resolvePendingEvent } from './pending';
-import type { SessionInfo } from './protocol';
+import type { SessionInfo, TeamInfo } from './protocol';
 
 export const state = reactive(initialState()) as AppState;
 
@@ -21,6 +21,21 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
     const e = (event as { SessionUpdated: { session: SessionInfo & { core?: string | null } } })
       .SessionUpdated;
     e.session.core = core;
+  }
+  // 多上游聚合视图：人格（TeamInfo）同样注入来源 core——人格身份是
+  // (core, id)，不标注就无法把"选中的 agent"路由回它所属的 core，
+  // 会出现把 A core 的 default 发给 B core →「智能体 default 不存在」。
+  if (core && 'TeamsList' in (event as object)) {
+    const e = (event as { TeamsList: { teams: TeamInfo[] } }).TeamsList;
+    for (const t of e.teams) t.core = core;
+  }
+  // 让 reducer 的 team 过滤能区分"同名跨 core"事件：给任何带 team_id 的
+  // 事件载荷注入来源 core（单上游/旧 core 不注入 = undefined）。
+  if (core) {
+    const body = Object.values(event as unknown as Record<string, unknown>)[0];
+    if (body && typeof body === 'object' && 'team_id' in (body as Record<string, unknown>)) {
+      (body as Record<string, unknown>).core = core;
+    }
   }
   reduce(state, event);
 }
