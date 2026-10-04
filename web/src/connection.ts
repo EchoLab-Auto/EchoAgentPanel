@@ -9,7 +9,7 @@
 //!   5s 内无任何下行帧则判死、走标准重连。
 
 import { state, dispatch } from './store';
-import { coreForTeam, pushToast } from './state';
+import { coreForTeam, currentRegion, pushToast } from './state';
 import { teamKey } from './keys';
 import { trackRequest } from './pending';
 import {
@@ -279,7 +279,7 @@ export function resolveTargetCore(
   // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > 当前运行区域。
   // 不再有"管理目标 core"这种自由变量，也不兜底首个上游——解析不出目标
   // 就明确拒发（见 sendCommand），绝不猜。
-  let core = targetCore ?? coreForCommand(command) ?? state.activeRegion;
+  let core = targetCore ?? coreForCommand(command) ?? currentRegion(state);
   // 一致性守卫：命令带 team_id 时目标 core 必须确实拥有该人格，否则重定向
   // 到拥有人格的 core。多上游下调度/会话归属若选到没有人格的节点，会把
   // A core 的 agent 发给 B core，B 回「智能体 X 不存在」——这里提前纠正。

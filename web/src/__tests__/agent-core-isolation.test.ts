@@ -3,7 +3,7 @@
 // 把 A core 的 `default` 发给 B core →「智能体 default 不存在」。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { state, dispatch } from '../store';
-import { belongsToActiveTeam, coreForTeam } from '../state';
+import { belongsToActiveTeam, coreForTeam, currentRegion } from '../state';
 import type { BackendEvent, TeamInfo } from '../protocol';
 
 function team(id: string, core: string | null, over: Partial<TeamInfo> = {}): TeamInfo {
@@ -146,5 +146,37 @@ describe('sendCommand 人格归属路由守卫', () => {
     sendCommand({ SendMessage: { session_id: 'new', content: 'hi', team_id: 'default' } });
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-a');
+  });
+});
+
+// ── Plan B：运行区域是派生量（agent 自带），绝不落回"管理目标"变量 ──
+describe('运行区域派生', () => {
+  beforeEach(() => {
+    state.teams = [];
+    state.activeTeamId = null;
+    state.activeRegion = null;
+  });
+
+  it('activeRegion 为空时从当前 agent 的归属派生', () => {
+    state.teams = [team('alix', 'core-a'), team('bob', 'core-b')];
+    state.activeTeamId = 'bob';
+    expect(currentRegion(state)).toBe('core-b');
+  });
+
+  it('无选中 agent 时取首个带归属的 agent 区域', () => {
+    state.teams = [team('alix', null), team('bob', 'core-b')];
+    expect(currentRegion(state)).toBe('core-b');
+  });
+
+  it('activeRegion 已设定时优先', () => {
+    state.teams = [team('alix', 'core-a')];
+    state.activeTeamId = 'alix';
+    state.activeRegion = 'core-c';
+    expect(currentRegion(state)).toBe('core-c');
+  });
+
+  it('没有任何带归属的 agent 时返回 null（不猜）', () => {
+    state.teams = [team('alix', null)];
+    expect(currentRegion(state)).toBeNull();
   });
 });

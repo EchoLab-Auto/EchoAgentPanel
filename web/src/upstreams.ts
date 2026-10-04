@@ -15,6 +15,9 @@ export async function refreshUpstreams(): Promise<void> {
     if (!res.ok) return;
     const list = (await res.json()) as UpstreamStatus[];
     state.upstreams = Array.isArray(list) ? list : [];
+    // 已配置上游即"已知运行区域"：区域集合不依赖是否已收到事件，
+    // 多区域判定（命令必须显式落到某个区域）从配置起就成立。
+    for (const u of state.upstreams) state.knownCores.add(u.name);
   } catch {
     // Panel 后端不可达：保留上次快照。
   }

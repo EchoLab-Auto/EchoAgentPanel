@@ -82,6 +82,21 @@ export function coreForTeam(
  * core）或 TeamsList 尚未到达时不过滤。多上游下同名 team 跨 core，必须同时
  * 比较来源 core（`core` 由 store.dispatch 注入），否则 A/B core 的推送会串显。 */
 /**
+ * 当前**运行区域**：优先 `activeRegion`（已由 agent 选择/TeamsList 校正写入），
+ * 否则从当前 agent（或首个带归属的 agent）派生。绝不落回某个"管理目标"变量。
+ */
+export function currentRegion(state: AppState): string | null {
+  if (state.activeRegion) return state.activeRegion;
+  const id = state.activeTeamId;
+  const matches = id ? state.teams.filter((t) => t.id === id) : [];
+  return (
+    matches.find((t) => t.core != null)?.core ??
+    state.teams.find((t) => t.core != null)?.core ??
+    null
+  );
+}
+
+/**
  * 当前选中的人格条目：优先 (activeTeamId, activeRegion) 精确匹配，其次
  * 同 id 的首个；同名 team 跨 core 时不会取错 core 的画像（能力门控/循环模式）。
  */

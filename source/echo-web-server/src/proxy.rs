@@ -563,13 +563,20 @@ async fn bridge(browser: WebSocket, state: AppState) {
     async fn refresh_multi(
         registry: &Arc<crate::upstreams::UpstreamRegistry>,
         multi: &Arc<std::sync::atomic::AtomicBool>,
-        links: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, CoreLink>>>,
+        _links: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, CoreLink>>>,
     ) {
-        let _ = registry; // 注册表保留参数位（后续可按需混合判定）
-        multi.store(
-            links.read().await.len() > 1,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        // 加壳开关按**已配置上游数**（不是当前在线链路数）：只要配置了 >1 个
+        // 上游，所有事件一律带 `{core, frame}` 外壳。若按在线链路数，某条链路
+        // 一断就翻成"不加壳"，前端会拿到无 core 的帧、无法归属到运行区域
+        // （表现为"尚未选择 agent/无法确定运行区域"），且同一批 TeamsList 会
+        // 一半有 core 一半没有。稳定性优先于"单条在线时不加壳"的省字节优化。
+        let configured = registry
+            .list()
+            .await
+            .iter()
+            .filter(|u| !u.url.is_empty())
+            .count();
+        multi.store(configured > 1, std::sync::atomic::Ordering::Relaxed);
     }
 
     // 初始上游接入（零上游 = 空转等待——管理面添加后变更泵接入）。

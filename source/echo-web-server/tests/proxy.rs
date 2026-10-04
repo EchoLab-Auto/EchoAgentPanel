@@ -224,3 +224,44 @@ async fn multi_upstream_frames_are_core_wrapped() {
     );
     ws.close(None).await.unwrap();
 }
+
+/// 稳定性契约：配置了 2 个上游但只有 1 条在线时，**仍然加壳**——否则同一批
+/// TeamsList 会一半有 core 一半没有，前端无法把 agent 归属到运行区域
+/// （表现为"尚未选择 agent / 无法确定运行区域"）。
+#[tokio::test]
+async fn multi_stays_wrapped_when_one_upstream_offline() {
+    let live = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let live_url = format!("ws://127.0.0.1:{}", live.local_addr().unwrap().port());
+    tokio::spawn(fake_core(live));
+    // 一个连不上的上游（端口 1 不会监听）。
+    let dead_url = "ws://127.0.0.1:1".to_string();
+
+    let panel_ws = spawn_panel_multi(vec![("core-a", live_url), ("dead-core", dead_url)]).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let broadcast = r#"{"broadcast":true,"frame":{"type":"command","payload":"RequestTeamsList"}}"#;
+    loop {
+        assert!(tokio::time::Instant::now() < deadline, "no wrapped frame arrived");
+        ws.send(WsMessage::Text(broadcast.into())).await.unwrap();
+        let text = match tokio::time::timeout(
+            std::time::Duration::from_millis(800),
+            next_text(&mut ws),
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(_) => continue, // 链路尚未就绪：重试
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let core = value.get("core").and_then(|c| c.as_str());
+        assert_eq!(
+            core,
+            Some("core-a"),
+            "frame must be wrapped even with one upstream offline: {text}"
+        );
+        assert!(value.get("frame").is_some(), "wrapped frame must carry .frame");
+        break;
+    }
+    ws.close(None).await.unwrap();
+}
