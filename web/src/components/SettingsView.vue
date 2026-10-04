@@ -37,6 +37,8 @@ import {
   NeumorphismTextarea,
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
+import { regionLabel } from '../state';
+import { moveAgentToRegion } from '../agent-placement';
 import {
   PACKAGE_DISPLAY_NAMES,
   PACKAGE_GATED_PLUGIN_IDS,
@@ -909,6 +911,31 @@ const teamFormDescription = ref('');
 const teamFormPrompt = ref('');
 const teamFormEnabled = ref(true);
 const teamEditing = ref(false);
+
+// ── 运行区域（Plan B）：agent 自带区域，Panel 统一管理/迁移 ──
+/** 可迁移到的其他区域（= 已配置上游，排除该 agent 当前所在区域）。 */
+const otherRegions = computed(() =>
+  state.upstreams
+    .map((u) => u.name)
+    .filter((name) => name !== (selectedTeam.value?.core ?? null)),
+);
+const moveTargetRegion = ref('');
+function doMoveRegion() {
+  const team = selectedTeam.value;
+  const target = moveTargetRegion.value || otherRegions.value[0] || '';
+  if (!team || !target) return;
+  const from = regionLabel(state, team.core);
+  const to = regionLabel(state, target);
+  const ok = window.confirm(
+    `把「${team.name}」的运行区域从「${from}」改为「${to}」？\n\n` +
+      `· 在目标区域创建/更新该 agent\n` +
+      `· 从当前区域删除\n\n` +
+      `注意：会话历史仍留在原区域，不会随迁移搬走。`,
+  );
+  if (!ok) return;
+  moveAgentToRegion(team, target);
+  selectedTeam.value = null;
+}
 const teamFormDisabledTools = ref<string[]>([]);
 const teamFormDisabledSkills = ref<string[]>([]);
 const teamFormEnabledPlugins = ref<string[]>([]);
@@ -2068,6 +2095,25 @@ watch(
               />
             </div>
             <p class="muted">{{ selectedTeam.description || '（无描述）' }}</p>
+            <div class="detail-field">
+              <span>运行区域</span>
+              <NeumorphismTag variant="info" size="small">
+                {{ regionLabel(state, selectedTeam.core) }}
+              </NeumorphismTag>
+            </div>
+            <div v-if="otherRegions.length" class="detail-field">
+              <span>迁移到其他区域（会话历史不随迁移）</span>
+              <div class="team-move">
+                <select v-model="moveTargetRegion" class="team-move__select">
+                  <option v-for="r in otherRegions" :key="r" :value="r">
+                    {{ regionLabel(state, r) }}
+                  </option>
+                </select>
+                <NeumorphismButton size="small" variant="glass" @click="doMoveRegion">
+                  迁移
+                </NeumorphismButton>
+              </div>
+            </div>
             <div class="detail-content">
               <div class="muted content-title">系统提示词（留空 = 继承全局）</div>
               <pre class="content-pre">{{ selectedTeam.system_prompt || '（继承全局）' }}</pre>
@@ -3394,5 +3440,19 @@ watch(
 .plugin-info__head {
   cursor: pointer;
   user-select: none;
+}
+
+.team-move {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.team-move__select {
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.12));
+  background: var(--nm-bg-raised, rgba(255, 255, 255, 0.06));
+  color: var(--nm-text-primary);
+  font-size: 12px;
 }
 </style>

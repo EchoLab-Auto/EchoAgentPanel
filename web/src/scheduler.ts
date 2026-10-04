@@ -10,7 +10,7 @@
 //! - `prefer:<name>`：亲和——固定发往指定节点（离线时退 least_busy）。
 //!
 //! 注意：本模块只做**建议**——最终路由仍经 connection.ts 的
-//! coreForCommand/activeCore 链；调度失败（无在线节点）返回 null，
+//! coreForCommand/activeRegion 链；调度失败（无在线节点）返回 null，
 //! 调用方按现状兜底（广播/本机）。
 
 import { state } from './store';

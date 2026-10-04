@@ -33,7 +33,7 @@ const stack = ref<Array<{ label: string; path: string }>>([]);
 const currentPath = computed(() => stack.value[stack.value.length - 1]?.path ?? '');
 const listing = computed(() =>
   currentPath.value
-    ? state.workspaceFiles[scopedKey(state.activeTeamCore, currentPath.value)]
+    ? state.workspaceFiles[scopedKey(state.activeRegion, currentPath.value)]
     : undefined,
 );
 const entries = computed(() => listing.value?.entries ?? []);

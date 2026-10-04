@@ -71,6 +71,8 @@ export interface SessionInfo {
   id: string;
   /** 来源节点身份（federation NodeId；多节点聚合时区分同名会话）。 */
   node_id?: string | null;
+  /** 运行区域展示名（`[core].region_name`；空 = 回退上游名）。 */
+  region_name?: string | null;
   team_id?: string | null;
   platform: string;
   scope: string;
@@ -119,6 +121,8 @@ export interface TeamInfo {
   id: string;
   /** 来源节点身份（federation NodeId；多节点聚合时人格身份 = (node_id, id)）。 */
   node_id?: string | null;
+  /** 运行区域展示名（`[core].region_name`；空 = 回退上游名）。 */
+  region_name?: string | null;
   name: string;
   description: string;
   /**

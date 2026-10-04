@@ -41,6 +41,12 @@ import { scopedKey, sessionKey, teamKey } from './keys';
 
 export const TRUNK_SESSION_ID = 'trunk';
 
+/** 运行区域的展示名（缺省回落上游名）。 */
+export function regionLabel(state: AppState, region: string | null | undefined): string {
+  if (!region) return '本机';
+  return state.regions[region]?.name || region;
+}
+
 /** 某 team id 出现在哪些 core 上（去重；null = 单上游/未标注）。 */
 export function teamCores(state: AppState, teamId: string): Array<string | null> {
   const out: Array<string | null> = [];
@@ -53,7 +59,7 @@ export function teamCores(state: AppState, teamId: string): Array<string | null>
 }
 
 /**
- * 解析某 team 应路由到哪个 core：优先 activeTeamCore（同名跨 core 时消歧），
+ * 解析某 team 应路由到哪个 core：优先 activeRegion（同名跨 core 时消歧），
  * 否则取首个带明确 core 的条目；team 未出现在列表返回 undefined。
  */
 export function coreForTeam(
@@ -63,7 +69,7 @@ export function coreForTeam(
 ): string | null | undefined {
   const matches = state.teams.filter((t) => t.id === teamId);
   if (!matches.length) return undefined;
-  const preferred = preferCore ?? state.activeTeamCore;
+  const preferred = preferCore ?? state.activeRegion;
   if (preferred != null && matches.some((t) => (t.core ?? null) === preferred)) {
     return preferred;
   }
@@ -76,7 +82,7 @@ export function coreForTeam(
  * core）或 TeamsList 尚未到达时不过滤。多上游下同名 team 跨 core，必须同时
  * 比较来源 core（`core` 由 store.dispatch 注入），否则 A/B core 的推送会串显。 */
 /**
- * 当前选中的人格条目：优先 (activeTeamId, activeTeamCore) 精确匹配，其次
+ * 当前选中的人格条目：优先 (activeTeamId, activeRegion) 精确匹配，其次
  * 同 id 的首个；同名 team 跨 core 时不会取错 core 的画像（能力门控/循环模式）。
  */
 export function activeTeam(state: AppState): TeamInfo | null {
@@ -84,8 +90,8 @@ export function activeTeam(state: AppState): TeamInfo | null {
   if (!id) return state.teams[0] ?? null;
   const matches = state.teams.filter((t) => t.id === id);
   if (!matches.length) return null;
-  if (state.activeTeamCore != null) {
-    return matches.find((t) => (t.core ?? null) === state.activeTeamCore) ?? matches[0];
+  if (state.activeRegion != null) {
+    return matches.find((t) => (t.core ?? null) === state.activeRegion) ?? matches[0];
   }
   return matches[0];
 }
@@ -101,9 +107,9 @@ export function belongsToActiveTeam(
   const active = state.activeTeamId ?? state.teams[0]?.id ?? null;
   if (active === null) return true;
   if (teamId !== active) return false;
-  // 多上游：同名 team 跨 core 时靠 activeTeamCore 区分；事件未带 core
+  // 多上游：同名 team 跨 core 时靠 activeRegion 区分；事件未带 core
   // （旧 core / 单上游）时不过滤，保持向后兼容。
-  if (core != null && state.activeTeamCore != null && core !== state.activeTeamCore) {
+  if (core != null && state.activeRegion != null && core !== state.activeRegion) {
     return false;
   }
   return true;
@@ -121,15 +127,15 @@ function payloadCore(event: unknown): string | null {
 }
 
 /**
- * 管理面事件是否属于当前选中 core（多上游）。单上游 / 未指定 activeCore 时
- * 放行；这样"设置页看到的配置"始终是 activeCore 那一份，不会被广播响应里
+ * 管理面事件是否属于当前选中 core（多上游）。单上游 / 未指定 activeRegion 时
+ * 放行；这样"设置页看到的配置"始终是 activeRegion 那一份，不会被广播响应里
  * 其他 core 的配置覆盖。
  */
 function managementCoreCurrent(state: AppState, core: string | null): boolean {
-  return core == null || state.activeCore == null || core === state.activeCore;
+  return core == null || state.activeRegion == null || core === state.activeRegion;
 }
 
-/** 切换 activeCore 时清空"单值管理面"缓存，避免短暂显示上一个 core 的值。 */
+/** 切换 activeRegion 时清空"单值管理面"缓存，避免短暂显示上一个 core 的值。 */
 export function resetManagementState(state: AppState): void {
   state.model = '';
   state.api = null;
@@ -348,6 +354,14 @@ export interface UpstreamStatus {
   last_checked: number;
 }
 
+/// 一个"运行区域"（= 一个承载 agent 的 Core）。
+export interface RegionInfo {
+  /// 区域 id（= Core 的 NodeId；旧 Core 缺省退化为上游名）。
+  id: string;
+  /// 展示名（`[core].region_name`；缺省 = 上游名）。
+  name: string;
+}
+
 export interface AppState {
   connected: boolean;
   /**
@@ -365,14 +379,13 @@ export interface AppState {
   selfUpdateStatus: { state: string; phase?: string | null; revision?: string | null; message?: string | null; updated_at?: string | null } | null;
   /// 本机邀请串（`FederationInvite` 响应；一次性展示，离开联邦页清除）。
   federationInvite: string | null;
-  /// 当前命令去向的上游 Core（多上游聚合视图；null = 单上游/无壳）。
-  activeCore: string | null;
   /// 已发现的上游名集合（连接层由事件信封登记；Core 切换器展示）。
   knownCores: Set<string>;
   /// 上游 Core 连接状态（`/api/upstreams` 周期轮询；连接状态卡逐 core 展示）。
   upstreams: UpstreamStatus[];
-  /// 上游名 → 本机 NodeId（从载荷内建 node_id 学习；诊断/展示用）。
-  coreNodeIds: Record<string, string>;
+  /// 上游名 → 运行区域信息（从载荷内建 node_id/region_name 学习）。
+  /// 这是 Panel 的"区域注册表"：agent 的「运行区域」即其 `core` 对应的区域名。
+  regions: Record<string, RegionInfo>;
   tasks: OrchActivity[];
   adapters: AdapterStatus[];
   model: string;
@@ -435,12 +448,14 @@ export interface AppState {
   /** 当前激活 team（null = default/未指定），用于实时事件隔离 */
   activeTeamId: string | null;
   /**
-   * 当前激活 team 归属的上游 core（多上游聚合视图）。
-   * 人格身份是 (core, id)：同名 team 可能同时存在于多个 core，路由/过滤
-   * 必须带上 core，否则会把一个 core 的 agent 发给另一个 core。
+   * 当前选中 agent 的**运行区域**（= 承载它的上游 core；多上游聚合视图）。
+   *
+   * 这是**派生量**：只在 agent 选择/TeamsList 校正时由 agent 的归属写入，
+   * 不存在独立的"管理目标"开关。所有命令的路由、事件过滤、QQ/设置/联邦等
+   * 管理面归属都由它决定——选 agent 即选区域。
    * null = 单上游裸帧 / 未标注。
    */
-  activeTeamCore: string | null;
+  activeRegion: string | null;
   /** 后台 shell 会话列表（Shell 面板） */
   shellSessions: import('./protocol').ShellSessionInfo[];
   /** 每会话的终端条目（seq → entry），Shell 面板流式输出 */
@@ -475,10 +490,9 @@ export function initialState(): AppState {
     federation: null,
     selfUpdateStatus: null,
     federationInvite: null,
-    activeCore: null,
     knownCores: new Set(),
     upstreams: [],
-    coreNodeIds: {},
+    regions: {},
     tasks: [],
     adapters: [],
     model: '',
@@ -511,7 +525,7 @@ export function initialState(): AppState {
     workspaceGitBySession: {},
     workspaceFiles: {},
     activeTeamId: null,
-    activeTeamCore: null,
+    activeRegion: null,
     shellSessions: [],
     shellTerminals: {},
     context: null,
@@ -869,10 +883,10 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'TrunkTimeline': {
       const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean; core?: string | null } }).TrunkTimeline;
-      // 多上游：同名 team 跨 core 时只接受当前 activeTeamCore 的响应——
+      // 多上游：同名 team 跨 core 时只接受当前 activeRegion 的响应——
       // 广播请求（TeamsList 尚未到达时）会让多个 core 各回一份，key 相同
       // 会互相覆盖/串显。core 未标注（单上游/旧 core）时不过滤。
-      if (e.core != null && state.activeTeamCore != null && e.core !== state.activeTeamCore) {
+      if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) {
         return state;
       }
       // 首屏加载态：收到过即说明 Core 已回（哪怕为空）——「暂无消息」只在此时展示。
@@ -886,7 +900,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const key =
         e.team_id !== undefined
           ? teamKey(e.core, e.team_id)
-          : teamKey(state.activeTeamCore, state.activeTeamId);
+          : teamKey(state.activeRegion, state.activeTeamId);
       const cached = state.teamTimelines[key];
 
       if (e.full === undefined && cached && seq === cached.seq && e.messages.length === 0) {
@@ -917,7 +931,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 仅当响应对应的正是当前查看的 team 时才替换实时视图；其他 team 的
       // 兜底响应只更新缓存。trunk 与缓存解除数组别名（[...converted]），
       // 否则实时推送会污染缓存、切换回来后经增量再投递一次（重复）。
-      if (key === teamKey(state.activeTeamCore, state.activeTeamId)) {
+      if (key === teamKey(state.activeRegion, state.activeTeamId)) {
         state.trunkTeamId = key;
         state.trunk = [...converted];
       }
@@ -1087,11 +1101,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         merged.push(t);
       }
       // 当前 active core 的条目排前：`teams[0]` 兜底默认时不会跳到别的 core。
-      const activeCore = state.activeTeamCore;
-      if (activeCore != null) {
+      const activeRegion = state.activeRegion;
+      if (activeRegion != null) {
         merged.sort((a, b) => {
-          const ac = (a.core ?? null) === activeCore ? 0 : 1;
-          const bc = (b.core ?? null) === activeCore ? 0 : 1;
+          const ac = (a.core ?? null) === activeRegion ? 0 : 1;
+          const bc = (b.core ?? null) === activeRegion ? 0 : 1;
           return ac - bc;
         });
       }
@@ -1425,9 +1439,8 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   // 该 core 下线/移除：人格列表、会话、活动、选中态一并清理——否则残留的
   // 人格条目会让路由继续把命令发往已消失的 core（「智能体 X 不存在」）。
   state.teams = state.teams.filter(t => (t.core ?? null) !== core);
-  delete state.coreNodeIds[core];
-  if (state.activeTeamCore === core) state.activeTeamCore = null;
-  if (state.activeCore === core) state.activeCore = null;
+  delete state.regions[core];
+  if (state.activeRegion === core) state.activeRegion = null;
   const removed = state.sessions.filter(s => (s as { core?: string | null }).core === core);
   const removedIds = new Set(removed.map(s => s.id));
   state.sessions = state.sessions.filter(s => !removedIds.has(s.id));

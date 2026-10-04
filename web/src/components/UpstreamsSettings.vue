@@ -135,7 +135,7 @@ async function remove(name: string) {
     error.value = `删除失败：HTTP ${res.status}`;
     return;
   }
-  if (state.activeCore === name) state.activeCore = null;
+  if (state.activeRegion === name) state.activeRegion = null;
   await refresh();
 }
 

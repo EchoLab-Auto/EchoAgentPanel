@@ -175,7 +175,7 @@ onUnmounted(() => {
       <div>
         <div class="fed-title">联邦网络</div>
         <div class="fed-sub" v-if="state.knownCores.size > 0">
-          作用于上游 core：{{ state.activeCore ?? '（未指定）' }}
+          作用于运行区域：{{ state.activeRegion ?? '（未指定）' }}
         </div>
         <div class="fed-sub" v-if="enabled && fed">
           节点 {{ fed.node_name || fed.node_id }}

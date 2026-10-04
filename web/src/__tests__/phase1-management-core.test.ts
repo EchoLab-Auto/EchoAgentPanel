@@ -1,7 +1,7 @@
 // Phase 1（2026-10）：管理面（设置/QQ/联邦）绑定"管理目标 core"。
 // - 无 team/session 的管理事件也注入来源 core；
 // - 单值管理面（api/skills/tools/plugins/systemPrompt/adapter/federation）只
-//   接受 activeCore 的响应，避免被广播响应里其他 core 的配置覆盖；
+//   接受 activeRegion 的响应，避免被广播响应里其他 core 的配置覆盖；
 // - QQ 实例名跨 core 可重复，管理态按 (core, adapter) 存放。
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
@@ -27,22 +27,22 @@ const apiEvent = (model: string): BackendEvent =>
 const skillsEvent = (names: string[]): BackendEvent =>
   ({ SkillsList: { skills: names.map((name) => ({ name })) } }) as unknown as BackendEvent;
 
-describe('Phase 1：管理面绑定 activeCore', () => {
+describe('Phase 1：管理面绑定 activeRegion', () => {
   beforeEach(() => {
     resetManagementState(state);
     state.knownCores = new Set(['core-a', 'core-b']);
-    state.activeCore = 'core-b';
+    state.activeRegion = 'core-b';
     state.qqByAdapter = {};
   });
 
-  it('非 activeCore 的 ApiConfigUpdated 被忽略；activeCore 的生效', () => {
+  it('非 activeRegion 的 ApiConfigUpdated 被忽略；activeRegion 的生效', () => {
     dispatch(apiEvent('from-a'), 'core-a');
     expect(state.api).toBeNull();
     dispatch(apiEvent('from-b'), 'core-b');
     expect(state.api?.model).toBe('from-b');
   });
 
-  it('非 activeCore 的 SkillsList 被忽略', () => {
+  it('非 activeRegion 的 SkillsList 被忽略', () => {
     dispatch(skillsEvent(['a-skill']), 'core-a');
     expect(state.skills).toHaveLength(0);
     dispatch(skillsEvent(['b-skill']), 'core-b');
@@ -50,7 +50,7 @@ describe('Phase 1：管理面绑定 activeCore', () => {
   });
 
   it('单上游（core=null）不过滤', () => {
-    state.activeCore = null;
+    state.activeRegion = null;
     dispatch(apiEvent('local'), null);
     expect(state.api?.model).toBe('local');
   });

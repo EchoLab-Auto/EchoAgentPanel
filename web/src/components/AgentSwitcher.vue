@@ -7,6 +7,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
+import { regionLabel } from '../state';
 
 const props = defineProps<{ activeTeamId: string | null }>();
 const emit = defineEmits<{ select: [id: string | null, core: string | null] }>();
@@ -14,7 +15,7 @@ const emit = defineEmits<{ select: [id: string | null, core: string | null] }>()
 const open = ref(false);
 const rootRef = ref<HTMLElement | null>(null);
 
-// 当前展示的 Agent：优先 (activeTeamId, activeTeamCore) 匹配；为空时取
+// 当前展示的 Agent：优先 (activeTeamId, activeRegion) 匹配；为空时取
 // 第一个 team（默认）。同名 team 跨 core 时用 core 消歧。
 const current = computed(() => {
   const teams = state.teams;
@@ -23,22 +24,22 @@ const current = computed(() => {
     ? teams.find(
         (t) =>
           t.id === props.activeTeamId &&
-          (state.activeTeamCore == null || (t.core ?? null) === state.activeTeamCore),
+          (state.activeRegion == null || (t.core ?? null) === state.activeRegion),
       ) ?? teams.find((t) => t.id === props.activeTeamId)
     : undefined;
   return active ?? teams[0];
 });
 
-/** 选中高亮：同名 team 跨 core 时只高亮 activeTeamCore 那一条。 */
+/** 选中高亮：同名 team 跨 core 时只高亮 activeRegion 那一条。 */
 function isActive(team: { id: string; core?: string | null }): boolean {
   const activeId = props.activeTeamId ?? state.teams[0]?.id ?? null;
   if (team.id !== activeId) return false;
-  if (state.activeTeamCore == null) return true;
-  return (team.core ?? null) === state.activeTeamCore;
+  if (state.activeRegion == null) return true;
+  return (team.core ?? null) === state.activeRegion;
 }
 
-/** 是否展示 core 徽标（多上游聚合，且该 team 标注了 core）。 */
-function showCore(core: string | null | undefined): boolean {
+/** 多区域时才展示「运行区域」徽标（单区域零变化）。 */
+function showRegion(core: string | null | undefined): boolean {
   return state.knownCores.size > 0 && !!core;
 }
 
@@ -101,6 +102,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
       </span>
       <span v-else class="agent-card__avatar agent-card__avatar--off">?</span>
       <span class="agent-card__name">{{ current?.name ?? '未配置' }}</span>
+      <span v-if="showRegion(current?.core)" class="agent-card__region">
+        {{ regionLabel(state, current?.core) }}
+      </span>
       <span v-if="currentModel(current)" class="agent-card__model" :title="currentModel(current)!">
         {{ currentModel(current) }}
       </span>
@@ -138,7 +142,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
           {{ avatarText(team.name) }}
         </span>
         <span class="agent-menu__name">{{ team.name }}</span>
-        <span v-if="showCore(team.core)" class="agent-menu__core">{{ team.core }}</span>
+        <span v-if="showRegion(team.core)" class="agent-menu__core">
+          {{ regionLabel(state, team.core) }}
+        </span>
         <span v-if="teamModel(team)" class="agent-menu__model" :title="teamModel(team)!">
           {{ teamModel(team) }}
         </span>
@@ -275,6 +281,16 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   width: 24px;
   height: 24px;
   font-size: 12px;
+}
+.agent-card__region {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 15px;
+  opacity: 0.7;
+  background: rgba(127, 127, 127, 0.18);
+  white-space: nowrap;
 }
 .agent-menu__core {
   margin-left: 6px;

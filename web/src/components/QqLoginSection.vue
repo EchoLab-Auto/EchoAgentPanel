@@ -26,9 +26,9 @@ const qrRequested = ref(false);
 
 const instanceName = computed(() => props.adapterName || props.adapter?.name || '');
 /** 该实例的登录态（Core 经 QqLoginStatus 回推）。 */
-// QQ 实例名跨 core 可重复（默认都叫 qq）：按 (activeCore, 实例) 取态。
+// QQ 实例名跨 core 可重复（默认都叫 qq）：按 (activeRegion, 实例) 取态。
 const instanceState = computed(
-  () => state.qqByAdapter[scopedKey(state.activeCore, instanceName.value)],
+  () => state.qqByAdapter[scopedKey(state.activeRegion, instanceName.value)],
 );
 const online = computed(
   () => instanceState.value?.online ?? props.adapter?.connected ?? false,
@@ -58,7 +58,7 @@ watch(
   () => (state as unknown as { lastQrcode?: { adapter: string; png_base64: string; error?: string | null; core?: string | null } }).lastQrcode,
   (qr) => {
     if (!qr || qr.adapter !== instanceName.value) return;
-    if ((qr.core ?? null) !== (state.activeCore ?? null)) return;
+    if ((qr.core ?? null) !== (state.activeRegion ?? null)) return;
     loading.value = false;
     if (qr.error) {
       error.value = qr.error;

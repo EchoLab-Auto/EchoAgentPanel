@@ -16,8 +16,8 @@ describe('Phase 0：运行态/缓存按 (core, id) 隔离', () => {
   beforeEach(() => {
     state.teams = [team('default', 'core-a'), team('default', 'core-b')];
     state.activeTeamId = 'default';
-    state.activeTeamCore = 'core-a';
-    state.activeCore = 'core-a';
+    state.activeRegion = 'core-a';
+    state.activeRegion = 'core-a';
     state.activities = {};
     state.tasks = [];
     state.teamTimelines = {};
@@ -32,7 +32,7 @@ describe('Phase 0：运行态/缓存按 (core, id) 隔离', () => {
       { AgentThinking: { session_id: SID, team_id: 'default' } } as unknown as BackendEvent,
       'core-a',
     );
-    state.activeTeamCore = 'core-b';
+    state.activeRegion = 'core-b';
     dispatch(
       { AgentThinking: { session_id: SID, team_id: 'default' } } as unknown as BackendEvent,
       'core-b',
@@ -48,7 +48,7 @@ describe('Phase 0：运行态/缓存按 (core, id) 隔离', () => {
         TrunkTimeline: { messages: [], seq: 1, team_id: 'default', full: true, _tag: content },
       }) as unknown as BackendEvent;
     dispatch(ev('a'), 'core-a');
-    state.activeTeamCore = 'core-b';
+    state.activeRegion = 'core-b';
     dispatch(ev('b'), 'core-b');
     expect(state.teamTimelines[teamKey('core-a', 'default')]).toBeTruthy();
     expect(state.teamTimelines[teamKey('core-b', 'default')]).toBeTruthy();
@@ -77,7 +77,7 @@ describe('Phase 0：运行态/缓存按 (core, id) 隔离', () => {
   });
 });
 
-// ── 会话路由：同名会话优先 activeCore ──
+// ── 会话路由：同名会话优先 activeRegion ──
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   static CONNECTING = 0;
@@ -105,7 +105,7 @@ class FakeWebSocket {
   }
 }
 
-describe('Phase 0：同名会话路由优先 activeCore', () => {
+describe('Phase 0：同名会话路由优先 activeRegion', () => {
   beforeEach(() => {
     vi.resetModules();
     FakeWebSocket.instances = [];
@@ -114,7 +114,7 @@ describe('Phase 0：同名会话路由优先 activeCore', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('两个 core 都有该 session_id 时按 activeCore 定向', async () => {
+  it('两个 core 都有该 session_id 时按 activeRegion 定向', async () => {
     const { startConnection, sendCommand } = await import('../connection');
     const { state: s } = await import('../store');
     startConnection();
@@ -126,8 +126,8 @@ describe('Phase 0：同名会话路由优先 activeCore', () => {
       { id: SID, core: 'core-b', team_id: 'default', platform: 'local', scope: 'tui', user_id: 'u', nickname: '', group_name: null, last_active: 0, last_message: '' },
     ];
     s.teams = [team('default', 'core-a'), team('default', 'core-b')];
-    s.activeCore = 'core-b';
-    s.activeTeamCore = 'core-b';
+    s.activeRegion = 'core-b';
+    s.activeRegion = 'core-b';
     sendCommand({ SendMessage: { session_id: SID, content: 'hi', team_id: 'default' } });
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-b');

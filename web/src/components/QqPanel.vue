@@ -50,10 +50,10 @@ const activeAdapter = computed(
 );
 const qqAdapter = computed(() => activeAdapter.value);
 /** 当前实例的 QQ 管理态（门控/名单/owner/群/好友）。 */
-// 实例名跨 core 可重复（默认都叫 qq）：按 (activeCore, 实例) 取态。
+// 实例名跨 core 可重复（默认都叫 qq）：按 (activeRegion, 实例) 取态。
 const instanceState = computed(
   () =>
-    state.qqByAdapter[scopedKey(state.activeCore, activeAdapter.value?.name ?? 'qq')] ??
+    state.qqByAdapter[scopedKey(state.activeRegion, activeAdapter.value?.name ?? 'qq')] ??
     defaultQqInstanceState(),
 );
 const activeName = computed(() => activeAdapter.value?.name ?? '');

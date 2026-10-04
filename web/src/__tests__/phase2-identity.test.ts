@@ -22,7 +22,7 @@ const branchEvt = (branchId: string): BackendEvent =>
 describe('Phase 2：branchTabs / node_id', () => {
   beforeEach(() => {
     state.branchTabs = {};
-    state.coreNodeIds = {};
+    state.regions = {};
     state.teams = [];
   });
 
@@ -47,7 +47,7 @@ describe('Phase 2：branchTabs / node_id', () => {
       last_message: '',
     } as SessionInfo;
     dispatch({ SessionUpdated: { session } } as unknown as BackendEvent, 'core-a');
-    expect(state.coreNodeIds['core-a']).toBe('node-abc');
+    expect(state.regions['core-a']?.id).toBe('node-abc');
   });
 });
 

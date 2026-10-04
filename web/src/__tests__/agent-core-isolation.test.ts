@@ -17,9 +17,9 @@ describe('多上游人格 (core, id) 隔离', () => {
   beforeEach(() => {
     state.teams = [];
     state.activeTeamId = null;
-    state.activeTeamCore = null;
+    state.activeRegion = null;
     state.sessions = [];
-    state.activeCore = null;
+    state.activeRegion = null;
     state.knownCores = new Set();
   });
 
@@ -49,10 +49,10 @@ describe('多上游人格 (core, id) 隔离', () => {
     ]);
   });
 
-  it('coreForTeam 优先 activeTeamCore 消歧，否则取带 core 的条目', () => {
+  it('coreForTeam 优先 activeRegion 消歧，否则取带 core 的条目', () => {
     dispatch(teamsEvent([team('default', 'core-a')]), 'core-a');
     dispatch(teamsEvent([team('default', 'core-b')]), 'core-b');
-    state.activeTeamCore = 'core-b';
+    state.activeRegion = 'core-b';
     expect(coreForTeam(state, 'default')).toBe('core-b');
     expect(coreForTeam(state, 'default', 'core-a')).toBe('core-a');
     expect(coreForTeam(state, 'missing')).toBeUndefined();
@@ -61,7 +61,7 @@ describe('多上游人格 (core, id) 隔离', () => {
   it('belongsToActiveTeam 按 (id, core) 过滤，同名跨 core 不串显', () => {
     dispatch(teamsEvent([team('default', 'core-a'), team('default', 'core-b')]), null);
     state.activeTeamId = 'default';
-    state.activeTeamCore = 'core-a';
+    state.activeRegion = 'core-a';
     expect(belongsToActiveTeam(state, 'default', 'core-a')).toBe(true);
     expect(belongsToActiveTeam(state, 'default', 'core-b')).toBe(false);
     // 事件未带 core（单上游/旧 core）时不过滤，保持兼容。
@@ -120,7 +120,7 @@ describe('sendCommand 人格归属路由守卫', () => {
     const { state: s } = await import('../store');
     const ws = await connect();
     s.teams = [team('default', 'core-a'), team('alix', 'core-b')];
-    s.activeTeamCore = 'core-a';
+    s.activeRegion = 'core-a';
     // 调度选到了 core-b，但命令带 core-a 的人格 → 必须改发 core-a。
     sendCommand({ RequestTrunkTimeline: { team_id: 'default' } }, 'core-b');
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
@@ -132,7 +132,7 @@ describe('sendCommand 人格归属路由守卫', () => {
     const { state: s } = await import('../store');
     const ws = await connect();
     s.teams = [team('alix', 'core-a'), team('alix', 'core-b')];
-    s.activeTeamCore = 'core-a';
+    s.activeRegion = 'core-a';
     sendCommand({ RequestTrunkTimeline: { team_id: 'alix' } }, 'core-b');
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-b');

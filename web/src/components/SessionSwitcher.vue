@@ -93,8 +93,7 @@ const globalVisible = computed(() => {
 });
 
 function pick(session: SessionInfo & { core?: string | null }) {
-  // 聚合视图：选择他 Core 的会话时同步切换命令去向（发送目标上游）。
-  if (session.core) state.activeCore = session.core;
+  // 运行区域由 App.onSessionPick 依据会话归属同步（派生量，不在这里手动设）。
   emit('select', session.id);
 }
 

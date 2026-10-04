@@ -13,20 +13,20 @@ import { sessionKey } from '../keys';
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{ back: [] }>();
 
-// 会话 id 是 per-core 的 `sh-{seq}`：按 (activeTeamCore, session_id) 精确定位。
+// 会话 id 是 per-core 的 `sh-{seq}`：按 (activeRegion, session_id) 精确定位。
 const session = computed(
   () =>
     state.shellSessions.find(
       (s) =>
         s.session_id === props.sessionId &&
-        (state.activeTeamCore == null || (s.core ?? null) === state.activeTeamCore),
+        (state.activeRegion == null || (s.core ?? null) === state.activeRegion),
     ) ?? null,
 );
 /** 终端条目的复合键（找不到会话时按当前 core + 请求 id 兜底）。 */
 const terminalKey = computed(() =>
   session.value
     ? sessionKey(session.value.core, session.value.session_id)
-    : sessionKey(state.activeTeamCore, props.sessionId),
+    : sessionKey(state.activeRegion, props.sessionId),
 );
 
 const inputBySession = ref<Record<string, string>>({});

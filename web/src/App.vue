@@ -11,7 +11,7 @@ import {
 import { state } from './store';
 import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';
-import { requestActiveCoreManagement, sendCommand, startConnection } from './connection';
+import { requestActiveRegionManagement, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
 import { loopModeOf } from './protocol';
 import { currentTeam, teamPluginEnabled } from './capabilities';
@@ -92,9 +92,9 @@ function saveActiveTeam(id: string | null, core: string | null) {
 /** 统一更新「当前 agent」选中态（人格身份 = id + 归属 core）+ 持久化。 */
 function applyActiveTeam(id: string | null, core: string | null) {
   activeTeamId.value = id;
-  activeTeamCore.value = core;
+  activeRegion.value = core;
   state.activeTeamId = id;
-  state.activeTeamCore = core;
+  state.activeRegion = core;
   saveActiveTeam(id, core);
 }
 
@@ -103,7 +103,7 @@ function onTeamSelect(next: string | null, core?: string | null) {
   // core，再取首个带 core 标注的条目，最后回落单上游（null）。core 锁定后
   // 命令不再发错节点。
   const resolved = next
-    ? core ?? coreForTeam(state, next, state.activeTeamCore ?? state.activeCore) ?? null
+    ? core ?? coreForTeam(state, next, state.activeRegion) ?? null
     : null;
   applyActiveTeam(next, resolved);
   // 分支 tab 属于上一个 agent 的运行期状态：切换后清空，避免在
@@ -143,12 +143,12 @@ const activeBranchId = ref<string | null>(null);
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
 // 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
 const activeTeamId = ref<string | null>(loadActiveTeam());
-const activeTeamCore = ref<string | null>(loadActiveTeamCore());
+const activeRegion = ref<string | null>(loadActiveTeamCore());
 // ⚠️ 关键：刷新时同步 state.activeTeamId/Core（reducer 与入口行会话切换都
 // 读它）。若不同步，state.activeTeamId 保持 null → 会话列表按"主 agent"
 // 过滤，会串显别人的会话（此前只在 onTeamSelect 里赋值，刷新即丢失）。
 state.activeTeamId = activeTeamId.value;
-state.activeTeamCore = activeTeamCore.value;
+state.activeRegion = activeRegion.value;
 
 
 
@@ -158,13 +158,13 @@ function send(content: string, images: string[] = []) {
   // 深度融合 P2 调度：目标会话无 core 归属（新会话/默认本地会话）时，
   // 由调度器按策略（least_busy 默认）选节点；已有归属的会话经
   // coreForCommand 自动路由（P1），调度不参与。
-  // 同名会话跨 core：优先当前 activeCore 那一份，避免把"已有归属"误判为
+  // 同名会话跨 core：优先当前 activeRegion 那一份，避免把"已有归属"误判为
   // 新会话而再去调度。
   const targetMatches = state.sessions.filter(s => s.id === target) as Array<{
     core?: string | null;
   }>;
   const targetSession =
-    targetMatches.find(s => s.core && s.core === state.activeCore) ??
+    targetMatches.find(s => s.core && s.core === state.activeRegion) ??
     targetMatches.find(s => s.core) ??
     targetMatches[0];
   const scheduled = targetSession?.core ? null : scheduleNode();
@@ -185,7 +185,7 @@ function send(content: string, images: string[] = []) {
 function cancelWork() {
   // 乐观中断：立即结束动画/任务/工具运行态（不等后端确认）
   // 活动态键是 (core, session_id)：用当前选中会话的归属 core 精准取消。
-  cancelSessionWork(state, activeSessionId.value, activeTeamCore.value);
+  cancelSessionWork(state, activeSessionId.value, activeRegion.value);
   // 取消必须路由到 turn 实际所在的 agent（去主智能体后 team_id 必填，
   // 缺省会被 core 明确拒绝）。
   sendCommand({
@@ -229,10 +229,10 @@ function onSessionPick(id: string) {
       core?: string | null;
     }>;
     const picked =
-      candidates.find((s) => s.core && s.core === state.activeCore) ??
+      candidates.find((s) => s.core && s.core === state.activeRegion) ??
       candidates.find((s) => s.core) ??
       candidates[0];
-    if (picked?.core && picked.core !== activeTeamCore.value) {
+    if (picked?.core && picked.core !== activeRegion.value) {
       applyActiveTeam(activeTeamId.value, picked.core);
     }
   }
@@ -295,7 +295,7 @@ watch(
 // 反复全量拉取）。初始值取 localStorage 还原的 (id, core)：若引导期已按同一
 // 组合定向请求过，这里不重复；core 由 TeamsList 校正后 key 变化 → 补拉一次。
 let resolvedTimelineKey = activeTeamId.value
-  ? teamKey(activeTeamCore.value, activeTeamId.value)
+  ? teamKey(activeRegion.value, activeTeamId.value)
   : '';
 
 let teamResetTimer: number | undefined;
@@ -343,14 +343,14 @@ watch(
       // 选中项存在：把 core 钉到合并列表里对应的那一条——首次从
       // localStorage 恢复时 core 为空，这里补全；同名跨 core 时保留已钉住的
       // core（缺失则取首个带明确 core 的条目）。
-      const cur = activeTeamCore.value;
+      const cur = activeRegion.value;
       const picked =
         (cur != null && matches.find((t) => (t.core ?? null) === cur)) ||
         matches.find((t) => t.core != null) ||
         matches[0];
-      if (activeTeamCore.value !== (picked.core ?? null)) {
-        activeTeamCore.value = picked.core ?? null;
-        state.activeTeamCore = picked.core ?? null;
+      if (activeRegion.value !== (picked.core ?? null)) {
+        activeRegion.value = picked.core ?? null;
+        state.activeRegion = picked.core ?? null;
         saveActiveTeam(picked.id, picked.core ?? null);
       }
       // core 解析完成后定向拉取 timeline（引导期不再裸广播）。
@@ -377,15 +377,15 @@ watch(
   { immediate: true },
 );
 
-// ── 管理目标 core 切换：清空单值管理面缓存 + 定向重拉 ──
-// 覆盖所有 activeCore 变更来源（连接骨架选择器 / 会话切换 / 事件驱动），
-// 保证设置/QQ/联邦页"看到的=改的"都是同一个 core。
+// ── 运行区域切换（= 所选 agent 的归属区域）：清空单值管理面缓存 + 定向重拉 ──
+// activeRegion 是派生量（agent 选择 / 会话归属 / TeamsList 校正）。区域一变，
+// 立即把设置/QQ/联邦等管理面重拉到该区域，保证"看到的=改的"。
 watch(
-  () => state.activeCore,
+  () => state.activeRegion,
   (next, prev) => {
     if (next === prev) return;
     resetManagementState(state);
-    requestActiveCoreManagement();
+    requestActiveRegionManagement();
   },
 );
 

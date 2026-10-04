@@ -23,7 +23,7 @@ const sessions = computed(() =>
   state.shellSessions.filter(
     (s) =>
       (s.team_id === undefined || s.team_id === null || s.team_id === teamKey.value) &&
-      (state.activeTeamCore == null || (s.core ?? null) === state.activeTeamCore),
+      (state.activeRegion == null || (s.core ?? null) === state.activeRegion),
   ),
 );
 

@@ -12,11 +12,18 @@ import type { SessionInfo, TeamInfo } from './protocol';
 
 export const state = reactive(initialState()) as AppState;
 
-/** 学习"上游名 → NodeId"映射（载荷内建 node_id；用于诊断/展示）。 */
-function learnCoreNodeId(core: string | null, nodeId: unknown): void {
-  if (core && typeof nodeId === 'string' && nodeId) {
-    state.coreNodeIds[core] = nodeId;
-  }
+/**
+ * 学习"上游名 → 运行区域"（载荷内建 node_id/region_name）。
+ * 区域 id 用 NodeId（稳定）；展示名缺省回落上游名。这是 Panel 的
+ * 区域注册表——agent 的「运行区域」即其 core 对应的区域。
+ */
+function learnRegion(core: string | null, nodeId: unknown, regionName: unknown): void {
+  if (!core) return;
+  const prev = state.regions[core];
+  const id = typeof nodeId === 'string' && nodeId ? nodeId : (prev?.id ?? core);
+  const name =
+    typeof regionName === 'string' && regionName ? regionName : (prev?.name ?? core);
+  state.regions[core] = { id, name };
 }
 
 export function dispatch(event: BackendEvent, core: string | null = null): void {
@@ -29,7 +36,7 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
     const e = (event as { SessionUpdated: { session: SessionInfo & { core?: string | null } } })
       .SessionUpdated;
     e.session.core = core;
-    learnCoreNodeId(core, e.session.node_id);
+    learnRegion(core, e.session.node_id, e.session.region_name);
   }
   // 多上游聚合视图：人格（TeamInfo）同样注入来源 core——人格身份是
   // (core, id)，不标注就无法把"选中的 agent"路由回它所属的 core，
@@ -38,7 +45,7 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
     const e = (event as { TeamsList: { teams: TeamInfo[] } }).TeamsList;
     for (const t of e.teams) {
       t.core = core;
-      learnCoreNodeId(core, t.node_id);
+      learnRegion(core, t.node_id, t.region_name);
     }
   }
   // Shell 事件：会话 id 是 per-core 的 `sh-{seq}`（每个 core 都从 sh-1 起），
@@ -61,8 +68,10 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
     const body = Object.values(event as unknown as Record<string, unknown>)[0];
     if (body && typeof body === 'object') {
       (body as Record<string, unknown>).core = core;
-      const embedded = (body as { node_id?: unknown }).node_id;
-      if (typeof embedded === 'string') learnCoreNodeId(core, embedded);
+      const b = body as { node_id?: unknown; region_name?: unknown };
+      if (typeof b.node_id === 'string' || typeof b.region_name === 'string') {
+        learnRegion(core, b.node_id, b.region_name);
+      }
     }
   }
   reduce(state, event);

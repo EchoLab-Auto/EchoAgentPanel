@@ -13,6 +13,7 @@
 import { computed } from 'vue';
 import { NeumorphismStatusDot } from '@echolab-auto/ui-frame';
 import { state } from '../store';
+import { regionLabel } from '../state';
 
 /** 状态点语义：connected（绿）/ running 未连（呼吸）/ stopped（灰）。 */
 type DotStatus = 'online' | 'connecting' | 'offline';
@@ -27,18 +28,13 @@ interface AdapterRow {
 
 const coreDot = computed<DotStatus>(() => (state.connected ? 'online' : 'connecting'));
 
-/** 可切换的上游 core：已发现（有事件）+ 已配置上游（含离线）的并集。 */
-const coreOptions = computed(() => {
-  const names = new Set<string>(state.knownCores);
-  for (const u of state.upstreams) names.add(u.name);
-  return Array.from(names).sort();
-});
-
-/** 逐 core 连接状态（Panel 后端 /api/upstreams 周期轮询）。 */
+/** 逐区域连接状态（Panel 后端 /api/upstreams 周期轮询）。 */
 const upstreams = computed(() => state.upstreams);
 
 interface CoreRow {
   name: string;
+  /** 展示名：运行区域名（region_name ?? 上游名）。 */
+  label: string;
   url: string;
   dot: DotStatus;
   stateText: string;
@@ -59,26 +55,15 @@ const coreRows = computed<CoreRow[]>(() =>
             : '离线';
     return {
       name: u.name,
+      label: regionLabel(state, u.name),
       url: u.url,
       dot,
       stateText,
       detail: u.last_error ?? u.url,
-      isTarget: state.activeCore === u.name,
+      isTarget: state.activeRegion === u.name,
     };
   }),
 );
-
-/** 切换"管理目标 core"：清缓存 + 重拉由 App.vue 的 activeCore watcher 统一处理。 */
-function onCoreChange(event: Event) {
-  state.activeCore = (event.target as HTMLSelectElement).value || null;
-}
-
-/** 展示用短 NodeId（载荷内建身份；无则空）。 */
-function shortNode(core: string): string {
-  const id = state.coreNodeIds[core];
-  if (!id) return '';
-  return id.length > 12 ? `${id.slice(0, 9)}…` : id;
-}
 
 const adapters = computed<AdapterRow[]>(() =>
   state.adapters.map((a) => ({
@@ -118,8 +103,8 @@ const adapters = computed<AdapterRow[]>(() =>
       >
         <NeumorphismStatusDot :status="row.dot" size="small" />
         <span class="conn-row__label">
-          {{ row.name }}
-          <span v-if="row.isTarget" class="conn-core-target">管理目标</span>
+          {{ row.label }}
+          <span v-if="row.isTarget" class="conn-core-target">当前区域</span>
         </span>
         <span class="conn-row__value" :class="row.dot === 'online' ? 'is-ok' : row.dot === 'offline' ? 'is-off' : 'is-pending'">
           {{ row.stateText }}
@@ -127,20 +112,11 @@ const adapters = computed<AdapterRow[]>(() =>
       </div>
     </div>
 
-    <!-- 管理目标 core（多上游）：设置/QQ/联邦等管理面作用于所选 core。 -->
-    <div v-if="coreOptions.length > 0" class="conn-row">
-      <span class="conn-row__label" title="管理面（设置/QQ/联邦）作用的目标 core">管理目标</span>
-      <select class="conn-core-select" :value="state.activeCore ?? ''" @change="onCoreChange">
-        <option v-for="c in coreOptions" :key="c" :value="c" :title="state.coreNodeIds[c] ?? ''">
-          {{ c }}{{ shortNode(c) ? ` · ${shortNode(c)}` : '' }}
-        </option>
-      </select>
-    </div>
 
     <!-- QQ 适配器实例 -->
     <div v-if="adapters.length" class="conn-group">
       <div class="conn-group__title">
-        QQ 适配器（{{ state.activeCore ?? '本机' }}）
+        QQ 适配器（{{ state.activeRegion ?? '本机' }}）
       </div>
       <div v-for="row in adapters" :key="row.key" class="conn-row">
         <NeumorphismStatusDot :status="row.dot" size="small" />

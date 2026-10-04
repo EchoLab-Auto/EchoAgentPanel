@@ -24,7 +24,7 @@ function upstream(over: Partial<UpstreamStatus>): UpstreamStatus {
 describe('ConnectionStatusCard 上游 Core 状态', () => {
   beforeEach(() => {
     state.connected = true;
-    state.activeCore = 'core';
+    state.activeRegion = 'core';
     state.knownCores = new Set(['core']);
     state.adapters = [];
     state.upstreams = [
@@ -60,10 +60,14 @@ describe('ConnectionStatusCard 上游 Core 状态', () => {
     expect(wrapper.find('.conn-core-target').exists()).toBe(true);
   });
 
-  it('管理目标选择器列出所有已配置上游（含离线）', () => {
+  it('区域行展示「运行区域」展示名（region_name）', () => {
+    state.regions = {
+      core: { id: 'node-1', name: '本机' },
+      ai_station: { id: 'node-2', name: 'AI 站' },
+    };
     const wrapper = mount(ConnectionStatusCard);
-    const options = wrapper.findAll('.conn-core-select option').map((o) => o.text());
-    expect(options.some((t) => t.includes('core'))).toBe(true);
-    expect(options.some((t) => t.includes('ai_station'))).toBe(true);
+    const rows = wrapper.findAll('.conn-row--core');
+    expect(rows[0].text()).toContain('本机');
+    expect(rows[1].text()).toContain('AI 站');
   });
 });

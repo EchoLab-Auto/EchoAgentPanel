@@ -213,7 +213,7 @@ const checklistAvailable = computed(() =>
 /** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 插件启用，
  * 或当前会话已有任务记录（即使插件后被禁用，历史任务仍可见）。 */
 const sessionTasks = computed(() => {
-  const core = state.activeTeamCore;
+  const core = state.activeRegion;
   const inCore = (t: { core?: string | null }) => core == null || (t.core ?? null) === core;
   return props.sessionId === 'global'
     ? state.tasks.filter(inCore)
@@ -406,7 +406,7 @@ const anyOverlayOpen = computed(() => {
 
 // 当前会话是否在运行任务（用于显示"取消任务"按钮）
 const busy = computed(() => {
-  const a = state.activities[sessionKey(state.activeTeamCore, props.sessionId)];
+  const a = state.activities[sessionKey(state.activeRegion, props.sessionId)];
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
 });
 
@@ -430,7 +430,7 @@ const ctxBottomOffsetCss = computed(() => `${configBottomOffset.value}px`);
 // 活动指示浮条：思考/调用工具/子代理 的实时状态，让用户知道 agent 在干什么
 const activityText = computed(() => {
   if (!busy.value) return '';
-  const a = state.activities[sessionKey(state.activeTeamCore, props.sessionId)];
+  const a = state.activities[sessionKey(state.activeRegion, props.sessionId)];
   switch (a?.phase) {
     case 'thinking':
       return a.detail ? `正在思考：${a.detail}…` : '正在思考…';
@@ -824,7 +824,7 @@ function imagesOf(message: ChatMessage): string[] {
       :style="{ bottom: tasksBottom + 'px', left: tasksLeft + 'px' }"
       @click.self="showTasks = false"
     >
-      <TasksPanel :session-id="props.sessionId" :core="state.activeTeamCore ?? null" />
+      <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />
     </div>
 
     <!-- 清单：跟随清单按钮下方 8px 的毛玻璃面板（无内层卡片） -->
@@ -849,7 +849,7 @@ function imagesOf(message: ChatMessage): string[] {
           <ContextView
             :team-id="props.activeTeamId ?? null"
             :session-id="props.sessionId"
-            :core="state.activeTeamCore ?? null"
+            :core="state.activeRegion ?? null"
           />
         </div>
       </div>

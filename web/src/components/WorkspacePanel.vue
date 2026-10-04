@@ -22,7 +22,7 @@ const props = defineProps<{ teamId: string | null }>();
 const fresh = computed(
   () =>
     state.workspaceTeamId === props.teamId &&
-    (state.workspaceCore ?? null) === (state.activeTeamCore ?? null),
+    (state.workspaceCore ?? null) === (state.activeRegion ?? null),
 );
 const sessions = computed(() => (fresh.value ? state.workspaceSessions : []));
 const activeId = computed(() => (fresh.value ? state.workspaceActive : null));
@@ -54,7 +54,7 @@ function requestSessions() {
 const gitLoading = ref(false);
 const gitDirs = computed(() =>
   selected.value
-    ? (state.workspaceGitBySession[sessionKey(state.activeTeamCore, selected.value.id)] ?? [])
+    ? (state.workspaceGitBySession[sessionKey(state.activeRegion, selected.value.id)] ?? [])
     : [],
 );
 
@@ -71,7 +71,7 @@ function requestGit(sessionId?: string) {
 
 function select(session: WorkspaceSessionInfo) {
   selectedId.value = session.id;
-  if (!state.workspaceGitBySession[sessionKey(state.activeTeamCore, session.id)]) requestGit(session.id);
+  if (!state.workspaceGitBySession[sessionKey(state.activeRegion, session.id)]) requestGit(session.id);
 }
 
 watch(gitDirs, () => {

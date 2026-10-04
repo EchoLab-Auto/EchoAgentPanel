@@ -128,10 +128,10 @@ export function startConnection(): void {
       // 单上游时中继不加壳，parseEvent 直接命中。
       const { core, event } = parseFrame(String(message.data));
       if (event) {
-        // 注意：activeCore 只由用户显式选择驱动（选会话/选上游），
-        // 绝不能随事件流漂移——否则破坏性命令会打错目标 core。
+        // 事件信封只用来登记"已知区域"。activeRegion（当前运行区域）是
+        // **派生量**——由选中的 agent / 会话决定（App.vue 的 teams watcher
+        // 与 onSessionPick），绝不随事件流漂移。
         if (core) state.knownCores.add(core);
-        if (!state.activeCore && core) state.activeCore = core;
         dispatch(event, core);
       }
     };
@@ -235,9 +235,9 @@ function coreForCommand(command: BackendCommand): string | null {
       SessionInfo & { core?: string | null }
     >;
     // 同名会话跨 core（每个 core 都有 local:tui::local_user）：优先当前
-    // activeCore 那一份，其次首个带 core 标注者——否则会发给错误的 core。
+    // activeRegion 那一份，其次首个带 core 标注者——否则会发给错误的 core。
     const session =
-      matches.find(s => s.core && s.core === state.activeCore) ??
+      matches.find(s => s.core && s.core === state.activeRegion) ??
       matches.find(s => s.core) ??
       matches[0];
     if (session?.core) return session.core;
@@ -254,10 +254,10 @@ function coreForCommand(command: BackendCommand): string | null {
 
 /**
  * 切换到某个 core 后重新拉取"单值管理面"数据（配置/技能/工具/插件/适配器/
- * shell/联邦）。这些响应会被 `managementCoreCurrent` 过滤到 activeCore，
+ * shell/联邦）。这些响应会被 `managementCoreCurrent` 过滤到 activeRegion，
  * 所以切 core 必须重拉一次，否则会短暂显示上一个 core 的值。
  */
-export function requestActiveCoreManagement(): void {
+export function requestActiveRegionManagement(): void {
   sendCommand('RequestState'); // → ApiConfigUpdated / ApiProfilesUpdated
   sendCommand('RequestSystemPrompt');
   sendCommand('RequestAdapterStatus');
@@ -276,10 +276,10 @@ export function resolveTargetCore(
   command: BackendCommand,
   targetCore?: string,
 ): string | null | undefined {
-  // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > activeCore >
-  // 首个已知上游。多上游下必须落到具体 core——无壳命令会被中继拒收。
-  const firstKnownCore = state.knownCores.size > 0 ? [...state.knownCores].sort()[0] : null;
-  let core = targetCore ?? coreForCommand(command) ?? state.activeCore ?? firstKnownCore;
+  // 路由优先级：显式 targetCore > 会话归属 > 人格归属 > 当前运行区域。
+  // 不再有"管理目标 core"这种自由变量，也不兜底首个上游——解析不出目标
+  // 就明确拒发（见 sendCommand），绝不猜。
+  let core = targetCore ?? coreForCommand(command) ?? state.activeRegion;
   // 一致性守卫：命令带 team_id 时目标 core 必须确实拥有该人格，否则重定向
   // 到拥有人格的 core。多上游下调度/会话归属若选到没有人格的节点，会把
   // A core 的 agent 发给 B core，B 回「智能体 X 不存在」——这里提前纠正。
@@ -302,6 +302,12 @@ export function resolveTargetCore(
 
 export function sendCommand(command: BackendCommand, targetCore?: string): void {
   const core = resolveTargetCore(command, targetCore);
+  // 多上游下解析不出目标 = 没有可路由的 agent/区域：明确提示并拒发，
+  // 绝不落到某个隐式的"默认 core"。
+  if (core == null && state.knownCores.size > 1) {
+    pushToast(state, '尚未选择 agent（无法确定运行区域），命令未发送', 'error');
+    return;
+  }
   const payload = core
     ? JSON.stringify({ core, frame: { type: 'command', payload: command } })
     : serializeCommand(command);
