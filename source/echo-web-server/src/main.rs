@@ -126,6 +126,9 @@ async fn main() -> Result<()> {
         warn!("no access token configured and not bound to localhost — panel is OPEN to the network; set [server] access_token");
     }
 
+    // 注册表级常驻探活（健康表真实可达性，不依赖浏览器连接）。
+    tokio::spawn(proxy::probe_pump(state.clone()));
+
     let app = Router::new()
         .route("/ws", get(proxy::ws_handler))
         // 媒体库：Core 落盘的入站图片（`/media/<id>`）。必须在静态 fallback

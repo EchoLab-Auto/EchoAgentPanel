@@ -133,6 +133,19 @@ impl AppState {
         }
     }
 
+    /// 是否有任一浏览器中继的活跃链路（探活泵据此让位——链路状态
+    /// 比探活更准）。
+    pub fn has_active_link(&self, name: &str) -> bool {
+        self.health
+            .read()
+            .map(|m| {
+                m.get(name)
+                    .map(|h| h.connectivity == "online")
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    }
+
     fn set_offline(&self, name: &str, error: Option<String>) {
         self.set_health(
             name,
@@ -252,6 +265,52 @@ async fn connect_upstream(
                 kind,
                 message: error.to_string(),
             })
+        }
+    }
+}
+
+/// 注册表级常驻探活（2026-10）：每 10s 对注册表全部上游做连接
+/// 探测（connect+即关）——健康表反映**真实可达性**，不再随浏览器
+/// 连接开关联动。有中继链路的上游跳过（链路状态更准）。
+pub async fn probe_pump(state: AppState) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        for cfg in state.registry.list().await {
+            if cfg.url.is_empty() {
+                continue;
+            }
+            // 有活跃中继链路：链路状态优先，不覆盖。
+            if state.has_active_link(&cfg.name) {
+                continue;
+            }
+            let upstream = Upstream {
+                name: Arc::from(cfg.name.as_str()),
+                url: Arc::from(cfg.url.as_str()),
+                access_token: Arc::from(cfg.access_token.as_str()),
+            };
+            match connect_upstream(&upstream).await {
+                Ok(core) => {
+                    drop(core);
+                    state.set_online_ok(&cfg.name);
+                }
+                Err(failure) => {
+                    state.set_health(
+                        &cfg.name,
+                        UpstreamHealth {
+                            connectivity: "offline".into(),
+                            auth: if failure.kind == "auth" {
+                                "failed".into()
+                            } else {
+                                "unknown".into()
+                            },
+                            last_error: Some(format!("[{}] {}", failure.kind, failure.message)),
+                            last_checked: now_unix(),
+                        },
+                    );
+                }
+            }
         }
     }
 }
