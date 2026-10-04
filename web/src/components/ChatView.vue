@@ -210,6 +210,20 @@ const checklistAvailable = computed(() =>
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
+/** 当前会话的清单快照（复合键 (core, session_id)；global 视图聚合当前区域全部）。 */
+const sessionChecklists = computed(() => {
+  if (props.sessionId !== 'global') {
+    return state.checklists[sessionKey(state.activeRegion, props.sessionId)] ?? [];
+  }
+  // global 视图：汇总当前运行区域下各会话的清单（跨 core 不串）。
+  const out = [];
+  for (const [key, lists] of Object.entries(state.checklists)) {
+    const core = key.includes('\u0000') ? key.slice(0, key.indexOf('\u0000')) : null;
+    if (state.activeRegion == null || core === state.activeRegion) out.push(...lists);
+  }
+  return out;
+});
+
 /** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 插件启用，
  * 或当前会话已有任务记录（即使插件后被禁用，历史任务仍可见）。 */
 const sessionTasks = computed(() => {
@@ -364,7 +378,8 @@ const trayPadRight = computed(() => (railHasCards('right') ? `${RAIL_WIDTH}px` :
 watch(checklistAvailable, (available) => {
   if (!available) {
     showChecklist.value = false;
-    state.checklists.splice(0, state.checklists.length);
+    // 清单已不可用：丢弃当前会话的本地快照（其他会话/core 的不动）。
+    delete state.checklists[sessionKey(state.activeRegion, props.sessionId)];
   }
 });
 
@@ -692,7 +707,7 @@ function imagesOf(message: ChatMessage): string[] {
       </NeumorphismButton>
       <NeumorphismBadge
         v-if="checklistAvailable"
-        :value="state.checklists.length"
+        :value="sessionChecklists.length"
         :show-zero="false"
       >
         <NeumorphismButton
@@ -834,7 +849,7 @@ function imagesOf(message: ChatMessage): string[] {
       :style="{ bottom: checklistBottom + 'px', left: checklistLeft + 'px' }"
       @click.self="showChecklist = false"
     >
-      <ChecklistSidebar />
+      <ChecklistSidebar :session-id="sessionId === 'global' ? undefined : sessionId" :lists="sessionId === 'global' ? sessionChecklists : undefined" />
     </div>
 
     <!-- 上下文弹层：与 Agent 配置同几何（上/左/右 12px，底距入口行 12px）；

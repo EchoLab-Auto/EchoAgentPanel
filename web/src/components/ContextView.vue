@@ -10,6 +10,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import { ChatFold } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
+import { sessionKey } from '../keys';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
@@ -88,17 +89,13 @@ const connected = computed(() => state.connected);
 const { phase: ctxPhase, loading: ctxLoading, failed: ctxFailed } = usePending('context');
 
 const snapshot = computed(() => {
-  const snap = state.context;
-  if (!snap) return null;
-  // 旧 Core 不带 session_id（单会话全局口径）：直接展示；
-  // 新 Core 带归属时只认当前会话的快照。
-  if (snap.session_id == null) return snap;
-  // 多上游：会话 id 可能跨 core 相同（local:tui::local_user），归属 core 也要
-  // 匹配，否则会显示另一个 core 的上下文。
-  return snap.session_id === targetSessionId.value &&
-    (snap.core ?? null) === (targetCore.value ?? null)
-    ? snap
-    : null;
+  // 快照按 (core, session_id) 复合键存储（2026-10 多上游修复）——写入侧已
+  // 隔离归属，直接按当前（core, 会话）取；取不到再回退旧 Core 的全局口径
+  // （session_id 缺失时 reducer 归入 `sessionKey(core, '')`）。
+  return (
+    state.contexts[sessionKey(targetCore.value, targetSessionId.value ?? '')] ??
+    null
+  );
 });
 const blocks = computed(() => snapshot.value?.blocks ?? []);
 const promptTokens = computed(() =>

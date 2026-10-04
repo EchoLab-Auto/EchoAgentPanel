@@ -164,7 +164,7 @@ export function resetManagementState(state: AppState): void {
   state.selfUpdateStatus = null;
   state.apiTests = {};
   state.apiBalances = {};
-  state.checklists = [];
+  state.checklists = {};
 }
 
 export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch' | 'subagent';
@@ -431,7 +431,14 @@ export interface AppState {
   qqOwner: number;
   qqGroups: Array<[number, string]>;
   qqFriends: Array<[number, string]>;
-  checklists: ChecklistEntry[];
+  /**
+   * 各会话的清单快照（复合键 `(core, session_id)` → 清单列表，2026-10 多上游修复）。
+   *
+   * ⚠️ 曾是全局单值槽：多 core 下 A/B core 的 `ChecklistUpdated` 互相覆盖
+   * （清单面板在两端之间跳变）。事件本就带 `session_id`，按会话隔离本来就是
+   * 正确语义。读取方按当前选中会话的复合键取值（见 ChecklistSidebar）。
+   */
+  checklists: Record<string, ChecklistEntry[]>;
   toasts: Toast[];
   /** API 连通性测试结果（name(空=默认) → { ok, message, latencyMs }） */
   apiTests: Record<string, { ok: boolean; message: string; latencyMs: number }>;
@@ -475,7 +482,14 @@ export interface AppState {
   shellSessions: import('./protocol').ShellSessionInfo[];
   /** 每会话的终端条目（seq → entry），Shell 面板流式输出 */
   shellTerminals: Record<string, import('./protocol').ShellTerminalEntry[]>;
-  context: ContextSnapshotData | null;
+  /**
+   * 各会话的上下文快照（复合键 `(core, session_id)` → 快照，2026-10 多上游修复）。
+   *
+   * ⚠️ 曾是全局单值槽：多 core 下不同 core 的 `ContextSnapshot` 响应互相覆盖。
+   * 按复合键存后写入天然正确；`session_id` 缺失（旧 Core 全局口径）时键为
+   * `sessionKey(core, '')`。
+   */
+  contexts: Record<string, ContextSnapshotData>;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
   /**
@@ -525,7 +539,7 @@ export function initialState(): AppState {
     qqFriends: [],
     lastQrcode: null,
     qqByAdapter: {},
-    checklists: [],
+    checklists: {},
     toasts: [],
     apiTests: {},
     apiBalances: {},
@@ -543,7 +557,7 @@ export function initialState(): AppState {
     activeRegion: null,
     shellSessions: [],
     shellTerminals: {},
-    context: null,
+    contexts: {},
     branchTabs: {},
     teamTimelines: {},
     trunkTeamId: null,
@@ -880,8 +894,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ChecklistUpdated': {
-      const e = (event as { ChecklistUpdated: { state: { lists: Array<{ name: string; items: Array<{ text: string; done: boolean }> }> } } }).ChecklistUpdated;
-      state.checklists = (e.state.lists ?? [])
+      const e = (event as { ChecklistUpdated: { session_id: string; state: { lists: Array<{ name: string; items: Array<{ text: string; done: boolean }> }> } } }).ChecklistUpdated;
+      // 按 (core, session_id) 复合键隔离：多 core 下同名会话（各 core 都有
+      // local:tui::local_user）的清单不互相覆盖；不同会话的清单本就互不相干。
+      const key = sessionKey(evtCore(e), e.session_id);
+      state.checklists[key] = (e.state.lists ?? [])
         .filter((list) => list && Array.isArray(list.items))
         .map((list) => {
           const items = list.items;
@@ -892,8 +909,10 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'ContextSnapshot': {
       const e = (event as { ContextSnapshot: ContextSnapshotData }).ContextSnapshot;
-      // 只更新状态栏/详情弹窗用的快照数据，不再把快照作为系统消息写进聊天流。
-      state.context = e;
+      // 按 (core, session_id) 复合键存：多 core 下不同 core 的响应不互相
+      // 覆盖。session_id 缺失（旧 Core 全局口径）时归入 `sessionKey(core, '')`。
+      const key = sessionKey(evtCore(e), e.session_id ?? '');
+      state.contexts[key] = e;
       return state;
     }
     case 'TrunkTimeline': {

@@ -36,10 +36,10 @@
 
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
 - 工具调用进度（连续调用合并为图标行；2026-09 紧凑化）、子代理委派行（运行中/完成/失败一行呈现、点击展开结论）、临时回复分支面板（入口行「任务」弹层，按当前会话过滤）、清单面板
-- API 设置（provider / model / base_url / api_key / profiles / system prompt）
+- API 设置（provider / model / base_url / api_key / profiles；system prompt 在智能体配置弹层 AgentConfigModal 中编辑）
 - QQ 管理（多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
-- 工作区会话管理（入口行「工作区」宽版面板：左栏文件浏览器（只读）+ 右栏多会话 / 多工作区目录 / 各目录 git 状态；`echo-agent.workspace` 插件）
-- 上下文快照、帮助与斜杠命令、深浅主题
+- 工作区会话管理（入口行「工作区」宽版面板：多会话 / 多工作区目录 / 各目录 git 状态；文件浏览器已迁至会话视图右侧边栏，2026-09-19；`echo-agent.workspace` 插件）
+- 上下文快照、深浅主题
 - 联邦（设置·联邦）：Core↔Core 配对（`echofed://` 邀请串）、peers 列表与在线状态
 - Core 连接（设置·Core 连接）：多上游聚合管理——在线增删/编辑上游、在线状态指示、当前命令目标切换（ui-frame 新拟态组件）
 
