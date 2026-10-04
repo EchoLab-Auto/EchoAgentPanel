@@ -1,6 +1,9 @@
 <script setup lang="ts">
-//! 连接状态卡（右侧边栏卡片栈）：浏览器↔Panel 通道 + **每个上游 Core** 的
-//! 连通性/认证 + 当前管理目标 core 的 QQ 适配器实例。
+//! 连接状态卡（右侧边栏卡片栈）：浏览器↔Panel 通道 + **每个运行区域**（上游
+//! Core）的连通性/认证 + 当前区域的 QQ 适配器实例。
+//!
+//! 注意：这里**不**标记"当前区域"——当前 agent 所属区域在 AgentSwitcher 的
+//! 区域徽标里展示，避免同一信息两处重复。
 //!
 //! 2026-09-23 从顶栏中段迁入：连接状态是"面板级"信息，放顶栏会与业务导航
 //! 混在一起，且断连时最该被看见的提示被压在顶栏中线；迁入右侧栏后与
@@ -39,7 +42,6 @@ interface CoreRow {
   dot: DotStatus;
   stateText: string;
   detail: string;
-  isTarget: boolean;
 }
 const coreRows = computed<CoreRow[]>(() =>
   upstreams.value.map((u) => {
@@ -60,7 +62,6 @@ const coreRows = computed<CoreRow[]>(() =>
       dot,
       stateText,
       detail: u.last_error ?? u.url,
-      isTarget: state.activeRegion === u.name,
     };
   }),
 );
@@ -98,14 +99,10 @@ const adapters = computed<AdapterRow[]>(() =>
         v-for="row in coreRows"
         :key="row.name"
         class="conn-row conn-row--core"
-        :class="{ 'conn-row--target': row.isTarget }"
         :title="row.detail"
       >
         <NeumorphismStatusDot :status="row.dot" size="small" />
-        <span class="conn-row__label">
-          {{ row.label }}
-          <span v-if="row.isTarget" class="conn-core-target">当前区域</span>
-        </span>
+        <span class="conn-row__label">{{ row.label }}</span>
         <span class="conn-row__value" :class="row.dot === 'online' ? 'is-ok' : row.dot === 'offline' ? 'is-off' : 'is-pending'">
           {{ row.stateText }}
         </span>
@@ -169,30 +166,8 @@ const adapters = computed<AdapterRow[]>(() =>
 .conn-row__value.is-pending {
   color: var(--panel-warn);
 }
-.conn-row--core.conn-row--target .conn-row__label {
-  font-weight: 600;
-}
-.conn-core-target {
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 6px;
-  font-size: 10px;
-  opacity: 0.75;
-  background: rgba(127, 127, 127, 0.18);
-  white-space: nowrap;
-}
 .conn-row__value.is-off {
   color: var(--nm-text-placeholder, #888);
-}
-.conn-core-select {
-  flex-shrink: 0;
-  max-width: 120px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.12));
-  background: var(--nm-bg-raised, rgba(255, 255, 255, 0.06));
-  color: var(--nm-text-primary);
-  font-size: 11.5px;
 }
 .conn-hint {
   margin: 0;

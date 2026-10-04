@@ -52,14 +52,6 @@ describe('ConnectionStatusCard 上游 Core 状态', () => {
     expect(rows[1].text()).toContain('认证失败');
   });
 
-  it('当前管理目标 core 带标记', () => {
-    const wrapper = mount(ConnectionStatusCard);
-    const rows = wrapper.findAll('.conn-row--core');
-    expect(rows[0].classes()).toContain('conn-row--target');
-    expect(rows[1].classes()).not.toContain('conn-row--target');
-    expect(wrapper.find('.conn-core-target').exists()).toBe(true);
-  });
-
   it('区域行展示「运行区域」展示名（region_name）', () => {
     state.regions = {
       core: { id: 'node-1', name: '本机' },
