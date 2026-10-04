@@ -471,6 +471,9 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         let _ = core_tx.close().await;
                     });
                     let name2 = name.clone();
+                    // reader 需要自己的 multi 句柄做加壳判定；外层循环保留
+                    // multi 用于链路增删时的 refresh_multi。
+                    let multi_reader = multi.clone();
                     let reader = tokio::spawn(async move {
                         let mut last_frame = Instant::now();
                         let mut hb = tokio::time::interval(heartbeat_interval());
@@ -485,7 +488,9 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                     last_frame = Instant::now();
                                     let forward = match message {
                                         tokio_tungstenite::tungstenite::Message::Text(text) => {
-                                            let out = if multi.load(std::sync::atomic::Ordering::Relaxed) {
+                                            let out = if multi_reader
+                                                .load(std::sync::atomic::Ordering::Relaxed)
+                                            {
                                                 match wrap_event(&name2, &text) {
                                                     Some(w) => w,
                                                     None => continue, // 非 JSON 帧：丢弃
@@ -525,6 +530,12 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         .write()
                         .await
                         .insert(name.clone(), CoreLink { cmd_tx, abort });
+                    // 链路是**异步**建立的：初始那一次 refresh_multi 可能在
+                    // links 还空时就跑完，此后只有注册表变更才会重算。必须
+                    // 在这里（以及断开处）刷新，否则多上游永远多=false →
+                    // 事件不加 core 壳 → 前端把两个 core 的 TeamsList 合并成
+                    // 一份，最后一个覆盖前一个（表现为某些 agent 消失）。
+                    refresh_multi(&state.registry, &multi, &links).await;
                     state.set_online_ok(&name);
                     // 读泵退出 = 链路死亡：**必须在本循环内 await**，绝不能
                     // 丢进 spawn 分流——否则外层 loop 每 ~50ms 无脑重连，而
@@ -534,6 +545,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     let _ = reader.await;
                     writer_abort.abort();
                     links.write().await.remove(&name);
+                    refresh_multi(&state.registry, &multi, &links).await;
                     state.set_offline(&name, None);
                     // 浏览器已断开（event_tx 无接收方）→ 结束重连循环，避免
                     // 空转建连。

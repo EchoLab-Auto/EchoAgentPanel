@@ -38,18 +38,21 @@ async fn fake_core(listener: TcpListener) {
     }
 }
 
-async fn spawn_panel(core_url: String) -> String {
+async fn spawn_panel_multi(upstreams: Vec<(&str, String)>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .with_state(AppState::new(
             echo_web_server::upstreams::UpstreamRegistry::new(
-                vec![echo_web_server::upstreams::UpstreamConfig {
-                    name: "core".to_string(),
-                    url: core_url.to_string(),
-                    access_token: String::new(),
-                }],
+                upstreams
+                    .into_iter()
+                    .map(|(name, url)| echo_web_server::upstreams::UpstreamConfig {
+                        name: name.to_string(),
+                        url,
+                        access_token: String::new(),
+                    })
+                    .collect(),
                 None,
             ),
             "/nonexistent".into(),
@@ -60,6 +63,10 @@ async fn spawn_panel(core_url: String) -> String {
         let _ = axum::serve(listener, app).await;
     });
     format!("ws://127.0.0.1:{}/ws", address.port())
+}
+
+async fn spawn_panel(core_url: String) -> String {
+    spawn_panel_multi(vec![("core", core_url)]).await
 }
 
 #[tokio::test]
@@ -168,5 +175,52 @@ async fn relay_keeps_active_browser_side() {
     // 1.2s 后链路仍可用。
     ws.send(WsMessage::Text(command.into())).await.unwrap();
     assert_eq!(next_text(&mut ws).await, command);
+    ws.close(None).await.unwrap();
+}
+
+/// 多上游：链路是异步建立的，中继必须在下线/上线时刷新"加壳开关"——
+/// 否则事件永远不带 `{core, frame}` 外壳，前端把多个 core 的 TeamsList
+/// 合并成一份、后者覆盖前者（表现为部分 agent 消失）。
+#[tokio::test]
+async fn multi_upstream_frames_are_core_wrapped() {
+    let l1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let l2 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url1 = format!("ws://127.0.0.1:{}", l1.local_addr().unwrap().port());
+    let url2 = format!("ws://127.0.0.1:{}", l2.local_addr().unwrap().port());
+    tokio::spawn(fake_core(l1));
+    tokio::spawn(fake_core(l2));
+
+    let panel_ws = spawn_panel_multi(vec![("core-a", url1), ("core-b", url2)]).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+
+    // 反复广播直到收到来自两个 core 的外壳帧（链路异步建立）。
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut seen = std::collections::BTreeSet::new();
+    while seen.len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "both cores never wrapped: {seen:?}"
+        );
+        ws.send(WsMessage::Text(
+            r#"{"broadcast":true,"frame":{"type":"command","payload":"RequestTeamsList"}}"#
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let text = next_text(&mut ws).await;
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if let Some(core) = value.get("core").and_then(|c| c.as_str()) {
+            assert!(
+                value.get("frame").is_some(),
+                "wrapped frame must carry .frame: {text}"
+            );
+            seen.insert(core.to_string());
+        }
+    }
+    assert_eq!(
+        seen.into_iter().collect::<Vec<_>>(),
+        vec!["core-a", "core-b"]
+    );
     ws.close(None).await.unwrap();
 }
