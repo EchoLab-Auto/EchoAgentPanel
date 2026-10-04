@@ -10,6 +10,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
 import { cancelSessionWork, coreForTeam } from './state';
+import { teamKey } from './keys';
 import { sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
 import { loopModeOf } from './protocol';
@@ -111,17 +112,17 @@ function onTeamSelect(next: string | null, core?: string | null) {
   // 切换 Team = 切换记忆（会话隔离）。
   // 1) 有缓存：立刻用缓存渲染（消除白屏/网络等待），再后台增量拉取；
   // 2) 无缓存：全量拉取（先清空避免串显上一 agent 内容）。
-  const teamKey = String(next ?? '');
-  const cached = state.teamTimelines[teamKey];
+  const tk = teamKey(resolved, next);
+  const cached = state.teamTimelines[tk];
   if (cached) {
     // 副本渲染：trunk 与缓存解除数组别名，实时推送不再污染缓存
     // （否则切换回来后增量同步会把缓存里已有的实时消息再投递一遍）。
     state.trunk = [...cached.msgs];
-    state.trunkTeamId = teamKey;
+    state.trunkTeamId = tk;
     sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
   } else {
     state.trunk = [];
-    state.trunkTeamId = teamKey;
+    state.trunkTeamId = tk;
     sendCommand({ RequestTrunkTimeline: { team_id: next } });
   }
   selectSession(localLanding(next));
@@ -157,9 +158,15 @@ function send(content: string, images: string[] = []) {
   // 深度融合 P2 调度：目标会话无 core 归属（新会话/默认本地会话）时，
   // 由调度器按策略（least_busy 默认）选节点；已有归属的会话经
   // coreForCommand 自动路由（P1），调度不参与。
-  const targetSession = state.sessions.find(s => s.id === target) as
-    | { core?: string | null }
-    | undefined;
+  // 同名会话跨 core：优先当前 activeCore 那一份，避免把"已有归属"误判为
+  // 新会话而再去调度。
+  const targetMatches = state.sessions.filter(s => s.id === target) as Array<{
+    core?: string | null;
+  }>;
+  const targetSession =
+    targetMatches.find(s => s.core && s.core === state.activeCore) ??
+    targetMatches.find(s => s.core) ??
+    targetMatches[0];
   const scheduled = targetSession?.core ? null : scheduleNode();
   sendCommand(
     {
@@ -177,7 +184,8 @@ function send(content: string, images: string[] = []) {
 
 function cancelWork() {
   // 乐观中断：立即结束动画/任务/工具运行态（不等后端确认）
-  cancelSessionWork(state, activeSessionId.value);
+  // 活动态键是 (core, session_id)：用当前选中会话的归属 core 精准取消。
+  cancelSessionWork(state, activeSessionId.value, activeTeamCore.value);
   // 取消必须路由到 turn 实际所在的 agent（去主智能体后 team_id 必填，
   // 缺省会被 core 明确拒绝）。
   sendCommand({
@@ -287,7 +295,7 @@ watch(
 // 反复全量拉取）。初始值取 localStorage 还原的 (id, core)：若引导期已按同一
 // 组合定向请求过，这里不重复；core 由 TeamsList 校正后 key 变化 → 补拉一次。
 let resolvedTimelineKey = activeTeamId.value
-  ? `${activeTeamCore.value ?? ''}\u0000${activeTeamId.value}`
+  ? teamKey(activeTeamCore.value, activeTeamId.value)
   : '';
 
 let teamResetTimer: number | undefined;
@@ -298,18 +306,19 @@ function resetToFirstTeam() {
   if (!first) return;
   const next = first.id;
   applyActiveTeam(next, first.core ?? null);
-  resolvedTimelineKey = `${first.core ?? ''}\u0000${next}`;
-  const cached = state.teamTimelines[next];
+  const tk = teamKey(first.core, next);
+  resolvedTimelineKey = tk;
+  const cached = state.teamTimelines[tk];
   if (cached) {
     // 副本渲染 + 归属标注：与 onTeamSelect 同一约定（trunk 与缓存解
     // 数组别名，实时推送不污染缓存；缺少 trunkTeamId 时增量投递不会
     // 落到实时视图）。
     state.trunk = [...cached.msgs];
-    state.trunkTeamId = String(next ?? '');
+    state.trunkTeamId = tk;
     sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
   } else {
     state.trunk = [];
-    state.trunkTeamId = String(next ?? '');
+    state.trunkTeamId = tk;
     sendCommand({ RequestTrunkTimeline: { team_id: next } });
   }
   selectSession(localLanding(next));
@@ -345,10 +354,10 @@ watch(
         saveActiveTeam(picked.id, picked.core ?? null);
       }
       // core 解析完成后定向拉取 timeline（引导期不再裸广播）。
-      const key = `${picked.core ?? ''}\u0000${picked.id}`;
+      const key = teamKey(picked.core, picked.id);
       if (resolvedTimelineKey !== key) {
         resolvedTimelineKey = key;
-        const cached = state.teamTimelines[picked.id];
+        const cached = state.teamTimelines[key];
         if (cached) {
           sendCommand({ RequestTrunkTimeline: { team_id: picked.id, since_seq: cached.seq } });
         } else {

@@ -6,6 +6,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
+import { sessionKey } from '../keys';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 
@@ -20,7 +21,9 @@ const teamKey = computed(() => props.teamId ?? state.teams[0]?.id ?? null);
 /** 本 agent 的会话（事件按 team_id 过滤；旧 core 无 team_id 字段时不过滤）。 */
 const sessions = computed(() =>
   state.shellSessions.filter(
-    (s) => s.team_id === undefined || s.team_id === null || s.team_id === teamKey.value,
+    (s) =>
+      (s.team_id === undefined || s.team_id === null || s.team_id === teamKey.value) &&
+      (state.activeTeamCore == null || (s.core ?? null) === state.activeTeamCore),
   ),
 );
 
@@ -50,7 +53,7 @@ onUnmounted(() => releasePending('shell:sessions'));
     <div v-if="sessions.length === 0 && listPhase === 'idle'" class="muted shell-list__empty">
       （当前 agent 暂无 shell 会话）
     </div>
-    <div v-for="session in sessions" :key="session.session_id" class="shell-row">
+    <div v-for="session in sessions" :key="sessionKey(session.core, session.session_id)" class="shell-row">
       <span class="shell-row__dot" />
       <span class="shell-row__id">{{ session.session_id }}</span>
       <span class="shell-row__meta" :title="session.workdir">

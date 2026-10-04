@@ -337,8 +337,10 @@ fn is_readonly_command(type_str: &str) -> bool {
         type_str,
         "RequestTeamsList"
             | "RequestAdapterList"
+            | "RequestAdapterStatus"
             | "RequestState"
             | "RequestConfig"
+            | "RequestShellSessions"
             | "RequestWorkspaces"
             | "RequestSessions"
             | "RequestTrunkTimeline"
@@ -761,5 +763,32 @@ async fn bridge(browser: WebSocket, state: AppState) {
         _ = route_pump => { read_abort.abort(); write_abort.abort(); }
         _ = browser_read => { route_abort.abort(); write_abort.abort(); }
         _ = browser_write => { route_abort.abort(); read_abort.abort(); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 引导期裸发的只读命令必须命中白名单——否则多上游下被中继拒收
+    /// （RequestAdapterStatus / RequestShellSessions 是 2026-10 补入的）。
+    #[test]
+    fn bootstrap_readonly_commands_are_whitelisted() {
+        for name in [
+            "RequestState",
+            "RequestTeamsList",
+            "RequestAdapterStatus",
+            "RequestShellSessions",
+        ] {
+            assert!(is_readonly_command(name), "{name} must be broadcast-allowed");
+        }
+    }
+
+    /// 写/删除类命令绝不能裸广播（会被拒收，要求显式 core）。
+    #[test]
+    fn mutating_commands_are_not_broadcast() {
+        for name in ["SendMessage", "ClearHistory", "TogglePlugin", "SaveTeam"] {
+            assert!(!is_readonly_command(name), "{name} must require an explicit core");
+        }
     }
 }

@@ -9,7 +9,7 @@ import { state } from '../store';
 import { cancelSessionWork } from '../state';
 import { sendCommand } from '../connection';
 
-const props = defineProps<{ sessionId?: string }>();
+const props = defineProps<{ sessionId?: string; core?: string | null }>();
 
 const KIND_LABEL: Record<string, string> = {
   background: '后台',
@@ -57,11 +57,13 @@ const now = ref(Date.now());
 let timer: number | undefined;
 
 /** 面板展示范围：限定会话时只取该会话的任务。 */
-const scopedTasks = computed(() =>
-  props.sessionId && props.sessionId !== 'global'
-    ? state.tasks.filter((task) => task.sessionId === props.sessionId)
-    : state.tasks,
-);
+const scopedTasks = computed(() => {
+  const core = props.core ?? null;
+  const inCore = (t: { core?: string | null }) => core == null || (t.core ?? null) === core;
+  return props.sessionId && props.sessionId !== 'global'
+    ? state.tasks.filter((task) => task.sessionId === props.sessionId && inCore(task))
+    : state.tasks.filter(inCore);
+});
 
 const hasActiveTask = computed(() =>
   scopedTasks.value.some((task) => task.status === 'running' || task.status === 'awaiting'),
@@ -105,7 +107,7 @@ function isActive(status: string): boolean {
 }
 
 function cancel(sessionId: string) {
-  cancelSessionWork(state, sessionId);
+  cancelSessionWork(state, sessionId, props.core ?? null);
   sendCommand({
     CancelRequestedWork: {
       session_id: sessionId,

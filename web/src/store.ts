@@ -29,11 +29,30 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
     const e = (event as { TeamsList: { teams: TeamInfo[] } }).TeamsList;
     for (const t of e.teams) t.core = core;
   }
-  // 让 reducer 的 team 过滤能区分"同名跨 core"事件：给任何带 team_id 的
-  // 事件载荷注入来源 core（单上游/旧 core 不注入 = undefined）。
+  // Shell 事件：会话 id 是 per-core 的 `sh-{seq}`（每个 core 都从 sh-1 起），
+  // 必须给会话/列表条目注入 core，否则终端输出会串到另一个 core。
+  if (core && 'ShellSessionStarted' in (event as object)) {
+    const e = (event as { ShellSessionStarted: { session: { core?: string | null } } })
+      .ShellSessionStarted;
+    e.session.core = core;
+  }
+  if (core && 'ShellSessionsList' in (event as object)) {
+    const e = (event as { ShellSessionsList: { sessions: Array<{ core?: string | null }> } })
+      .ShellSessionsList;
+    for (const s of e.sessions) s.core = core;
+  }
+  // 让 reducer 的 team/session 过滤与复合键能区分"同名跨 core"事件：给任何
+  // 带 team_id 或 session_id 的事件载荷注入来源 core（单上游/旧 core 不注入
+  // = undefined）。覆盖 AgentCompleted / ContextSnapshot 等只有 session_id 的
+  // 事件——它们同样需要 (core, session_id) 复合键。
   if (core) {
     const body = Object.values(event as unknown as Record<string, unknown>)[0];
-    if (body && typeof body === 'object' && 'team_id' in (body as Record<string, unknown>)) {
+    if (
+      body &&
+      typeof body === 'object' &&
+      ('team_id' in (body as Record<string, unknown>) ||
+        'session_id' in (body as Record<string, unknown>))
+    ) {
       (body as Record<string, unknown>).core = core;
     }
   }

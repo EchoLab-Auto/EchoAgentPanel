@@ -6,14 +6,27 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
+import { sessionKey } from '../keys';
 
 /** 详情视图（2026-09-19 起）：`sessionId` 必填，只展示该会话的终端。
  *  会话列表在右侧边栏「Shell」卡（ShellList），点「详情」进入本视图。 */
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{ back: [] }>();
 
-const session = computed(() =>
-  state.shellSessions.find((s) => s.session_id === props.sessionId) ?? null,
+// 会话 id 是 per-core 的 `sh-{seq}`：按 (activeTeamCore, session_id) 精确定位。
+const session = computed(
+  () =>
+    state.shellSessions.find(
+      (s) =>
+        s.session_id === props.sessionId &&
+        (state.activeTeamCore == null || (s.core ?? null) === state.activeTeamCore),
+    ) ?? null,
+);
+/** 终端条目的复合键（找不到会话时按当前 core + 请求 id 兜底）。 */
+const terminalKey = computed(() =>
+  session.value
+    ? sessionKey(session.value.core, session.value.session_id)
+    : sessionKey(state.activeTeamCore, props.sessionId),
 );
 
 const inputBySession = ref<Record<string, string>>({});
@@ -85,11 +98,11 @@ watch(
     <div v-else class="shell-card">
       <!-- 终端区 -->
       <div ref="el => (terminalEls[session.session_id] = el)" class="shell-terminal">
-        <div v-if="!(state.shellTerminals[session.session_id] ?? []).length" class="shell-terminal__hint">
+        <div v-if="!(state.shellTerminals[terminalKey] ?? []).length" class="shell-terminal__hint">
           输入命令后回车执行…
         </div>
         <div
-          v-for="entry in state.shellTerminals[session.session_id] ?? []"
+          v-for="entry in state.shellTerminals[terminalKey] ?? []"
           :key="entry.seq"
           class="shell-entry"
         >

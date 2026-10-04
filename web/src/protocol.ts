@@ -174,6 +174,8 @@ export const LEGACY_MODE_PLUGIN_IDS = [
 export interface ShellSessionInfo {
   session_id: string;
   team_id?: string | null;
+  /** 归属上游 core（多上游聚合；store.dispatch 注入）。 */
+  core?: string | null;
   workdir: string;
   created_at_ms: number;
   last_active_ms: number;

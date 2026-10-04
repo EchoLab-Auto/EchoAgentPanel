@@ -37,6 +37,8 @@ import type {
   WorkspaceSessionInfo,
 } from './protocol';
 
+import { scopedKey, sessionKey, teamKey } from './keys';
+
 export const TRUNK_SESSION_ID = 'trunk';
 
 /** 某 team id 出现在哪些 core 上（去重；null = 单上游/未标注）。 */
@@ -107,9 +109,9 @@ export function belongsToActiveTeam(
   return true;
 }
 
-/** 事件载荷的来源 core（dispatch 注入；旧 core / 单上游 = undefined）。 */
-function evtCore(e: unknown): string | null | undefined {
-  return (e as { core?: string | null } | null | undefined)?.core;
+/** 事件载荷的来源 core（dispatch 注入；旧 core / 单上游 → null）。 */
+function evtCore(e: unknown): string | null {
+  return (e as { core?: string | null } | null | undefined)?.core ?? null;
 }
 
 export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch' | 'subagent';
@@ -253,6 +255,8 @@ export interface OrchActivity {
   id: string;
   sequence: number | null;
   sessionId: string;
+  /** 归属上游 core（多上游聚合；null = 单上游/未标注）。 */
+  core?: string | null;
   kind: OrchKind;
   objective: string;
   status: OrchStatus;
@@ -290,6 +294,8 @@ export interface Toast {
 export interface ContextSnapshotData {
   /** 快照归属的会话 id（多会话，2026-09；旧 Core 缺省为 undefined） */
   session_id?: string | null;
+  /** 来源上游 core（多上游聚合；store.dispatch 注入）。 */
+  core?: string | null;
   messages: ContextMessageInfo[];
   blocks: ContextBlockInfo[];
   total_tokens: number;
@@ -370,6 +376,8 @@ export interface AppState {
   workspaceActive: string | null;
   /** 上述列表归属的 team id（用于切换 team 后判定新鲜度） */
   workspaceTeamId: string | null;
+  /** 上述列表归属的 core（多上游；与 workspaceTeamId 一起判定新鲜度）。 */
+  workspaceCore: string | null;
   /** 各会话目录 git 状态的缓存（session_id → 目录结果） */
   workspaceGitBySession: Record<string, WorkspaceGitInfo[]>;
   /** 文件浏览器缓存（目录绝对路径 → 条目/错误；workspace 插件） */
@@ -447,6 +455,7 @@ export function initialState(): AppState {
     workspaceSessions: [],
     workspaceActive: null,
     workspaceTeamId: null,
+    workspaceCore: null,
     workspaceGitBySession: {},
     workspaceFiles: {},
     activeTeamId: null,
@@ -493,12 +502,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
             team_id?: string | null;
             sessions: WorkspaceSessionInfo[];
             active?: string | null;
+            core?: string | null;
           };
         }
       ).WorkspaceSessions;
       state.workspaceSessions = e.sessions ?? [];
       state.workspaceActive = e.active ?? null;
       state.workspaceTeamId = e.team_id ?? null;
+      state.workspaceCore = e.core ?? null;
       return state;
     }
     case 'WorkspaceGitStatus': {
@@ -511,7 +522,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           };
         }
       ).WorkspaceGitStatus;
-      state.workspaceGitBySession[e.session_id] = e.directories ?? [];
+      state.workspaceGitBySession[sessionKey(evtCore(e), e.session_id)] = e.directories ?? [];
       return state;
     }
     case 'WorkspaceFiles': {
@@ -525,7 +536,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           };
         }
       ).WorkspaceFiles;
-      state.workspaceFiles[e.path] = {
+      state.workspaceFiles[scopedKey(evtCore(e), e.path)] = {
         entries: e.entries ?? [],
         error: e.error ?? null,
       };
@@ -538,7 +549,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'AgentThinking': {
       const e = (event as { AgentThinking: { session_id: string; team_id?: string | null } }).AgentThinking;
       if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
-      activity(state, e.session_id);
+      activity(state, sessionKey(evtCore(e), e.session_id));
       return state;
     }
     case 'ActiveTurnsSnapshot': {
@@ -547,33 +558,40 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 但快照中不存在的 activity 置 completed（多为刷新前已结束的残留）。
       const e = (event as unknown as { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }).ActiveTurnsSnapshot;
       if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
-      const running = new Set(e.session_ids);
-      // 快照范围：有 team_id 时只覆盖该 team 会话的 activity（其他
-      // team/core 正在运行的活动不能被误杀——此前全局 entries 清扫把
-      // 不在本快照里的全部置 completed）。
+      const core = evtCore(e);
+      // activity 键是复合 (core, session_id)：同名跨 core 不互相误杀。
+      const running = new Set(e.session_ids.map(id => sessionKey(core, id)));
+      // 快照范围：只覆盖"本 core 的该 team"会话的 activity（其他 team/core
+      // 正在运行的活动不能被误杀）。
+      const scopeOf = (session: { id: string; team_id?: string | null; core?: string | null }) =>
+        sessionKey(session.core ?? null, session.id);
+      const sameCore = (session: { core?: string | null }) =>
+        core == null || (session.core ?? null) === core;
       const scopedIds = e.team_id
         ? new Set(
             state.sessions
-              .filter(s => (s.team_id ?? null) === (e.team_id ?? null))
-              .map(s => s.id),
+              .filter(s => (s.team_id ?? null) === (e.team_id ?? null) && sameCore(s))
+              .map(scopeOf),
           )
-        : null;
-      for (const [sessionId, act] of Object.entries(state.activities)) {
-        if (running.has(sessionId)) {
+        : core != null
+          ? new Set(state.sessions.filter(sameCore).map(scopeOf))
+          : null;
+      for (const [key, act] of Object.entries(state.activities)) {
+        if (running.has(key)) {
           if (act.phase === 'completed' || act.phase === 'failed') {
             act.phase = 'thinking';
             act.detail = null;
           }
         } else if (
           (act.phase === 'thinking' || act.phase === 'tool' || act.phase === 'subagent') &&
-          (scopedIds === null || scopedIds.has(sessionId))
+          (scopedIds === null || scopedIds.has(key))
         ) {
           act.phase = 'completed';
           act.detail = null;
         }
       }
       for (const sessionId of e.session_ids) {
-        activity(state, sessionId);
+        activity(state, sessionKey(core, sessionId));
       }
       return state;
     }
@@ -594,12 +612,12 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'LlmRequest': {
       const e = (event as { LlmRequest: { session_id: string; model: string } }).LlmRequest;
       state.model = e.model;
-      setPhase(state, e.session_id, 'thinking', null);
+      setPhase(state, sessionKey(evtCore(e), e.session_id), 'thinking', null);
       return state;
     }
     case 'LlmResponse': {
       const e = (event as { LlmResponse: { session_id: string; prompt_tokens: number; completion_tokens: number } }).LlmResponse;
-      const act = activity(state, e.session_id);
+      const act = activity(state, sessionKey(evtCore(e), e.session_id));
       act.promptTokens += e.prompt_tokens;
       act.completionTokens += e.completion_tokens;
       return state;
@@ -626,23 +644,25 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'SubagentStarted': {
       const e = (event as { SubagentStarted: { session_id: string; task: string } }).SubagentStarted;
-      startSubagent(state, e.session_id, e.task);
+      const core = evtCore(e);
+      startSubagent(state, e.session_id, core, e.task);
       // 派发位置插一行"子代理运行中"（执行过程就地可见；完成时就地改写为结果）。
       startSubagentRun(state, e.session_id, e.task);
-      setPhase(state, e.session_id, 'subagent', truncate(oneLine(e.task), 72));
+      setPhase(state, sessionKey(core, e.session_id), 'subagent', truncate(oneLine(e.task), 72));
       return state;
     }
     case 'SubagentCompleted': {
       const e = (event as { SubagentCompleted: { session_id: string; success: boolean } }).SubagentCompleted;
-      completeSubagent(state, e.session_id, e.success);
-      const act = activity(state, e.session_id);
+      const core = evtCore(e);
+      completeSubagent(state, e.session_id, core, e.success);
+      const act = activity(state, sessionKey(core, e.session_id));
       if (e.success) act.subagentsCompleted += 1;
-      setPhase(state, e.session_id, 'thinking', e.success ? '正在整合 subagent 结果' : 'subagent 失败，正在恢复');
+      setPhase(state, sessionKey(core, e.session_id), 'thinking', e.success ? '正在整合 subagent 结果' : 'subagent 失败，正在恢复');
       return state;
     }
     case 'ReplyBranchStarted': {
       const e = (event as { ReplyBranchStarted: { session_id: string; branch_id: string; message_sequence: number; task: string; target: string; started_at_ms: number } }).ReplyBranchStarted;
-      startReplyBranch(state, e.session_id, e.branch_id, e.message_sequence, e.task, e.target, e.started_at_ms);
+      startReplyBranch(state, e.session_id, evtCore(e), e.branch_id, e.message_sequence, e.task, e.target, e.started_at_ms);
       // 单开一个侧边临时会话标签：分支运行期间的活动都路由到这里，
       // 不进入主会话 trunk。
       state.branchTabs[e.branch_id] = {
@@ -671,8 +691,17 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'ReplyBranchCompleted': {
       const e = (event as { ReplyBranchCompleted: { session_id: string; branch_id: string; success: boolean; cancelled: boolean; completed_at_ms: number } }).ReplyBranchCompleted;
       completeReplyBranch(state, e.branch_id, e.success, e.cancelled, e.completed_at_ms);
-      if (!state.tasks.some((t) => t.sessionId === e.session_id && t.kind === 'reply' && t.status === 'running')) {
-        setPhase(state, e.session_id, 'completed', null);
+      const core = evtCore(e);
+      if (
+        !state.tasks.some(
+          (t) =>
+            t.sessionId === e.session_id &&
+            (t.core ?? null) === core &&
+            t.kind === 'reply' &&
+            t.status === 'running',
+        )
+      ) {
+        setPhase(state, sessionKey(core, e.session_id), 'completed', null);
       }
       // 分支结束：主时间线已实时展示推理/工具/回答（时序交错），
       // 不再归档折叠合并块（避免重复内容）；仅清理临时标签。
@@ -685,7 +714,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'BackgroundTaskStarted': {
       const e = (event as { BackgroundTaskStarted: { session_id: string; task_id: string; sequence: number; branch_count: number; objective: string; created_at_ms: number } }).BackgroundTaskStarted;
-      startBackgroundTask(state, e.session_id, e.task_id, e.sequence, e.branch_count, e.objective, e.created_at_ms);
+      startBackgroundTask(state, e.session_id, evtCore(e), e.task_id, e.sequence, e.branch_count, e.objective, e.created_at_ms);
       pushTo(
         state,
         'system',
@@ -706,8 +735,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'ToolCall': {
       const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null } }).ToolCall;
-      stageOrchestrationTool(state, e.session_id, e.tool_name, e.arguments);
-      setPhase(state, e.session_id, e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
+      stageOrchestrationTool(state, e.session_id, evtCore(e), e.tool_name, e.arguments);
+      setPhase(state, sessionKey(evtCore(e), e.session_id), e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
       // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
       const tab = e.branch_id ? state.branchTabs[e.branch_id] : undefined;
@@ -758,9 +787,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           break;
         }
       }
-      const act = activity(state, e.session_id);
+      const act = activity(state, sessionKey(evtCore(e), e.session_id));
       if (e.tool_name !== 'run_subagent') act.toolsCompleted += 1;
-      setPhase(state, e.session_id, 'thinking', null);
+      setPhase(state, sessionKey(evtCore(e), e.session_id), 'thinking', null);
       return state;
     }
     case 'ChecklistUpdated': {
@@ -793,10 +822,13 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // ⚠️ 响应归属由后端标注（team_id = 请求值），绝不能拿当前
       // activeTeamId 猜测：其他 agent 的兜底请求若按当前视图路由会
       // 污染 trunk（串显 alix 会话/误清空 self-coding 内容）。
-      const teamKey = String(e.team_id ?? '');
       const seq = e.seq ?? 0;
+      // 归属键用复合 (core, team_id)：同名 team 跨 core 时缓存不互相覆盖。
       // 旧 core（无 team_id 标注）沿用旧路由：按当前视图处理。
-      const key = e.team_id !== undefined ? teamKey : String(state.activeTeamId ?? '');
+      const key =
+        e.team_id !== undefined
+          ? teamKey(e.core, e.team_id)
+          : teamKey(state.activeTeamCore, state.activeTeamId);
       const cached = state.teamTimelines[key];
 
       if (e.full === undefined && cached && seq === cached.seq && e.messages.length === 0) {
@@ -827,7 +859,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 仅当响应对应的正是当前查看的 team 时才替换实时视图；其他 team 的
       // 兜底响应只更新缓存。trunk 与缓存解除数组别名（[...converted]），
       // 否则实时推送会污染缓存、切换回来后经增量再投递一次（重复）。
-      if (key === String(state.activeTeamId ?? '')) {
+      if (key === teamKey(state.activeTeamCore, state.activeTeamId)) {
         state.trunkTeamId = key;
         state.trunk = [...converted];
       }
@@ -852,7 +884,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
         }
       }
-      const act = state.activities[e.session_id];
+      const act = state.activities[sessionKey(evtCore(e), e.session_id)];
       if (act && act.phase !== 'completed' && act.phase !== 'failed') {
         act.phase = 'completed';
         act.detail = null;
@@ -860,9 +892,18 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'AgentCompleted': {
-      const e = (event as { AgentCompleted: { session_id: string } }).AgentCompleted;
-      if (!state.tasks.some((t) => t.sessionId === e.session_id && t.kind === 'reply' && t.status === 'running')) {
-        setPhase(state, e.session_id, 'completed', null);
+      const e = (event as { AgentCompleted: { session_id: string; core?: string | null } }).AgentCompleted;
+      const core = evtCore(e);
+      if (
+        !state.tasks.some(
+          (t) =>
+            t.sessionId === e.session_id &&
+            (t.core ?? null) === core &&
+            t.kind === 'reply' &&
+            t.status === 'running',
+        )
+      ) {
+        setPhase(state, sessionKey(core, e.session_id), 'completed', null);
       }
       // 兜底：turn 完成时若该会话最后一条仍未到 backend（回答缺失），
       // 主动拉取时间线对齐——推理/工具已实时显示但回答丢失时保证补齐。
@@ -995,39 +1036,56 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ShellSessionsList': {
-      const e = (event as { ShellSessionsList: { sessions: import('./protocol').ShellSessionInfo[] } }).ShellSessionsList;
-      state.shellSessions = e.sessions;
-      // 清理已不存在的会话的终端
-      for (const sid of Object.keys(state.shellTerminals)) {
-        if (!e.sessions.some((s) => s.session_id === sid)) delete state.shellTerminals[sid];
+      const e = (event as {
+        ShellSessionsList: {
+          sessions: import('./protocol').ShellSessionInfo[];
+          core?: string | null;
+        };
+      }).ShellSessionsList;
+      // 会话 id 是 per-core 的 `sh-{seq}`（每个 core 都从 sh-1 起）：按
+      // core 合并，只替换本 core 的切片，避免清掉其他 core 的 shell。
+      const cores = new Set<unknown>();
+      for (const s of e.sessions) cores.add(s.core ?? null);
+      if (cores.size === 0) cores.add(e.core ?? null);
+      const kept = state.shellSessions.filter(
+        (s) => !cores.has((s as { core?: string | null }).core ?? null),
+      );
+      state.shellSessions = [...kept, ...e.sessions];
+      const live = new Set(e.sessions.map((s) => sessionKey(s.core, s.session_id)));
+      for (const key of Object.keys(state.shellTerminals)) {
+        const coreOf = key.includes('\u0000') ? key.slice(0, key.indexOf('\u0000')) : null;
+        if (cores.has(coreOf) && !live.has(key)) delete state.shellTerminals[key];
       }
       return state;
     }
     case 'ShellSessionStarted': {
       const e = (event as { ShellSessionStarted: { session: import('./protocol').ShellSessionInfo } }).ShellSessionStarted;
-      const idx = state.shellSessions.findIndex((s) => s.session_id === e.session.session_id);
+      const core = e.session.core ?? null;
+      const idx = state.shellSessions.findIndex(
+        (s) => s.session_id === e.session.session_id && (s.core ?? null) === core,
+      );
       if (idx >= 0) state.shellSessions[idx] = e.session;
       else state.shellSessions.push(e.session);
-      state.shellTerminals[e.session.session_id] ??= [];
+      state.shellTerminals[sessionKey(core, e.session.session_id)] ??= [];
       return state;
     }
     case 'ShellExecStarted': {
-      const e = (event as { ShellExecStarted: { session_id: string; seq: number; command: string } }).ShellExecStarted;
-      const entries = (state.shellTerminals[e.session_id] ??= []);
+      const e = (event as { ShellExecStarted: { session_id: string; seq: number; command: string; core?: string | null } }).ShellExecStarted;
+      const entries = (state.shellTerminals[sessionKey(evtCore(e), e.session_id)] ??= []);
       entries.push({ seq: e.seq, command: e.command, status: 'running', output: '' });
       return state;
     }
     case 'ShellExecOutput': {
-      const e = (event as { ShellExecOutput: { session_id: string; seq: number; chunk: string } }).ShellExecOutput;
-      const entries = state.shellTerminals[e.session_id];
+      const e = (event as { ShellExecOutput: { session_id: string; seq: number; chunk: string; core?: string | null } }).ShellExecOutput;
+      const entries = state.shellTerminals[sessionKey(evtCore(e), e.session_id)];
       if (!entries) return state;
       const entry = entries.find((t) => t.seq === e.seq);
       if (entry) entry.output += e.chunk;
       return state;
     }
     case 'ShellExecDone': {
-      const e = (event as { ShellExecDone: { session_id: string; seq: number; success: boolean; elapsed_ms: number } }).ShellExecDone;
-      const entries = state.shellTerminals[e.session_id];
+      const e = (event as { ShellExecDone: { session_id: string; seq: number; success: boolean; elapsed_ms: number; core?: string | null } }).ShellExecDone;
+      const entries = state.shellTerminals[sessionKey(evtCore(e), e.session_id)];
       const entry = entries?.find((t) => t.seq === e.seq);
       if (entry) {
         entry.status = entry.output.includes('timeout after') ? 'timeout' : e.success ? 'done' : 'failed';
@@ -1036,8 +1094,12 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ShellSessionClosed': {
-      const e = (event as { ShellSessionClosed: { session_id: string; reason: string } }).ShellSessionClosed;
-      state.shellSessions = state.shellSessions.filter((s) => s.session_id !== e.session_id);
+      const e = (event as { ShellSessionClosed: { session_id: string; reason: string; core?: string | null } }).ShellSessionClosed;
+      const core = evtCore(e);
+      state.shellSessions = state.shellSessions.filter(
+        (s) => !(s.session_id === e.session_id && (s.core ?? null) === core),
+      );
+      delete state.shellTerminals[sessionKey(core, e.session_id)];
       return state;
     }
     case 'SystemPrompt': {
@@ -1231,16 +1293,17 @@ function applyBackgroundHook(state: AppState, content: string) {
 
 /** 乐观取消：立即中断当前会话的活动动画/任务/工具运行态，
  * 不等后端确认（后端随后会发 AgentCompleted/ReplyBranchCompleted 对齐）。 */
-export function cancelSessionWork(state: AppState, sessionId: string) {
+export function cancelSessionWork(state: AppState, sessionId: string, core: string | null = null) {
   // 1) 活动 phase → completed：活动浮条/取消按钮立即消失
-  const act = state.activities[sessionId];
+  //    活动态键是复合 (core, session_id)：同名跨 core 不误伤。
+  const act = state.activities[sessionKey(core, sessionId)];
   if (act && act.phase !== 'completed' && act.phase !== 'failed') {
     act.phase = 'completed';
     act.detail = null;
   }
   // 2) 运行中的任务（reply/后台/子代理）→ cancelled
   for (const task of state.tasks) {
-    if (task.sessionId === sessionId && task.status === 'running') {
+    if (task.sessionId === sessionId && (task.core ?? null) === core && task.status === 'running') {
       task.status = 'cancelled';
       task.completedAtMs = Date.now();
       for (const b of task.branches) {
@@ -1281,12 +1344,19 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   if (state.activeTeamCore === core) state.activeTeamCore = null;
   if (state.activeCore === core) state.activeCore = null;
   const removed = state.sessions.filter(s => (s as { core?: string | null }).core === core);
-  if (removed.length === 0) return;
   const removedIds = new Set(removed.map(s => s.id));
   state.sessions = state.sessions.filter(s => !removedIds.has(s.id));
   for (const id of removedIds) {
-    delete state.activities[id];
+    delete state.activities[sessionKey(core, id)];
+    delete state.pendingBackground[sessionKey(core, id)];
   }
+  // 该 core 的任务与 timeline 缓存（复合键前缀）一并清理，避免残留死条目。
+  const prefix = `${core}\u0000`;
+  state.tasks = state.tasks.filter(t => (t.core ?? null) !== core);
+  for (const key of Object.keys(state.teamTimelines)) {
+    if (key.startsWith(prefix)) delete state.teamTimelines[key];
+  }
+  if (state.trunkTeamId?.startsWith(prefix)) state.trunkTeamId = null;
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {

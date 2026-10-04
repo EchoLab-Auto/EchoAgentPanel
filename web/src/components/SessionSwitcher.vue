@@ -11,6 +11,7 @@
 
 import { computed } from 'vue';
 import { state } from '../store';
+import { sessionKey } from '../keys';
 import { loopModeOf, type SessionInfo } from '../protocol';
 
 const props = defineProps<{
@@ -79,8 +80,9 @@ const groups = computed(() => {
     }));
 });
 
-function isBusy(session: SessionInfo): boolean {
-  const activity = state.activities[session.id];
+function isBusy(session: SessionInfo & { core?: string | null }): boolean {
+  // 活动态键是复合 (core, session_id)：同名跨 core 不串显"运行中"。
+  const activity = state.activities[sessionKey(session.core, session.id)];
   return !!activity && activity.phase !== 'completed';
 }
 

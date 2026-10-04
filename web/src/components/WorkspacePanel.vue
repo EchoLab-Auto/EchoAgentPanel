@@ -11,14 +11,19 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
+import { sessionKey } from '../keys';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 import type { WorkspaceSessionInfo } from '../protocol';
 
 const props = defineProps<{ teamId: string | null }>();
 
-/** 当前列表归属 team 与请求目标一致才渲染（避免跨 team 串显）。 */
-const fresh = computed(() => state.workspaceTeamId === props.teamId);
+/** 当前列表归属 (team, core) 与请求目标一致才渲染（避免跨 team/core 串显）。 */
+const fresh = computed(
+  () =>
+    state.workspaceTeamId === props.teamId &&
+    (state.workspaceCore ?? null) === (state.activeTeamCore ?? null),
+);
 const sessions = computed(() => (fresh.value ? state.workspaceSessions : []));
 const activeId = computed(() => (fresh.value ? state.workspaceActive : null));
 
@@ -48,7 +53,9 @@ function requestSessions() {
 // ── git 状态 ──
 const gitLoading = ref(false);
 const gitDirs = computed(() =>
-  selected.value ? (state.workspaceGitBySession[selected.value.id] ?? []) : [],
+  selected.value
+    ? (state.workspaceGitBySession[sessionKey(state.activeTeamCore, selected.value.id)] ?? [])
+    : [],
 );
 
 function requestGit(sessionId?: string) {
@@ -64,7 +71,7 @@ function requestGit(sessionId?: string) {
 
 function select(session: WorkspaceSessionInfo) {
   selectedId.value = session.id;
-  if (!state.workspaceGitBySession[session.id]) requestGit(session.id);
+  if (!state.workspaceGitBySession[sessionKey(state.activeTeamCore, session.id)]) requestGit(session.id);
 }
 
 watch(gitDirs, () => {

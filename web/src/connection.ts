@@ -10,6 +10,7 @@
 
 import { state, dispatch } from './store';
 import { coreForTeam, pushToast } from './state';
+import { teamKey } from './keys';
 import { trackRequest } from './pending';
 import {
   parseEvent,
@@ -81,33 +82,37 @@ export function startConnection(): void {
       state.workspaceGitBySession = {};
       state.workspaceFiles = {};
       // Bootstrap the panel state on (re)connect.
-      // ⚠️ timeline 不在这里预取：多上游下 TeamsList 尚未到达，无法知道
-      // 上次使用的 agent 属于哪个 core；裸广播会让多个 core 各回一份、
-      // 按同一个 team_id 互相覆盖（同名 team 跨 core）。改由 App 的 teams
-      // watcher 在 core 解析完成后定向请求（见 App.vue）。
-      const bootstrap: BackendCommand[] = [
+      // 先广播只读发现命令（RequestState/RequestTeamsList）：必须发往全部在线
+      // core，Panel 才能知道有哪些上游。timeline 见下方——core 未知时只能裸
+      // 广播，TeamsList 到达后由 App 的 teams watcher 定向补拉（覆盖竞态结果）。
+      const broadcastBootstrap: BackendCommand[] = [
+        // 只读且需要"发现全部上游"：裸广播给所有在线 core（中继白名单放行）。
         'RequestState',
-        'RequestAdapterStatus',
         // QQ 过滤配置不在这里预取：面板打开时 QqPanel/QqLoginSection 会按实例
         // 自行刷新；无 QQ（或多实例未指定实例）时预取必被 Core 拒绝，平白
         // 弹出"QQ 适配器未找到"提示。
         'RequestTeamsList',
-        { RequestShellSessions: {} },
       ];
-      for (const command of bootstrap) {
+      for (const command of broadcastBootstrap) {
         ws.send(serializeCommand(command));
       }
+      // 定向引导：多上游下必须带 core，否则非只读命令会被中继拒收。core 未知
+      // 时 sendCommand 兜底裸发，中继白名单已放行这两条（广播各 core）。
+      sendCommand('RequestAdapterStatus');
+      sendCommand({ RequestShellSessions: {} });
       // 上次使用的 Agent 的 timeline：经 sendCommand 走统一路由（多上游下
       // core 已从 localStorage 还原/teams 已知时定向；未知则裸广播，
       // TeamsList 到达后 App watcher 会再定向补拉，覆盖竞态结果）。
       let savedTeam: string | null = null;
+      let savedCore: string | null = null;
       try {
         savedTeam = localStorage.getItem('echo-panel-active-team');
+        savedCore = localStorage.getItem('echo-panel-active-team-core');
       } catch {
         // ignore storage errors (private mode)
       }
       if (savedTeam) {
-        const cachedSeq = state.teamTimelines[savedTeam]?.seq ?? 0;
+        const cachedSeq = state.teamTimelines[teamKey(savedCore, savedTeam)]?.seq ?? 0;
         sendCommand({ RequestTrunkTimeline: { team_id: savedTeam, since_seq: cachedSeq } });
       }
       // 补发握手期暂存的命令（见 pendingCommands 注释）。
@@ -216,9 +221,15 @@ function coreForCommand(command: BackendCommand): string | null {
   const body = Object.values(payload)[0] as Record<string, unknown> | undefined;
   const sessionId = body?.session_id;
   if (typeof sessionId === 'string' && sessionId) {
-    const session = state.sessions.find(s => s.id === sessionId) as
-      | (SessionInfo & { core?: string | null })
-      | undefined;
+    const matches = state.sessions.filter(s => s.id === sessionId) as Array<
+      SessionInfo & { core?: string | null }
+    >;
+    // 同名会话跨 core（每个 core 都有 local:tui::local_user）：优先当前
+    // activeCore 那一份，其次首个带 core 标注者——否则会发给错误的 core。
+    const session =
+      matches.find(s => s.core && s.core === state.activeCore) ??
+      matches.find(s => s.core) ??
+      matches[0];
     if (session?.core) return session.core;
   }
   // 无会话归属（新会话/切换 agent）时按人格所属 core 路由——人格身份是

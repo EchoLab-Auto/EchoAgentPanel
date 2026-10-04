@@ -57,9 +57,14 @@ function displayLabel(kind: string, label: string): string {
 const showMessages = ref(false);
 const confirmClear = ref(false);
 
-const props = defineProps<{ teamId?: string | null; sessionId?: string | null }>();
+const props = defineProps<{
+  teamId?: string | null;
+  sessionId?: string | null;
+  core?: string | null;
+}>();
 const targetTeamId = computed(() => props.teamId ?? null);
 const targetSessionId = computed(() => props.sessionId ?? null);
+const targetCore = computed(() => props.core ?? null);
 
 onMounted(() => {
   requestSnapshot();
@@ -88,7 +93,12 @@ const snapshot = computed(() => {
   // 旧 Core 不带 session_id（单会话全局口径）：直接展示；
   // 新 Core 带归属时只认当前会话的快照。
   if (snap.session_id == null) return snap;
-  return snap.session_id === targetSessionId.value ? snap : null;
+  // 多上游：会话 id 可能跨 core 相同（local:tui::local_user），归属 core 也要
+  // 匹配，否则会显示另一个 core 的上下文。
+  return snap.session_id === targetSessionId.value &&
+    (snap.core ?? null) === (targetCore.value ?? null)
+    ? snap
+    : null;
 });
 const blocks = computed(() => snapshot.value?.blocks ?? []);
 const promptTokens = computed(() =>

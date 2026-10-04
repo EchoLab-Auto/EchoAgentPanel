@@ -29,6 +29,7 @@
 
 import { state } from './store';
 import { nextKey, parseSubagentEvent } from './state_domains/timeline';
+import { teamKey } from './keys';
 import type { DisplayMessage } from './state';
 
 const STORAGE_KEY = 'echo-panel-trunk-cache';
@@ -53,9 +54,12 @@ interface CachePayload {
 /** 最近一次写入的原文，避免无变化时空写（10s 一次的检查几乎零成本）。 */
 let lastWritten = '';
 
+/** 当前选中的人格复合键 `(core, team_id)`；与 `state.teamTimelines` 键一致。 */
 function activeTeamKey(): string {
   try {
-    return String(localStorage.getItem('echo-panel-active-team') ?? '');
+    const id = localStorage.getItem('echo-panel-active-team') ?? '';
+    const core = localStorage.getItem('echo-panel-active-team-core');
+    return teamKey(core, id);
   } catch {
     return '';
   }

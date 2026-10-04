@@ -19,6 +19,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NeumorphismSpinner, NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
+import { scopedKey } from '../keys';
 import type { WorkspaceFileEntry, WorkspaceSessionInfo } from '../protocol';
 
 const props = defineProps<{
@@ -31,7 +32,9 @@ const stack = ref<Array<{ label: string; path: string }>>([]);
 
 const currentPath = computed(() => stack.value[stack.value.length - 1]?.path ?? '');
 const listing = computed(() =>
-  currentPath.value ? state.workspaceFiles[currentPath.value] : undefined,
+  currentPath.value
+    ? state.workspaceFiles[scopedKey(state.activeTeamCore, currentPath.value)]
+    : undefined,
 );
 const entries = computed(() => listing.value?.entries ?? []);
 const error = computed(() => listing.value?.error ?? null);

@@ -1,9 +1,15 @@
 import type { AgentActivity, AgentPhase, OrchActivity, OrchKind, AppState } from '../state';
+import { sessionKey } from '../keys';
 import { targetLabel } from './helpers';
 // ── activity helpers ───────────────────────────────────────────────
 
-export function activity(state: AppState, sessionId: string): AgentActivity {
-  let act = state.activities[sessionId];
+/**
+ * 取/建活动态。`key` 必须是复合会话键 `sessionKey(core, session_id)`——
+ * 同名会话（如每个 core 都有的 `local:tui::local_user`）跨 core 时不能互相
+ * 覆盖运行态。
+ */
+export function activity(state: AppState, key: string): AgentActivity {
+  let act = state.activities[key];
   if (!act) {
     act = {
       phase: 'thinking',
@@ -14,13 +20,13 @@ export function activity(state: AppState, sessionId: string): AgentActivity {
       promptTokens: 0,
       completionTokens: 0,
     };
-    state.activities[sessionId] = act;
+    state.activities[key] = act;
   }
   return act;
 }
 
-export function setPhase(state: AppState, sessionId: string, phase: AgentPhase, detail: string | null) {
-  const act = activity(state, sessionId);
+export function setPhase(state: AppState, key: string, phase: AgentPhase, detail: string | null) {
+  const act = activity(state, key);
   act.phase = phase;
   act.detail = detail;
 }
@@ -34,7 +40,7 @@ export function pushTask(state: AppState, task: OrchActivity) {
   }
 }
 
-export function startSubagent(state: AppState, sessionId: string, task: string) {
+export function startSubagent(state: AppState, sessionId: string, core: string | null, task: string) {
   state.nextSubagentSeq += 1;
   const now = Date.now();
   const sequence = state.nextSubagentSeq;
@@ -42,6 +48,7 @@ export function startSubagent(state: AppState, sessionId: string, task: string) 
     id: `subagent-${sequence}`,
     sequence: null,
     sessionId,
+    core,
     kind: 'subagent',
     objective: task,
     status: 'running',
@@ -62,11 +69,17 @@ export function startSubagent(state: AppState, sessionId: string, task: string) 
   });
 }
 
-export function completeSubagent(state: AppState, sessionId: string, success: boolean) {
+export function completeSubagent(
+  state: AppState,
+  sessionId: string,
+  core: string | null,
+  success: boolean,
+) {
   for (let i = state.tasks.length - 1; i >= 0; i--) {
     const task = state.tasks[i];
     if (
       task.sessionId === sessionId &&
+      (task.core ?? null) === core &&
       task.kind === 'subagent' &&
       task.status === 'running'
     ) {
@@ -85,6 +98,7 @@ export function completeSubagent(state: AppState, sessionId: string, success: bo
 export function startReplyBranch(
   state: AppState,
   sessionId: string,
+  core: string | null,
   branchId: string,
   messageSequence: number,
   taskText: string,
@@ -95,6 +109,7 @@ export function startReplyBranch(
     id: branchId,
     sequence: messageSequence,
     sessionId,
+    core,
     kind: 'reply',
     objective: taskText,
     status: 'running',
@@ -136,14 +151,16 @@ export function completeReplyBranch(
 export function startBackgroundTask(
   state: AppState,
   sessionId: string,
+  core: string | null,
   taskId: string,
   sequence: number,
   branchCount: number,
   objective: string,
   createdAtMs: number,
 ) {
-  const pending = state.pendingBackground[sessionId];
-  delete state.pendingBackground[sessionId];
+  const key = sessionKey(core, sessionId);
+  const pending = state.pendingBackground[key];
+  delete state.pendingBackground[key];
   const kind: OrchKind = pending
     ? pending.kind
     : branchCount > 1
@@ -165,6 +182,7 @@ export function startBackgroundTask(
     id: taskId,
     sequence,
     sessionId,
+    core,
     kind,
     objective: objective.trim() ? objective : pending ? pending.objective : '后台任务',
     status: 'running',
@@ -205,7 +223,13 @@ export function integrateBackgroundTask(
   task.integratedAtMs = integratedAtMs;
 }
 
-export function stageOrchestrationTool(state: AppState, sessionId: string, toolName: string, argumentsJson: string) {
+export function stageOrchestrationTool(
+  state: AppState,
+  sessionId: string,
+  core: string | null,
+  toolName: string,
+  argumentsJson: string,
+) {
   if (toolName !== 'spawn_background_task' && toolName !== 'spawn_parallel_task') return;
   let value: Record<string, unknown>;
   try {
@@ -214,10 +238,11 @@ export function stageOrchestrationTool(state: AppState, sessionId: string, toolN
     return;
   }
   const now = Date.now();
+  const key = sessionKey(core, sessionId);
   if (toolName === 'spawn_parallel_task') {
     const objective = String(value['objective'] ?? '并行任务');
     const branches = (value['branches'] as unknown[]) ?? [];
-    state.pendingBackground[sessionId] = {
+    state.pendingBackground[key] = {
       kind: 'parallel',
       objective,
       branches: branches.map((raw, index) => {
@@ -235,7 +260,7 @@ export function stageOrchestrationTool(state: AppState, sessionId: string, toolN
     };
   } else {
     const task = String(value['task'] ?? '后台任务');
-    state.pendingBackground[sessionId] = {
+    state.pendingBackground[key] = {
       kind: 'background',
       objective: task,
       branches: [
@@ -252,4 +277,3 @@ export function stageOrchestrationTool(state: AppState, sessionId: string, toolN
     };
   }
 }
-
