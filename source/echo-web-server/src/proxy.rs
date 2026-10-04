@@ -332,6 +332,12 @@ fn wrap_event(upstream_name: &str, text: &str) -> Option<String> {
 /// 无壳（单上游旧前端）→ 广播给全部上游（单上游时即唯一上游）。
 /// 无壳命令（未选中会话/上游）仅允许只读白名单广播；写/删除类必须
 /// 显式指定目标 core——否则一次点击扇出到全部上游（批量清历史）。
+/// 可"无壳广播"的只读命令白名单（中继本地副本）。
+///
+/// 权威定义在 Core 的 `echo_protocol::BROADCAST_READONLY_COMMANDS`（本仓库
+/// 是纯透传中继，不依赖 echo-protocol crate）。**改动必须与 Core 同步**；
+/// 两边各有快照测试（此处 `readonly_whitelist_snapshot`，Core
+/// `broadcast_readonly_contract_snapshot`）防止单边漂移。
 fn is_readonly_command(type_str: &str) -> bool {
     matches!(
         type_str,
@@ -782,6 +788,33 @@ mod tests {
         ] {
             assert!(is_readonly_command(name), "{name} must be broadcast-allowed");
         }
+    }
+
+    /// 全量快照：与 Core `BROADCAST_READONLY_COMMANDS` 逐项一致。
+    #[test]
+    fn readonly_whitelist_snapshot() {
+        let mut names = [
+            "RequestTeamsList",
+            "RequestAdapterList",
+            "RequestAdapterStatus",
+            "RequestState",
+            "RequestConfig",
+            "RequestShellSessions",
+            "RequestWorkspaces",
+            "RequestSessions",
+            "RequestTrunkTimeline",
+            "RequestActiveTurns",
+            "RequestFederationStatus",
+            "RequestFederationInvite",
+            "RequestNodeStatus",
+            "Ping",
+        ];
+        names.sort();
+        for name in names {
+            assert!(is_readonly_command(name), "{name} must be broadcast-allowed");
+        }
+        assert!(!is_readonly_command("SendMessage"));
+        assert!(!is_readonly_command("ClearHistory"));
     }
 
     /// 写/删除类命令绝不能裸广播（会被拒收，要求显式 core）。
