@@ -106,6 +106,31 @@ describe('重连引导命令（去主智能体）', () => {
     expect(ws.sent.filter((c) => c.includes('team_id\":null')).length).toBe(1);
   });
 
+  it('握手期排队的命令在补发时重新解析目标 core（不在入队时烤死）', async () => {
+    // 2026-10 修复：入队时 teams 尚未到达，路由会落到 activeRegion；onopen
+    // 后 TeamsList 校正了人格归属，补发必须按**校正后**的归属重新路由。
+    const { startConnection, sendCommand } = await import('../connection');
+    const { state, dispatch } = await import('../store');
+    startConnection();
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    // 入队时：activeRegion 是 core-a，teams 表里还没有任何人格。
+    state.activeRegion = 'core-a';
+    state.teams = [];
+    sendCommand({ SendMessage: { session_id: 'local:tui::local_user', team_id: 'bot', content: 'hi' } });
+    expect(ws.sent.some((c) => c.includes('SendMessage'))).toBe(false);
+    // onopen 前 TeamsList 到达：人格 bot 实际归属 core-b。
+    dispatch(
+      { TeamsList: { teams: [{ id: 'bot', name: 'bot', description: '', enabled: true, sessions: 0 }] } } as never,
+      'core-b',
+    );
+    ws.triggerOpen();
+    const queued = ws.sent.find((c) => c.includes('SendMessage'));
+    expect(queued).toBeTruthy();
+    const parsed = JSON.parse(queued as string) as { core?: string };
+    // 补发的信封必须路由到 core-b（人格真实归属），而不是入队时的 core-a。
+    expect(parsed.core).toBe('core-b');
+  });
+
   it('连接不存在时仍给出明确提示（命令确实没发出去）', async () => {
     const { sendCommand } = await import('../connection');
     const { state } = await import('../store');

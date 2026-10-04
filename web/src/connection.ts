@@ -35,7 +35,7 @@ let lastFrameAt = 0;
  * 且这些请求真的丢了。改为握手期静默排队、onopen 引导命令之后按序补发：
  * 既不再误报，也不丢请求（这些请求都幂等，重复发无副作用）。
  */
-const pendingCommands: string[] = [];
+const pendingCommands: BackendCommand[] = [];
 /** 队列上限：握手期正常只有个位数条；上限只用于防御性封顶。 */
 const PENDING_LIMIT = 128;
 
@@ -115,9 +115,14 @@ export function startConnection(): void {
         const cachedSeq = state.teamTimelines[teamKey(savedCore, savedTeam)]?.seq ?? 0;
         sendCommand({ RequestTrunkTimeline: { team_id: savedTeam, since_seq: cachedSeq } });
       }
-      // 补发握手期暂存的命令（见 pendingCommands 注释）。
-      for (const payload of pendingCommands) {
-        ws.send(payload);
+      // 补发握手期暂存的命令（见 pendingCommands 注释）：**重新解析**
+      // 目标 core 再加壳发送——入队时的路由可能基于不完整的 teams/会话表。
+      for (const queued of pendingCommands) {
+        const core = resolveTargetCore(queued);
+        const queuedPayload = core
+          ? JSON.stringify({ core, frame: { type: 'command', payload: queued } })
+          : serializeCommand(queued);
+        ws.send(queuedPayload);
       }
       pendingCommands.length = 0;
     };
@@ -317,8 +322,11 @@ export function sendCommand(command: BackendCommand, targetCore?: string): void 
   }
   if (socket && socket.readyState === WebSocket.CONNECTING) {
     // 握手期（页面刚加载/重连窗口）：静默排队，连接建立后补发。
+    // ⚠️ 存的是原始命令而不是已加壳的 payload：入队时 teams 可能尚未到达，
+    // 路由会落到 activeRegion/兜底——onopen 补发前必须**重新解析**目标 core，
+    // 否则 TeamsList 校正后的归属救不回来（跨 core 误投，2026-10 修复）。
     if (pendingCommands.length < PENDING_LIMIT) {
-      pendingCommands.push(payload);
+      pendingCommands.push(command);
     }
     return;
   }
