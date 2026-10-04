@@ -215,9 +215,24 @@ async fn connect_upstream(
             });
         }
     };
-    match connect_async(core_request).await {
-        Ok((core, _)) => Ok(core),
-        Err(error) => {
+    // 连接超时（5s）：无响应挂死时不再永久停在 connecting（此前
+    // connect_async 无超时——对端半开/防火墙 DROP 会挂死整条重连
+    // 循环，健康表永远"连接中"）。
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        connect_async(core_request),
+    )
+    .await
+    {
+        Err(_) => {
+            warn!(core = %upstream.url, "connect to Core management WS timed out (5s)");
+            Err(ConnectFailure {
+                kind: "network",
+                message: "连接超时（5s 无响应）".into(),
+            })
+        }
+        Ok(Ok((core, _))) => Ok(core),
+        Ok(Err(error)) => {
             // 分类：HTTP 401/403 → 认证失败；连接拒绝/超时/DNS → 网络；
             // 其余按协议错误。tokio-tungstenite 的 Http(Response) 携带状态码。
             let kind = match &error {
@@ -585,9 +600,8 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         //   （避免一次点击扇出到全部上游——批量清历史）。
                         if links.len() == 1 {
                             if let Some(link) = links.values().next() {
-                                let _ =
-                                    tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text))
-                                        .await;
+                                let _ = tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text))
+                                    .await;
                             }
                         } else {
                             let readonly =
