@@ -200,7 +200,9 @@ function formatSize(size: number): string {
         @mouseleave="hideRootTip"
         @click="openRoot(root)"
       >
-        {{ basename(root) }}
+        <span v-if="root.startsWith('node://')" class="wfb-root__node">
+          {{ root.slice('node://'.length).split('/')[0] }}⛓
+        </span>{{ basename(root) }}
       </button>
     </div>
 
@@ -275,6 +277,11 @@ function formatSize(size: number): string {
 .wfb-actions { display: flex; gap: 6px; }
 
 .wfb-roots { display: flex; flex-wrap: wrap; gap: 4px; }
+.wfb-root__node {
+  color: var(--panel-accent, #0969da);
+  font-weight: 600;
+  margin-right: 2px;
+}
 .wfb-root {
   max-width: 100%;
   overflow: hidden;

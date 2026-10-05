@@ -192,12 +192,17 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
         <input v-model="formDescription" class="ws-input" placeholder="可选" />
       </label>
       <label class="ws-field">
-        <span>工作区目录（每行一个绝对路径）</span>
+        <span>
+          工作区目录（每行一个绝对路径；跨机工作区（2026-10）支持
+          <code>node://&lt;联邦peer&gt;/&lt;绝对路径&gt;</code> 远程目录，
+          如 <code>node://gpu-box/srv/repo</code>——需联邦在线且对端
+          allow_queries 放行 workspace_files / workspace_git_status）
+        </span>
         <textarea
           v-model="formDirs"
           class="ws-textarea"
           rows="4"
-          placeholder="/home/evence/.local/share/echo-agent-core/source&#10;/home/evence/.local/share/echo-agent-panel/source"
+          placeholder="/home/evence/.local/share/echo-agent-core/source&#10;node://gpu-box/srv/remote-repo"
         />
       </label>
       <div class="ws-form__actions">
@@ -224,7 +229,9 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
         <p v-if="session.description" class="ws-card__desc">{{ session.description }}</p>
         <div class="ws-card__dirs">
           <span v-for="dir in session.directories ?? []" :key="dir" class="ws-dir-chip" :title="dir">
-            {{ dir }}
+            <span v-if="dir.startsWith('node://')" class="ws-dir-chip__node">
+              {{ dir.slice('node://'.length).split('/')[0] }}⛓
+            </span>{{ dir.startsWith('node://') ? dir.slice('node://'.length).split('/').slice(1).join('/') : dir }}
           </span>
           <span v-if="!(session.directories ?? []).length" class="muted">（尚未配置目录）</span>
         </div>
@@ -353,6 +360,11 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
 }
 .ws-card__desc { margin: 0; font-size: 11px; color: var(--nm-text-secondary); }
 .ws-card__dirs { display: flex; flex-wrap: wrap; gap: 4px; }
+.ws-dir-chip__node {
+  color: var(--panel-accent, #0969da);
+  font-weight: 600;
+  margin-right: 2px;
+}
 .ws-dir-chip {
   max-width: 100%;
   overflow: hidden;
