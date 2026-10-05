@@ -1011,14 +1011,26 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       ) {
         setPhase(state, sessionKey(core, e.session_id), 'completed', null);
       }
-      // 兜底：turn 完成时若该会话最后一条仍未到 backend（回答缺失），
-      // 主动拉取时间线对齐——推理/工具已实时显示但回答丢失时保证补齐。
+      // 兜底：turn 完成时若该会话仍无任何 backend（回答缺失），主动拉取
+      // 时间线对齐——推理/工具已实时显示但回答丢失时保证补齐。
+      //
+      // 两个防误触发（2026-10 滚动 bug 修复）：
+      // 1. 判定从「最后一条不是 backend」改为「连一条 backend/branch 都
+      //    没有」——工具回合/系统行收尾时 AgentOutput 已在 trunk 里但不是
+      //    最后一条，旧判定会**每轮对话结束都误触发**兜底；
+      // 2. 兜底请求带 since_seq（缓存游标）——不带时 Core 回 full:true
+      //    全量，前端 trunk 整体替换、消息 key 全部重建，DOM 回顶（用户
+      //    看到的「对话框滑到最上面」）。带游标走增量路径：追加不重建。
       const trunk = state.trunk.filter((m) => m.sessionId === e.session_id || m.sessionId === undefined);
-      const last = trunk[trunk.length - 1];
-      if (!last || (last.role !== 'backend' && last.role !== 'branch')) {
+      const hasAnswer = trunk.some((m) => m.role === 'backend' || m.role === 'branch');
+      if (!hasAnswer) {
         // ⚠️ 兜底请求必须带当前 team_id：team_id: null 会拉回主 agent 的
         // timeline 并污染当前视图（self-coding 下串显 alix 会话）。
-        sendCommand({ RequestTrunkTimeline: { team_id: state.activeTeamId } });
+        const sinceSeq =
+          state.teamTimelines[teamKey(state.activeRegion, state.activeTeamId)]?.seq ?? 0;
+        sendCommand({
+          RequestTrunkTimeline: { team_id: state.activeTeamId, since_seq: sinceSeq },
+        });
       }
       return state;
     }
