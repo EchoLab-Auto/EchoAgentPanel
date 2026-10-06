@@ -245,6 +245,8 @@ export interface FederationPeerInfo {
   allow_tools: string[];
   allow_subagent: boolean;
   require_confirm: string[];
+  /** 允许的只读查询种类（`*` = 全部；2026-10 与 Core 对齐）。 */
+  allow_queries: string[];
   link: 'Online' | 'Offline';
   /** 节点负载（活跃 turn 数；P2 调度器输入，Core status_event 回传）。 */
   active_turns?: number;

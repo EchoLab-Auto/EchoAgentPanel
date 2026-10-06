@@ -33,7 +33,32 @@ const formName = ref('');
 const formUrl = ref('');
 const formToken = ref('');
 const formAllowAll = ref(true);
+/** 自定义工具列表（formAllowAll=false 时生效；换行或逗号分隔）。 */
+const formToolsCustom = ref('');
+/** 允许的只读查询种类（2026-10）：全选 = ["*"]。 */
+const QUERY_KINDS: Array<{ key: string; label: string }> = [
+  { key: 'session_snapshot', label: '会话快照（trunk 历史）' },
+  { key: 'workspace_files', label: '工作区文件列举' },
+  { key: 'workspace_git_status', label: '工作区 git 状态' },
+  { key: 'browse_directories', label: '目录浏览（选择器）' },
+];
+const formQueries = ref<string[]>(QUERY_KINDS.map((k) => k.key));
+const formAllowSubagent = ref(true);
+/** 需人工确认的调用（命中即拒；空 = 无需确认）。 */
+const formRequireConfirm = ref('');
 const inviteInput = ref('');
+
+/** 解析自定义列表（换行/逗号分隔，去空、去重）。 */
+function parseList(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
+}
 // ── 会话迁移（P3-2b）：把当前会话的历史搬到某个在线 peer ──
 const migratePeer = ref('');
 const onlinePeers = computed(() => peers.value.filter((p: FederationPeerInfo) => p.link === 'Online'));
@@ -71,18 +96,32 @@ function openAdd() {
   formName.value = '';
   formUrl.value = '';
   formToken.value = '';
+  // 默认满权限（2026-10）：邀请串即凭证，配对后按互信对待；可在此收紧。
   formAllowAll.value = true;
+  formToolsCustom.value = '';
+  formQueries.value = QUERY_KINDS.map((k) => k.key);
+  formAllowSubagent.value = true;
+  formRequireConfirm.value = '';
   inviteInput.value = '';
   inviteError.value = '';
   showAdd.value = true;
 }
 
-function openEdit(name: string, url: string) {
-  editName.value = name;
-  formName.value = name;
-  formUrl.value = url;
+function openEdit(peer: FederationPeerInfo) {
+  editName.value = peer.name;
+  formName.value = peer.name;
+  formUrl.value = peer.url;
   formToken.value = ''; // 留空 = 保留旧 token
-  formAllowAll.value = true;
+  // 回填现有授权（编辑必须有原值，否则保存即静默重置为默认）。
+  const tools = peer.allow_tools ?? [];
+  formAllowAll.value = tools.includes('*');
+  formToolsCustom.value = formAllowAll.value ? '' : tools.join('\n');
+  const queries = peer.allow_queries ?? [];
+  formQueries.value = queries.includes('*')
+    ? QUERY_KINDS.map((k) => k.key)
+    : queries.filter((q) => QUERY_KINDS.some((k) => k.key === q));
+  formAllowSubagent.value = peer.allow_subagent ?? true;
+  formRequireConfirm.value = (peer.require_confirm ?? []).join('\n');
   showAdd.value = true;
 }
 
@@ -123,6 +162,7 @@ function savePeer() {
     inviteError.value = 'peer 名称不能为空';
     return;
   }
+  const queries = formQueries.value;
   sendCommand({
     SaveFederationPeer: {
       peer: {
@@ -130,9 +170,12 @@ function savePeer() {
         url: formUrl.value.trim(),
         token: formToken.value.trim(),
         token_set: false,
-        allow_tools: formAllowAll.value ? ['*'] : [],
-        allow_subagent: true,
-        require_confirm: [],
+        allow_tools: formAllowAll.value ? ['*'] : parseList(formToolsCustom.value),
+        allow_subagent: formAllowSubagent.value,
+        require_confirm: parseList(formRequireConfirm.value),
+        // 全选（覆盖全部四种）→ 等价 "*"（对端可新增查询种类时自动覆盖）。
+        allow_queries:
+          queries.length === QUERY_KINDS.length ? ['*'] : queries,
         link: 'Offline',
       },
     },
@@ -251,7 +294,28 @@ onUnmounted(() => {
         </label>
         <label class="fed-field fed-field--check">
           <input v-model="formAllowAll" type="checkbox" />
-          <span>允许对端调用本机全部工具（联邦互信 ≈ SSH 免密，谨慎开启）</span>
+          <span>允许对端调用本机全部工具（默认满权限；联邦互信 ≈ SSH 免密）</span>
+        </label>
+        <label v-if="!formAllowAll" class="fed-field fed-field--wide">
+          <span>允许的工具（换行/逗号分隔；如 bash、read_file）</span>
+          <textarea v-model="formToolsCustom" class="fed-input fed-textarea" rows="3" placeholder="bash&#10;read_file" />
+        </label>
+        <div class="fed-field fed-field--wide">
+          <span>允许的只读查询（跨机工作区/git/浏览所需）</span>
+          <div class="fed-checks">
+            <label v-for="kind in QUERY_KINDS" :key="kind.key" class="fed-check">
+              <input v-model="formQueries" type="checkbox" :value="kind.key" />
+              <span>{{ kind.label }}</span>
+            </label>
+          </div>
+        </div>
+        <label class="fed-field fed-field--check">
+          <input v-model="formAllowSubagent" type="checkbox" />
+          <span>接受对端的子代理委派（spawn_subagent node=本机）</span>
+        </label>
+        <label class="fed-field fed-field--wide">
+          <span>需确认的调用（可选；命中即拒，换行/逗号分隔）</span>
+          <input v-model="formRequireConfirm" class="fed-input" placeholder="（空 = 无需确认）" />
         </label>
       </div>
       <div v-if="inviteError" class="fed-error">{{ inviteError }}</div>
@@ -281,9 +345,15 @@ onUnmounted(() => {
           <template v-if="p.allow_tools.includes('*')"> · 全部工具</template>
           <template v-else-if="p.allow_tools.length"> · {{ p.allow_tools.length }} 工具</template>
           <template v-else> · 无工具授权</template>
+          <template v-if="(p.allow_queries ?? []).includes('*')"> · 全部查询</template>
+          <template v-else-if="(p.allow_queries ?? []).length">
+            · {{ p.allow_queries.length }} 类查询
+          </template>
+          <template v-else> · 无查询授权</template>
+          <template v-if="p.allow_subagent"> · 接受委派</template>
         </div>
         <div class="fed-peer-actions">
-          <button class="fed-btn fed-btn--small" @click="openEdit(p.name, p.url)">编辑</button>
+          <button class="fed-btn fed-btn--small" @click="openEdit(p)">编辑</button>
           <button class="fed-btn fed-btn--small fed-btn--danger" @click="deletePeer(p.name)">删除</button>
         </div>
       </div>
@@ -292,6 +362,26 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.fed-textarea {
+  resize: vertical;
+  min-height: 52px;
+  font-family: var(--nm-font-mono, monospace);
+}
+.fed-field--wide {
+  grid-column: 1 / -1;
+}
+.fed-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+}
+.fed-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
 .fed-page {
   padding: 16px;
   display: flex;

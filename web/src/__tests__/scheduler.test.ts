@@ -16,6 +16,7 @@ function setupFederation(peers: Array<{ name: string; online: boolean; turns: nu
       allow_tools: [],
       allow_subagent: true,
       require_confirm: [],
+      allow_queries: [],
       link: p.online ? 'Online' : 'Offline',
       active_turns: p.turns,
     })),
