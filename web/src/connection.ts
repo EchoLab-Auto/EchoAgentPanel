@@ -64,6 +64,8 @@ export function startConnection(): void {
       }
       state.connected = true;
       retryMs = 500;
+      // 重置断开提示标志：下次掉线重新提示一次（2026-10 Toast 去风暴）。
+      disconnectedNotified = false;
       lastFrameAt = Date.now();
       // 时间线到达标志按"本次连接"计：重连后若无缓存需要重新加载，
       // 聊天区据此显示「正在加载时间线…」而不是「暂无消息」（见 ChatView）。
@@ -145,7 +147,13 @@ export function startConnection(): void {
       if (socket !== ws) return; // 旧连接的迟到事件，忽略
       socket = null;
       state.connected = false;
-      pushToast(state, '与后端断开，正在重连…', 'error');
+      // Toast 去风暴（2026-10 巡检）：仅"已连接后掉线"的首次弹提示
+      // ——此前每次 onclose 都弹（服务宕机时每 ≤30s 一条刷屏）。断开
+      // 期间的重试不再提示；重连成功由 onopen 的「已连接」提示收尾。
+      if (!disconnectedNotified) {
+        disconnectedNotified = true;
+        pushToast(state, '与后端断开，正在重连…', 'error');
+      }
       retryTimer = window.setTimeout(connect, retryMs);
       retryMs = Math.min(retryMs * 2, 30_000);
     };
@@ -160,6 +168,9 @@ export function startConnection(): void {
     retryMs = 500;
     connect();
   };
+
+  // 断开提示一次性标志（见 onclose；onopen 复位）。
+  let disconnectedNotified = false;
 
   // 自愈评估：前台可见 / 网络恢复时调用。
   const heal = () => {

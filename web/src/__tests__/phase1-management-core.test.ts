@@ -79,3 +79,63 @@ describe('Phase 1：管理面绑定 activeRegion', () => {
     expect(defaultQqInstanceState().owner).toBe(0);
   });
 });
+
+describe('QQ 列表事件按 (core, adapter) 写入 qqByAdapter（2026-10 修复）', () => {
+  beforeEach(() => {
+    state.qqByAdapter = {};
+    state.activeRegion = 'core-a';
+  });
+
+  it('FriendList 写入实例槽位（此前只写废弃全局字段，好友列表永远空）', () => {
+    dispatch(
+      {
+        FriendList: {
+          friends: [
+            { user_id: 10001, nickname: 'alice' },
+            { user_id: 10002, nickname: 'bob' },
+          ],
+          adapter: 'qq',
+        },
+      } as unknown as BackendEvent,
+      'core-a',
+    );
+    const slot = state.qqByAdapter[scopedKey('core-a', 'qq')];
+    expect(slot, 'FriendList 必须写入 qqByAdapter').toBeTruthy();
+    expect(slot.friends).toEqual([
+      [10001, 'alice'],
+      [10002, 'bob'],
+    ]);
+  });
+
+  it('多实例：FriendList 按 adapter 分槽，互不覆盖', () => {
+    dispatch(
+      { FriendList: { friends: [[1, 'a']].map(([user_id, nickname]) => ({ user_id, nickname })), adapter: 'qq' } } as unknown as BackendEvent,
+      'core-a',
+    );
+    dispatch(
+      { FriendList: { friends: [{ user_id: 2, nickname: 'b' }], adapter: 'alix-two' } } as unknown as BackendEvent,
+      'core-a',
+    );
+    expect(state.qqByAdapter[scopedKey('core-a', 'qq')].friends).toEqual([[1, 'a']]);
+    expect(state.qqByAdapter[scopedKey('core-a', 'alix-two')].friends).toEqual([[2, 'b']]);
+  });
+
+  it('GroupList 与 FriendList 互不干扰（同一槽位的两个字段）', () => {
+    dispatch(
+      {
+        GroupList: {
+          groups: [{ group_id: 456, group_name: 'g1' }],
+          adapter: 'qq',
+        },
+      } as unknown as BackendEvent,
+      'core-a',
+    );
+    dispatch(
+      { FriendList: { friends: [{ user_id: 10001, nickname: 'alice' }], adapter: 'qq' } } as unknown as BackendEvent,
+      'core-a',
+    );
+    const slot = state.qqByAdapter[scopedKey('core-a', 'qq')];
+    expect(slot.groups).toEqual([[456, 'g1']]);
+    expect(slot.friends).toEqual([[10001, 'alice']]);
+  });
+});

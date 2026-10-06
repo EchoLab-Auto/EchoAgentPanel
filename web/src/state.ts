@@ -237,28 +237,19 @@ export interface BranchTab {
 
 export type AgentPhase = 'thinking' | 'tool' | 'subagent' | 'completed' | 'failed';
 
-/** 联邦 peer（`FederationStatus` 列表元素；线格式同 echo-protocol）。 */
-export interface FederationPeerInfo {
-  name: string;
-  url: string;
-  token_set: boolean;
-  allow_tools: string[];
-  allow_subagent: boolean;
-  require_confirm: string[];
-  /** 允许的只读查询种类（`*` = 全部；2026-10 与 Core 对齐）。 */
-  allow_queries: string[];
-  link: 'Online' | 'Offline';
-  /** 节点负载（活跃 turn 数；P2 调度器输入，Core status_event 回传）。 */
-  active_turns?: number;
-}
+/** 联邦 peer 与状态快照：线格式归 protocol.ts（2026-10 巡检——
+ * 此前定义在 state.ts，federation 事件联合类型引用不到）。
+ * re-export 保持既有 `import type { FederationPeerInfo } from '../state'`
+ * 调用点（FederationSettings 等）零改动。 */
+export type { FederationPeerInfo, FederationStatus } from './protocol';
+import type { FederationStatus } from './protocol';
 
-/** 联邦状态快照。 */
-export interface FederationStatus {
-  enabled: boolean;
-  node_id: string;
-  node_name?: string | null;
-  listen: string;
-  peers: FederationPeerInfo[];
+/** QQ 名单四表（QqFilterConfig 事件载荷；qqByAdapter.filter 的元素类型）。 */
+export interface QqFilterState {
+  allowlist_users: number[];
+  allowlist_groups: number[];
+  denylist_users: number[];
+  denylist_groups: number[];
 }
 
 /// QQ 实例管理态的空白初值（多实例面板按实例填充）。
@@ -419,19 +410,15 @@ export interface AppState {
   model: string;
   api: ApiConfig | null;
   systemPrompt: string;
-  qqFilter: {
-    allowlist_users: number[];
-    allowlist_groups: number[];
-    denylist_users: number[];
-    denylist_groups: number[];
-  };
+  // qqFilter 字段已删除（2026-10 巡检：死状态——读取方早已改用
+  // qqByAdapter；类型保留为 QqFilterState 供其引用）。
   /** 最近一次二维码回推（Core 代理登录；按 (core, 实例) 过滤消费）。 */
   lastQrcode: { adapter: string; png_base64: string; error?: string | null; core?: string | null } | null;
   /** 多实例（2026-09）：按 QQ 实例名存放的 QQ 管理态；单实例时键为 "qq"。 */
   qqByAdapter: Record<
     string,
     {
-      filter: AppState['qqFilter'];
+      filter: QqFilterState;
       gateMode: GateMode;
       owner: number;
       groups: Array<[number, string]>;
@@ -440,10 +427,7 @@ export interface AppState {
       selfId: string | null;
     }
   >;
-  qqGateMode: GateMode;
-  qqOwner: number;
-  qqGroups: Array<[number, string]>;
-  qqFriends: Array<[number, string]>;
+
   /**
    * 各会话的清单快照（复合键 `(core, session_id)` → 清单列表，2026-10 多上游修复）。
    *
@@ -454,7 +438,7 @@ export interface AppState {
   checklists: Record<string, ChecklistEntry[]>;
   toasts: Toast[];
   /** 目录选择器浏览结果（RequestBrowseDirectories 响应，2026-10）：
-   * 键 = 复合 (activeRegion, 请求 path   '' 表示根列表) → 结果。
+   * 键 = 复合 (activeRegion, 请求 path \u0000 '' 表示根列表) → 结果。
    * 每次浏览（进目录/换位置）一次请求一次响应（乱序到达按 path 键隔离）。 */
   browseDirectories: Record<
     string,
@@ -534,8 +518,8 @@ export interface AppState {
     string,
     { kind: OrchKind; objective: string; branches: BranchActivity[] }
   >;
-  pendingReasoning: Record<string, string[]>;
-  completedReasoning: Record<string, string[]>;
+  // pendingReasoning/completedReasoning 已删除（2026-10 巡检：死状态，
+  // 无任何写入/读取方——reasoning 展示由消息条目自带的 reasoning 字段承载）。
   nextSubagentSeq: number;
 }
 
@@ -557,16 +541,8 @@ export function initialState(): AppState {
     model: '',
     api: null,
     systemPrompt: '',
-    qqFilter: {
-      allowlist_users: [],
-      allowlist_groups: [],
-      denylist_users: [],
-      denylist_groups: [],
-    },
-    qqGateMode: 'none',
-    qqOwner: 0,
-    qqGroups: [],
-    qqFriends: [],
+  // qqGateMode/qqOwner/qqGroups/qqFriends 已删除（2026-10 巡检：死状态，
+  // 读取方早已改用 qqByAdapter[name].{gateMode,owner,groups,friends}）。
     lastQrcode: null,
     qqByAdapter: {},
     checklists: {},
@@ -594,8 +570,7 @@ export function initialState(): AppState {
     teamTimelines: {},
     trunkTeamId: null,
     pendingBackground: {},
-    pendingReasoning: {},
-    completedReasoning: {},
+
     nextSubagentSeq: 0,
   };
 }
@@ -685,7 +660,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 刷新恢复（2026-10）：运行状态本是瞬时事件流，刷新重连后 Core 在
       // TrunkTimeline 之后补发本快照。按列表重建 running 集合——本地已有
       // 但快照中不存在的 activity 置 completed（多为刷新前已结束的残留）。
-      const e = (event as unknown as { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }).ActiveTurnsSnapshot;
+      const e = (event as { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }).ActiveTurnsSnapshot;
       if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
       const core = evtCore(e);
       // activity 键是复合 (core, session_id)：同名跨 core 不互相误杀。
@@ -726,18 +701,18 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'SelfUpdateStatus': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
-      state.selfUpdateStatus = (event as unknown as { SelfUpdateStatus: AppState['selfUpdateStatus'] }).SelfUpdateStatus;
+      state.selfUpdateStatus = (event as { SelfUpdateStatus: AppState['selfUpdateStatus'] }).SelfUpdateStatus;
       return state;
     }
     case 'FederationStatus': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
-      const e = (event as unknown as { FederationStatus: FederationStatus }).FederationStatus;
+      const e = (event as { FederationStatus: FederationStatus }).FederationStatus;
       state.federation = e;
       return state;
     }
     case 'FederationInvite': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
-      const e = (event as unknown as { FederationInvite: { invite: string } }).FederationInvite;
+      const e = (event as { FederationInvite: { invite: string } }).FederationInvite;
       state.federationInvite = e.invite;
       return state;
     }
@@ -1312,10 +1287,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'QqFilterConfig': {
       const e = (event as {
-        QqFilterConfig: AppState['qqFilter'] & { adapter?: string | null; core?: string | null };
+        QqFilterConfig: QqFilterState & { adapter?: string | null; core?: string | null };
       }).QqFilterConfig;
       const { adapter: _a, core: _c, ...filter } = e;
-      state.qqFilter = filter;
       // 多上游：QQ 实例名跨 core 可重复（默认都叫 qq），按 (core, adapter) 键。
       const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
@@ -1326,7 +1300,6 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'QqGateMode': {
       const e = (event as { QqGateMode: { mode: GateMode; adapter?: string | null; core?: string | null } }).QqGateMode;
-      state.qqGateMode = e.mode;
       const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
         ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
@@ -1336,7 +1309,6 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'QqOwner': {
       const e = (event as { QqOwner: { owner_qq: number; adapter?: string | null; core?: string | null } }).QqOwner;
-      state.qqOwner = e.owner_qq;
       const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
         ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
@@ -1371,17 +1343,30 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           core?: string | null;
         };
       }).GroupList;
-      state.qqGroups = e.groups.map((g) => [g.group_id, g.group_name]);
       const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
       state.qqByAdapter[key] = {
         ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
-        groups: state.qqGroups,
+        groups: e.groups.map((g) => [g.group_id, g.group_name]),
       };
       return state;
     }
     case 'FriendList': {
-      const e = (event as { FriendList: { friends: Array<{ user_id: number; nickname: string }> } }).FriendList;
-      state.qqFriends = e.friends.map((f) => [f.user_id, f.nickname]);
+      // 2026-10 修复：此前只写已废弃的全局 qqFriends 字段（读取方早已
+      // 改用 qqByAdapter）——好友列表在实例槽位永远为空；且丢失多实例
+      // 维度（Core 事件带 adapter）。现与 GroupList 同模式按
+      // (core, adapter) 键写入。
+      const e = (event as {
+        FriendList: {
+          friends: Array<{ user_id: number; nickname: string }>;
+          adapter?: string | null;
+          core?: string | null;
+        };
+      }).FriendList;
+      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
+      state.qqByAdapter[key] = {
+        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
+        friends: e.friends.map((f) => [f.user_id, f.nickname]),
+      };
       return state;
     }
     case 'SessionMigrated': {

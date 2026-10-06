@@ -7,6 +7,30 @@ export type GateMode = 'none' | 'allowlist' | 'denylist';
 export type ThinkingMode = 'enabled' | 'disabled';
 export type ReasoningEffort = 'low' | 'high' | 'max';
 
+/** 联邦 peer（`FederationStatus` 列表元素；线格式同 echo-protocol）。 */
+export interface FederationPeerInfo {
+  name: string;
+  url: string;
+  token_set: boolean;
+  allow_tools: string[];
+  allow_subagent: boolean;
+  require_confirm: string[];
+  /** 允许的只读查询种类（`*` = 全部；2026-10 与 Core 对齐）。 */
+  allow_queries: string[];
+  link: 'Online' | 'Offline';
+  /** 节点负载（活跃 turn 数；P2 调度器输入，Core status_event 回传）。 */
+  active_turns?: number;
+}
+
+/** 联邦状态快照（`FederationStatus` 事件）。 */
+export interface FederationStatus {
+  enabled: boolean;
+  node_id: string;
+  node_name?: string | null;
+  listen: string;
+  peers: FederationPeerInfo[];
+}
+
 export interface AdapterStatus {
   name: string;
   display_name: string;
@@ -505,10 +529,30 @@ export type BackendEvent =
     }
   | { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null } }
   | { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null } }
-  | { ChecklistUpdated: { session_id: string; state: ChecklistState } }
+  | { ChecklistUpdated: { session_id: string; state: ChecklistState; team_id?: string | null } }
   | { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }
   | { AgentCompleted: { session_id: string } }
   | { SessionUpdated: { session: SessionInfo } }
+  | { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }
+  | { FederationInvite: { invite: string } }
+  | {
+      FederationStatus: {
+        enabled: boolean;
+        node_id: string;
+        node_name?: string | null;
+        listen: string;
+        peers: FederationPeerInfo[];
+      };
+    }
+  | {
+      SelfUpdateStatus: {
+        state: string;
+        phase?: string | null;
+        revision?: string | null;
+        message?: string | null;
+        updated_at?: string | null;
+      };
+    }
   | {
       ContextSnapshot: {
         /** 快照归属的会话 id（多会话，2026-09；旧 Core 缺省） */
