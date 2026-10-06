@@ -39,6 +39,14 @@ export interface WorkspaceFileEntry {
  * 消费一律经 `workspace.ts` 的规范化助手（directoryPath / directoryNode）。 */
 export type WorkspaceDirectoryEntry = string | { path: string; node?: string | null };
 
+/** 目录选择器的浏览根（可进入浏览的位置）。 */
+export interface BrowseRoot {
+  /** 展示名（「家目录 (~)」「<工作区名>」或远程的同名标签）。 */
+  label: string;
+  /** 绝对路径（本机）或 `node://<peer>/<abs>`（远程）。 */
+  path: string;
+}
+
 /** 工作区会话（workspace 插件）：名称 + 多个工作区目录。 */
 export interface WorkspaceSessionInfo {
   /** 稳定 id（空 = 由 Core 依名称生成）。 */
@@ -399,6 +407,7 @@ export type BackendCommand =
         path: string;
       };
     }
+  | { RequestBrowseDirectories: { path?: string | null } }
   | 'StartAllAdapters'
   | 'StopAllAdapters'
   | { UpdateQqAllowlist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
@@ -535,6 +544,14 @@ export type BackendEvent =
         peer: string;
         active?: Record<string, unknown> | null;
         profiles?: RemoteApiProfileEntry[];
+        error?: string | null;
+      };
+    }
+  | {
+      BrowseDirectories: {
+        path?: string | null;
+        roots?: BrowseRoot[];
+        entries?: WorkspaceFileEntry[];
         error?: string | null;
       };
     }

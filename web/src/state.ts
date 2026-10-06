@@ -440,6 +440,17 @@ export interface AppState {
    */
   checklists: Record<string, ChecklistEntry[]>;
   toasts: Toast[];
+  /** 目录选择器浏览结果（RequestBrowseDirectories 响应，2026-10）：
+   * 键 = 复合 (activeRegion, 请求 path   '' 表示根列表) → 结果。
+   * 每次浏览（进目录/换位置）一次请求一次响应（乱序到达按 path 键隔离）。 */
+  browseDirectories: Record<
+    string,
+    {
+      roots: import('./protocol').BrowseRoot[];
+      entries: import('./protocol').WorkspaceFileEntry[];
+      error: string | null;
+    }
+  >;
   /** 最近一次联邦远端供应商池查询结果（RequestRemoteApiProfiles 响应；
    * ApiSettings「从节点导入」消费；peer → 响应）。 */
   remoteApiProfiles: Record<
@@ -547,6 +558,7 @@ export function initialState(): AppState {
     qqByAdapter: {},
     checklists: {},
     toasts: [],
+    browseDirectories: {},
     remoteApiProfiles: {},
     apiTests: {},
     apiBalances: {},
@@ -1093,6 +1105,26 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         state.api.active_api = e.active_api;
         state.api.profiles = e.profiles;
       }
+      return state;
+    }
+    case 'BrowseDirectories': {
+      const e = (event as {
+        BrowseDirectories: {
+          path?: string | null;
+          roots?: import('./protocol').BrowseRoot[];
+          entries?: import('./protocol').WorkspaceFileEntry[];
+          error?: string | null;
+        };
+      }).BrowseDirectories;
+      // 键与 DirectoryPicker 的请求键一致：请求 path 为 None（根列表）时
+      // 键为空串——同一 activeRegion 下 local 根（''）与 peer 根
+      // （'node://peer'）天然不冲突。
+      const key = scopedKey(state.activeRegion, e.path ?? '');
+      state.browseDirectories[key] = {
+        roots: e.roots ?? [],
+        entries: e.entries ?? [],
+        error: e.error ?? null,
+      };
       return state;
     }
     case 'RemoteApiProfiles': {

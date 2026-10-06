@@ -16,6 +16,7 @@ import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 import type { WorkspaceSessionInfo } from '../protocol';
 import { directoryNode, directoryPath, directoryToInput } from '../workspace';
+import DirectoryPicker from './DirectoryPicker.vue';
 
 const props = defineProps<{ teamId: string | null }>();
 
@@ -103,6 +104,22 @@ function startEdit(session: WorkspaceSessionInfo) {
 
 function cancelEdit() {
   editing.value = null;
+}
+
+// ── 目录选择器（2026-10）：浏览本机/联邦节点目录树挑选 ──
+const pickerOpen = ref(false);
+
+/** 选择器回填：追加一行目录到编辑框（去重，保留手写能力）。 */
+function onPickDirectory(path: string) {
+  const lines = formDirs.value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (!lines.includes(path)) {
+    lines.push(path);
+  }
+  formDirs.value = lines.join('\n');
+  pickerOpen.value = false;
 }
 
 function save() {
@@ -195,11 +212,15 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
         <input v-model="formDescription" class="ws-input" placeholder="可选" />
       </label>
       <label class="ws-field">
-        <span>
+        <span class="ws-form__dirs-head">
           工作区目录（每行一个绝对路径；跨机工作区（2026-10）支持
           <code>node://&lt;联邦peer&gt;/&lt;绝对路径&gt;</code> 远程目录，
           如 <code>node://gpu-box/srv/repo</code>——需联邦在线且对端
-          allow_queries 放行 workspace_files / workspace_git_status）
+          allow_queries 放行 workspace_files / workspace_git_status /
+          browse_directories）
+          <NeumorphismButton size="small" variant="glass" @click="pickerOpen = true">
+            浏览…
+          </NeumorphismButton>
         </span>
         <textarea
           v-model="formDirs"
@@ -293,6 +314,13 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
       </div>
     </section>
   </div>
+
+  <!-- 目录选择器（2026-10）：浏览本机/联邦节点目录树 -->
+  <DirectoryPicker
+    v-if="pickerOpen"
+    @select="onPickDirectory"
+    @close="pickerOpen = false"
+  />
 </template>
 
 <style scoped>
@@ -327,6 +355,12 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
   background: var(--panel-accent-soft);
 }
 .ws-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--nm-text-secondary); }
+.ws-form__dirs-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .ws-input, .ws-textarea {
   width: 100%;
   box-sizing: border-box;
