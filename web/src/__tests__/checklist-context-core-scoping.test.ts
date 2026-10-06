@@ -3,7 +3,8 @@
 // local:tui::local_user）的快照不得互相覆盖。
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
-import { sessionKey } from '../keys';
+import { checklistsForSession } from '../state';
+import { checklistKey, sessionKey } from '../keys';
 import type { BackendEvent, TeamInfo } from '../protocol';
 
 function team(id: string, core: string | null): TeamInfo {
@@ -93,5 +94,52 @@ describe('多上游：checklists / contexts 按 (core, session_id) 隔离', () =
     // 单上游裸帧：键为裸空串。
     dispatch(contextEvent(null, 888), null);
     expect(state.contexts[''].total_tokens).toBe(888);
+  });
+});
+
+describe('清单 team 维度（同一 core 多 persona 同名会话）', () => {
+  beforeEach(() => {
+    state.teams = [team('EchoCode', 'core-a'), team('alix', 'core-a')];
+    state.activeTeamId = 'EchoCode';
+    state.activeRegion = 'core-a';
+    state.checklists = {};
+  });
+
+  function teamEvent(sessionId: string, teamId: string | null) {
+    return {
+      ChecklistUpdated: {
+        session_id: sessionId,
+        team_id: teamId,
+        state: {
+          lists: [
+            { name: `list-${teamId ?? 'none'}`, items: [{ text: 'x', done: false }] },
+          ],
+        },
+      },
+    } as unknown as BackendEvent;
+  }
+
+  it('同一 core 内两个 persona 的同名会话清单各自独立', () => {
+    dispatch(teamEvent(SID, 'EchoCode'), 'core-a');
+    dispatch(teamEvent(SID, 'alix'), 'core-a');
+    expect(state.checklists[checklistKey('core-a', 'EchoCode', SID)]).toHaveLength(1);
+    expect(state.checklists[checklistKey('core-a', 'alix', SID)]).toHaveLength(1);
+    expect(state.checklists[checklistKey('core-a', 'EchoCode', SID)][0].name).toBe('list-EchoCode');
+    expect(state.checklists[checklistKey('core-a', 'alix', SID)][0].name).toBe('list-alix');
+  });
+
+  it('读助手：优先 team 键（当前 agent 的清单），不串他 persona', () => {
+    dispatch(teamEvent(SID, 'EchoCode'), 'core-a');
+    dispatch(teamEvent(SID, 'alix'), 'core-a');
+    // 当前 agent = EchoCode → 只看到自己的
+    expect(checklistsForSession(state, SID)[0].name).toBe('list-EchoCode');
+    state.activeTeamId = 'alix';
+    expect(checklistsForSession(state, SID)[0].name).toBe('list-alix');
+  });
+
+  it('读助手：旧 core 无 team 标注 → 回退 (core, session) 键', () => {
+    dispatch(teamEvent(SID, null), 'core-a');
+    expect(state.checklists[sessionKey('core-a', SID)]).toHaveLength(1);
+    expect(checklistsForSession(state, SID)).toHaveLength(1);
   });
 });

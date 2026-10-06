@@ -37,7 +37,7 @@ import type {
   WorkspaceSessionInfo,
 } from './protocol';
 
-import { scopedKey, sessionKey, teamKey } from './keys';
+import { checklistKey, scopedKey, sessionKey, teamKey } from './keys';
 
 export const TRUNK_SESSION_ID = 'trunk';
 
@@ -328,6 +328,17 @@ export interface ChecklistEntry {
   items: Array<{ text: string; done: boolean }>;
   done: number;
   total: number;
+}
+
+/** 读某会话的清单快照（team 维度隔离 + 旧 core 回退，2026-10）：
+ * 新键 `(core, team, session)` → 旧键 `(core, session)`（旧 core 无
+ * team 标注）→ 空。写入侧见 reduce 的 ChecklistUpdated 分支。 */
+export function checklistsForSession(state: AppState, sessionId: string): ChecklistEntry[] {
+  return (
+    state.checklists[checklistKey(state.activeRegion, state.activeTeamId, sessionId)] ??
+    state.checklists[sessionKey(state.activeRegion, sessionId)] ??
+    []
+  );
 }
 
 export interface ApiConfig {
@@ -915,10 +926,12 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ChecklistUpdated': {
-      const e = (event as { ChecklistUpdated: { session_id: string; state: { lists: Array<{ name: string; items: Array<{ text: string; done: boolean }> }> } } }).ChecklistUpdated;
-      // 按 (core, session_id) 复合键隔离：多 core 下同名会话（各 core 都有
-      // local:tui::local_user）的清单不互相覆盖；不同会话的清单本就互不相干。
-      const key = sessionKey(evtCore(e), e.session_id);
+      const e = (event as { ChecklistUpdated: { session_id: string; team_id?: string | null; state: { lists: Array<{ name: string; items: Array<{ text: string; done: boolean }> }> } } }).ChecklistUpdated;
+      // 按 (core, team_id, session_id) 复合键隔离（2026-10）：多 core 下同名
+      // 会话不互相覆盖；同一 core 内多 persona 的同名会话（各自的
+      // local:tui::local_user）也不互相覆盖。旧 core 无 team_id → 退化为
+      // (core, session_id)（与既有键兼容）。
+      const key = checklistKey(evtCore(e), e.team_id ?? null, e.session_id);
       state.checklists[key] = (e.state.lists ?? [])
         .filter((list) => list && Array.isArray(list.items))
         .map((list) => {

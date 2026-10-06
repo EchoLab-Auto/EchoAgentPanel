@@ -18,6 +18,17 @@ export function sessionKey(core: string | null | undefined, sessionId: string): 
   return scopedKey(core, sessionId);
 }
 
+/** 清单复合键 `(core, team_id, session_id)`（2026-10）：同一 core 内多
+ * persona 的同名会话（各自的 `local:tui::local_user`）的清单不互相覆盖。
+ * team_id 为 null（旧 core 未标注）时退化为 `(core, session_id)`。 */
+export function checklistKey(
+  core: string | null | undefined,
+  teamId: string | null | undefined,
+  sessionId: string,
+): string {
+  return teamId ? scopedKey(core, `${teamId}\u0000${sessionId}`) : sessionKey(core, sessionId);
+}
+
 /** 人格复合键 `(core, team_id)`（null team_id → 空 id）。 */
 export function teamKey(core: string | null | undefined, teamId: string | null | undefined): string {
   return scopedKey(core, teamId ?? '');

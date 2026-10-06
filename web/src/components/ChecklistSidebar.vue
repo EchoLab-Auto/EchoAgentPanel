@@ -3,12 +3,12 @@
 
 import { computed, ref } from 'vue';
 import { state } from '../store';
-import { sessionKey } from '../keys';
+import { checklistsForSession } from '../state';
 import SidebarCard from './SidebarCard.vue';
 
-//! 清单快照按 (core, session_id) 复合键存储（state.checklists，2026-10 多上游
-//! 修复）——本组件只显示**当前会话**的清单；global 会话由父组件（ChatView）
-//! 聚合后传入 lists 覆盖。
+//! 清单快照按 (core, team_id, session_id) 复合键存储（state.checklists，
+//! 2026-10：多上游 core 维度 + 多 persona team 维度）——本组件只显示
+//! **当前会话**的清单；global 会话由父组件（ChatView）聚合后传入 lists 覆盖。
 
 const props = defineProps<{
   /** 当前会话 id（缺省 = 本地默认会话；'global' 时由 lists 提供聚合结果）。 */
@@ -22,7 +22,8 @@ const open = ref(true);
 const lists = computed(() => {
   if (props.lists) return props.lists;
   const id = props.sessionId ?? 'local:tui::local_user';
-  return state.checklists[sessionKey(state.activeRegion, id)] ?? [];
+  // team 维度隔离 + 旧 core 回退（2026-10）。
+  return checklistsForSession(state, id);
 });
 </script>
 

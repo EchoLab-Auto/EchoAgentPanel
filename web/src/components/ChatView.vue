@@ -15,9 +15,10 @@ import {
   type ChatMessage,
 } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
+import { checklistsForSession } from '../state';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
-import { sessionKey } from '../keys';
+import { checklistKey, sessionKey } from '../keys';
 import AgentConfigModal from './AgentConfigModal.vue';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
@@ -213,7 +214,8 @@ const checklistAvailable = computed(() =>
 /** 当前会话的清单快照（复合键 (core, session_id)；global 视图聚合当前区域全部）。 */
 const sessionChecklists = computed(() => {
   if (props.sessionId !== 'global') {
-    return state.checklists[sessionKey(state.activeRegion, props.sessionId)] ?? [];
+    // team 维度隔离 + 旧 core 回退（2026-10）。
+    return checklistsForSession(state, props.sessionId);
   }
   // global 视图：汇总当前运行区域下各会话的清单（跨 core 不串）。
   const out = [];
@@ -379,6 +381,8 @@ watch(checklistAvailable, (available) => {
   if (!available) {
     showChecklist.value = false;
     // 清单已不可用：丢弃当前会话的本地快照（其他会话/core 的不动）。
+    // 两种键形态都清（新键带 team 维度、旧键退化形态）。
+    delete state.checklists[checklistKey(state.activeRegion, state.activeTeamId, props.sessionId)];
     delete state.checklists[sessionKey(state.activeRegion, props.sessionId)];
   }
 });
