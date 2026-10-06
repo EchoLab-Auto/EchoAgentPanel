@@ -6,6 +6,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   LOCAL_DEFAULT_SESSION,
+  directoryNode,
+  directoryPath,
+  directoryToInput,
+  isRemoteDirectoryInput,
   localSessionProjection,
   workspaceChannelSessionId,
   workspaceIdOfChannel,
@@ -56,5 +60,37 @@ describe('切换器点选意图（双向绑定）', () => {
   it('QQ/global 会话点选不触发激活语义', () => {
     expect(workspacePickIntent('qq:dm::42', 'docs', true)).toEqual({ kind: 'none' });
     expect(workspacePickIntent('global', 'docs', true)).toEqual({ kind: 'none' });
+  });
+});
+
+describe('工作区目录条目规范化（跨机线格式 {path,node}）', () => {
+  it('字符串（本机）三助手直通', () => {
+    const dir = '/srv/local';
+    expect(directoryPath(dir)).toBe('/srv/local');
+    expect(directoryNode(dir)).toBeNull();
+    expect(directoryToInput(dir)).toBe('/srv/local');
+    expect(isRemoteDirectoryInput(dir)).toBe(false);
+  });
+
+  it('表形式（跨机）规范化：path/node 提取 + node:// 编辑串', () => {
+    const dir = { path: '/srv/remote', node: 'gpu-box' };
+    expect(directoryPath(dir)).toBe('/srv/remote');
+    expect(directoryNode(dir)).toBe('gpu-box');
+    // 单斜杠格式（与 Core Display / 提示词一致）
+    expect(directoryToInput(dir)).toBe('node://gpu-box/srv/remote');
+    expect(isRemoteDirectoryInput(directoryToInput(dir))).toBe(true);
+  });
+
+  it('node 缺失的表形式视为本机', () => {
+    const dir = { path: '/srv/maybe', node: null };
+    expect(directoryNode(dir)).toBeNull();
+    expect(directoryToInput(dir)).toBe('/srv/maybe');
+  });
+
+  it('node:// 编辑串往返：Core upsert 解析 → 表形式 → 回编辑串', () => {
+    // Core 侧 upsert 把 node:// 串解析为 Qualified{path,node}，
+    // 回推线格式为 {path,node} 表——面板规范化应还原同一编辑串。
+    const roundtrip = directoryToInput({ path: '/srv/repo', node: 'gpu-box' });
+    expect(roundtrip).toBe('node://gpu-box/srv/repo');
   });
 });

@@ -33,14 +33,20 @@ export interface WorkspaceFileEntry {
   size: number;
 }
 
+/** 工作区目录条目（线格式 untagged，2026-10）：
+ * - 本机目录 = 纯字符串绝对路径；
+ * - 跨机目录 = `{ path, node }`（node = 联邦节点名）。
+ * 消费一律经 `workspace.ts` 的规范化助手（directoryPath / directoryNode）。 */
+export type WorkspaceDirectoryEntry = string | { path: string; node?: string | null };
+
 /** 工作区会话（workspace 插件）：名称 + 多个工作区目录。 */
 export interface WorkspaceSessionInfo {
   /** 稳定 id（空 = 由 Core 依名称生成）。 */
   id: string;
   name: string;
   description?: string;
-  /** 工作区目录绝对路径列表。 */
-  directories?: string[];
+  /** 工作区目录列表（本机字符串 / 跨机 {path,node} 两种线格式）。 */
+  directories?: WorkspaceDirectoryEntry[];
 }
 
 /** 一个工作区目录的 git 状态快照（只读采集）。 */

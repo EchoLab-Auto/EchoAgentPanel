@@ -15,6 +15,7 @@ import { sessionKey } from '../keys';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 import type { WorkspaceSessionInfo } from '../protocol';
+import { directoryNode, directoryPath, directoryToInput } from '../workspace';
 
 const props = defineProps<{ teamId: string | null }>();
 
@@ -95,7 +96,9 @@ function startEdit(session: WorkspaceSessionInfo) {
   editing.value = { id: session.id };
   formName.value = session.name;
   formDescription.value = session.description ?? '';
-  formDirs.value = (session.directories ?? []).join('\n');
+  // 规范化：跨机目录 {path,node} → `node://<node>/<path>` 编辑串
+  // （此前直接 join 会把对象变成 "[object Object]"）。
+  formDirs.value = (session.directories ?? []).map(directoryToInput).join('\n');
 }
 
 function cancelEdit() {
@@ -228,10 +231,15 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
         </div>
         <p v-if="session.description" class="ws-card__desc">{{ session.description }}</p>
         <div class="ws-card__dirs">
-          <span v-for="dir in session.directories ?? []" :key="dir" class="ws-dir-chip" :title="dir">
-            <span v-if="dir.startsWith('node://')" class="ws-dir-chip__node">
-              {{ dir.slice('node://'.length).split('/')[0] }}⛓
-            </span>{{ dir.startsWith('node://') ? dir.slice('node://'.length).split('/').slice(1).join('/') : dir }}
+          <span
+            v-for="(dir, index) in session.directories ?? []"
+            :key="directoryToInput(dir) + index"
+            class="ws-dir-chip"
+            :title="directoryToInput(dir)"
+          >
+            <span v-if="directoryNode(dir)" class="ws-dir-chip__node">
+              {{ directoryNode(dir) }}⛓
+            </span>{{ directoryPath(dir) }}
           </span>
           <span v-if="!(session.directories ?? []).length" class="muted">（尚未配置目录）</span>
         </div>

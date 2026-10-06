@@ -1,3 +1,4 @@
+import type { WorkspaceDirectoryEntry } from './protocol';
 //! 工作区通道（激活 = 进入项目对话，2026-09-14）的面板侧规则。
 //!
 //! Core 侧单一事实来源 = workspace store 的 `active` 标记（经
@@ -10,6 +11,34 @@
 //! （正在查看 QQ/global 会话不打扰）。
 
 export const LOCAL_DEFAULT_SESSION = 'local:tui::local_user';
+
+// ── 工作区目录条目规范化（2026-10）──
+// Core 线格式：本机目录字符串 / 跨机 `{path, node}` 表（untagged）。
+// 所有 UI（chip、编辑表单、文件浏览器根）必须经这三个助手处理，
+// 不得直接假设目录是字符串（会把 `{path,node}` 当字符串用而崩）。
+
+/** 目录的绝对路径（两种形态通用）。 */
+export function directoryPath(dir: WorkspaceDirectoryEntry): string {
+  return typeof dir === 'string' ? dir : dir.path;
+}
+
+/** 目录的归属节点（本机 → null）。 */
+export function directoryNode(dir: WorkspaceDirectoryEntry): string | null {
+  if (typeof dir === 'string') return null;
+  return dir.node ?? null;
+}
+
+/** 目录的显示/编辑字符串：本机 = 路径；跨机 = `node://<node>/<path>`。 */
+export function directoryToInput(dir: WorkspaceDirectoryEntry): string {
+  const node = directoryNode(dir);
+  if (!node) return directoryPath(dir);
+  return `node://${node}/${directoryPath(dir).replace(/^\/+/, '')}`;
+}
+
+/** 输入字符串是否跨机目录（`node://` 前缀）。 */
+export function isRemoteDirectoryInput(input: string): boolean {
+  return input.trim().startsWith('node://');
+}
 
 /** 工作区 W 的本地通道会话 id。 */
 export function workspaceChannelSessionId(workspaceId: string): string {

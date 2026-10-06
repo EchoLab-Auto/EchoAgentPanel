@@ -21,6 +21,7 @@ import { state } from '../store';
 import { sendCommand } from '../connection';
 import { scopedKey } from '../keys';
 import type { WorkspaceFileEntry, WorkspaceSessionInfo } from '../protocol';
+import { directoryToInput, isRemoteDirectoryInput } from '../workspace';
 
 const props = defineProps<{
   teamId: string | null;
@@ -38,7 +39,10 @@ const listing = computed(() =>
 );
 const entries = computed(() => listing.value?.entries ?? []);
 const error = computed(() => listing.value?.error ?? null);
-const roots = computed(() => props.session?.directories ?? []);
+/** 目录根（规范化为字符串：本机路径 / 跨机 node:// 串）——Core 线格式
+ * 中跨机目录是 `{path,node}` 表，直接当字符串用（basename/startsWith）
+ * 会崩，这里统一规范化（2026-10）。 */
+const roots = computed(() => (props.session?.directories ?? []).map(directoryToInput));
 
 function basename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
@@ -200,7 +204,7 @@ function formatSize(size: number): string {
         @mouseleave="hideRootTip"
         @click="openRoot(root)"
       >
-        <span v-if="root.startsWith('node://')" class="wfb-root__node">
+        <span v-if="isRemoteDirectoryInput(root)" class="wfb-root__node">
           {{ root.slice('node://'.length).split('/')[0] }}⛓
         </span>{{ basename(root) }}
       </button>
