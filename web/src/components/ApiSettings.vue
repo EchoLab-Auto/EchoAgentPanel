@@ -16,7 +16,7 @@ import {
 } from '@echolab-auto/ui-frame';
 import { ChatCopyButton } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
 
 interface ApiTemplate {
   key: string;
@@ -197,6 +197,55 @@ function closeForm() {
 
 function applyTemplate(t: ApiTemplate) {
   fillForm(t);
+}
+
+// ── 联邦分布式供应商共享（2026-10）：从节点导入 ──
+// 流程：选 peer → RequestRemoteApiProfiles → Core 经 Query(ApiProfiles)
+// 拉远端**脱敏**池 → RemoteApiProfiles 事件存 state.remoteApiProfiles
+// → 这里列出 → 「导入」把 provider/model/base_url 预填进添加表单
+// （api_key 明文永不过线——用户在本机补填后保存）。
+
+/** 在线的联邦 peer 名列表（联邦页数据；本机 'local' 不算远端）。 */
+const federatedPeers = computed(() => {
+  const peers = state.federation?.peers ?? [];
+  return peers.filter((p) => p.link === 'Online').map((p) => p.name);
+});
+
+const importPeer = ref('');
+/** 该 peer 最近一次查询结果（state.remoteApiProfiles）。 */
+const remotePool = computed(() => (importPeer.value ? state.remoteApiProfiles[importPeer.value] : undefined));
+const remoteLoading = ref(false);
+
+function queryRemoteProfiles() {
+  if (!importPeer.value) return;
+  remoteLoading.value = true;
+  sendPending(
+    { RequestRemoteApiProfiles: { peer: importPeer.value } },
+    'api:remote-profiles',
+  );
+}
+
+// 查询结果到达（事件写入 state）即结束加载态
+watch(remotePool, () => {
+  remoteLoading.value = false;
+});
+
+/** 把远端条目预填进「添加 API 服务商」表单（key 留空待补）。 */
+function importFromRemote(entry: import('../protocol').RemoteApiProfileEntry) {
+  openAdd();
+  profileName.value = entry.name;
+  fillForm({
+    provider: entry.provider,
+    model: entry.model,
+    base_url: entry.base_url,
+    thinking: (entry as { thinking?: 'enabled' | 'disabled' }).thinking,
+    reasoning_effort: (entry as { reasoning_effort?: 'low' | 'high' | 'max' })
+      .reasoning_effort,
+  });
+  // 提示 key 需本机补填（远端只回了 key_set 布尔）
+  if (!entry.key_set) {
+    // 远端自己也没配 key——原样导入也无妨（用户会看到同样的 key 缺失态）
+  }
 }
 
 // Provider 预配置：选择常见服务商时自动填充 base_url / model。
@@ -569,6 +618,50 @@ watch(
       </NeumorphismCard>
     </div>
 
+    <!-- 联邦分布式供应商共享（2026-10）：从节点导入 -->
+    <div v-if="formMode === 'none' && federatedPeers.length" class="api-remote-import">
+      <div class="api-remote-import__row">
+        <NeumorphismSelect
+          v-model="importPeer"
+          :options="federatedPeers.map((p) => ({ label: p, value: p }))"
+          placeholder="选择联邦节点…"
+          size="small"
+        />
+        <NeumorphismButton
+          variant="glass"
+          size="small"
+          :disabled="!importPeer || remoteLoading"
+          @click="queryRemoteProfiles"
+        >
+          {{ remoteLoading ? '查询中…' : '查询供应商' }}
+        </NeumorphismButton>
+      </div>
+      <div v-if="remotePool?.error" class="api-remote-import__error muted">
+        {{ remotePool.error }}
+      </div>
+      <div
+        v-for="entry in remotePool?.profiles ?? []"
+        :key="entry.name"
+        class="api-remote-entry"
+      >
+        <span class="api-remote-entry__name">{{ entry.name }}</span>
+        <span class="muted">{{ entry.provider }} / {{ entry.model }}</span>
+        <span v-if="!entry.key_set" class="api-remote-entry__warn" title="远端未配置 key">
+          ⚠ 无 key
+        </span>
+        <NeumorphismButton variant="glass" size="small" @click="importFromRemote(entry)">
+          导入
+        </NeumorphismButton>
+      </div>
+      <div
+        v-if="remotePool && !remotePool.error && !(remotePool.profiles ?? []).length"
+        class="muted"
+      >
+        （远端无自定义 profile；活跃默认：{{ remotePool.active?.provider ?? '—' }} /
+        {{ remotePool.active?.model ?? '—' }}）
+      </div>
+    </div>
+
     <!-- 添加 API 服务商（概览态常驻；表单展开时隐藏） -->
     <div v-if="formMode === 'none'" class="profile-add-row">
       <NeumorphismButton variant="primary" @click="openAdd">+ 添加 API 服务商</NeumorphismButton>
@@ -729,4 +822,24 @@ watch(
   font-size: 11px;
   font-weight: 400;
 }
+.api-remote-import {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--nm-bg-soft, rgba(128, 128, 128, 0.06));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-remote-import__row { display: flex; gap: 8px; align-items: center; }
+.api-remote-import__row > *:first-child { flex: 1; }
+.api-remote-import__error { font-size: 12px; }
+.api-remote-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.api-remote-entry__name { font-weight: 600; }
+.api-remote-entry__warn { color: var(--panel-warn, #9a6700); font-size: 12px; }
 </style>

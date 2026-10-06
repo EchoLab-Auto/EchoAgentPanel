@@ -289,6 +289,14 @@ export interface ChecklistState {
 
 // ── BackendCommand（外部标签枚举）──────────────────────────────────────────
 
+export interface RemoteApiProfileEntry {
+  name: string;
+  provider: string;
+  model: string;
+  base_url?: string;
+  key_set?: boolean;
+}
+
 export type BackendCommand =
   | { SendMessage: { session_id: string; content: string; images?: string[]; team_id?: string | null } }
   | { SwitchModel: { model: string } }
@@ -307,6 +315,7 @@ export type BackendCommand =
       };
     }
   | { SwitchApi: { name: string } }
+  | { RequestRemoteApiProfiles: { peer: string } }
   | { TestApi: { name: string } }
   | { QueryApiBalance: { name: string } }
   | 'RequestSkillsList'
@@ -513,6 +522,14 @@ export type BackendEvent =
         system_prompt: string;
         active_api: string;
         profiles: ApiProfileInfo[];
+      };
+    }
+  | {
+      RemoteApiProfiles: {
+        peer: string;
+        active?: Record<string, unknown> | null;
+        profiles?: RemoteApiProfileEntry[];
+        error?: string | null;
       };
     }
   | { ApiProfilesUpdated: { active_api: string; profiles: ApiProfileInfo[] } }

@@ -440,6 +440,12 @@ export interface AppState {
    */
   checklists: Record<string, ChecklistEntry[]>;
   toasts: Toast[];
+  /** 最近一次联邦远端供应商池查询结果（RequestRemoteApiProfiles 响应；
+   * ApiSettings「从节点导入」消费；peer → 响应）。 */
+  remoteApiProfiles: Record<
+    string,
+    { active?: Record<string, unknown> | null; profiles: import('./protocol').RemoteApiProfileEntry[]; error: string | null }
+  >;
   /** API 连通性测试结果（name(空=默认) → { ok, message, latencyMs }） */
   apiTests: Record<string, { ok: boolean; message: string; latencyMs: number }>;
   /** API 余额查询结果（name(空=默认) → 余额信息） */
@@ -541,6 +547,7 @@ export function initialState(): AppState {
     qqByAdapter: {},
     checklists: {},
     toasts: [],
+    remoteApiProfiles: {},
     apiTests: {},
     apiBalances: {},
     skills: [],
@@ -1086,6 +1093,22 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         state.api.active_api = e.active_api;
         state.api.profiles = e.profiles;
       }
+      return state;
+    }
+    case 'RemoteApiProfiles': {
+      const e = (event as {
+        RemoteApiProfiles: {
+          peer: string;
+          active?: Record<string, unknown> | null;
+          profiles?: import('./protocol').RemoteApiProfileEntry[];
+          error?: string | null;
+        };
+      }).RemoteApiProfiles;
+      state.remoteApiProfiles[e.peer] = {
+        active: e.active ?? null,
+        profiles: e.profiles ?? [],
+        error: e.error ?? null,
+      };
       return state;
     }
     case 'ApiTestResult': {
