@@ -237,7 +237,12 @@ function onSessionPick(id: string) {
     }
   }
   const synced = state.workspaceTeamId === activeTeamId.value;
-  const intent = workspacePickIntent(id, state.workspaceActive, synced);
+  const intent = workspacePickIntent(
+    id,
+    state.workspaceActive,
+    synced,
+    state.workspaceSessions.map((s) => s.id),
+  );
   if (intent.kind === 'activate') sendWorkspaceActivate(intent.workspaceId);
   else if (intent.kind === 'deactivate') sendWorkspaceActivate(null);
   selectSession(id);

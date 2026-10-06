@@ -68,14 +68,22 @@ export type WorkspacePickIntent =
  * @param sessionId 被点选的会话 id
  * @param active    Core 已知的激活工作区（state.workspaceActive）
  * @param synced    该快照是否属于当前团队（state.workspaceTeamId === 当前 team）
+ * @param knownWorkspaceIds 已知工作区 id 列表（快照已知时传入）——已删除
+ *   工作区的残留通道（历史保留）仅查看、不发激活（否则 Core 报
+ *   「工作区会话 X 不存在」）；undefined/null = 不校验（快照未就绪）。
  */
 export function workspacePickIntent(
   sessionId: string,
   active: string | null,
   synced: boolean,
+  knownWorkspaceIds?: string[] | null,
 ): WorkspacePickIntent {
   const workspaceId = workspaceIdOfChannel(sessionId);
   if (workspaceId) {
+    // 残留通道（已删除工作区）：仅查看（不发激活）。
+    if (synced && knownWorkspaceIds && !knownWorkspaceIds.includes(workspaceId)) {
+      return { kind: 'none' };
+    }
     // 选通道 = 激活对应工作区（已是激活态且快照已同步 → 无需重发）。
     if (!synced || active !== workspaceId) {
       return { kind: 'activate', workspaceId };

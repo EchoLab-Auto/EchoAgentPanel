@@ -63,6 +63,39 @@ describe('切换器点选意图（双向绑定）', () => {
   });
 });
 
+describe('已删除工作区的残留通道（历史保留）', () => {
+  it('快照已知且不含该 id → 仅查看（不激活，避免 Core 报错）', () => {
+    const stale = 'local:workspace:deleted-ws:local_user';
+    expect(workspacePickIntent(stale, null, true, ['alive-ws'])).toEqual({ kind: 'none' });
+    // 已是激活态（不太可能，但防御）：依然不激活
+    expect(workspacePickIntent(stale, 'deleted-ws', true, ['alive-ws'])).toEqual({ kind: 'none' });
+  });
+
+  it('存在的工作区不受影响（正常激活）', () => {
+    const alive = 'local:workspace:alive-ws:local_user';
+    expect(workspacePickIntent(alive, null, true, ['alive-ws'])).toEqual({
+      kind: 'activate',
+      workspaceId: 'alive-ws',
+    });
+  });
+
+  it('快照未同步（synced=false）→ 不校验（保持旧行为）', () => {
+    const id = 'local:workspace:some-ws:local_user';
+    expect(workspacePickIntent(id, null, false, [])).toEqual({
+      kind: 'activate',
+      workspaceId: 'some-ws',
+    });
+  });
+
+  it('未提供已知列表 → 不校验（兼容旧调用）', () => {
+    const id = 'local:workspace:some-ws:local_user';
+    expect(workspacePickIntent(id, null, true)).toEqual({
+      kind: 'activate',
+      workspaceId: 'some-ws',
+    });
+  });
+});
+
 describe('工作区目录条目规范化（跨机线格式 {path,node}）', () => {
   it('字符串（本机）三助手直通', () => {
     const dir = '/srv/local';
