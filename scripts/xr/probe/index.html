@@ -15,11 +15,18 @@
       .k { flex: 0 0 200px; color: #9aa3af; }
       .v { margin: 0; font-weight: 600; word-break: break-all; }
       .ok { color: #4ade80; } .bad { color: #f87171; } .mid { color: #facc15; }
-      button { margin-top: 16px; padding: 14px 20px; font-size: 18px; font-weight: 700;
+      button, .btn { display: inline-block; margin-top: 16px; margin-right: 10px; padding: 14px 20px;
+               font-size: 17px; font-weight: 700; text-decoration: none; cursor: pointer;
                color: #0b1220; background: #8ab4f8; border: 0; border-radius: 999px; }
-      button:active { transform: scale(0.98); }
+      .btn.secondary { background: #2a2f39; color: #cbd5e1; }
+      button:active, .btn:active { transform: scale(0.98); }
       #session { margin-top: 12px; font-size: 15px; color: #cbd5e1; white-space: pre-wrap; }
-      .hint { color: #7c8593; font-size: 13px; margin-top: 18px; }
+      .hint { color: #7c8593; font-size: 13px; margin-top: 18px; max-width: 720px; }
+      .card { max-width: 720px; margin-top: 22px; padding: 16px 18px; background: #1d2026; border-radius: 12px; }
+      .card h2 { font-size: 16px; margin: 0 0 8px; color: #e8eaed; }
+      .card ol { margin: 8px 0 0; padding-left: 20px; color: #b6bdc9; font-size: 14px; }
+      .card ol li { margin: 4px 0; }
+      code { background: #14161a; padding: 1px 6px; border-radius: 6px; font-size: 13px; }
     </style>
   </head>
   <body>
@@ -27,13 +34,34 @@
     <div class="grid" id="grid"></div>
     <button id="btn" disabled>正在检测…</button>
     <div id="session"></div>
+
+    <div class="card">
+      <h2>去 Panel 巨幕</h2>
+      <a class="btn" id="open-panel" href="#">打开 Panel（HTTPS）</a>
+      <a class="btn secondary" href="/ca.crt" download="echo-agent-dev-ca.crt">下载根证书（可选）</a>
+      <ol>
+        <li>点「打开 Panel」如再弹证书警告：<b>高级 → 继续前往</b>（本机自签开发证书，属预期）。</li>
+        <li>Panel 打开后：地址栏「<b>作为独立应用打开/运行</b>」→ 独立窗口（免安装）。</li>
+        <li>点顶栏「<b>全屏</b>」→ 铺满视野；控制器射线 = 鼠标，蓝牙键盘可输入。</li>
+        <li>（可选）装了根证书可减少警告：设置 → 安全/加密与凭据 → 安装证书 → CA 证书。
+            若浏览器不信任用户证书，继续用「继续前往」即可，不影响 WebXR。</li>
+      </ol>
+    </div>
+
     <p class="hint">
-      打开本页后若无按钮可点，说明 WebXR 不可用——先解决「安全上下文」（见 scripts/xr/README.md）。<br />
-      检测结果已自动回传给 PC 端服务器（reports.log）。
+      <b>无需 adb。</b>本页主要用途：① 判定当前地址是否安全上下文（WebXR 的前提）；
+      ② 一键试启 immersive-vr 会话验证全链路；③ 检测结果自动回传 PC（reports.log）。<br />
+      若本页在 <code>http://</code> 下显示 <span class="bad">isSecureContext=false</span>：
+      换 <code>https://</code> 入口（首次点「继续前往」），或用 <code>pico://flags</code> 把本地址
+      加入「Insecure origins treated as secure」（PICO OS 5.x 可用）。
     </p>
+
     <script>
       const $ = (id) => document.getElementById(id);
       const esc = (v) => String(v ?? '—');
+
+      // Panel 入口：同主机名 + 8443（HTTPS 前端）
+      $('open-panel').href = `https://${location.hostname}:8443/`;
 
       async function collect() {
         const info = {
@@ -60,10 +88,7 @@
       }
 
       function render(info) {
-        const yn = (v, invert = false) => {
-          const good = invert ? !v : !!v;
-          return `<span class="${good ? 'ok' : 'bad'}">${v}</span>`;
-        };
+        const yn = (v) => `<span class="${v ? 'ok' : 'bad'}">${v}</span>`;
         const rows = [
           ['安全上下文 isSecureContext', yn(info.isSecureContext), info.isSecureContext],
           ['WebXR 入口 navigator.xr', yn(info.hasXR), info.hasXR],

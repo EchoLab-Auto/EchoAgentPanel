@@ -39,6 +39,21 @@ class Handler(SimpleHTTPRequestHandler):
             except FileNotFoundError:
                 body = ""
             return self._send(200, body.encode("utf-8"))
+        if self.path in ("/ca.crt", "/dev-ca.crt"):
+            # 本机开发根证书（可选安装到头显，减少 HTTPS 警告）：
+            # 单独提供下载是因为证书本身是公开信息，明文 HTTP 分发无风险。
+            ca = Path.home() / ".config" / "echo-agent-panel" / "dev-tls" / "dev-ca.crt"
+            if not ca.is_file():
+                return self._send(404, b"ca not generated yet")
+            body = ca.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-x509-ca-cert")
+            self.send_header("Content-Disposition", 'attachment; filename="echo-agent-dev-ca.crt"')
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         return self._send(404, b"not found")
 
     def do_POST(self):  # noqa: N802
