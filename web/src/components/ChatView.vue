@@ -507,7 +507,7 @@ function subagentTaskLabel(input: string): string | undefined {
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
 }
 
-const toolRowOf = (m: ChatMessage): ToolRunItem | null => {
+const toolRowOf = (m: ChatMessageWithImages): ToolRunItem | null => {
   const tool = m.tool;
   if (m.role !== 'tool' || !tool) return null;
   return {
@@ -518,6 +518,8 @@ const toolRowOf = (m: ChatMessage): ToolRunItem | null => {
     status: tool.status,
     label: tool.name === 'spawn_subagent' ? subagentTaskLabel(tool.input ?? '') : undefined,
     time: m.time ? formatTime(m.time) : undefined,
+    startedAtMs: tool.startedAtMs,
+    elapsedMs: tool.elapsedMs,
   };
 };
 

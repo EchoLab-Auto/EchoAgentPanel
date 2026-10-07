@@ -301,6 +301,10 @@ export interface TimelineTool {
   tool_call_id?: string;
   /** 执行被外圈超时守卫中止 */
   timed_out?: boolean;
+  /** 工具开始执行的 epoch 毫秒（新 core 提供；重放显示实时/总耗时用） */
+  started_at_ms?: number;
+  /** 工具执行总耗时（毫秒；新 core 提供） */
+  elapsed_ms?: number;
 }
 
 export interface TimelineMessage {
@@ -527,8 +531,8 @@ export type BackendEvent =
         integrated_at_ms: number;
       };
     }
-  | { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null } }
-  | { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null } }
+  | { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }
+  | { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null; elapsed_ms?: number } }
   | { ChecklistUpdated: { session_id: string; state: ChecklistState; team_id?: string | null } }
   | { AgentOutput: { session_id: string; content: string; branch_id: string | null; team_id?: string | null } }
   | { AgentCompleted: { session_id: string } }

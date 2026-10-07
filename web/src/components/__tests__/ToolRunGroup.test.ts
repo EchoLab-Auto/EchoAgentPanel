@@ -98,4 +98,31 @@ describe('ToolRunGroup', () => {
     // 失败图标带红色标记
     expect(wrapper.findAll('.tool-run-group__icon--failed').length).toBe(1);
   });
+
+  it('耗时：运行中实时计时（角标+详情），完成后显示总耗时', async () => {
+    const started = Date.now() - 4200;
+    const wrapper = mount(ToolRunGroup, {
+      props: {
+        items: [
+          item({ key: 'a', name: 'bash', status: 'succeeded', elapsedMs: 12345 }),
+          item({ key: 'b', name: 'bash', status: 'running', output: null, startedAtMs: started }),
+        ],
+      },
+    });
+    // 运行中：图标右下角实时角标（仅 1 个；已完成项不显示）
+    const badges = wrapper.findAll('.tool-run-group__timer');
+    expect(badges.length).toBe(1);
+    expect(badges[0].text()).toMatch(/^\d+(\.\d+)?s$/);
+
+    // 完成项详情头显示总耗时（elapsedMs → 12.3s）
+    await wrapper.findAll('.tool-run-group__icon')[0].trigger('click');
+    const detail = wrapper.find('.tool-run-group__detail');
+    expect(detail.text()).toContain('耗时 12.3s');
+
+    // 运行项详情头显示「运行中 X」实时文案
+    await wrapper.findAll('.tool-run-group__icon')[1].trigger('click');
+    expect(wrapper.find('.tool-run-group__detail').text()).toContain('运行中');
+
+    wrapper.unmount();
+  });
 });

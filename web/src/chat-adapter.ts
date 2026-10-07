@@ -1,7 +1,7 @@
 //! DisplayMessage → ChatMessage 适配层：panel 的消息模型与
 //! @echolab-auto/ui-frame/chat 的数据契约之间的唯一翻译点。
 
-import type { ChatBranchEntry, ChatMessage } from '@echolab-auto/ui-frame/chat';
+import type { ChatBranchEntry, ChatMessage, ChatToolCall } from '@echolab-auto/ui-frame/chat';
 import type { BranchMsg, DisplayMessage } from './state';
 import type { SubagentEventInfo } from './state_domains/timeline';
 
@@ -24,12 +24,23 @@ function mergeReasoning(msgs: BranchMsg[]): ChatBranchEntry[] {
   return out;
 }
 
+/** ui-frame `ChatToolCall` 的 panel 侧扩展：core 上报的工具计时。
+ *  仅加宽本地类型，不改 vendor 契约（字段全部可选，兼容上游）。 */
+export type ChatToolCallWithTiming = ChatToolCall & {
+  /** 执行开始时间（epoch ms；运行中实时计时用） */
+  startedAtMs?: number;
+  /** 执行总耗时（ms；完成后展示） */
+  elapsedMs?: number;
+};
+
 export interface ChatMessageWithImages extends ChatMessage {
   images?: string[];
   /** 实时消息标记（渲染层据此播放场动画/打字机；历史回放不播放） */
   animate?: boolean;
   /** 子代理完成回报（role='subagent'）的结构化载荷。 */
   subagent?: SubagentEventInfo;
+  /** 覆盖基类 ChatToolCall：追加计时字段（结构兼容）。 */
+  tool?: ChatToolCallWithTiming;
 }
 
 /**
@@ -66,6 +77,8 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
       input: m.tool.input,
       output: m.tool.output,
       status: m.tool.status,
+      startedAtMs: m.tool.startedAtMs,
+      elapsedMs: m.tool.elapsedMs,
     },
     branch: m.branch && {
       branchId: m.branch.branchId,

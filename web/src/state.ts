@@ -177,6 +177,10 @@ export interface ToolMsg {
   status: ToolStatus;
   /** 工具调用精确配对 id（新 core 提供；同名并行调用据此配对） */
   toolCallId?: string;
+  /** 执行开始时间（epoch ms；core 提供，运行中实时计时用） */
+  startedAtMs?: number;
+  /** 执行总耗时（ms；core 上报或按开始时间回算） */
+  elapsedMs?: number;
 }
 
 export interface DisplayMessage {
@@ -220,6 +224,10 @@ export interface BranchMsg {
   input?: string;
   output?: string;
   status?: ToolStatus;
+  /** 执行开始时间（epoch ms；core 提供，运行中实时计时用） */
+  startedAtMs?: number;
+  /** 执行总耗时（ms；core 上报） */
+  elapsedMs?: number;
 }
 
 /** 运行中的临时回复分支（侧边临时会话标签） */
@@ -842,7 +850,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'ToolCall': {
-      const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null } }).ToolCall;
+      const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }).ToolCall;
+      const startedAtMs = typeof e.started_at_ms === 'number' ? e.started_at_ms : Date.now();
       stageOrchestrationTool(state, e.session_id, evtCore(e), e.tool_name, e.arguments);
       setPhase(state, sessionKey(evtCore(e), e.session_id), e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
       // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
@@ -858,6 +867,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
             output: null,
             status: 'running',
             toolCallId: e.tool_call_id || undefined,
+            startedAtMs,
           },
         });
       }
@@ -870,16 +880,17 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           toolCallId: e.tool_call_id || undefined,
           input: summarizeArguments(e.arguments),
           status: 'running',
+          startedAtMs,
         });
       }
       return state;
     }
     case 'ToolResult': {
-      const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null } }).ToolResult;
+      const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null; elapsed_ms?: number } }).ToolResult;
       // 工具结果实时回填主时间线（与 ToolCall 精确配对）；分支 tab 同步更新。
       const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
-        finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out);
+        finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out, e.elapsed_ms);
       }
       if (tab) {
         const failed = e.timed_out === true || e.result.trimStart().startsWith('error:');
@@ -892,6 +903,12 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           if (!matched) continue;
           msg.output = bounded(e.result, 4000);
           msg.status = failed ? 'failed' : 'succeeded';
+          msg.elapsedMs =
+            typeof e.elapsed_ms === 'number'
+              ? e.elapsed_ms
+              : msg.startedAtMs != null
+                ? Math.max(0, Date.now() - msg.startedAtMs)
+                : undefined;
           break;
         }
       }

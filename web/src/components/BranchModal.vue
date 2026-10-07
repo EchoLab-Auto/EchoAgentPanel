@@ -74,6 +74,8 @@ const rows = computed<BranchRow[]>(() => {
       output: m.output ?? null,
       status: m.status,
       time: formatTime(m.time),
+      startedAtMs: m.startedAtMs,
+      elapsedMs: m.elapsedMs,
     };
     const last = out[out.length - 1];
     if (last && last.kind === 'tool-group') last.items.push(item);

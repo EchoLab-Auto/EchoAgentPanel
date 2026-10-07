@@ -3,7 +3,7 @@
 //! 空间不足自动换行；点击某行图标，该行下方浮现具体调用内容卡片。
 //! 运行过程中默认折叠；全部完成且均成功时自动折叠，存在失败时保持展开提示。
 
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import ToolIcon from './ToolIcon.vue';
 
 export interface ToolRunItem {
@@ -19,6 +19,10 @@ export interface ToolRunItem {
    */
   label?: string;
   time?: string;
+  /** 执行开始时间（epoch ms；core 提供，运行中实时计时用） */
+  startedAtMs?: number;
+  /** 执行总耗时（ms；core 上报，完成后展示为「耗时 X」） */
+  elapsedMs?: number;
 }
 
 const props = defineProps<{ items: ToolRunItem[] }>();
@@ -62,6 +66,69 @@ const STATUS_LABEL: Record<string, string> = {
   succeeded: '成功',
   failed: '失败',
 };
+
+// ── 耗时显示：运行中实时刷新（100ms 步进），完成后为总耗时 ──────────────
+/** 计时基准 now：仅当组内有运行中条目时开定时器，避免常驻开销。 */
+const now = ref(Date.now());
+let ticker: ReturnType<typeof setInterval> | null = null;
+watch(
+  hasRunning,
+  (running) => {
+    if (running && ticker == null) {
+      ticker = setInterval(() => {
+        now.value = Date.now();
+      }, 100);
+    } else if (!running && ticker != null) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => {
+  if (ticker != null) clearInterval(ticker);
+});
+
+/** 已运行/总耗时（毫秒）：优先 core 上报的 elapsedMs；运行中按开始时间实时回算。 */
+function elapsedOf(item: ToolRunItem): number | null {
+  if (typeof item.elapsedMs === 'number') return item.elapsedMs;
+  if (item.status === 'running' && typeof item.startedAtMs === 'number') {
+    return Math.max(0, now.value - item.startedAtMs);
+  }
+  return null;
+}
+
+/** 毫秒 → 时长文案（<60s 保留一位小数；否则 Xm YYs）。 */
+function fmtDuration(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`;
+}
+
+/** 详情头/悬停：运行中=「运行中 X」实时刷新；已完成=「耗时 X」。 */
+function durationLabel(item: ToolRunItem | null | undefined): string | null {
+  if (!item) return null;
+  const ms = elapsedOf(item);
+  if (ms == null) return null;
+  return item.status === 'running' ? `运行中 ${fmtDuration(ms)}` : `耗时 ${fmtDuration(ms)}`;
+}
+
+/** 图标角标：仅运行中显示，紧凑格式（<10s 一位小数）。 */
+function badgeLabel(item: ToolRunItem): string | null {
+  if (item.status !== 'running') return null;
+  const ms = elapsedOf(item);
+  if (ms == null) return null;
+  return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : fmtDuration(ms);
+}
+
+/** 图标 title：名称 · 状态 · 时长。 */
+function titleOf(item: ToolRunItem): string {
+  const parts = [item.label ?? item.name];
+  if (item.status) parts.push(STATUS_LABEL[item.status] ?? item.status);
+  const duration = durationLabel(item);
+  if (duration) parts.push(duration);
+  return parts.join(' · ');
+}
 </script>
 
 <template>
@@ -76,12 +143,13 @@ const STATUS_LABEL: Record<string, string> = {
           'tool-run-group__icon--open': openKey === item.key,
           'tool-run-group__icon--failed': item.status === 'failed',
         }"
-        :title="`${item.label ?? item.name}${item.status ? ' · ' + (STATUS_LABEL[item.status] ?? item.status) : ''}`"
+        :title="titleOf(item)"
         :aria-label="item.label ?? item.name"
         @click="toggle(item.key)"
       >
         <ToolIcon :name="item.name" :loading="item.status === 'running'" />
         <span v-if="item.status === 'failed'" class="tool-run-group__dot tool-run-group__dot--failed" />
+        <span v-if="badgeLabel(item)" class="tool-run-group__timer">{{ badgeLabel(item) }}</span>
       </button>
     </div>
 
@@ -90,6 +158,7 @@ const STATUS_LABEL: Record<string, string> = {
         <ToolIcon :name="openItem.name" class="tool-run-group__detail-icon" />
         <span class="tool-run-group__detail-name">{{ openItem.label ?? openItem.name }}</span>
         <span v-if="openItem.time" class="tool-run-group__detail-time">{{ openItem.time }}</span>
+        <span v-if="durationLabel(openItem)" class="tool-run-group__detail-duration">{{ durationLabel(openItem) }}</span>
         <span
           v-if="openItem.status"
           class="tool-run-group__detail-status"
@@ -260,5 +329,32 @@ const STATUS_LABEL: Record<string, string> = {
 }
 .tool-run-group__pre--output {
   color: var(--nm-text-primary);
+}
+
+/* 运行中角标：图标右下角的实时耗时（仅运行中显示，100ms 刷新） */
+.tool-run-group__timer {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  padding: 0 3px;
+  border-radius: 6px;
+  font-size: 9px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: var(--panel-accent);
+  background: color-mix(in srgb, var(--nm-bg-color) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-accent) 35%, transparent);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* 详情头部时长：运行中实时刷新，完成后固定为总耗时 */
+.tool-run-group__detail-duration {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--panel-accent);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-accent) 14%, transparent);
 }
 </style>
