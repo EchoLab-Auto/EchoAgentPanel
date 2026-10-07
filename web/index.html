@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EchoAgent Panel</title>
+    <!-- PWA / 头显独立应用运行（XR 巨幕模式）：manifest + 图标 + 主题色。
+         maskable 图标供 Android 系（PICO 等）桌面/窗口自适应裁切。 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="theme-color" content="#e0e0e0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c1c1c" media="(prefers-color-scheme: dark)" />
     <script>
       // 防主题闪烁：显式 light 不设 data-theme；dark 或未保存/auto 时跟随系统偏好。
       !(function () {

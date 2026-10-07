@@ -220,7 +220,7 @@ fn accepts_gzip(headers: &HeaderMap) -> bool {
 fn compressible_ext(file: &Path) -> bool {
     matches!(
         file.extension().and_then(|ext| ext.to_str()),
-        Some("js" | "css" | "html" | "json" | "svg" | "map" | "txt" | "xml")
+        Some("js" | "css" | "html" | "json" | "webmanifest" | "svg" | "map" | "txt" | "xml")
     )
 }
 
@@ -230,6 +230,9 @@ fn content_type(file: &Path) -> HeaderValue {
         Some("js") => "text/javascript; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
         Some("json") | Some("map") => "application/json",
+        // PWA manifest（XR 巨幕模式 / 独立应用运行的清单）：浏览器推荐注册的
+        // 专用 MIME；缺省 application/octet-stream 会被部分实现拒绝解析。
+        Some("webmanifest") => "application/manifest+json",
         Some("svg") => "image/svg+xml",
         Some("png") => "image/png",
         Some("ico") => "image/x-icon",
@@ -246,4 +249,42 @@ fn not_found() -> Response {
         "not found",
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webmanifest_is_manifest_json_and_gzip_capable() {
+        // PWA manifest：浏览器要求（推荐）application/manifest+json；
+        // 作为文本资源参与 gzip 协商（XR 巨幕模式的清单依赖此类型）。
+        assert_eq!(
+            content_type(Path::new("manifest.webmanifest"))
+                .to_str()
+                .unwrap(),
+            "application/manifest+json"
+        );
+        assert!(compressible_ext(Path::new("manifest.webmanifest")));
+    }
+
+    #[test]
+    fn existing_types_and_gzip_rules_stay_stable() {
+        assert_eq!(
+            content_type(Path::new("assets/app.js")).to_str().unwrap(),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(
+            content_type(Path::new("index.html")).to_str().unwrap(),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            content_type(Path::new("icons/icon-192.png"))
+                .to_str()
+                .unwrap(),
+            "image/png"
+        );
+        assert!(compressible_ext(Path::new("assets/app.css")));
+        assert!(!compressible_ext(Path::new("icons/icon-192.png")));
+    }
 }

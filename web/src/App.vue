@@ -24,6 +24,7 @@ import ChatView from './components/ChatView.vue';
 import SettingsView from './components/SettingsView.vue';
 import ShellPanel from './components/ShellPanel.vue';
 import BranchModal from './components/BranchModal.vue';
+import FullscreenToggleButton from './components/FullscreenToggleButton.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 
 startConnection();
@@ -440,6 +441,7 @@ watch(
           >
             设置
           </NeumorphismButton>
+          <FullscreenToggleButton />
           <ThemeToggleButton />
         </div>
       </template>

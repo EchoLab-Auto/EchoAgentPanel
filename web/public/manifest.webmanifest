@@ -1,0 +1,22 @@
+{
+  "name": "EchoAgent Panel",
+  "short_name": "EchoAgent",
+  "description": "EchoAgent 本机 Agent 的 Web 管理面板（聊天 / 任务 / 设置）",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#e0e0e0",
+  "theme_color": "#e0e0e0",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
