@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>EchoAgent XR 就绪检测</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 24px; font: 16px/1.6 system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+             background: #14161a; color: #e8eaed; }
+      h1 { font-size: 22px; margin: 0 0 12px; }
+      .grid { display: grid; gap: 10px; max-width: 720px; }
+      .row { display: flex; gap: 10px; align-items: baseline; padding: 10px 14px;
+             background: #1d2026; border-radius: 10px; }
+      .k { flex: 0 0 200px; color: #9aa3af; }
+      .v { margin: 0; font-weight: 600; word-break: break-all; }
+      .ok { color: #4ade80; } .bad { color: #f87171; } .mid { color: #facc15; }
+      button { margin-top: 16px; padding: 14px 20px; font-size: 18px; font-weight: 700;
+               color: #0b1220; background: #8ab4f8; border: 0; border-radius: 999px; }
+      button:active { transform: scale(0.98); }
+      #session { margin-top: 12px; font-size: 15px; color: #cbd5e1; white-space: pre-wrap; }
+      .hint { color: #7c8593; font-size: 13px; margin-top: 18px; }
+    </style>
+  </head>
+  <body>
+    <h1>EchoAgent XR 就绪检测</h1>
+    <div class="grid" id="grid"></div>
+    <button id="btn" disabled>正在检测…</button>
+    <div id="session"></div>
+    <p class="hint">
+      打开本页后若无按钮可点，说明 WebXR 不可用——先解决「安全上下文」（见 scripts/xr/README.md）。<br />
+      检测结果已自动回传给 PC 端服务器（reports.log）。
+    </p>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const esc = (v) => String(v ?? '—');
+
+      async function collect() {
+        const info = {
+          ua: navigator.userAgent,
+          href: location.href,
+          isSecureContext: window.isSecureContext,
+          hasXR: 'xr' in navigator,
+          immersiveVr: null,
+          immersiveAr: null,
+          timestamp: new Date().toISOString(),
+        };
+        if (info.hasXR) {
+          try { info.immersiveVr = await navigator.xr.isSessionSupported('immersive-vr'); }
+          catch (e) { info.immersiveVr = 'err: ' + e.name; }
+          try { info.immersiveAr = await navigator.xr.isSessionSupported('immersive-ar'); }
+          catch (e) { info.immersiveAr = 'err: ' + e.name; }
+        }
+        return info;
+      }
+
+      function report(data, kind) {
+        const payload = { kind, ...data };
+        fetch('/report', { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
+      }
+
+      function render(info) {
+        const yn = (v, invert = false) => {
+          const good = invert ? !v : !!v;
+          return `<span class="${good ? 'ok' : 'bad'}">${v}</span>`;
+        };
+        const rows = [
+          ['安全上下文 isSecureContext', yn(info.isSecureContext), info.isSecureContext],
+          ['WebXR 入口 navigator.xr', yn(info.hasXR), info.hasXR],
+          ['immersive-vr 支持', esc(info.immersiveVr), !!info.immersiveVr],
+          ['immersive-ar 支持', esc(info.immersiveAr), !!info.immersiveAr],
+          ['当前地址', esc(info.href), null],
+          ['User-Agent', `<span style="font-weight:400;color:#9aa3af">${esc(info.ua)}</span>`, null],
+        ];
+        $('grid').innerHTML = rows
+          .map(([k, v, state]) =>
+            `<div class="row"><span class="k">${k}</span><span class="v ${
+              state === null ? '' : state ? 'ok' : 'bad'
+            }">${v}</span></div>`)
+          .join('');
+      }
+
+      (async () => {
+        const info = await collect();
+        render(info);
+        report(info, 'snapshot');
+        const btn = $('btn');
+        const canTry = info.hasXR && info.immersiveVr === true;
+        btn.disabled = !canTry;
+        btn.textContent = canTry ? '① 尝试启动 immersive-vr 会话（8 秒后自动退出）' : 'immersive-vr 不可用';
+        btn.onclick = async () => {
+          btn.disabled = true;
+          $('session').textContent = '正在请求会话…（戴上头显看效果）';
+          try {
+            const session = await navigator.xr.requestSession('immersive-vr', {
+              optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+            });
+            const refSpace = await session.requestReferenceSpace('local-floor').catch(() => null);
+            $('session').textContent = '✅ immersive-vr 会话已启动！（8 秒后自动退出）\n' +
+              'referenceSpace: ' + (refSpace ? 'local-floor ok' : 'fallback');
+            report({ ...info, sessionStarted: true }, 'session');
+            session.addEventListener('end', () => {
+              $('session').textContent += '\n会话已结束。';
+              report({ ...info, sessionEnded: true }, 'session');
+              btn.disabled = false;
+            });
+            setTimeout(() => session.end().catch(() => {}), 8000);
+          } catch (e) {
+            $('session').textContent = '❌ 启动失败：' + e.name + ' — ' + e.message;
+            report({ ...info, sessionError: e.name + ': ' + e.message }, 'session');
+            btn.disabled = false;
+          }
+        };
+      })();
+    </script>
+  </body>
+</html>
