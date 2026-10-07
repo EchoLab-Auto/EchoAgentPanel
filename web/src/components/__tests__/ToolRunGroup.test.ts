@@ -99,28 +99,37 @@ describe('ToolRunGroup', () => {
     expect(wrapper.findAll('.tool-run-group__icon--failed').length).toBe(1);
   });
 
-  it('耗时：运行中实时计时（角标+详情），完成后显示总耗时', async () => {
+  it('耗时：毫秒级精度（<1s 显示 ms，秒级 3 位小数），运行中角标实时计时', async () => {
     const started = Date.now() - 4200;
     const wrapper = mount(ToolRunGroup, {
       props: {
         items: [
-          item({ key: 'a', name: 'bash', status: 'succeeded', elapsedMs: 12345 }),
-          item({ key: 'b', name: 'bash', status: 'running', output: null, startedAtMs: started }),
+          item({ key: 'a', name: 'bash', status: 'succeeded', elapsedMs: 39 }),
+          item({ key: 'b', name: 'bash', status: 'succeeded', elapsedMs: 12345 }),
+          item({ key: 'c', name: 'bash', status: 'succeeded', elapsedMs: 90500 }),
+          item({ key: 'd', name: 'bash', status: 'running', output: null, startedAtMs: started }),
         ],
       },
     });
     // 运行中：图标右下角实时角标（仅 1 个；已完成项不显示）
     const badges = wrapper.findAll('.tool-run-group__timer');
     expect(badges.length).toBe(1);
-    expect(badges[0].text()).toMatch(/^\d+(\.\d+)?s$/);
+    expect(badges[0].text()).toMatch(/^\d+(\.\d+)?(ms|s)$/);
 
-    // 完成项详情头显示总耗时（elapsedMs → 12.3s）
+    // 毫秒段：39ms（旧格式会缩成 0.0s）
     await wrapper.findAll('.tool-run-group__icon')[0].trigger('click');
-    const detail = wrapper.find('.tool-run-group__detail');
-    expect(detail.text()).toContain('耗时 12.3s');
+    expect(wrapper.find('.tool-run-group__detail').text()).toContain('耗时 39ms');
+
+    // 秒级：3 位小数 = 毫秒精度
+    await wrapper.findAll('.tool-run-group__icon')[1].trigger('click');
+    expect(wrapper.find('.tool-run-group__detail').text()).toContain('耗时 12.345s');
+
+    // 分钟段：Xm SS.mmm s
+    await wrapper.findAll('.tool-run-group__icon')[2].trigger('click');
+    expect(wrapper.find('.tool-run-group__detail').text()).toContain('耗时 1m 30.500s');
 
     // 运行项详情头显示「运行中 X」实时文案
-    await wrapper.findAll('.tool-run-group__icon')[1].trigger('click');
+    await wrapper.findAll('.tool-run-group__icon')[3].trigger('click');
     expect(wrapper.find('.tool-run-group__detail').text()).toContain('运行中');
 
     wrapper.unmount();

@@ -66,8 +66,7 @@ const STATUS_LABEL: Record<string, string> = {
   succeeded: '成功',
   failed: '失败',
 };
-
-// ── 耗时显示：运行中实时刷新（100ms 步进），完成后为总耗时 ──────────────
+// ── 耗时显示：毫秒级精度；运行中实时刷新（50ms 步进），完成后为总耗时 ──────
 /** 计时基准 now：仅当组内有运行中条目时开定时器，避免常驻开销。 */
 const now = ref(Date.now());
 let ticker: ReturnType<typeof setInterval> | null = null;
@@ -77,7 +76,7 @@ watch(
     if (running && ticker == null) {
       ticker = setInterval(() => {
         now.value = Date.now();
-      }, 100);
+      }, 50);
     } else if (!running && ticker != null) {
       clearInterval(ticker);
       ticker = null;
@@ -98,11 +97,26 @@ function elapsedOf(item: ToolRunItem): number | null {
   return null;
 }
 
-/** 毫秒 → 时长文案（<60s 保留一位小数；否则 Xm YYs）。 */
+/** 毫秒 → 完整时长文案（毫秒级精度）：
+ *  <1s → `39ms`；<60s → `12.345s`（3 位小数 = 毫秒）；更长 → `2m 03.456s`。 */
 function fmtDuration(ms: number): string {
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const total = Math.round(ms / 1000);
-  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`;
+  const value = Math.floor(ms);
+  if (value < 1_000) return `${value}ms`;
+  if (value < 60_000) return `${(value / 1000).toFixed(3)}s`;
+  const minutes = Math.floor(value / 60_000);
+  const seconds = (value - minutes * 60_000) / 1000;
+  const secs = seconds < 10 ? `0${seconds.toFixed(3)}` : seconds.toFixed(3);
+  return `${minutes}m ${secs}s`;
+}
+
+/** 图标角标：紧凑格式（保留毫秒级读数；长时段降位，避免超出图标宽度）。 */
+function fmtCompact(ms: number): string {
+  const value = Math.floor(ms);
+  if (value < 1_000) return `${value}ms`;
+  if (value < 10_000) return `${(value / 1000).toFixed(2)}s`;
+  if (value < 60_000) return `${(value / 1000).toFixed(1)}s`;
+  const total = Math.floor(value / 1000);
+  return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`;
 }
 
 /** 详情头/悬停：运行中=「运行中 X」实时刷新；已完成=「耗时 X」。 */
@@ -113,12 +127,12 @@ function durationLabel(item: ToolRunItem | null | undefined): string | null {
   return item.status === 'running' ? `运行中 ${fmtDuration(ms)}` : `耗时 ${fmtDuration(ms)}`;
 }
 
-/** 图标角标：仅运行中显示，紧凑格式（<10s 一位小数）。 */
+/** 图标角标：仅运行中显示。 */
 function badgeLabel(item: ToolRunItem): string | null {
   if (item.status !== 'running') return null;
   const ms = elapsedOf(item);
   if (ms == null) return null;
-  return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : fmtDuration(ms);
+  return fmtCompact(ms);
 }
 
 /** 图标 title：名称 · 状态 · 时长。 */
@@ -331,7 +345,7 @@ function titleOf(item: ToolRunItem): string {
   color: var(--nm-text-primary);
 }
 
-/* 运行中角标：图标右下角的实时耗时（仅运行中显示，100ms 刷新） */
+/* 运行中角标：图标右下角的实时耗时（仅运行中显示，50ms 刷新） */
 .tool-run-group__timer {
   position: absolute;
   right: 1px;
