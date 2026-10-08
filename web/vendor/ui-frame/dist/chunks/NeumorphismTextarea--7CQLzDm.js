@@ -120,7 +120,7 @@ import '../NeumorphismTextarea.css';const J = ["id", "value", "placeholder", "di
       ])
     ], 6));
   }
-}), te = /* @__PURE__ */ G(W, [["__scopeId", "data-v-3fa3e1f6"]]);
+}), te = /* @__PURE__ */ G(W, [["__scopeId", "data-v-3fc10468"]]);
 export {
   te as N
 };

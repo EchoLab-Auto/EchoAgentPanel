@@ -18,14 +18,14 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     closeLabel: string;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {
     close: (event: MouseEvent) => void;
-    click: (event: MouseEvent) => void;
+    click: (event: MouseEvent | KeyboardEvent) => void;
 }, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismTagProps>, {
     rounded: undefined;
     closable: boolean;
     disabled: boolean;
     closeLabel: string;
 }>>> & Readonly<{
-    onClick?: ((event: MouseEvent) => any) | undefined;
+    onClick?: ((event: MouseEvent | KeyboardEvent) => any) | undefined;
     onClose?: ((event: MouseEvent) => any) | undefined;
 }>, {
     rounded: boolean;

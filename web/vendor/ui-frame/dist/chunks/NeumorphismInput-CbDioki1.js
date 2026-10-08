@@ -1,19 +1,20 @@
 import { defineComponent as S, computed as s, useSlots as w, useAttrs as E, openBlock as o, createElementBlock as u, normalizeStyle as A, unref as l, normalizeClass as p, createBlock as K, createCommentVNode as d, createElementVNode as b, createTextVNode as j, toDisplayString as D, renderSlot as v, mergeProps as M, createVNode as O } from "vue";
 import { useFormField as P } from "../composables/useFormField.js";
 import { useConfig as T } from "../composables/useConfig.js";
-import { N as G } from "./NeumorphismFieldLabel-CBF1nZs1.js";
-import { N as H } from "./NeumorphismFieldError-BxamHjhs.js";
-import { _ as J } from "./_plugin-vue_export-helper-CHgC5LLL.js";
-import '../NeumorphismInput.css';const Q = {
+import { isImeComposing as G } from "../composables/useChatInput.js";
+import { N as H } from "./NeumorphismFieldLabel-CBF1nZs1.js";
+import { N as J } from "./NeumorphismFieldError-BxamHjhs.js";
+import { _ as Q } from "./_plugin-vue_export-helper-CHgC5LLL.js";
+import '../NeumorphismInput.css';const R = {
   key: 0,
   class: "nm-input__floating-required"
-}, R = {
+}, U = {
   key: 1,
   class: "nm-input__prefix"
-}, U = ["id", "type", "value", "placeholder", "disabled", "readonly", "required", "maxlength", "minlength", "name", "autocomplete", "inputmode", "aria-invalid", "aria-errormessage", "aria-describedby"], W = {
+}, W = ["id", "type", "value", "placeholder", "disabled", "readonly", "required", "maxlength", "minlength", "name", "autocomplete", "inputmode", "aria-invalid", "aria-errormessage", "aria-describedby"], X = {
   key: 2,
   class: "nm-input__suffix"
-}, X = /* @__PURE__ */ S({
+}, Y = /* @__PURE__ */ S({
   inheritAttrs: !1,
   __name: "NeumorphismInput",
   props: {
@@ -44,7 +45,7 @@ import '../NeumorphismInput.css';const Q = {
       for (const a of Object.keys(m))
         a !== "class" && a !== "style" && (e[a] = m[a]);
       return e;
-    }), { fieldId: r, isFocused: B, errorMessage: f, baseClassList: q, handleFocus: F, handleBlur: z } = P(
+    }), { fieldId: r, isFocused: B, errorMessage: f, baseClassList: q, handleFocus: C, handleBlur: F } = P(
       () => ({
         id: n.id,
         size: N.value,
@@ -52,50 +53,53 @@ import '../NeumorphismInput.css';const Q = {
         error: n.error,
         prefix: "input"
       })
-    ), h = s(() => n.modelValue.length > 0), C = s(() => [
+    ), g = s(() => n.modelValue.length > 0), z = s(() => [
       ...q("nm-input").value,
       {
         "nm-input--readonly": n.readonly,
         "nm-input--has-prefix": !!y.prefix,
         "nm-input--has-suffix": !!y.suffix,
         "nm-input--has-label": !!n.label,
-        "nm-input--filled": h.value
+        "nm-input--filled": g.value
       }
-    ]), g = s(() => n.floatingLabel && !!n.label);
-    function $(e) {
+    ]), h = s(() => n.floatingLabel && !!n.label);
+    function I(e) {
       const a = e.target;
       i("update:modelValue", a.value), i("input", e);
     }
-    function I(e) {
+    function $(e) {
       i("change", e);
     }
     function L(e) {
-      i("keydown", e), e.key === "Enter" && i("enter", n.modelValue);
+      if (i("keydown", e), e.key === "Enter") {
+        if (G(e)) return;
+        i("enter", n.modelValue);
+      }
     }
     return (e, a) => (o(), u("div", {
       class: p(["nm-input__wrapper", l(m).class]),
       style: A(l(m).style)
     }, [
-      g.value ? d("", !0) : (o(), K(G, {
+      h.value ? d("", !0) : (o(), K(H, {
         key: 0,
         label: t.label,
         required: t.required,
         "for-id": l(r)
       }, null, 8, ["label", "required", "for-id"])),
       b("div", {
-        class: p(C.value)
+        class: p(z.value)
       }, [
-        g.value ? (o(), u("span", {
+        h.value ? (o(), u("span", {
           key: 0,
           class: p([
             "nm-input__floating-label",
-            { "nm-input__floating-label--active": h.value || l(B) }
+            { "nm-input__floating-label--active": g.value || l(B) }
           ])
         }, [
           j(D(t.label), 1),
-          t.required ? (o(), u("span", Q, " *")) : d("", !0)
+          t.required ? (o(), u("span", R, " *")) : d("", !0)
         ], 2)) : d("", !0),
-        e.$slots.prefix ? (o(), u("div", R, [
+        e.$slots.prefix ? (o(), u("div", U, [
           v(e.$slots, "prefix", {}, void 0, !0)
         ])) : d("", !0),
         b("input", M({
@@ -116,23 +120,23 @@ import '../NeumorphismInput.css';const Q = {
           "aria-describedby": l(f) ? `${l(r)}-error` : void 0,
           class: "nm-input__field"
         }, V.value, {
-          onInput: $,
-          onChange: I,
-          onFocus: a[0] || (a[0] = (c) => l(F)(c, i)),
-          onBlur: a[1] || (a[1] = (c) => l(z)(c, i)),
+          onInput: I,
+          onChange: $,
+          onFocus: a[0] || (a[0] = (c) => l(C)(c, i)),
+          onBlur: a[1] || (a[1] = (c) => l(F)(c, i)),
           onKeydown: L
-        }), null, 16, U),
-        e.$slots.suffix ? (o(), u("div", W, [
+        }), null, 16, W),
+        e.$slots.suffix ? (o(), u("div", X, [
           v(e.$slots, "suffix", {}, void 0, !0)
         ])) : d("", !0)
       ], 2),
-      O(H, {
+      O(J, {
         id: `${l(r)}-error`,
         message: l(f)
       }, null, 8, ["id", "message"])
     ], 6));
   }
-}), ae = /* @__PURE__ */ J(X, [["__scopeId", "data-v-78da569e"]]);
+}), ie = /* @__PURE__ */ Q(Y, [["__scopeId", "data-v-52681084"]]);
 export {
-  ae as N
+  ie as N
 };

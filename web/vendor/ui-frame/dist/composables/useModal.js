@@ -12,8 +12,8 @@ function A() {
   return typeof window > "u" ? 0 : window.innerWidth - document.documentElement.clientWidth;
 }
 function U(u) {
-  const { modelValue: n } = u, b = u.closable ?? d(!0), w = u.destroyOnClose ?? d(!1), c = d(n.value), i = d(n.value), r = I();
-  let m, s = !1;
+  const { modelValue: n } = u, b = u.closable ?? d(!0), w = u.destroyOnClose ?? d(!1), c = d(n.value), r = d(n.value), s = I();
+  let m, i = !1;
   const { getZIndex: S, registerOverlay: T } = Z();
   let l = null;
   function C() {
@@ -34,14 +34,14 @@ function U(u) {
     (e) => {
       var t;
       if (e) {
-        i.value = !0;
+        r.value = !0;
         const o = document.activeElement;
-        r.push(o instanceof HTMLElement ? o : null), C(), l || (l = T()), k(() => {
+        s.push(o instanceof HTMLElement ? o : null), i = !1, C(), l || (l = T()), k(() => {
           c.value = !0;
         });
       } else if (c.value = !1, clearTimeout(m), w.value && (m = setTimeout(() => {
-        i.value = !1;
-      }, 200)), s || (v(), s = !0), (t = r.pop()) == null || t.focus(), l) {
+        r.value = !1;
+      }, 200)), i || (v(), i = !0), (t = s.pop()) == null || t.focus(), l) {
         const o = l;
         l = null, setTimeout(o, 250);
       }
@@ -79,15 +79,15 @@ function U(u) {
     }
   }
   return B(() => {
-    n.value && (i.value = !0, k(() => {
+    n.value && (r.value = !0, k(() => {
       c.value = !0;
     }));
   }), D(() => {
     var e;
-    clearTimeout(m), s || (v(), s = !0), c.value && ((e = r.pop()) == null || e.focus()), r.destroy(), l && (l(), l = null);
+    clearTimeout(m), i || (v(), i = !0), c.value && ((e = s.pop()) == null || e.focus()), s.destroy(), l && (l(), l = null);
   }), {
     visible: c,
-    rendered: i,
+    rendered: r,
     close: p,
     confirm: M,
     handleKeydown: L,

@@ -7,7 +7,7 @@ import { useLocale as il } from "../composables/useLocale.js";
 import { useZIndex as rl } from "../composables/useZIndex.js";
 import { N as ul } from "./NeumorphismFieldLabel-CBF1nZs1.js";
 import { N as dl } from "./NeumorphismFieldError-BxamHjhs.js";
-import { N as re } from "./NeumorphismTag-S0FZZ2i6.js";
+import { N as re } from "./NeumorphismTag-DrOOT-gC.js";
 import { _ as cl } from "./_plugin-vue_export-helper-CHgC5LLL.js";
 import '../NeumorphismSelect.css';const vl = { class: "nm-select__wrapper" }, ml = ["tabindex", "role", "aria-expanded", "aria-haspopup", "aria-controls", "aria-activedescendant", "aria-labelledby", "aria-label"], pl = { class: "nm-select__face" }, fl = ["value", "placeholder", "disabled", "readonly", "aria-expanded", "aria-controls", "aria-activedescendant", "aria-labelledby", "aria-label"], bl = { class: "nm-select__actions" }, hl = ["aria-label"], gl = {
   key: 1,

@@ -1,4 +1,4 @@
-import { ref as i, watch as B, nextTick as k, onMounted as E, onBeforeUnmount as I, computed as Z } from "vue";
+import { ref as s, watch as B, nextTick as k, onMounted as E, onBeforeUnmount as I, computed as Z } from "vue";
 import { useZIndex as A } from "./useZIndex.js";
 import { useFocusStack as F } from "./useFocusStack.js";
 const v = /* @__PURE__ */ new WeakMap();
@@ -12,8 +12,8 @@ function K() {
   return typeof window > "u" ? 0 : window.innerWidth - document.documentElement.clientWidth;
 }
 function H(n) {
-  const { modelValue: o } = n, C = n.maskClosable ?? i(!0), m = n.closable ?? i(!0), S = n.destroyOnClose ?? i(!1), c = i(o.value), s = i(o.value), r = F();
-  let y, a = !1;
+  const { modelValue: o } = n, C = n.maskClosable ?? s(!0), m = n.closable ?? s(!0), S = n.destroyOnClose ?? s(!1), c = s(o.value), a = s(o.value), r = F();
+  let y, i = !1;
   const { getZIndex: T, registerOverlay: w } = A();
   let l = null;
   function M() {
@@ -34,14 +34,14 @@ function H(n) {
     (e) => {
       var t;
       if (e) {
-        s.value = !0;
+        a.value = !0;
         const u = document.activeElement;
-        r.push(u instanceof HTMLElement ? u : null), M(), l || (l = w()), k(() => {
+        r.push(u instanceof HTMLElement ? u : null), i = !1, M(), l || (l = w()), k(() => {
           c.value = !0;
         });
       } else if (c.value = !1, clearTimeout(y), S.value && (y = setTimeout(() => {
-        s.value = !1;
-      }, 200)), a || (p(), a = !0), (t = r.pop()) == null || t.focus(), l) {
+        a.value = !1;
+      }, 200)), i || (p(), i = !0), (t = r.pop()) == null || t.focus(), l) {
         const u = l;
         l = null, setTimeout(u, 250);
       }
@@ -82,15 +82,15 @@ function H(n) {
     }
   }
   return E(() => {
-    o.value && (s.value = !0, k(() => {
+    o.value && (a.value = !0, k(() => {
       c.value = !0;
     }));
   }), I(() => {
     var e;
-    clearTimeout(y), a || (p(), a = !0), c.value && ((e = r.pop()) == null || e.focus()), r.destroy(), l && (l(), l = null);
+    clearTimeout(y), i || (p(), i = !0), c.value && ((e = r.pop()) == null || e.focus()), r.destroy(), l && (l(), l = null);
   }), {
     isOpen: c,
-    rendered: s,
+    rendered: a,
     open: O,
     close: b,
     handleKeydown: L,

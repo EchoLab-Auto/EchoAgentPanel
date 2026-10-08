@@ -4,7 +4,7 @@ import { useLocale as T } from "../composables/useLocale.js";
 import { _ as $ } from "../chunks/_plugin-vue_export-helper-CHgC5LLL.js";
 import { u as P } from "../chunks/createComponent-jnXBYqCm.js";
 import { useChatScroll as E } from "../composables/useChatScroll.js";
-import { N as M } from "../chunks/NeumorphismTextarea-CSZ2VWdh.js";
+import { N as M } from "../chunks/NeumorphismTextarea--7CQLzDm.js";
 import { N as z } from "../chunks/NeumorphismButton-DEVgFO0I.js";
 import { useChatInput as A } from "../composables/useChatInput.js";
 import '../index.css';const D = ["aria-label", "title"], U = /* @__PURE__ */ C({
