@@ -16,7 +16,7 @@ import { useClipboard as mt } from "../composables/useClipboard.js";
 import { N as pt } from "../chunks/NeumorphismCanvas-_XC7PscV.js";
 import { _ as Ae } from "../chunks/_plugin-vue_export-helper-CHgC5LLL.js";
 import { N as vt } from "../chunks/NeumorphismTabs-Duap_z9d.js";
-import { N as gt } from "../chunks/NeumorphismTextarea--7CQLzDm.js";
+import { N as gt } from "../chunks/NeumorphismTextarea--YsTkmI1.js";
 import '../index2.css';function yt(t) {
   var e;
   const o = ((e = t.path) == null ? void 0 : e.toLowerCase()) || "";
