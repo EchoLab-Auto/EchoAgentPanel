@@ -40,13 +40,18 @@ function ruleBody(segment: string, selector: string): string {
 }
 
 describe('移动端外壳布局契约（固定视口 vs 库"整页滚动"模式）', () => {
-  it('#app 前缀覆盖 nm-layout--mobile：定高 100dvh + 隐藏溢出', () => {
+  it('#app 前缀覆盖 nm-layout--mobile：定高 100dvh + min-height:0 + 隐藏溢出', () => {
     const body = ruleBody(mobileSegment(), '#app .nm-layout--mobile');
     expect(
       body,
       '缺失 #app .nm-layout--mobile 规则——库的"整页滚动"模式会把小屏输入区裁出视口',
     ).not.toBe('');
     expect(body).toMatch(/height:\s*100dvh/);
+    // 库的 `min-height: 100vh` 必须被压掉：移动浏览器 vh=大视口（含工具条
+    // 隐藏时的区域），比可见区高 → 顶穿 height 覆盖、输入区被工具条遮住。
+    expect(body, '缺 min-height: 0——库的 min-height:100vh 会顶穿高度覆盖').toMatch(
+      /min-height:\s*0/,
+    );
     expect(body).toMatch(/overflow:\s*hidden/);
   });
 
@@ -66,5 +71,48 @@ describe('移动端外壳布局契约（固定视口 vs 库"整页滚动"模式�
     // 上方全局段的地基（防被改成可滚动文档——那会牵动整站布局）
     expect(css).toMatch(/html,\s*body,\s*#app\s*\{[^}]*overflow:\s*hidden/);
     expect(mobileSegment()).toMatch(/html,\s*body,\s*#app\s*\{[^}]*height:\s*100dvh/);
+  });
+
+  it('顶栏右组全按钮可达：全屏隐藏（类匹配）+ 品牌可收缩 + header-left 放开收缩', () => {
+    // 2026-10 修复：<768px 时右组固定宽 ~354px，375px 屏上「主题切换」被推出
+    // 屏外不可达。三层收敛——全屏隐藏（-60px）、品牌省略号、内边距收紧。
+    const seg = mobileSegment();
+
+    // ① 全屏隐藏：选择器与类名是一对——类必须真的落在组件根按钮上，
+    //    否则规则空转（此前即此症状：全屏按钮在手机上占 60px 并溢出）。
+    expect(seg).toMatch(/\.topbar-actions \.fullscreen-toggle\s*\{[^}]*display:\s*none/);
+    const fsb = readFileSync(
+      join(here, '..', '..', 'src', 'components', 'FullscreenToggleButton.vue'),
+      'utf-8',
+    );
+    expect(fsb, 'FullscreenToggleButton 根按钮必须携带 fullscreen-toggle 类').toMatch(
+      /class="fullscreen-toggle"/,
+    );
+
+    // ② 品牌可收缩 + 省略号（不把右侧按钮挤出屏幕）
+    const brand = ruleBody(seg, '.brand');
+    expect(brand).toMatch(/min-width:\s*0/);
+    expect(brand).toMatch(/text-overflow:\s*ellipsis/);
+
+    // ③ 库的 header-left（flex:0 0 auto）放开收缩
+    expect(seg).toMatch(/#app \.nm-layout__header-left\s*\{[^}]*flex:\s*0 1 auto/);
+  });
+
+  it('视口高度三层兜底：--app-h（JS 实测 innerHeight）兜底 dvh 不可靠的浏览器', () => {
+    // 2026-10 修复「手机浏览器底部工具条遮住输入框」：个别浏览器 dvh
+    // 不可靠（iOS 非滚动页不动态更新 / 老 WebView 不支持）→ 高度偏大。
+    // styles.css 两处高度链均以 var(--app-h, 100dvh) 收尾（JS 值优先、
+    // dvh 兜底、100% 再兜底）。
+    const seg = mobileSegment();
+    const heights = seg.match(/height:\s*var\(--app-h,\s*100dvh\)/g) ?? [];
+    expect(heights.length, '移动段应有 2 处 var(--app-h, 100dvh) 高度（外壳 + 库布局覆盖）').toBe(2);
+
+    // index.html：内联脚本须及时写入 --app-h 并在视口变化时更新
+    // （首帧前生效——module JS 是 deferred，放 main.ts 会晚一拍）。
+    const html = readFileSync(join(here, '..', '..', 'index.html'), 'utf-8');
+    expect(html).toMatch(/setProperty\('--app-h'/);
+    expect(html).toMatch(/addEventListener\('resize'/);
+    expect(html).toMatch(/orientationchange/);
+    expect(html).toMatch(/visualViewport/);
   });
 });

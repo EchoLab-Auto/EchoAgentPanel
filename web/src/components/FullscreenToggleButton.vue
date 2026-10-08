@@ -39,7 +39,16 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', sync));
 </script>
 
 <template>
-  <NeumorphismButton size="small" variant="glass" :pressed="isFullscreen" @click="toggle">
+  <!-- fullscreen-toggle 类：移动端（<768px）由 styles.css 隐藏（iOS Safari
+       不支持元素全屏、触摸端意义低）——类必须落在根按钮上，否则隐藏选择器
+       匹配不到（2026-10 修复：此前该类缺失，全屏按钮在手机上溢出屏外）。 -->
+  <NeumorphismButton
+    size="small"
+    variant="glass"
+    class="fullscreen-toggle"
+    :pressed="isFullscreen"
+    @click="toggle"
+  >
     {{ isFullscreen ? '退出全屏' : '全屏' }}
   </NeumorphismButton>
 </template>

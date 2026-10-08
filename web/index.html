@@ -29,6 +29,32 @@
         } catch (e) {}
       })();
     </script>
+    <script>
+      // 视口高度兜底（2026-10）：--app-h = 实测 window.innerHeight（px），
+      // 供 styles.css 移动段高度链消费（var(--app-h, 100dvh)）。
+      // 修复：个别浏览器 dvh 不可靠（iOS 非滚动页不动态更新 / 老 WebView
+      // 不支持 dvh）时高度会偏大 ~浏览器工具条高，底部输入区被工具条遮挡。
+      // innerHeight 在主流移动浏览器均为「排除浏览器工具条的可见高度」，
+      // 且键盘弹出不改变它（键盘偏移由 visualViewport 逻辑处理，互不干扰）。
+      !(function () {
+        var doc = document.documentElement;
+        function setAppHeight() {
+          var h = window.innerHeight;
+          if (h > 0) doc.style.setProperty('--app-h', h + 'px');
+        }
+        setAppHeight();
+        window.addEventListener('resize', setAppHeight);
+        window.addEventListener('orientationchange', setAppHeight);
+        window.addEventListener('pageshow', setAppHeight);
+        // 个别浏览器地址栏收展只发 visualViewport.resize：键盘关闭时才同步
+        // （键盘打开时 vv.height 会骤减，此处不介入、保持 --app-h 不变）
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', function () {
+            if (window.visualViewport.height >= window.innerHeight - 80) setAppHeight();
+          });
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

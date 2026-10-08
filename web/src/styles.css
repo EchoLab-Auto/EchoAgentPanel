@@ -706,9 +706,16 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 }
 
 @media (max-width: 767.98px) {
-  /* ── 高度：iOS 地址栏伸缩用 dvh 兜底（回退 vh 由上方默认给） ── */
+  /* ── 高度：三层兜底（2026-10） ──
+     ① height:100%（最上方全局段，兜底中的兜底）；
+     ② 100dvh：iOS 15.4+ / Chrome 108+ 地址栏收展动态跟随；
+     ③ var(--app-h)：index.html 内联脚本实测的 window.innerHeight（px）——
+        个别浏览器 dvh 不可靠（iOS 非滚动页不动态更新 / 老 WebView 不支持
+        dvh）时高度会偏大 ~浏览器工具条高，底部输入区被工具条遮挡；实测值
+        兜底修复（2026-10，用户反馈「手机浏览器底部遮住输入框」）。 */
   html, body, #app {
     height: 100dvh;
+    height: var(--app-h, 100dvh);
   }
 
   /* ── 布局契约（2026-10 修复）：固定视口 SPA vs 库"整页滚动"模式的冲突 ──
@@ -726,6 +733,12 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
      锚定更稳，不依赖 CSS 文件顺序）。 */
   #app .nm-layout--mobile {
     height: 100dvh;
+    height: var(--app-h, 100dvh);
+    /* 压掉库的 `min-height: 100vh`：移动浏览器里 `vh` = 「大视口」
+       （按浏览器工具条隐藏时算），比可见区高 ~工具条高度——它会顶穿
+       上面的 height 覆盖，把底部输入区推到工具条之下（2026-10 用户
+       症状「输入框被浏览器底部遮住」的直接元凶）。 */
+    min-height: 0;
     overflow: hidden;
   }
   #app .nm-layout--mobile .nm-layout__body {
@@ -736,20 +749,34 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
     overflow-y: hidden;
   }
 
-  /* ── 顶栏：压缩 + 安全区；品牌缩短 ── */
+  /* ── 顶栏：压缩 + 安全区；品牌可收缩让位功能按钮 ──
+     （2026-10 修复：此前右组固定宽 ~354px，375px 屏上「主题切换」被推出
+     屏外不可达；三层收敛：隐藏全屏（-60px）→ 品牌变省略号 → 间距/内边距
+     收紧。320px 也可全放下，品牌在超窄屏收为 0。） */
   .nm-layout__header {
     padding-top: env(safe-area-inset-top);
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
   }
+  /* 品牌：可收缩 + 省略号（不换行、不把右侧按钮挤出去） */
   .brand {
     font-size: 13px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* 库的 header-left 是 flex: 0 0 auto（不收缩）——放开收缩，让品牌让位 */
+  #app .nm-layout__header-left {
+    flex: 0 1 auto;
+    min-width: 0;
   }
   .topbar-actions {
     gap: 4px;
     flex-wrap: nowrap;
   }
-  /* 全屏按钮：触摸端意义低（iOS Safari 不支持元素全屏），隐藏省空间 */
+  /* 全屏按钮：触摸端意义低（iOS Safari 不支持元素全屏），隐藏省空间。
+     匹配 .fullscreen-toggle —— 类由 FullscreenToggleButton.vue 根按钮自带。 */
   .topbar-actions .fullscreen-toggle {
     display: none;
   }
