@@ -375,6 +375,15 @@ onUnmounted(() => {
   }
 });
 
+// 连接建立（含断线重连）时刷新一次：首挂载的握手期请求走全局暂存队列，
+// 重连恢复走这里（与 QqPanel/ShellList 同一模式）。
+watch(
+  () => state.connected,
+  (connected) => {
+    if (connected) fetchMetrics('');
+  },
+);
+
 /** 币种（优先最近快照，其次手动查询结果；缺省 CNY） */
 function currencyOf(name: string): string {
   return (
