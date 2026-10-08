@@ -18,6 +18,8 @@ export interface NeumorphismChartLineProps {
     yMin?: number;
     yMax?: number;
     title?: string;
+    /** tooltip 数值格式化：接收 (value, seriesName)，返回展示文本 */
+    valueFormatter?: (value: number, seriesName: string) => string;
 }
 declare function __VLS_template(): {
     title?(_: {}): any;

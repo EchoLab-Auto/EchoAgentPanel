@@ -1,53 +1,55 @@
 import { ref as i, computed as w, onBeforeUnmount as E } from "vue";
 function P(B) {
   const {
-    containerRef: v,
-    enabled: g,
-    marginLeft: F,
-    plotWidth: X,
+    containerRef: d,
+    enabled: y,
+    marginLeft: X,
+    plotWidth: L,
     dataPointXs: M,
-    xAxisLabels: L,
-    series: y,
-    palette: b,
-    tooltip: f,
-    hideTooltip: R
-  } = B, r = i({ left: 0, top: 0 }), d = i(null), $ = w(() => {
+    xAxisLabels: R,
+    series: b,
+    palette: F,
+    tooltip: p,
+    hideTooltip: $,
+    valueFormatter: I
+  } = B, r = i({ left: 0, top: 0 }), m = i(null), C = w(() => {
     const e = {};
-    return v.value ? (e.left = `${f.value.x - r.value.left + 12}px`, e.top = `${f.value.y - r.value.top - 8}px`, e) : (e.display = "none", e);
-  }), p = i(null), m = i(-1), x = i(!1);
-  function C(e) {
+    return d.value ? (e.left = `${p.value.x - r.value.left + 12}px`, e.top = `${p.value.y - r.value.top - 8}px`, e) : (e.display = "none", e);
+  }), x = i(null), h = i(-1), g = i(!1);
+  function D(e) {
     const l = M.value;
     if (l.length === 0) return -1;
-    let o = 0, t = Math.abs(e - l[0]);
-    for (let a = 1; a < l.length; a++) {
-      const u = Math.abs(e - l[a]);
-      u < t && (t = u, o = a);
+    let a = 0, t = Math.abs(e - l[0]);
+    for (let o = 1; o < l.length; o++) {
+      const u = Math.abs(e - l[o]);
+      u < t && (t = u, a = o);
     }
-    return o;
+    return a;
   }
   let n = null, s = null;
-  function D(e) {
-    if (!v.value || !g.value) return;
-    const l = v.value.getBoundingClientRect();
+  function H(e) {
+    if (!d.value || !y.value) return;
+    const l = d.value.getBoundingClientRect();
     r.value = { left: l.left, top: l.top };
-    const o = e.clientX - l.left - F.value;
-    if (o < 0 || o > X.value) {
-      I();
+    const a = e.clientX - l.left - X.value;
+    if (a < 0 || a > L.value) {
+      A();
       return;
     }
-    const t = C(o);
+    const t = D(a);
     if (t < 0) return;
-    x.value = !0, m.value = t, p.value = M.value[t] ?? o;
-    const a = L.value[t] ?? `#${t + 1}`, u = [];
-    for (let c = 0; c < y.value.length; c++) {
-      const h = y.value[c], A = h.data[t];
-      A && u.push({
-        name: h.name,
-        value: A.value,
-        color: h.color ?? b.value[c % b.value.length]
+    g.value = !0, h.value = t, x.value = M.value[t] ?? a;
+    const o = R.value[t] ?? `#${t + 1}`, u = [];
+    for (let c = 0; c < b.value.length; c++) {
+      const v = b.value[c], f = v.data[t];
+      f && u.push({
+        name: v.name,
+        value: f.value,
+        display: I ? I(f.value, v.name) : String(f.value),
+        color: v.color ?? F.value[c % F.value.length]
       });
     }
-    d.value = { header: a, rows: u }, f.value = {
+    m.value = { header: o, rows: u }, p.value = {
       visible: !0,
       x: e.clientX,
       y: e.clientY,
@@ -56,27 +58,27 @@ function P(B) {
       seriesIndex: 0
     };
   }
-  function I() {
-    p.value = null, m.value = -1, x.value = !1, d.value = null, R();
+  function A() {
+    x.value = null, h.value = -1, g.value = !1, m.value = null, $();
   }
-  function H(e) {
-    g.value && (s = e, n === null && (n = requestAnimationFrame(() => {
-      n = null, s && D(s);
+  function S(e) {
+    y.value && (s = e, n === null && (n = requestAnimationFrame(() => {
+      n = null, s && H(s);
     })));
   }
   function q() {
-    n !== null && (cancelAnimationFrame(n), n = null), s = null, I();
+    n !== null && (cancelAnimationFrame(n), n = null), s = null, A();
   }
   return E(() => {
     n !== null && (cancelAnimationFrame(n), n = null);
   }), {
-    crosshairX: p,
-    nearestIndex: m,
-    isHovering: x,
-    tooltipData: d,
-    tooltipStyle: $,
+    crosshairX: x,
+    nearestIndex: h,
+    isHovering: g,
+    tooltipData: m,
+    tooltipStyle: C,
     containerRect: r,
-    onBodyMouseMove: H,
+    onBodyMouseMove: S,
     onBodyMouseLeave: q
   };
 }
