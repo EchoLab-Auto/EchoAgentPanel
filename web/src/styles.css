@@ -711,6 +711,31 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
     height: 100dvh;
   }
 
+  /* ── 布局契约（2026-10 修复）：固定视口 SPA vs 库"整页滚动"模式的冲突 ──
+     ui-frame 在 <768px 会给布局挂 `nm-layout--mobile`，把它切成"整页滚动"
+     模式（height:auto / body min-height:auto / content overflow:visible）——
+     期望由**页面滚动**消费溢出。但本应用 html/body/#app 均为
+     `overflow:hidden`（防弹性滚动，固定视口架构），这些溢出会被直接裁掉：
+     小屏（375×667 / 360×640 等，可用高 < 内容固有高）时输入区被裁出视口，
+     且不存在任何可滚动容器可达（症状：无法下滑、看不到输入框）。
+     这里把布局拉回定高 + 恢复收缩能力，让 ChatTray 等**内部滚动区**正常
+     形成。
+     #app 前缀：ui-frame 的 scoped 规则带 [data-v-*]（如
+     `.nm-layout--mobile .nm-layout__body[data-v-cab1bc24]` = 0,3,0）——
+     必须提高特异性才能覆盖（0,3,0 的平手按加载顺序本可胜出，但 #app
+     锚定更稳，不依赖 CSS 文件顺序）。 */
+  #app .nm-layout--mobile {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  #app .nm-layout--mobile .nm-layout__body {
+    min-height: 0;
+    overflow: hidden;
+  }
+  #app .nm-layout--mobile .nm-layout__content {
+    overflow-y: hidden;
+  }
+
   /* ── 顶栏：压缩 + 安全区；品牌缩短 ── */
   .nm-layout__header {
     padding-top: env(safe-area-inset-top);
