@@ -265,6 +265,42 @@ export interface ApiProfileInfo {
   reasoning_effort: ReasoningEffort;
 }
 
+/** API 指标时间序列（`ApiMetrics` 事件；近 7 天窗口）。 */
+export interface ApiMetricsEntry {
+  /** 配置名（空 = 顶层默认配置）。 */
+  name: string;
+  /** 余额快照序列（成功采样；时间升序）。 */
+  balance: ApiBalancePoint[];
+  /** token 用量序列（小时 × 模型聚合；时间升序）。 */
+  usage: ApiUsagePoint[];
+  /** 费用估算币种（如 'CNY'；无估算时为空串）。 */
+  cost_currency?: string;
+}
+
+export interface ApiBalancePoint {
+  /** Unix 毫秒。 */
+  ts_ms: number;
+  /** 总余额（含赠送）。 */
+  total: number;
+  /** 赠送余额。 */
+  granted: number;
+  /** 充值余额。 */
+  topped_up: number;
+  /** 币种（如 'CNY'）。 */
+  currency?: string;
+}
+
+export interface ApiUsagePoint {
+  /** 小时桶起点（Unix 毫秒）。 */
+  ts_ms: number;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  calls: number;
+  /** 估算费用（按 Core 定价表；无匹配价格 = null / undefined）。 */
+  est_cost?: number | null;
+}
+
 export interface ContextMessageInfo {
   role: string;
   content: string;
@@ -360,6 +396,7 @@ export type BackendCommand =
   | { RequestRemoteApiProfiles: { peer: string } }
   | { TestApi: { name: string } }
   | { QueryApiBalance: { name: string } }
+  | { QueryApiMetrics: { name: string } }
   | 'RequestSkillsList'
   | 'ReloadSkills'
   | 'RequestToolsList'
@@ -618,10 +655,15 @@ export type BackendEvent =
         ok: boolean;
         available: boolean;
         total: string;
+        /** 赠送余额（granted_balance；旧 Core 可能缺省）。 */
+        granted?: string;
+        /** 充值余额（topped_up_balance；旧 Core 可能缺省）。 */
+        topped_up?: string;
         currency: string;
         message: string;
       }
     }
+  | { ApiMetrics: { entries: ApiMetricsEntry[] } }
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
   | { PluginsList: { plugins: PluginInfo[] } }

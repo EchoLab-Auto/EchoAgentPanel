@@ -60,6 +60,7 @@ export const REQUEST_RESPONSES: Record<string, string> = {
   RequestSystemPrompt: 'SystemPrompt',
   TestApi: 'ApiTestResult',
   QueryApiBalance: 'ApiBalanceResult',
+  QueryApiMetrics: 'ApiMetrics',
 };
 
 /** 响应事件 → 等待它的请求命令集（由关联表反向构建）。 */

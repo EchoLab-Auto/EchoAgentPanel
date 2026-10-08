@@ -19,6 +19,7 @@ import { sendCommand } from './connection';
 
 import type {
   AdapterStatus,
+  ApiMetricsEntry,
   ApiProfileInfo,
   BackendEvent,
   ContextBlockInfo,
@@ -161,9 +162,9 @@ export function resetManagementState(state: AppState): void {
   state.adapters = [];
   state.federation = null;
   state.federationInvite = null;
-  state.selfUpdateStatus = null;
   state.apiTests = {};
   state.apiBalances = {};
+  state.apiMetrics = {};
   state.checklists = {};
 }
 
@@ -467,8 +468,20 @@ export interface AppState {
   /** API 余额查询结果（name(空=默认) → 余额信息） */
   apiBalances: Record<
     string,
-    { ok: boolean; available: boolean; total: string; currency: string; message: string }
+    {
+      ok: boolean;
+      available: boolean;
+      total: string;
+      currency: string;
+      message: string;
+      /** 赠送余额（granted_balance；旧 Core 可能缺省）。 */
+      granted?: string;
+      /** 充值余额（topped_up_balance；旧 Core 可能缺省）。 */
+      topped_up?: string;
+    }
   >;
+  /** API 指标时间序列（name → 近 7 天余额/用量；`ApiMetrics` 事件填充） */
+  apiMetrics: Record<string, ApiMetricsEntry>;
   /** 已发现并注册的技能列表 */
   skills: SkillInfo[];
   /** 已注册的工具定义列表 */
@@ -559,6 +572,7 @@ export function initialState(): AppState {
     remoteApiProfiles: {},
     apiTests: {},
     apiBalances: {},
+    apiMetrics: {},
     skills: [],
     tools: [],
     plugins: [],
@@ -1169,6 +1183,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
             total: string;
             currency: string;
             message: string;
+            granted?: string;
+            topped_up?: string;
           };
         }
       ).ApiBalanceResult;
@@ -1178,7 +1194,17 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         total: e.total,
         currency: e.currency,
         message: e.message,
+        granted: e.granted,
+        topped_up: e.topped_up,
       };
+      return state;
+    }
+    case 'ApiMetrics': {
+      const e = (event as { ApiMetrics: { entries: ApiMetricsEntry[] } }).ApiMetrics;
+      // 逐目标覆盖（"" = 顶层默认；请求单目标时只更新该目标，其余保留）。
+      for (const entry of e.entries ?? []) {
+        state.apiMetrics[entry.name] = entry;
+      }
       return state;
     }
     case 'SkillsList': {

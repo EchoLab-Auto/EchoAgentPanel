@@ -6,16 +6,29 @@
 //! 2026-09-14：「默认」标记与「设为默认」按钮已移除（默认提供商功能去除）——
 //! profiles 只是可供 persona 引用的供应商池，不再有"哪个是默认"的概念。
 
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismCard,
+  NeumorphismChartLine,
   NeumorphismInput,
   NeumorphismSelect,
   NeumorphismTag,
 } from '@echolab-auto/ui-frame';
 import { ChatCopyButton } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
+import {
+  alignBalanceSeries,
+  alignUsageSeries,
+  balanceSeries,
+  entryTotals,
+  formatMoney,
+  formatTokens,
+  formatTsLabel,
+  latestBalance,
+  usageSeries,
+} from '../api-metrics';
+import type { MetricsSeries } from '../api-metrics';
 import { sendCommand, sendPending } from '../connection';
 
 interface ApiTemplate {
@@ -329,20 +342,81 @@ function isDeepSeekTarget(provider: string | undefined, baseUrl: string | undefi
   return provider === 'deepseek' || (baseUrl ?? '').includes('deepseek.com');
 }
 
-/** 余额展示文本：成功 = 币种符号 + 金额；失败 = 错误消息 */
-function balanceText(name: string): string {
-  const b = state.apiBalances[name];
-  if (!b) return '';
-  if (!b.ok) return b.message;
-  const symbol = b.currency === 'CNY' ? '¥' : b.currency === 'USD' ? '$' : '';
-  return `${symbol}${b.total}${b.currency && !symbol ? ' ' + b.currency : ''}`;
+// ── 余额 / 用量图表（近 7 天；`ApiMetrics` 事件）──
+// 数据来源：Core 本地积累（余额按周期快照 + 每次 LLM 调用的 token 用量）。
+// 挂载时拉全量、每 5 分钟自动刷新；手动查余额成功后刷新该目标（新快照即入图）。
+
+/** 指标加载态（刷新按钮用） */
+const metricsLoading = ref(false);
+
+function fetchMetrics(name = '') {
+  metricsLoading.value = true;
+  sendPending({ QueryApiMetrics: { name } }, 'api:metrics');
 }
 
-/** 余额状态：ok=成功；fail=失败（展示错误文本样式） */
+// 指标数据到达（reducer 逐目标覆盖）→ 清除加载态。
+watch(
+  () => state.apiMetrics,
+  () => {
+    metricsLoading.value = false;
+  },
+  { deep: true },
+);
+
+let metricsRefreshTimer: number | null = null;
+onMounted(() => {
+  fetchMetrics('');
+  metricsRefreshTimer = window.setInterval(() => fetchMetrics(''), 5 * 60 * 1000);
+});
+onUnmounted(() => {
+  if (metricsRefreshTimer !== null) {
+    window.clearInterval(metricsRefreshTimer);
+    metricsRefreshTimer = null;
+  }
+});
+
+/** 币种（优先最近快照，其次手动查询结果；缺省 CNY） */
+function currencyOf(name: string): string {
+  return (
+    latestBalance(state.apiMetrics[name])?.currency || state.apiBalances[name]?.currency || 'CNY'
+  );
+}
+
+/** 余额展示文本：手动查询结果优先；否则最近快照；都无 = 空 */
+function balanceText(name: string): string {
+  const b = state.apiBalances[name];
+  if (b) {
+    if (!b.ok) return b.message;
+    return formatMoney(Number(b.total) || 0, b.currency);
+  }
+  const snap = latestBalance(state.apiMetrics[name]);
+  return snap ? formatMoney(snap.total, snap.currency || 'CNY') : '';
+}
+
+/** 余额状态：ok = 有值（查询结果或快照）；fail = 失败（展示错误文本样式） */
 function balanceState(name: string): 'ok' | 'fail' | '' {
   const b = state.apiBalances[name];
-  if (!b) return '';
-  return b.ok ? 'ok' : 'fail';
+  if (b) return b.ok ? 'ok' : 'fail';
+  return latestBalance(state.apiMetrics[name]) ? 'ok' : '';
+}
+
+/** 余额行 tooltip：查询消息优先，否则快照时间 */
+function balanceTitle(name: string): string {
+  const b = state.apiBalances[name];
+  if (b?.message) return b.message;
+  const snap = latestBalance(state.apiMetrics[name]);
+  return snap ? `快照 ${formatTsLabel(snap.ts_ms)}` : '';
+}
+
+/** 充值 / 赠送分账行（有数据才显示） */
+function balanceSubText(name: string): string {
+  const b = state.apiBalances[name];
+  const snap = latestBalance(state.apiMetrics[name]);
+  const granted = b?.granted ?? (snap ? String(snap.granted) : undefined);
+  const topped = b?.topped_up ?? (snap ? String(snap.topped_up) : undefined);
+  if (granted === undefined && topped === undefined) return '';
+  const currency = currencyOf(name);
+  return `充值 ${formatMoney(Number(topped) || 0, currency)} · 赠送 ${formatMoney(Number(granted) || 0, currency)}`;
 }
 
 function queryBalance(name: string) {
@@ -352,13 +426,96 @@ function queryBalance(name: string) {
   sendCommand({ QueryApiBalance: { name } });
 }
 
-// 余额结果到达 → 解除加载态（按目标字段跟踪，reducer 原地深变异）。
+// 余额结果到达 → 解除加载态；成功则刷新该目标指标（新快照即时进图）。
 watch(
   () => (balanceLoading.value !== null ? state.apiBalances[balanceLoading.value] : undefined),
   (val) => {
-    if (val) balanceLoading.value = null;
+    if (val) {
+      const name = balanceLoading.value;
+      balanceLoading.value = null;
+      if (val.ok && name !== null) fetchMetrics(name);
+    }
   },
 );
+
+// ── 卡片小图 ──
+
+/** 该 profile 是否有可展示的图表数据（余额 ≥ 2 点或有用量） */
+function hasCardCharts(name: string): boolean {
+  const entry = state.apiMetrics[name];
+  if (!entry) return false;
+  return (entry.balance?.length ?? 0) > 1 || (entry.usage?.length ?? 0) > 0;
+}
+
+/** 卡片余额 series（无数据 = 空数组） */
+function cardBalanceSeries(name: string): MetricsSeries[] {
+  const entry = state.apiMetrics[name];
+  if (!entry) return [];
+  const data = balanceSeries(entry);
+  return data.length > 1 ? [{ name: '余额', data }] : [];
+}
+
+/** 卡片用量 series（无数据 = 空数组） */
+function cardUsageSeries(name: string): MetricsSeries[] {
+  const entry = state.apiMetrics[name];
+  if (!entry) return [];
+  const data = usageSeries(entry);
+  return data.length > 0 ? [{ name: '用量', data }] : [];
+}
+
+/** 用量行标题：近 7 天 tokens 总量 + 估算费用 */
+function usageLabel(name: string): string {
+  const entry = state.apiMetrics[name];
+  if (!entry) return '用量 · 近 7 天';
+  const totals = entryTotals(entry);
+  const cost = totals.cost != null ? ` · 约 ${formatMoney(totals.cost, totals.currency)}` : '';
+  return `用量 · 近 7 天 ${formatTokens(totals.tokens)} tokens${cost}`;
+}
+
+/** 余额小图 tooltip 格式化（闭包按 profile 缓存，币种实时解析） */
+const balanceFmtCache = new Map<string, (value: number) => string>();
+function balanceFmtFor(name: string): (value: number) => string {
+  let fmt = balanceFmtCache.get(name);
+  if (!fmt) {
+    fmt = (value: number) => formatMoney(value, currencyOf(name));
+    balanceFmtCache.set(name, fmt);
+  }
+  return fmt;
+}
+
+/** 用量 tooltip 格式化（K/M 缩写） */
+function tokenFmt(value: number): string {
+  return formatTokens(value);
+}
+
+// ── 总览对比图（近 7 天；多 profile，公共时间桶轴）──
+
+const metricsEntries = computed(() => Object.values(state.apiMetrics));
+const overviewBalance = computed(() => alignBalanceSeries(metricsEntries.value));
+const overviewUsage = computed(() => alignUsageSeries(metricsEntries.value));
+const overviewEmpty = computed(
+  () => overviewBalance.value.length === 0 && overviewUsage.value.length === 0,
+);
+
+/** 总览余额 tooltip：series 名 = profile 名（空名显示为「默认」） */
+function overviewBalanceFmt(value: number, seriesName: string): string {
+  const key = seriesName === '默认' ? '' : seriesName;
+  return formatMoney(value, currencyOf(key));
+}
+
+/** 近 7 天估算费用摘要（有可估算用量才显示） */
+const costSummary = computed(() => {
+  const parts: string[] = [];
+  for (const entry of metricsEntries.value) {
+    const totals = entryTotals(entry);
+    if (totals.tokens > 0 && totals.cost != null) {
+      parts.push(`${entry.name || '默认'} 约 ${formatMoney(totals.cost, totals.currency)}`);
+    }
+  }
+  return parts.length > 0
+    ? `近 7 天估算费用：${parts.join(' · ')}（按 [agent.pricing] 定价估算，未计缓存优惠）`
+    : '';
+});
 
 /** 保存：编辑模式存回 profile；添加模式以名称为准新建/覆盖 */
 function saveForm() {
@@ -511,6 +668,60 @@ watch(
     </div>
 
     <hr />
+
+    <!-- 余额与用量总览（近 7 天；多 profile 对比） -->
+    <div v-if="formMode === 'none' && (api?.profiles?.length ?? 0) > 0" class="api-metrics">
+      <div class="api-metrics__head">
+        <h3>余额与用量（近 7 天）</h3>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          :loading="metricsLoading"
+          @click="fetchMetrics('')"
+        >
+          刷新
+        </NeumorphismButton>
+      </div>
+      <div v-if="overviewEmpty" class="muted api-metrics__hint">
+        数据积累中：Core 每 10 分钟采样一次余额；token 用量随对话自动记录（约 5 分钟自动刷新）。
+      </div>
+      <template v-else>
+        <div class="api-metrics__charts">
+          <div v-if="overviewBalance.length" class="api-metrics__chart">
+            <div class="api-metrics__chart-title">余额</div>
+            <NeumorphismChartLine
+              :series="overviewBalance"
+              :height="170"
+              curve="smooth"
+              :area="true"
+              :show-axis="false"
+              :show-grid="false"
+              :show-points="false"
+              :show-legend="true"
+              :animate="false"
+              :value-formatter="overviewBalanceFmt"
+            />
+          </div>
+          <div v-if="overviewUsage.length" class="api-metrics__chart">
+            <div class="api-metrics__chart-title">用量（tokens / 小时）</div>
+            <NeumorphismChartLine
+              :series="overviewUsage"
+              :height="170"
+              curve="smooth"
+              :area="true"
+              :show-axis="false"
+              :show-grid="false"
+              :show-points="false"
+              :show-legend="true"
+              :animate="false"
+              :value-formatter="tokenFmt"
+            />
+          </div>
+        </div>
+        <div v-if="costSummary" class="muted api-metrics__cost">{{ costSummary }}</div>
+      </template>
+    </div>
+
     <h3>API Profiles</h3>
     <div v-if="!api?.profiles || api.profiles.length === 0" class="muted">（暂无 profile）</div>
     <div class="profile-grid">
@@ -551,18 +762,23 @@ watch(
 
         <template #footer>
           <div class="profile-card__foot">
-            <!-- DeepSeek：余额查询与展示（独占一行，金额左、按钮右） -->
+            <!-- DeepSeek：余额查询与展示（金额 + 分账行左、按钮右） -->
             <div
               v-if="isDeepSeekTarget(profile.provider, profile.base_url)"
               class="profile-card__balance"
             >
-              <span
-                class="profile-card__balance-amount"
-                :class="balanceState(profile.name)"
-                :title="state.apiBalances[profile.name]?.message"
-              >
-                {{ balanceState(profile.name) ? balanceText(profile.name) : '余额未查询' }}
-              </span>
+              <div class="profile-card__balance-col">
+                <span
+                  class="profile-card__balance-amount"
+                  :class="balanceState(profile.name)"
+                  :title="balanceTitle(profile.name)"
+                >
+                  {{ balanceState(profile.name) ? balanceText(profile.name) : '余额未查询' }}
+                </span>
+                <span v-if="balanceSubText(profile.name)" class="profile-card__balance-sub">
+                  {{ balanceSubText(profile.name) }}
+                </span>
+              </div>
               <NeumorphismButton
                 size="small"
                 variant="glass"
@@ -572,6 +788,40 @@ watch(
               >
                 查余额
               </NeumorphismButton>
+            </div>
+
+            <!-- 余额 / 用量小图（近 7 天；Core 本地积累，有数据才显示） -->
+            <div v-if="hasCardCharts(profile.name)" class="profile-card__charts">
+              <div v-if="cardBalanceSeries(profile.name).length" class="profile-card__chart">
+                <span class="profile-card__chart-label">余额 · 近 7 天</span>
+                <NeumorphismChartLine
+                  :series="cardBalanceSeries(profile.name)"
+                  :height="56"
+                  curve="smooth"
+                  :area="true"
+                  :show-axis="false"
+                  :show-grid="false"
+                  :show-points="false"
+                  :show-legend="false"
+                  :animate="false"
+                  :value-formatter="balanceFmtFor(profile.name)"
+                />
+              </div>
+              <div v-if="cardUsageSeries(profile.name).length" class="profile-card__chart">
+                <span class="profile-card__chart-label">{{ usageLabel(profile.name) }}</span>
+                <NeumorphismChartLine
+                  :series="cardUsageSeries(profile.name)"
+                  :height="56"
+                  curve="smooth"
+                  :area="true"
+                  :show-axis="false"
+                  :show-grid="false"
+                  :show-points="false"
+                  :show-legend="false"
+                  :animate="false"
+                  :value-formatter="tokenFmt"
+                />
+              </div>
             </div>
 
             <!-- 操作行：三按钮等宽网格 -->
@@ -758,15 +1008,22 @@ watch(
   gap: 8px;
   padding: 10px 14px 12px;
 }
-/* 余额行：金额左（占满余宽、超长省略），按钮右固定 */
+/* 余额行：金额列左（占满余宽、超长省略），按钮右固定 */
 .profile-card__balance {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 28px;
 }
-.profile-card__balance-amount {
+/* 金额列：主金额 + 分账行（充值 / 赠送） */
+.profile-card__balance-col {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.profile-card__balance-amount {
   min-width: 0;
   font-size: 13px;
   font-weight: 700;
@@ -784,9 +1041,39 @@ watch(
   font-size: 11px;
   font-weight: 400;
 }
+/* 分账行：充值 / 赠送（小字、次要色） */
+.profile-card__balance-sub {
+  font-size: 10px;
+  color: var(--nm-text-secondary);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .profile-card__balance .nm-button,
 .profile-card__balance button {
   flex: 0 0 auto;
+}
+/* 卡片小图区：余额 / 用量 sparkline（近 7 天） */
+.profile-card__charts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+.profile-card__chart {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.profile-card__chart-label {
+  font-size: 10px;
+  color: var(--nm-text-secondary);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 操作行：三按钮等宽网格（排版整齐，不随文本长度抖动） */
 .profile-card__actions {
@@ -842,4 +1129,40 @@ watch(
 }
 .api-remote-entry__name { font-weight: 600; }
 .api-remote-entry__warn { color: var(--panel-warn, #9a6700); font-size: 12px; }
+/* 余额与用量总览（近 7 天；多 profile 对比） */
+.api-metrics {
+  margin: 4px 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-metrics__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.api-metrics__head h3 {
+  margin: 0;
+}
+.api-metrics__hint {
+  font-size: 12px;
+}
+.api-metrics__charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.api-metrics__chart {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.api-metrics__chart-title {
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+}
+.api-metrics__cost {
+  font-size: 12px;
+}
 </style>
