@@ -5,7 +5,7 @@
 //! 发 `RequestQqLoginStatus` / `RequestQqQrcode`（带实例名），Core 用
 //! `QqLoginStatus` / `QqQrcode` 事件回推（二维码为 PNG base64）。
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import type { AdapterStatus } from '../protocol';
 import { state } from '../store';
@@ -48,10 +48,21 @@ function loadQr() {
   qrRequested.value = true;
   sendCommand({ RequestQqQrcode: { adapter: instanceName.value || null } });
   // Core 以事件回推，超时由事件缺失自然体现（无加载态挂死）。
-  window.setTimeout(() => {
+  // 计时器句柄保存并随卸载清理（2026-10 审计：此前泄漏到组件销毁后）。
+  if (qrcodeTimeout != null) window.clearTimeout(qrcodeTimeout);
+  qrcodeTimeout = window.setTimeout(() => {
     loading.value = false;
+    qrcodeTimeout = null;
   }, 8000);
 }
+
+let qrcodeTimeout: number | null = null;
+onUnmounted(() => {
+  if (qrcodeTimeout != null) {
+    window.clearTimeout(qrcodeTimeout);
+    qrcodeTimeout = null;
+  }
+});
 
 // QqQrcode 事件 → data URL（Core 回推 base64 PNG）。
 watch(

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 //! Shell 面板：后台持久 shell 会话的终端可视化。
 //! 每个会话一张终端卡片：启动/停止会话、逐条命令回显 + 流式输出、运行态指示。
-
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { NeumorphismButton } from '@echolab-auto/ui-frame';
 import { state } from '../store';
-import { sendCommand } from '../connection';
+import { sendCommand, sendPending } from '../connection';
+import { releasePending, usePending } from '../pending';
 import { sessionKey } from '../keys';
+import LoadHint from './LoadHint.vue';
 
 /** 详情视图（2026-09-19 起）：`sessionId` 必填，只展示该会话的终端。
  *  会话列表在右侧边栏「Shell」卡（ShellList），点「详情」进入本视图。 */
@@ -32,7 +33,18 @@ const terminalKey = computed(() =>
 const inputBySession = ref<Record<string, string>>({});
 const terminalEls = ref<Record<string, HTMLElement | null>>({});
 
-onMounted(() => sendCommand({ RequestShellSessions: {} }));
+// 会话数据未到时不再直显"会话不存在"（2026-10 审计修复）：请求登记为
+// pending 三态——pending/slow 显示加载、timeout 显示重试；仅 idle 且查无
+// pending 三态——pending/slow 显示加载、timeout 显示重试；仅 idle 且查无
+// 会话才是真"不存在"。断连时不登记（重连后由重试/挂载补拉）。
+const { phase: panelPhase } = usePending('shell:panel:sessions');
+function loadSessions() {
+  sendPending({ RequestShellSessions: {} }, 'shell:panel:sessions');
+}
+onMounted(() => {
+  if (state.connected) loadSessions();
+});
+onUnmounted(() => releasePending('shell:panel:sessions'));
 
 function stopSession(sessionId: string) {
   sendCommand({ ShellStop: { session_id: sessionId } });
@@ -93,7 +105,15 @@ watch(
     </div>
 
     <!-- 会话卡片（仅目标会话） -->
-    <div v-if="!session" class="shell-empty">（会话不存在或已停止，返回列表刷新）</div>
+    <!-- 数据未到不误报（2026-10 审计修复）：pending/slow/timeout 三态走
+         LoadHint，仅 idle 且无会话才是真"不存在"。 -->
+    <LoadHint
+      v-if="!session && panelPhase !== 'idle'"
+      :phase="panelPhase"
+      label="Shell 会话"
+      @retry="loadSessions"
+    />
+    <div v-else-if="!session" class="shell-empty">（会话不存在或已停止，返回列表刷新）</div>
 
     <div v-else class="shell-card">
       <!-- 终端区 -->
@@ -246,4 +266,15 @@ watch(
   font-size: 12.5px;
 }
 @keyframes shell-spin { to { transform: rotate(360deg); } }
+
+/* 竖屏移动端（2026-10，断点 768px）：命令输入行贴底安全区；输入字号
+   提至 16px（iOS 聚焦防缩放，native input 同样适用）。 */
+@media (max-width: 767.98px) {
+  .shell-input {
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+  .shell-input__field {
+    font-size: 16px;
+  }
+}
 </style>

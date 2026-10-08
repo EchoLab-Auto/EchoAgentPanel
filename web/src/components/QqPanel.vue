@@ -3,7 +3,13 @@
 //! 名单无本地草稿态——点击即发送更新命令，展示派生自 state.qqFilter。
 
 import { computed, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton, NeumorphismSegmented, NeumorphismStatusDot } from '@echolab-auto/ui-frame';
+import {
+  NeumorphismBadge,
+  NeumorphismButton,
+  NeumorphismSegmented,
+  NeumorphismStatusDot,
+  NeumorphismTag,
+} from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { defaultQqInstanceState } from '../state';
 import { scopedKey } from '../keys';
@@ -280,87 +286,131 @@ function toggleDenyGroup(id: number) {
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>白名单用户</h3>
-          <span class="qq-count">{{ instanceState.filter.allowlist_users.length }}</span>
+          <NeumorphismBadge class="qq-count" :value="instanceState.filter.allowlist_users.length" show-zero />
         </div>
         <div class="qq-picked">
-          <span v-for="id in instanceState.filter.allowlist_users" :key="id" class="id-chip" @click="toggleAllowUser(id)">
-            {{ id }}<span class="id-chip__x">×</span>
-          </span>
+          <NeumorphismTag
+            v-for="id in instanceState.filter.allowlist_users"
+            :key="id"
+            class="id-chip"
+            size="small"
+            rounded
+            closable
+            @click="toggleAllowUser(id)"
+            @close="toggleAllowUser(id)"
+          >
+            {{ id }}
+          </NeumorphismTag>
           <span v-if="instanceState.filter.allowlist_users.length === 0" class="muted">未添加</span>
         </div>
         <div class="qq-select">
-          <button
+          <NeumorphismTag
             v-for="[id, name] in instanceState.friends"
             :key="id"
             class="pick-chip"
-            :class="{ selected: instanceState.filter.allowlist_users.includes(id) }"
+            :variant="instanceState.filter.allowlist_users.includes(id) ? 'primary' : 'default'"
+            size="small"
+            rounded
             @click="toggleAllowUser(id)"
           >
             <span class="pick-chip__name">{{ name }}</span>
             <span class="pick-chip__id">{{ id }}</span>
-          </button>
+          </NeumorphismTag>
         </div>
       </div>
 
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>黑名单用户</h3>
-          <span class="qq-count">{{ instanceState.filter.denylist_users.length }}</span>
+          <NeumorphismBadge class="qq-count" :value="instanceState.filter.denylist_users.length" show-zero />
         </div>
         <div class="qq-picked">
-          <span v-for="id in instanceState.filter.denylist_users" :key="id" class="id-chip is-deny" @click="toggleDenyUser(id)">
-            {{ id }}<span class="id-chip__x">×</span>
-          </span>
+          <NeumorphismTag
+            v-for="id in instanceState.filter.denylist_users"
+            :key="id"
+            class="id-chip"
+            variant="error"
+            size="small"
+            rounded
+            closable
+            @click="toggleDenyUser(id)"
+            @close="toggleDenyUser(id)"
+          >
+            {{ id }}
+          </NeumorphismTag>
           <span v-if="instanceState.filter.denylist_users.length === 0" class="muted">未添加</span>
         </div>
         <div class="qq-select">
-          <button
+          <NeumorphismTag
             v-for="[id, name] in instanceState.friends"
             :key="id"
             class="pick-chip"
-            :class="{ selected: instanceState.filter.denylist_users.includes(id) }"
+            :variant="instanceState.filter.denylist_users.includes(id) ? 'primary' : 'default'"
+            size="small"
+            rounded
             @click="toggleDenyUser(id)"
           >
             <span class="pick-chip__name">{{ name }}</span>
             <span class="pick-chip__id">{{ id }}</span>
-          </button>
+          </NeumorphismTag>
         </div>
       </div>
 
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>白名单群</h3>
-          <span class="qq-count">{{ instanceState.filter.allowlist_groups.length }}</span>
+          <NeumorphismBadge class="qq-count" :value="instanceState.filter.allowlist_groups.length" show-zero />
         </div>
         <div class="qq-picked">
-          <span v-for="id in instanceState.filter.allowlist_groups" :key="id" class="id-chip" @click="toggleAllowGroup(id)">
-            {{ id }}<span class="id-chip__x">×</span>
-          </span>
+          <NeumorphismTag
+            v-for="id in instanceState.filter.allowlist_groups"
+            :key="id"
+            class="id-chip"
+            size="small"
+            rounded
+            closable
+            @click="toggleAllowGroup(id)"
+            @close="toggleAllowGroup(id)"
+          >
+            {{ id }}
+          </NeumorphismTag>
           <span v-if="instanceState.filter.allowlist_groups.length === 0" class="muted">未添加</span>
         </div>
         <div class="qq-select">
-          <button
+          <NeumorphismTag
             v-for="[id, name] in instanceState.groups"
             :key="id"
             class="pick-chip"
-            :class="{ selected: instanceState.filter.allowlist_groups.includes(id) }"
+            :variant="instanceState.filter.allowlist_groups.includes(id) ? 'primary' : 'default'"
+            size="small"
+            rounded
             @click="toggleAllowGroup(id)"
           >
             <span class="pick-chip__name">{{ name }}</span>
             <span class="pick-chip__id">{{ id }}</span>
-          </button>
+          </NeumorphismTag>
         </div>
       </div>
 
       <div class="qq-list-card">
         <div class="qq-list-card__head">
           <h3>黑名单群</h3>
-          <span class="qq-count">{{ instanceState.filter.denylist_groups.length }}</span>
+          <NeumorphismBadge class="qq-count" :value="instanceState.filter.denylist_groups.length" show-zero />
         </div>
         <div class="qq-picked">
-          <span v-for="id in instanceState.filter.denylist_groups" :key="id" class="id-chip is-deny" @click="toggleDenyGroup(id)">
-            {{ id }}<span class="id-chip__x">×</span>
-          </span>
+          <NeumorphismTag
+            v-for="id in instanceState.filter.denylist_groups"
+            :key="id"
+            class="id-chip"
+            variant="error"
+            size="small"
+            rounded
+            closable
+            @click="toggleDenyGroup(id)"
+            @close="toggleDenyGroup(id)"
+          >
+            {{ id }}
+          </NeumorphismTag>
           <span v-if="instanceState.filter.denylist_groups.length === 0" class="muted">未添加</span>
         </div>
         <p class="qq-select-empty">群列表仅对白名单开放，黑名单群请在 Core 侧配置</p>

@@ -826,7 +826,7 @@ watch(
   margin: 8px 0;
   padding: 10px 12px;
   border-radius: 10px;
-  background: var(--nm-bg-soft, rgba(128, 128, 128, 0.06));
+  background: var(--panel-hover);
   display: flex;
   flex-direction: column;
   gap: 8px;

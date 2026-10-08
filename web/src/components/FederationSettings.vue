@@ -10,6 +10,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import {
+  NeumorphismButton,
+  NeumorphismCheckbox,
+  NeumorphismInput,
+  NeumorphismSelect,
+  NeumorphismStatusDot,
+  NeumorphismTextarea,
+} from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import type { BackendCommand } from '../protocol';
@@ -43,6 +51,21 @@ const QUERY_KINDS: Array<{ key: string; label: string }> = [
   { key: 'browse_directories', label: '目录浏览（选择器）' },
 ];
 const formQueries = ref<string[]>(QUERY_KINDS.map((k) => k.key));
+
+/** 查询授权勾选（库 Checkbox 为布尔模型；数组语义在本层维护）。 */
+function toggleQuery(key: string, checked: boolean) {
+  if (checked) {
+    if (!formQueries.value.includes(key)) formQueries.value = [...formQueries.value, key];
+  } else {
+    formQueries.value = formQueries.value.filter((k) => k !== key);
+  }
+}
+
+/** 迁移目标下拉（库 Select options；空值 = 自动选首个在线节点）。 */
+const migrateOptions = computed(() => [
+  { label: '（自动：首个在线节点）', value: '' },
+  ...onlinePeers.value.map((p) => ({ label: p.name, value: p.name })),
+]);
 const formAllowSubagent = ref(true);
 /** 需人工确认的调用（命中即拒；空 = 无需确认）。 */
 const formRequireConfirm = ref('');
@@ -230,9 +253,20 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="fed-actions" v-if="enabled">
-        <button class="fed-btn" @click="refresh">刷新</button>
-        <button class="fed-btn" @click="requestInvite">生成邀请</button>
-        <button class="fed-btn fed-btn--primary" @click="openAdd">添加 peer</button>
+        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="refresh">
+          刷新
+        </NeumorphismButton>
+        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="requestInvite">
+          生成邀请
+        </NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="primary"
+          class="fed-btn fed-btn--primary"
+          @click="openAdd"
+        >
+          添加 peer
+        </NeumorphismButton>
       </div>
     </div>
 
@@ -246,15 +280,22 @@ onUnmounted(() => {
           · 人格：{{ props.activeTeamId ?? '（未指定）' }}
         </div>
       </div>
-      <select v-model="migratePeer" class="fed-input fed-migrate__peer">
-        <option value="">（自动：首个在线节点）</option>
-        <option v-for="peer in onlinePeers" :key="peer.name" :value="peer.name">
-          {{ peer.name }}
-        </option>
-      </select>
-      <button class="fed-btn fed-btn--primary" :disabled="!canMigrate" @click="migrateSession">
+      <NeumorphismSelect
+        v-model="migratePeer"
+        class="fed-migrate__peer"
+        size="small"
+        :options="migrateOptions"
+        placeholder="（自动：首个在线节点）"
+      />
+      <NeumorphismButton
+        size="small"
+        variant="primary"
+        class="fed-btn fed-btn--primary fed-migrate__go"
+        :disabled="!canMigrate"
+        @click="migrateSession"
+      >
         迁移
-      </button>
+      </NeumorphismButton>
     </div>
 
     <!-- 邀请串输出 -->
@@ -264,7 +305,9 @@ onUnmounted(() => {
       </div>
       <div class="fed-invite-row">
         <code class="fed-invite-text">{{ inviteText }}</code>
-        <button class="fed-btn" @click="copyInvite">{{ inviteCopied ? '已复制' : '复制' }}</button>
+        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="copyInvite">
+          {{ inviteCopied ? '已复制' : '复制' }}
+        </NeumorphismButton>
       </div>
     </div>
 
@@ -272,56 +315,98 @@ onUnmounted(() => {
     <div v-if="showAdd" class="fed-form">
       <div class="fed-form-title">{{ editName ? `编辑 peer「${editName}」` : '添加 peer' }}</div>
       <div class="fed-form-invite">
-        <input
+        <NeumorphismInput
           v-model="inviteInput"
           class="fed-input"
+          size="small"
           placeholder="粘贴 echofed:// 邀请串自动填充（推荐）"
-          @input="applyInvite"
+          @update:model-value="applyInvite"
         />
       </div>
       <div class="fed-form-grid">
         <label class="fed-field">
           <span>名称</span>
-          <input v-model="formName" class="fed-input" :disabled="!!editName" placeholder="gpu-box" />
+          <NeumorphismInput
+            v-model="formName"
+            class="fed-input"
+            size="small"
+            :disabled="!!editName"
+            placeholder="gpu-box"
+          />
         </label>
         <label class="fed-field">
           <span>地址（留空 = 仅接受对方连入）</span>
-          <input v-model="formUrl" class="fed-input" placeholder="ws://192.168.1.20:3133" />
+          <NeumorphismInput
+            v-model="formUrl"
+            class="fed-input"
+            size="small"
+            placeholder="ws://192.168.1.20:3133"
+          />
         </label>
         <label class="fed-field">
           <span>共享密钥{{ editName ? '（留空 = 不变）' : '' }}</span>
-          <input v-model="formToken" class="fed-input" placeholder="与对端一致" />
+          <NeumorphismInput v-model="formToken" class="fed-input" size="small" placeholder="与对端一致" />
         </label>
-        <label class="fed-field fed-field--check">
-          <input v-model="formAllowAll" type="checkbox" />
-          <span>允许对端调用本机全部工具（默认满权限；联邦互信 ≈ SSH 免密）</span>
-        </label>
+        <div class="fed-field fed-field--check">
+          <NeumorphismCheckbox
+            v-model="formAllowAll"
+            size="small"
+            label="允许对端调用本机全部工具（默认满权限；联邦互信 ≈ SSH 免密）"
+          />
+        </div>
         <label v-if="!formAllowAll" class="fed-field fed-field--wide">
           <span>允许的工具（换行/逗号分隔；如 bash、read_file）</span>
-          <textarea v-model="formToolsCustom" class="fed-input fed-textarea" rows="3" placeholder="bash&#10;read_file" />
+          <NeumorphismTextarea
+            v-model="formToolsCustom"
+            class="fed-input fed-textarea"
+            size="small"
+            :rows="3"
+            placeholder="bash&#10;read_file"
+          />
         </label>
         <div class="fed-field fed-field--wide">
           <span>允许的只读查询（跨机工作区/git/浏览所需）</span>
           <div class="fed-checks">
-            <label v-for="kind in QUERY_KINDS" :key="kind.key" class="fed-check">
-              <input v-model="formQueries" type="checkbox" :value="kind.key" />
-              <span>{{ kind.label }}</span>
-            </label>
+            <div v-for="kind in QUERY_KINDS" :key="kind.key" class="fed-check">
+              <NeumorphismCheckbox
+                :model-value="formQueries.includes(kind.key)"
+                size="small"
+                :label="kind.label"
+                @update:model-value="(v: boolean) => toggleQuery(kind.key, v)"
+              />
+            </div>
           </div>
         </div>
-        <label class="fed-field fed-field--check">
-          <input v-model="formAllowSubagent" type="checkbox" />
-          <span>接受对端的子代理委派（spawn_subagent node=本机）</span>
-        </label>
+        <div class="fed-field fed-field--check">
+          <NeumorphismCheckbox
+            v-model="formAllowSubagent"
+            size="small"
+            label="接受对端的子代理委派（spawn_subagent node=本机）"
+          />
+        </div>
         <label class="fed-field fed-field--wide">
           <span>需确认的调用（可选；命中即拒，换行/逗号分隔）</span>
-          <input v-model="formRequireConfirm" class="fed-input" placeholder="（空 = 无需确认）" />
+          <NeumorphismInput
+            v-model="formRequireConfirm"
+            class="fed-input"
+            size="small"
+            placeholder="（空 = 无需确认）"
+          />
         </label>
       </div>
       <div v-if="inviteError" class="fed-error">{{ inviteError }}</div>
       <div class="fed-form-actions">
-        <button class="fed-btn" @click="showAdd = false">取消</button>
-        <button class="fed-btn fed-btn--primary" @click="savePeer">保存</button>
+        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="showAdd = false">
+          取消
+        </NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="primary"
+          class="fed-btn fed-btn--primary"
+          @click="savePeer"
+        >
+          保存
+        </NeumorphismButton>
       </div>
     </div>
 
@@ -331,11 +416,12 @@ onUnmounted(() => {
         尚未配置 peer。点「生成邀请」把本机串发给对端，或「添加 peer」粘贴对端的邀请串。
       </div>
       <div v-for="p in peers" :key="p.name" class="fed-peer">
-        <span
-          class="fed-dot"
-          :class="p.link === 'Online' ? 'fed-dot--online' : 'fed-dot--offline'"
-          :title="p.link === 'Online' ? '在线' : '离线'"
-        />
+        <span class="fed-dot" :title="p.link === 'Online' ? '在线' : '离线'">
+          <NeumorphismStatusDot
+            :status="p.link === 'Online' ? 'online' : 'offline'"
+            size="small"
+          />
+        </span>
         <div class="fed-peer-main">
           <div class="fed-peer-name">{{ p.name }}</div>
           <div class="fed-peer-url">{{ p.url || '（仅接受连入）' }}</div>
@@ -353,8 +439,17 @@ onUnmounted(() => {
           <template v-if="p.allow_subagent"> · 接受委派</template>
         </div>
         <div class="fed-peer-actions">
-          <button class="fed-btn fed-btn--small" @click="openEdit(p)">编辑</button>
-          <button class="fed-btn fed-btn--small fed-btn--danger" @click="deletePeer(p.name)">删除</button>
+          <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="openEdit(p)">
+            编辑
+          </NeumorphismButton>
+          <NeumorphismButton
+            size="small"
+            variant="glass"
+            class="fed-btn fed-btn--danger"
+            @click="deletePeer(p.name)"
+          >
+            删除
+          </NeumorphismButton>
         </div>
       </div>
     </div>
@@ -421,11 +516,11 @@ onUnmounted(() => {
   font-weight: 600;
 }
 .fed-sub {
-  color: var(--nf-text-secondary, #888);
+  color: var(--nm-text-secondary);
   margin-top: 2px;
 }
 .fed-sub--warn {
-  color: var(--nf-warning, #b8860b);
+  color: var(--panel-warn);
 }
 .fed-actions {
   display: flex;
@@ -435,25 +530,25 @@ onUnmounted(() => {
 .fed-btn {
   padding: 5px 12px;
   border-radius: 6px;
-  border: 1px solid var(--nf-border, #4444);
+  border: 1px solid var(--nm-border-color);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
 }
 .fed-btn--primary {
-  background: var(--nf-primary, #4a7dff);
+  background: var(--panel-accent);
   color: #fff;
   border-color: transparent;
 }
 .fed-btn--danger {
-  color: var(--nf-danger, #d64545);
+  color: var(--panel-err);
 }
 .fed-btn--small {
   padding: 3px 8px;
 }
 .fed-invite,
 .fed-form {
-  border: 1px solid var(--nf-border, #4444);
+  border: 1px solid var(--nm-border-color);
   border-radius: 8px;
   padding: 12px;
   display: flex;
@@ -461,7 +556,7 @@ onUnmounted(() => {
   gap: 10px;
 }
 .fed-invite-label {
-  color: var(--nf-text-secondary, #888);
+  color: var(--nm-text-secondary);
   font-size: 12px;
 }
 .fed-invite-row {
@@ -473,7 +568,7 @@ onUnmounted(() => {
   flex: 1;
   word-break: break-all;
   font-size: 12px;
-  background: var(--nf-bg-inset, #0002);
+  background: var(--panel-hover);
   padding: 6px 8px;
   border-radius: 6px;
 }
@@ -492,7 +587,7 @@ onUnmounted(() => {
 }
 .fed-field span {
   font-size: 12px;
-  color: var(--nf-text-secondary, #888);
+  color: var(--nm-text-secondary);
 }
 .fed-field--check {
   flex-direction: row;
@@ -502,12 +597,12 @@ onUnmounted(() => {
 .fed-input {
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid var(--nf-border, #4444);
-  background: var(--nf-bg-inset, #0001);
+  border: 1px solid var(--nm-border-color);
+  background: var(--panel-hover);
   font-size: 12px;
 }
 .fed-error {
-  color: var(--nf-danger, #d64545);
+  color: var(--panel-err);
   font-size: 12px;
 }
 .fed-form-actions {
@@ -521,7 +616,7 @@ onUnmounted(() => {
   gap: 6px;
 }
 .fed-empty {
-  color: var(--nf-text-secondary, #888);
+  color: var(--nm-text-secondary);
   padding: 20px;
   text-align: center;
 }
@@ -530,7 +625,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border: 1px solid var(--nf-border, #4443);
+  border: 1px solid var(--nm-border-color);
   border-radius: 8px;
 }
 .fed-dot {
@@ -540,10 +635,10 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .fed-dot--online {
-  background: var(--nf-success, #3aa655);
+  background: var(--panel-ok);
 }
 .fed-dot--offline {
-  background: var(--nf-text-secondary, #999);
+  background: var(--nm-text-placeholder);
 }
 .fed-peer-main {
   flex: 1;
@@ -554,14 +649,14 @@ onUnmounted(() => {
 }
 .fed-peer-url {
   font-size: 12px;
-  color: var(--nf-text-secondary, #888);
+  color: var(--nm-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .fed-peer-meta {
   font-size: 12px;
-  color: var(--nf-text-secondary, #888);
+  color: var(--nm-text-secondary);
   flex-shrink: 0;
 }
 .fed-peer-actions {

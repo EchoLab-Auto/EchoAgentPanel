@@ -86,6 +86,20 @@ npm run ui-frame:diff -- 1.3.2   # 对比指定版本 / 标签
   切到 npm 模式会移除它们。
 - CI 用 `npm ci` + 提交的 vendor 快照，无需任何切换动作。
 
+### 前端质量脚本（`web/`）
+
+```bash
+cd web
+npm test              # vitest（44 文件 / 289 用例）
+npm run lint:styles   # 样式令牌守卫：幻影令牌 / --nf-* 禁用命名空间 / 拼写错
+npm run build         # vue-tsc + vite 生产构建（视图与弹层按 import() 自动分包）
+```
+
+**样式令牌纪律（2026-10 起）**：只用 ui-frame 真实存在的 `--nm-*` 令牌与 Panel
+的 `--panel-*` 语义色；禁止自造令牌名（历史上 37 处幻影令牌曾导致主题切换静默
+失效）。`lint:styles` 会对照 ui-frame 的 `tokens.scss` 全量校验（源文件不在时
+退化为名单检查）；玻璃浮层统一用 `--panel-glass-*` 配方，遮罩用 `--nm-mask-bg`。
+
 ## 安装（Linux，用户级）
 
 ```bash

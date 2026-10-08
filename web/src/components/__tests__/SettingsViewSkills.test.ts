@@ -9,7 +9,7 @@
 //! - 包禁用提示（所属插件 disabled → 技能不可用）。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 vi.mock('../../connection', () => {
   const sendCommand = vi.fn();
@@ -21,7 +21,14 @@ vi.mock('../../connection', () => {
   };
 });
 
+vi.mock('../../confirm', () => ({
+  // 确认框服务（2026-10 审计：window.confirm 已替换为全局 Modal 确认）。
+  // 默认同意——多数用例不受影响；需要"拒绝"的用例再覆盖返回值。
+  confirmDialog: vi.fn(() => Promise.resolve(true)),
+}));
+
 import SettingsView from '../SettingsView.vue';
+import { confirmDialog } from '../../confirm';
 import { state } from '../../store';
 import { sendCommand } from '../../connection';
 
@@ -276,19 +283,18 @@ describe('SettingsView 技能工作台', () => {
       .trigger('click');
     const inputs = wrapper.findAll('.caps-form input');
     await inputs[1].setValue('改动后的描述');
-    // confirm 拒绝放弃 → 留在编辑态（不回详情、不丢改动）
-    // 注：jsdom 未实现 confirm（undefined），用 stubGlobal 定义。
-    const confirmSpy = vi.fn(() => false);
-    vi.stubGlobal('confirm', confirmSpy);
+    // 确认框拒绝放弃 → 留在编辑态（不回详情、不丢改动）
+    vi.mocked(confirmDialog).mockResolvedValue(false);
     await row.trigger('click');
-    expect(confirmSpy).toHaveBeenCalled();
+    await flushPromises();
+    expect(confirmDialog).toHaveBeenCalled();
     expect(wrapper.find('.caps-form').exists()).toBe(true);
-    // confirm 同意放弃 → 退出编辑（回到只读详情）
-    confirmSpy.mockReturnValue(true);
+    // 确认框同意放弃 → 退出编辑（回到只读详情）
+    vi.mocked(confirmDialog).mockResolvedValue(true);
     await row.trigger('click');
+    await flushPromises();
     expect(wrapper.find('.caps-form').exists()).toBe(false);
     expect(wrapper.find('.skill-detail').exists()).toBe(true);
-    vi.unstubAllGlobals();
   });
 
   it('详情：触发词就地删除（closable tag）→ SaveSkill 携带剩余字段', async () => {

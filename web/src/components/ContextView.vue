@@ -14,6 +14,7 @@ import { sessionKey } from '../keys';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
+import { confirmDialog } from '../confirm';
 
 //! 块种类 → 中文徽标（Core 侧 kind 全集的镜像；缺项会裸显英文 kind）。
 //! `displayLabel` 会据此剥掉 label 里重复的种类前缀（如「常驻技能 · xx」）。
@@ -166,13 +167,23 @@ function reloadSkills() {
   refresh();
 }
 
-function archiveHistory() {
-  if (!window.confirm('归档当前会话历史？将复制快照到 archives/ 并清空当前历史。')) return;
+async function archiveHistory() {
+  const ok = await confirmDialog('归档当前会话历史？将复制快照到 archives/ 并清空当前历史。', {
+    title: '归档会话历史',
+    danger: true,
+    confirmText: '归档',
+  });
+  if (!ok) return;
   sendCommand({ ArchiveHistory: { team_id: targetTeamId.value } });
 }
 
-function compactHistory() {
-  if (!window.confirm('压缩当前会话历史？早期事件将替换为规则摘要，保留最近 40 条。')) return;
+async function compactHistory() {
+  const ok = await confirmDialog('压缩当前会话历史？早期事件将替换为规则摘要，保留最近 40 条。', {
+    title: '压缩会话历史',
+    danger: true,
+    confirmText: '压缩',
+  });
+  if (!ok) return;
   sendCommand({ CompactHistory: { team_id: targetTeamId.value, keep_recent: 40 } });
 }
 </script>

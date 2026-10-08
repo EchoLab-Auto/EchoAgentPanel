@@ -497,13 +497,13 @@ function save() {
   --nm-table-cell-padding-y-sm: 5px;
   --nm-table-cell-padding-x-sm: 10px;
   border-radius: 20px;
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border: 1px solid var(--panel-glass-border);
   backdrop-filter: blur(var(--nm-glass-blur)) saturate(1.6);
   -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(1.6);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.45),
-    0 0 0 0.5px rgba(255, 255, 255, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    var(--panel-glass-shadow-lg),
+    0 0 0 0.5px var(--panel-glass-border),
+    inset 0 1px 0 var(--panel-glass-highlight);
   overflow: hidden;
 }
 /* 库的内容槽：让头部/滚动区/脚部仍是外壳的直接弹性子项（布局不变） */
@@ -593,5 +593,19 @@ function save() {
   gap: 8px;
   padding: 10px 18px 14px;
   border-top: 1px solid var(--nm-border-subtle);
+}
+
+/* 竖屏移动端（2026-10，断点 768px）：覆盖层几何从「贴会话框 12px」收为
+   6px 近全屏（最大化内容宽度）；内容内的表格靠横向滚动兜底。 */
+@media (max-width: 767.98px) {
+  .agent-config-overlay .agent-config {
+    top: 6px;
+    left: 6px;
+    right: 6px;
+    border-radius: 16px;
+  }
+  .agent-config__head {
+    padding: 10px 12px 8px;
+  }
 }
 </style>

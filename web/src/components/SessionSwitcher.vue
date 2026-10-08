@@ -152,8 +152,8 @@ function pickGlobal() {
   font-size: 10px;
   padding: 0 5px;
   border-radius: 4px;
-  background: var(--nf-bg-inset, #0002);
-  color: var(--nf-text-secondary, #888);
+  background: var(--panel-hover);
+  color: var(--nm-text-secondary);
   flex-shrink: 0;
 }
 

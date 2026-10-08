@@ -32,9 +32,21 @@ const { phase: listPhase } = usePending('shell:sessions');
 function refresh() {
   sendPending({ RequestShellSessions: { team_id: teamKey.value } }, 'shell:sessions');
 }
-onMounted(refresh);
+// 断连守卫（2026-10 审计修复）：未连接时登记 pending 会 20s 后假"超时"，
+// 且重连后不补拉。挂载/team 变化仅在已连接时发起；由 connected 监听补拉。
+onMounted(() => {
+  if (state.connected) refresh();
+});
+watch(
+  () => state.connected,
+  (connected) => {
+    if (connected) refresh();
+  },
+);
 // 切换 agent 后重拉（列表归属变化）。
-watch(teamKey, refresh);
+watch(teamKey, () => {
+  if (state.connected) refresh();
+});
 onUnmounted(() => releasePending('shell:sessions'));
 
 </script>

@@ -211,7 +211,7 @@ function titleOf(item: ToolRunItem): string {
   width: 30px;
   height: 26px;
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
+  border: 1px solid var(--panel-glass-border);
   background: color-mix(in srgb, var(--nm-surface-raised) 40%, transparent);
   backdrop-filter: blur(12px) saturate(1.4);
   -webkit-backdrop-filter: blur(12px) saturate(1.4);
@@ -273,11 +273,11 @@ function titleOf(item: ToolRunItem): string {
 /* 展开态：下方浮现的具体内容卡片 */
 .tool-run-group__detail {
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
+  border: 1px solid var(--panel-glass-border);
   background: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
   backdrop-filter: blur(16px) saturate(1.5);
   -webkit-backdrop-filter: blur(16px) saturate(1.5);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--panel-glass-shadow-md);
   padding: 8px 10px;
   animation: tool-run-enter 0.18s ease-out both;
 }

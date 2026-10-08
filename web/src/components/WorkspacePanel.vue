@@ -17,6 +17,7 @@ import LoadHint from './LoadHint.vue';
 import type { WorkspaceSessionInfo } from '../protocol';
 import { directoryNode, directoryPath, directoryToInput } from '../workspace';
 import DirectoryPicker from './DirectoryPicker.vue';
+import { confirmDialog } from '../confirm';
 
 const props = defineProps<{ teamId: string | null }>();
 
@@ -145,9 +146,13 @@ function toggleActive(session: WorkspaceSessionInfo) {
   sendCommand({ ActivateWorkspaceSession: { team_id: props.teamId, id } });
 }
 
-function remove(session: WorkspaceSessionInfo) {
+async function remove(session: WorkspaceSessionInfo) {
   if (!props.teamId) return;
-  if (!window.confirm(`删除工作区会话「${session.name}」？（不影响磁盘目录与对话历史）`)) return;
+  const ok = await confirmDialog(
+    `删除工作区会话「${session.name}」？（不影响磁盘目录与对话历史）`,
+    { title: '删除工作区会话', danger: true, confirmText: '删除' },
+  );
+  if (!ok) return;
   sendCommand({ DeleteWorkspaceSession: { team_id: props.teamId, id: session.id } });
 }
 

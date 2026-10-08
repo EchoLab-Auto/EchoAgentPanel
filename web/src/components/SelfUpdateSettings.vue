@@ -259,14 +259,14 @@ onUnmounted(stopPoll);
   width: 100%;
   height: 4px;
   border-radius: 2px;
-  background: var(--nm-surface-inset, rgba(0, 0, 0, 0.08));
+  background: var(--panel-hover);
 }
 
 .su-phase--done { color: var(--nm-color-success, #4a8); }
 .su-phase--done .su-phase-dot { background: var(--nm-color-success, #4a8); }
-.su-phase--current { color: var(--nm-primary, #4a7dff); font-weight: 600; }
+.su-phase--current { color: var(--nm-primary-color); font-weight: 600; }
 .su-phase--current .su-phase-dot {
-  background: var(--nm-primary, #4a7dff);
+  background: var(--nm-primary-color);
   animation: su-pulse 1.2s ease-in-out infinite;
 }
 

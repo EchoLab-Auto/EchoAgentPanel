@@ -13,7 +13,7 @@
 //! 数据来自后端 SkillsList / ToolsList / PluginsList / TeamsList 事件，打开时主动拉取；
 //! API 配置随 state.api 事件更新。
 
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue';
 
 const props = defineProps<{
   activeSessionId?: string | null;
@@ -35,7 +35,10 @@ import {
   NeumorphismTable,
   NeumorphismTag,
   NeumorphismTextarea,
+  useToast,
+  useTouchDevice,
 } from '@echolab-auto/ui-frame';
+import { confirmDialog } from '../confirm';
 import { state } from '../store';
 import { regionLabel } from '../state';
 import { moveAgentToRegion } from '../agent-placement';
@@ -52,11 +55,14 @@ import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../pro
 import { loopModeOf } from '../protocol';
 import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
 import { MarkdownRenderer } from '@echolab-auto/ui-frame/doc';
-import ApiSettings from './ApiSettings.vue';
-import LogView from './LogView.vue';
-import FederationSettings from './FederationSettings.vue';
-import UpstreamsSettings from './UpstreamsSettings.vue';
-import SelfUpdateSettings from './SelfUpdateSettings.vue';
+// 子设置页按需加载（2026-10 审计修复）：五个子页约 2300 行（含 LogView
+// 挂载即开始的 5s 轮询），此前全随设置视图进首包；改为首次切入对应
+// 分类时才加载（vite 对每个 import() 自动分包）。
+const ApiSettings = defineAsyncComponent(() => import('./ApiSettings.vue'));
+const LogView = defineAsyncComponent(() => import('./LogView.vue'));
+const FederationSettings = defineAsyncComponent(() => import('./FederationSettings.vue'));
+const UpstreamsSettings = defineAsyncComponent(() => import('./UpstreamsSettings.vue'));
+const SelfUpdateSettings = defineAsyncComponent(() => import('./SelfUpdateSettings.vue'));
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
@@ -67,6 +73,13 @@ type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'cores' | 'fed
 const activeCategory = ref<CategoryKey>('api');
 
 // ── 列表加载跟踪（pending.ts）：四类清单各自的加载/慢/超时三态 ──
+// 竖屏移动端（2026-10）：断点与库内 useTouchDevice 同源（innerWidth < 768）。
+// 一级菜单变横滑 tab 条；工作台（技能/工具/插件/智能体）从「列表+详情并排」
+// 退化为 Master-Detail 二级导航（详情态隐藏列表、头部出现返回按钮）。
+const { isMobile } = useTouchDevice();
+
+// 全局 toast（替代 window.alert，2026-10 审计修复）：provider 在 App 根挂载。
+const { addToast } = useToast();
 const { phase: skillPhase, loading: skillLoading } = usePending('settings:skills');
 const { phase: toolPhase, loading: toolLoading } = usePending('settings:tools');
 const { phase: pluginPhase, loading: pluginLoading } = usePending('settings:plugins');
@@ -171,9 +184,9 @@ function resetTransient() {
   teamEditing.value = false;
 }
 
-function switchCategory(cat: CategoryKey) {
+async function switchCategory(cat: CategoryKey) {
   if (activeCategory.value === cat) return;
-  if (activeCategory.value === 'skill' && !confirmDiscardSkillEdit()) return;
+  if (activeCategory.value === 'skill' && !(await confirmDiscardSkillEdit())) return;
   activeCategory.value = cat;
   resetTransient();
 }
@@ -371,12 +384,13 @@ function toggleSkillAlways(skill: SkillInfo, always: boolean) {
   saveSkillPatch(skill, { always });
 }
 
-function toggleSkillSystem(skill: SkillInfo, system: boolean) {
+async function toggleSkillSystem(skill: SkillInfo, system: boolean) {
   if (
     system &&
-    !window.confirm(
+    !(await confirmDialog(
       `将「${skill.name}」设为系统提示词技能？\n\n其内容会注入该智能体的 base 区（身份/规则层），影响所有启用它的智能体，而不仅是触发词命中时。`,
-    )
+      { title: '设为系统提示词技能' },
+    ))
   ) {
     return;
   }
@@ -462,10 +476,14 @@ const skillFormDirty = computed(
     skillSnapshotOf() !== skillFormSnapshot.value,
 );
 
-/** 有未保存改动时询问；返回 false = 取消当前动作。 */
-function confirmDiscardSkillEdit(): boolean {
+/** 有未保存改动时询问；返回 false = 取消当前动作（全局确认框，2026-10）。 */
+async function confirmDiscardSkillEdit(): Promise<boolean> {
   if (!skillFormDirty.value) return true;
-  return window.confirm('技能编辑尚未保存，放弃更改？');
+  return confirmDialog('技能编辑尚未保存，放弃更改？', {
+    title: '放弃未保存的编辑',
+    danger: true,
+    confirmText: '放弃',
+  });
 }
 
 // ── 工具工作台（2026-09-23 重排版，与技能工作台同构）──
@@ -850,12 +868,12 @@ const hasWorkbench = computed(
 const teamList = computed(() => [...state.teams].sort((a, b) => a.id.localeCompare(b.id)));
 
 // ── 条目选中 ──
-function selectSkillItem(s: SkillInfo) {
+async function selectSkillItem(s: SkillInfo) {
   // 已选同一技能的只读态：无需确认。编辑中（含点回同一行）都先确认脏改动，
   // 避免「点自己就把未保存内容丢掉」的静默数据丢失。
   const readOnlySame =
     selectedSkill.value?.name === s.name && !editing.value && !creating.value;
-  if (!readOnlySame && !confirmDiscardSkillEdit()) return;
+  if (!readOnlySame && !(await confirmDiscardSkillEdit())) return;
   resetTransient();
   skillMenuOpen.value = false;
   selectedSkill.value = s;
@@ -904,6 +922,45 @@ const showEmpty = computed(() => {
   }
 });
 
+/**
+ * 移动端「详情态」：当前分类已选中条目（或处于编辑态）——此时隐藏条目列表、
+ * 详情全宽显示（Master-Detail 二级导航；返回按钮见 closeMobileDetail）。
+ * 仅工作台类（技能/工具/插件）与智能体有该形态；其余分类是整页表单，恒 false。
+ */
+const mobileDetailOpen = computed(() => {
+  if (!isMobile.value) return false;
+  switch (activeCategory.value) {
+    case 'skill':
+      return !!(selectedSkill.value || editing.value || creating.value);
+    case 'tool':
+      return !!selectedTool.value;
+    case 'plugin':
+      return !!selectedPlugin.value;
+    case 'team':
+      return !!(selectedTeam.value || teamEditing.value);
+    default:
+      return false;
+  }
+});
+
+/** 工作台根节点的移动端类（列表态/详情态二选一；桌面 undefined = 原样）。 */
+const mobileWorkspaceClass = computed(() => {
+  if (!isMobile.value) return undefined;
+  return mobileDetailOpen.value ? 'caps-workspace--mobile-detail' : 'caps-workspace--mobile-list';
+});
+
+/** 移动端详情「返回列表」：与各选择逻辑同口径先走脏确认，再清空选中/编辑态。 */
+async function closeMobileDetail() {
+  if (activeCategory.value === 'skill' && (editing.value || creating.value)) {
+    if (!(await confirmDiscardSkillEdit())) return;
+  }
+  resetTransient();
+  selectedSkill.value = null;
+  selectedTool.value = null;
+  selectedPlugin.value = null;
+  selectedTeam.value = null;
+}
+
 // ── Team 成员编辑（ui-frame 表单模型，NeumorphismForm 受控）──
 const teamFormId = ref('');
 const teamFormName = ref('');
@@ -920,17 +977,18 @@ const otherRegions = computed(() =>
     .filter((name) => name !== (selectedTeam.value?.core ?? null)),
 );
 const moveTargetRegion = ref('');
-function doMoveRegion() {
+async function doMoveRegion() {
   const team = selectedTeam.value;
   const target = moveTargetRegion.value || otherRegions.value[0] || '';
   if (!team || !target) return;
   const from = regionLabel(state, team.core);
   const to = regionLabel(state, target);
-  const ok = window.confirm(
+  const ok = await confirmDialog(
     `把「${team.name}」的运行区域从「${from}」改为「${to}」？\n\n` +
       `· 在目标区域创建/更新该 agent\n` +
       `· 从当前区域删除\n\n` +
       `注意：会话历史仍留在原区域，不会随迁移搬走。`,
+    { title: '迁移运行区域', danger: true, confirmText: '迁移' },
   );
   if (!ok) return;
   moveAgentToRegion(team, target);
@@ -1184,13 +1242,19 @@ function saveTeam() {
   teamEditing.value = false;
 }
 
-function deleteTeam(team: TeamInfo) {
+async function deleteTeam(team: TeamInfo) {
   // 去主智能体（2026-09）：没有受保护的"主 Agent"，唯一约束是至少保留一个。
   if (state.teams.length <= 1) {
-    window.alert('至少保留一个智能体，不能删除最后一个。');
+    addToast({ message: '至少保留一个智能体，不能删除最后一个。', type: 'warning', duration: 5000 });
     return;
   }
-  if (!window.confirm(`确定删除智能体「${team.name}」？该成员的记忆与系统提示词将被移除，此操作不可恢复。`)) return;
+  if (
+    !(await confirmDialog(
+      `确定删除智能体「${team.name}」？该成员的记忆与系统提示词将被移除，此操作不可恢复。`,
+      { title: '删除智能体', danger: true, confirmText: '删除' },
+    ))
+  )
+    return;
   sendCommand({ DeleteTeam: { id: team.id } });
   selectedTeam.value = null;
   teamEditing.value = false;
@@ -1208,9 +1272,12 @@ const MANAGEMENT_PANEL_PLUGIN_ID = 'echo-agent.management.panel';
 
 function togglePlugin(plugin: PluginInfo, enabled: boolean) {
   if (!enabled && plugin.id === MANAGEMENT_PANEL_PLUGIN_ID) {
-    window.alert(
-      '「管理面」插件承载 Panel 与 Core 的通信通道，禁用即断连自锁（无法经界面恢复），已被保护。\n如需禁用请编辑 core.toml 的 disabled_plugins 后重启 Core。',
-    );
+    addToast({
+      message:
+        '「管理面」插件承载 Panel 与 Core 的通信通道，禁用即断连自锁（无法经界面恢复），已被保护。如需禁用请编辑 core.toml 的 disabled_plugins 后重启 Core。',
+      type: 'warning',
+      duration: 6000,
+    });
     return;
   }
   sendCommand({ TogglePlugin: { id: plugin.id, enabled } });
@@ -1253,14 +1320,21 @@ function updateGitSkill(skill: SkillInfo) {
   sendCommand({ UpdateSkillFromGit: { name: skill.name } });
 }
 
-function removeGitSource(skill: SkillInfo) {
-  if (!window.confirm(`移除 ${skill.name} 的 Git 来源记录？（目录保留，可手动删除）`)) return;
+async function removeGitSource(skill: SkillInfo) {
+  if (
+    !(await confirmDialog(`移除 ${skill.name} 的 Git 来源记录？（目录保留，可手动删除）`, {
+      title: '移除 Git 来源',
+      danger: true,
+      confirmText: '移除',
+    }))
+  )
+    return;
   sendCommand({ RemoveSkillSource: { name: skill.name } });
 }
 
 // ── 新建 / 编辑 / 保存 / 删除 ──
-function startCreate() {
-  if (!confirmDiscardSkillEdit()) return;
+async function startCreate() {
+  if (!(await confirmDiscardSkillEdit())) return;
   activeCategory.value = 'skill';
   formAlways.value = false;
   formSystem.value = false;
@@ -1333,8 +1407,15 @@ function saveSkill() {
   skillFormSnapshot.value = '';
 }
 
-function deleteSkill(skill: SkillInfo) {
-  if (!window.confirm(`确定删除技能「${skill.name}」？该操作会删除 SKILL.md 文件。`)) return;
+async function deleteSkill(skill: SkillInfo) {
+  if (
+    !(await confirmDialog(`确定删除技能「${skill.name}」？该操作会删除 SKILL.md 文件。`, {
+      title: '删除技能',
+      danger: true,
+      confirmText: '删除',
+    }))
+  )
+    return;
   sendCommand({ DeleteSkill: { name: skill.name } });
   selectedSkill.value = null;
 }
@@ -1425,6 +1506,17 @@ watch(
     <!-- 分类工作区 -->
     <div class="caps-body">
       <div class="caps-toolbar">
+        <!-- 移动端 Master-Detail 返回（2026-10）：仅详情态出现 -->
+        <NeumorphismButton
+          v-if="mobileDetailOpen"
+          size="small"
+          variant="glass"
+          class="caps-mobile-back"
+          aria-label="返回列表"
+          @click="closeMobileDetail"
+        >
+          ← 返回
+        </NeumorphismButton>
         <div class="caps-toolbar-title">
           <h3>{{ currentCategory.label }}</h3>
           <span class="muted">{{ toolbarSubtitle }}</span>
@@ -1570,13 +1662,14 @@ watch(
         </div>
       </div>
 
-      <!-- 资源工作区：条目列表 + 详情/编辑 -->
-      <div v-else class="caps-workspace">
+      <!-- 资源工作区：条目列表 + 详情/编辑（移动端 Master-Detail，见 mobileWorkspaceClass） -->
+      <div v-else class="caps-workspace" :class="mobileWorkspaceClass">
         <!-- 条目列表 -->
-        <!-- 列表宽度：工作台（技能/工具/插件）可拖拽（其余分类沿用默认 250px） -->
+        <!-- 列表宽度：工作台（技能/工具/插件）可拖拽（其余分类沿用默认 250px）；
+             移动端不绑定（列表全宽、详情态隐藏） -->
         <div
           class="caps-list"
-          :style="hasWorkbench ? { width: capsListWidth + 'px' } : undefined"
+          :style="hasWorkbench && !isMobile ? { width: capsListWidth + 'px' } : undefined"
         >
           <!-- 技能：工作台分组（按包 / 按分类 / 平铺）+ 双行行卡 -->
           <template v-if="activeCategory === 'skill'">
@@ -2681,7 +2774,7 @@ watch(
   display: flex;
   flex-direction: column;
   border-radius: 12px;
-  background: var(--nm-surface, rgba(255, 255, 255, 0.04));
+  background: color-mix(in srgb, var(--nm-text-primary) 4%, transparent);
   overflow: hidden;
 }
 .caps-toolbar {
@@ -2818,7 +2911,7 @@ watch(
   margin: 0;
   padding: 10px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--nm-mask-bg);
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 420px;
@@ -3451,8 +3544,101 @@ watch(
   padding: 3px 8px;
   border-radius: 6px;
   border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.12));
-  background: var(--nm-bg-raised, rgba(255, 255, 255, 0.06));
+  background: var(--nm-surface-raised);
   color: var(--nm-text-primary);
   font-size: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   竖屏移动端（2026-10，断点 768px，与库 useTouchDevice.isMobile 同源）
+   · 一级菜单：168px 竖排 → 顶部横滑 tab 条
+   · 工作台：列表+详情并排 → Master-Detail（类由 mobileWorkspaceClass 切换）
+   · 详情头部返回按钮：.caps-mobile-back（仅详情态渲染）
+   桌面样式即上方默认；本段只做窄屏收敛。参考 document/panel-mobile.md。
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 767.98px) {
+  .caps {
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  /* ── 一级菜单：横滑 tab 条 ── */
+  .caps-nav {
+    width: auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 4px;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .caps-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .caps-nav-item {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    min-height: 40px;
+  }
+  .caps-nav-spacer {
+    display: none;
+  }
+  /* 「刷新」按钮不随 tab 滚动出视野？——保持随行（tab 条右端），简化实现 */
+  .caps-nav > .nm-button {
+    flex: 0 0 auto;
+  }
+
+  /* ── 工作区与工具条 ── */
+  .caps-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .caps-mobile-back {
+    order: -1;
+  }
+  .caps-workspace {
+    position: relative;
+  }
+
+  /* ── Master-Detail：列表态隐藏详情、详情态隐藏列表 ── */
+  .caps-workspace--mobile-list .caps-detail-pane {
+    display: none;
+  }
+  .caps-workspace--mobile-detail .caps-list {
+    display: none;
+  }
+  .caps-workspace--mobile-detail .caps-resizer {
+    display: none;
+  }
+  /* 移动端列表全宽（inline 宽度已不绑定）；去掉右分隔线 */
+  .caps-list {
+    width: auto;
+    flex: 1;
+    border-right: none;
+    padding: 6px;
+  }
+  .caps-detail-pane {
+    padding: 10px 12px;
+  }
+
+  /* 详情内表格/长内容：横向滚动兜底（外层 min-width:0 已保证可滚） */
+  .caps-detail-pane :deep(.nm-table__wrapper) {
+    overflow-x: auto;
+  }
+  /* 表单动作行与详情头：允许换行，防按钮溢出 */
+  .detail-head,
+  .form-actions {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  /* Git 安装弹层：420px 最小宽在窄屏放不下，改自适应 */
+  .git-modal {
+    min-width: 0;
+  }
 }
 </style>

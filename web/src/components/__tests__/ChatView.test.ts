@@ -4,7 +4,7 @@
 //! 修复方案：输入区改为 flex 子项占位（flex: 0 0 auto），消息列表 flex:1 独立滚动。
 //! 本测试锁定该契约，防止回归为 absolute/padding hack。
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { defineComponent, h } from 'vue';
 import ChatView from '../ChatView.vue';
@@ -222,6 +222,11 @@ describe('ChatView 布局契约', () => {
       .find((b) => b.text().includes('会话'));
     expect(btn, 'session button visible').toBeTruthy();
     await btn!.trigger('click');
+    // 弹层组件为按需加载（defineAsyncComponent，2026-10 首屏瘦身）：
+    // 异步 chunk 的解析落在宏任务，`vi.waitFor` 等到弹层渲染完成。
+    await vi.waitFor(() => {
+      expect(wrapper.findAll('.sw-item').length).toBeGreaterThan(0);
+    });
     // 弹层内可选 QQ 私聊项
     const item = wrapper.findAll('.sw-item').find((b) => b.text().includes('Evence'));
     expect(item).toBeTruthy();

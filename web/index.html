@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：竖屏移动端安全区（刘海 / Home 指示条）随
+         env(safe-area-inset-*) 生效（2026-10 移动端适配）。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EchoAgent Panel</title>
     <!-- PWA / 头显独立应用运行（XR 巨幕模式）：manifest + 图标 + 主题色。
          maskable 图标供 Android 系（PICO 等）桌面/窗口自适应裁切。 -->

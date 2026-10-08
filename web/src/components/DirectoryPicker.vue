@@ -16,7 +16,7 @@ import { computed, ref, watch } from 'vue';
 import { state } from '../store';
 import { scopedKey } from '../keys';
 import { sendCommand } from '../connection';
-import { NeumorphismButton, NeumorphismSpinner } from '@echolab-auto/ui-frame';
+import { NeumorphismButton, NeumorphismSelect, NeumorphismSpinner } from '@echolab-auto/ui-frame';
 
 const props = defineProps<{
   /** 初始位置（编辑现有目录时可预置；缺省 local）。 */
@@ -37,6 +37,12 @@ const location = ref<string>(
 const peerNames = computed(() =>
   (state.federation?.peers ?? []).filter((p) => p.link === 'Online').map((p) => p.name),
 );
+
+/** 位置下拉选项（库 Select options；'local' = 当前区域，其余 = 联邦节点）。 */
+const locationOptions = computed(() => [
+  { label: '本机（当前区域）', value: 'local' },
+  ...peerNames.value.map((peer) => ({ label: `${peer}（联邦节点）`, value: peer })),
+]);
 
 /** 导航栈：[] = 根视图；每进入一层 push { label, path }。 */
 const stack = ref<Array<{ label: string; path: string }>>([]);
@@ -134,19 +140,23 @@ watch(
 </script>
 
 <template>
-  <div class="dp-overlay" @click.self="emit('close')">
+  <!-- Teleport 到 body（2026-10 审计修复）：本组件常挂在 ChatView 的
+       `.checklist-pop` 浮层内——其 `backdrop-filter` 会把 fixed 后代的包含块
+       改为自身、`overflow-y:auto` 再行裁剪，导致全屏遮罩只罩住 520px 浮层、
+       @click.self 关闭大面积失效。teleport 后 fixed/inset 参照视口。 -->
+  <Teleport to="body">
+    <div class="dp-overlay" @click.self="emit('close')">
     <div class="dp-panel">
       <div class="dp-head">
         <span class="dp-title">选择目录</span>
         <!-- 位置切换：本机 + 在线联邦节点 -->
-        <select
+        <NeumorphismSelect
+          :model-value="location"
           class="dp-location"
-          :value="location"
-          @change="pickLocation(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="local">本机（当前区域）</option>
-          <option v-for="peer in peerNames" :key="peer" :value="peer">{{ peer }}（联邦节点）</option>
-        </select>
+          size="small"
+          :options="locationOptions"
+          @update:model-value="(v) => pickLocation(String(v ?? 'local'))"
+        />
         <NeumorphismButton size="small" variant="glass" @click="emit('close')">✕</NeumorphismButton>
       </div>
 
@@ -230,9 +240,9 @@ watch(
         </NeumorphismButton>
       </div>
     </div>
-  </div>
+    </div>
+  </Teleport>
 </template>
-
 <style scoped>
 .dp-overlay {
   position: fixed;
@@ -241,7 +251,7 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--nm-mask-bg);
 }
 .dp-panel {
   width: min(560px, 92vw);
@@ -251,7 +261,7 @@ watch(
   gap: 8px;
   padding: 12px;
   border-radius: 14px;
-  background: var(--nm-bg, #f2f3f7);
+  background: var(--nm-surface-raised);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 }
 .dp-head {
@@ -264,7 +274,7 @@ watch(
   max-width: 220px;
   padding: 4px 6px;
   border-radius: 8px;
-  border: 1px solid var(--nm-border, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--nm-border-color);
   background: transparent;
 }
 .dp-crumbs {
@@ -287,7 +297,7 @@ watch(
   flex: 1;
   overflow: auto;
   min-height: 180px;
-  border: 1px solid var(--nm-border, rgba(128, 128, 128, 0.18));
+  border: 1px solid var(--nm-border-color);
   border-radius: 10px;
   padding: 4px;
 }
@@ -299,7 +309,7 @@ watch(
   border-radius: 8px;
   cursor: pointer;
 }
-.dp-row:hover { background: var(--nm-bg-soft, rgba(128, 128, 128, 0.1)); }
+.dp-row:hover { background: var(--panel-hover); }
 .dp-row__icon { font-size: 13px; }
 .dp-row__name { font-weight: 500; min-width: 0; }
 .dp-row__path {
@@ -318,7 +328,7 @@ watch(
   padding: 2px 6px;
   border-radius: 6px;
 }
-.dp-enter:hover { background: var(--nm-bg-soft, rgba(128, 128, 128, 0.18)); }
+.dp-enter:hover { background: var(--panel-hover); }
 .dp-error {
   padding: 10px;
   color: var(--panel-warn, #9a6700);

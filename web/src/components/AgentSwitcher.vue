@@ -170,7 +170,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   gap: 8px;
   height: 34px;
   padding: 0 10px 0 4px;
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border: 1px solid var(--panel-glass-border);
   border-radius: 999px;
   background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
   backdrop-filter: blur(20px) saturate(1.6);
@@ -205,7 +205,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   user-select: none;
 }
 .agent-card__avatar--off {
-  background: color-mix(in srgb, var(--nm-text-tertiary, #8a8a8a) 60%, transparent) !important;
+  background: color-mix(in srgb, var(--nm-text-placeholder) 60%, transparent) !important;
   color: var(--nm-text-secondary, #bbb);
 }
 
@@ -250,8 +250,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   background: color-mix(in srgb, var(--nm-surface-raised) 85%, transparent);
   backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--panel-glass-border);
+  box-shadow: var(--panel-glass-shadow-lg);
 }
 
 .agent-menu__empty {

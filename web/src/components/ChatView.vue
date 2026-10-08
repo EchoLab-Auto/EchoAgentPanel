@@ -7,8 +7,14 @@
 //! doc `MarkdownRenderer`）。库的 chat 组合组件已移除（组合权归产品）。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { NeumorphismBadge, NeumorphismButton, NeumorphismSpinner } from '@echolab-auto/ui-frame';
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+  NeumorphismBadge,
+  NeumorphismButton,
+  NeumorphismDrawer,
+  NeumorphismSpinner,
+  useTouchDevice,
+} from '@echolab-auto/ui-frame';
 import {
   ChatComposer,
   ChatTray,
@@ -19,23 +25,26 @@ import { checklistsForSession } from '../state';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
 import { checklistKey, sessionKey } from '../keys';
-import AgentConfigModal from './AgentConfigModal.vue';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
 import ReasoningBlock from './ReasoningBlock.vue';
 import SubagentEventBlock from './SubagentEventBlock.vue';
-import ContextView from './ContextView.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
-import QqPanel from './QqPanel.vue';
-import WorkspacePanel from './WorkspacePanel.vue';
-import SessionSwitcher from './SessionSwitcher.vue';
-import TasksPanel from './TasksPanel.vue';
 import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
 import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards } from '../rail-cards';
+import { mobileCardsDrawerOpen } from '../mobile-cards';
 import { railDragEngaged } from '../rail-drag';
+// 弹层按需加载（2026-10 审计修复）：入口行弹层与配置/上下文覆盖层首次
+// 打开时才加载对应 chunk（此前全部静态进首包——不打开也付加载成本）。
+const AgentConfigModal = defineAsyncComponent(() => import('./AgentConfigModal.vue'));
+const ContextView = defineAsyncComponent(() => import('./ContextView.vue'));
+const QqPanel = defineAsyncComponent(() => import('./QqPanel.vue'));
+const WorkspacePanel = defineAsyncComponent(() => import('./WorkspacePanel.vue'));
+const SessionSwitcher = defineAsyncComponent(() => import('./SessionSwitcher.vue'));
+const TasksPanel = defineAsyncComponent(() => import('./TasksPanel.vue'));
 
 const props = defineProps<{
   sessionId: string;
@@ -152,9 +161,32 @@ const composerFloatRef = ref<HTMLElement | null>(null);
 const entryBottom = ref('170px');
 let ctxObserver: ResizeObserver | null = null;
 
+/**
+ * 软键盘适配（移动端，2026-10）：iOS/Android 弹键盘时不改变 layout viewport，
+ * 页面 overflow:hidden 的 SPA 里 fixed/absolute 输入区会被键盘盖住。
+ * 监听 `visualViewport` 求「可视视口被压缩的高度」，注入输入区/入口行的
+ * bottom（桌面恒 0，无影响）。阈值 80px：滤掉地址栏伸缩等 UI 抖动。
+ */
+const keyboardInset = ref(0);
+const keyboardInsetPx = computed(() => `${keyboardInset.value}px`);
+let visualViewport: VisualViewport | null = null;
+function updateKeyboardInset() {
+  if (!visualViewport) return;
+  const inset = Math.round(
+    window.innerHeight - visualViewport.height - visualViewport.offsetTop,
+  );
+  keyboardInset.value = inset > 80 ? inset : 0;
+}
+
 onMounted(() => {
   // 拖选监听：选区出现即临时关 blur（输入框未聚焦时也可能拖选已输入文本）。
   document.addEventListener('selectionchange', onSelectionChange);
+  // 软键盘：仅在移动端挂监听（桌面视觉视口恒等于窗口，无收益）
+  if (isMobile.value && window.visualViewport) {
+    visualViewport = window.visualViewport;
+    visualViewport.addEventListener('resize', updateKeyboardInset);
+    visualViewport.addEventListener('scroll', updateKeyboardInset);
+  }
   const target = composerFloatRef.value;
   if (!target) return;
   ctxObserver = new ResizeObserver(() => {
@@ -166,6 +198,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ctxObserver?.disconnect();
   document.removeEventListener('selectionchange', onSelectionChange);
+  if (visualViewport) {
+    visualViewport.removeEventListener('resize', updateKeyboardInset);
+    visualViewport.removeEventListener('scroll', updateKeyboardInset);
+    visualViewport = null;
+  }
 });
 
 function onSelectionChange() {
@@ -354,14 +391,24 @@ function toggleWorkspace() {
 // 「工作区」入口按钮仍只负责会话管理/git 弹层（与列无关）。
 const RAIL_WIDTH = 324;
 
+// 竖屏移动端（2026-10）：断点与库内 useTouchDevice 同源（innerWidth < 768），
+// 移动端隐藏双侧边栏（卡片改经顶栏「卡片」抽屉访问）、消息区留白归零、
+// 底部弹层改全宽形态。isMobile 变化是响应式的（库 composable 监听 resize）。
+const { isMobile } = useTouchDevice();
+
 /** 某列是否有可见卡片（门控 × 用户排序，判据来自共享注册表）。 */
 function railHasCards(side: 'left' | 'right'): boolean {
   return railHasVisibleCards(side, props.activeTeamId ?? null);
 }
 
-/** 列的显隐：有卡片，或拖动进行中（拖动时需要两列都作为投放区）。 */
-const leftRailVisible = computed(() => railHasCards('left') || railDragEngaged.value);
-const rightRailVisible = computed(() => railHasCards('right') || railDragEngaged.value);
+/** 列的显隐：有卡片，或拖动进行中（拖动时需要两列都作为投放区）。
+ *  移动端恒不渲染——卡片经顶栏「卡片」抽屉（PanelSidebar 复用）访问。 */
+const leftRailVisible = computed(
+  () => !isMobile.value && (railHasCards('left') || railDragEngaged.value),
+);
+const rightRailVisible = computed(
+  () => !isMobile.value && (railHasCards('right') || railDragEngaged.value),
+);
 
 /**
  * 消息滚动区的左右留白（有**可见卡片**的列 = 列宽）。
@@ -373,8 +420,31 @@ const rightRailVisible = computed(() => railHasCards('right') || railDragEngaged
  * 注意返回**带单位的字符串**：`v-bind()` 注入 CSS 变量时数字无单位会被
  * 浏览器丢弃（padding-left: 324 非法）。
  */
-const trayPadLeft = computed(() => (railHasCards('left') ? `${RAIL_WIDTH}px` : '0px'));
-const trayPadRight = computed(() => (railHasCards('right') ? `${RAIL_WIDTH}px` : '0px'));
+const trayPadLeft = computed(() =>
+  !isMobile.value && railHasCards('left') ? `${RAIL_WIDTH}px` : '0px',
+);
+const trayPadRight = computed(() =>
+  !isMobile.value && railHasCards('right') ? `${RAIL_WIDTH}px` : '0px',
+);
+
+/**
+ * 弹出层（.checklist-pop）定位样式（2026-10 移动端适配）。
+ *
+ * 桌面：跟随按钮 `left = centerX - 260`（面板半宽），`bottom` 锚在入口行上方。
+ * 移动端：锚点法在窄屏会把面板推出屏外（left 常为负）——改为全宽贴底：
+ * 左右各 8px + 解析安全区，`bottom` 仍锚入口行以保持与触发按钮的关联。
+ */
+function popoverStyle(bottom: number, left: number): Record<string, string> {
+  if (isMobile.value) {
+    return {
+      bottom: `${bottom}px`,
+      left: '8px',
+      right: '8px',
+      width: 'auto',
+    };
+  }
+  return { bottom: `${bottom}px`, left: `${left}px` };
+}
 
 // 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
@@ -807,7 +877,7 @@ function imagesOf(message: ChatMessage): string[] {
     <div
       v-if="showSessions"
       class="checklist-pop"
-      :style="{ bottom: sessionsBottom + 'px', left: sessionsLeft + 'px' }"
+      :style="popoverStyle(sessionsBottom, sessionsLeft)"
       @click.self="showSessions = false"
     >
       <SessionSwitcher
@@ -822,7 +892,7 @@ function imagesOf(message: ChatMessage): string[] {
     <div
       v-if="showWorkspace"
       class="checklist-pop"
-      :style="{ bottom: workspaceBottom + 'px', left: workspaceLeft + 'px' }"
+      :style="popoverStyle(workspaceBottom, workspaceLeft)"
       @click.self="showWorkspace = false"
     >
       <WorkspacePanel :team-id="props.activeTeamId ?? null" />
@@ -832,7 +902,7 @@ function imagesOf(message: ChatMessage): string[] {
     <div
       v-if="showAdapter"
       class="checklist-pop"
-      :style="{ bottom: adapterTop + 'px', left: adapterLeft + 'px' }"
+      :style="popoverStyle(adapterTop, adapterLeft)"
       @click.self="showAdapter = false"
     >
       <QqPanel :team-id="props.activeTeamId ?? null" />
@@ -842,7 +912,7 @@ function imagesOf(message: ChatMessage): string[] {
     <div
       v-if="showTasks"
       class="checklist-pop"
-      :style="{ bottom: tasksBottom + 'px', left: tasksLeft + 'px' }"
+      :style="popoverStyle(tasksBottom, tasksLeft)"
       @click.self="showTasks = false"
     >
       <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />
@@ -852,7 +922,7 @@ function imagesOf(message: ChatMessage): string[] {
     <div
       v-if="showChecklist"
       class="checklist-pop"
-      :style="{ bottom: checklistBottom + 'px', left: checklistLeft + 'px' }"
+      :style="popoverStyle(checklistBottom, checklistLeft)"
       @click.self="showChecklist = false"
     >
       <ChecklistSidebar :session-id="sessionId === 'global' ? undefined : sessionId" :lists="sessionId === 'global' ? sessionChecklists : undefined" />
@@ -984,6 +1054,41 @@ function imagesOf(message: ChatMessage): string[] {
 
     <!-- 拖动拖影：跟随指针的卡片缩影（Teleport 到 body，fixed 定位） -->
     <RailDragGhost />
+
+    <!-- 卡片抽屉（竖屏移动端，2026-10）：双侧边栏在窄屏隐藏（压死正文），
+         卡片改经顶栏「卡片」按钮打开的底部 Drawer 访问——复用 PanelSidebar
+         （门控/排序/工作区绑定全继承）。仅移动端渲染，桌面零影响。 -->
+    <NeumorphismDrawer
+      v-if="isMobile"
+      v-model="mobileCardsDrawerOpen"
+      position="bottom"
+      title="信息卡片"
+      width="78%"
+    >
+      <div class="mobile-cards">
+        <PanelSidebar
+          v-if="railHasCards('left')"
+          side="left"
+          :active-branch-id="props.activeBranchId ?? null"
+          :team-id="props.activeTeamId ?? null"
+          @select-branch="(id) => emit('selectBranch', id)"
+          @manage-workspace="toggleWorkspace"
+          @open-shell-detail="(id) => emit('openShellDetail', id)"
+        />
+        <PanelSidebar
+          v-if="railHasCards('right')"
+          side="right"
+          :active-branch-id="props.activeBranchId ?? null"
+          :team-id="props.activeTeamId ?? null"
+          @select-branch="(id) => emit('selectBranch', id)"
+          @manage-workspace="toggleWorkspace"
+          @open-shell-detail="(id) => emit('openShellDetail', id)"
+        />
+        <p v-if="!railHasCards('left') && !railHasCards('right')" class="mobile-cards__empty">
+          （当前无可见卡片）
+        </p>
+      </div>
+    </NeumorphismDrawer>
 
     <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
     <div
@@ -1213,11 +1318,11 @@ function imagesOf(message: ChatMessage): string[] {
      重绘全量重栅格化，跨行拖选每帧触发，是拖选卡顿的根治点。 */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border: 1px solid var(--panel-glass-border);
   box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.45),
-    0 0 0 0.5px rgba(255, 255, 255, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    var(--panel-glass-shadow-md),
+    0 0 0 0.5px var(--panel-glass-border),
+    inset 0 1px 0 var(--panel-glass-highlight);
 }
 
 /* 聚焦/拖选期间：临时关毛玻璃（纯色底撑住视觉），拖选重绘不再触发
@@ -1227,16 +1332,10 @@ function imagesOf(message: ChatMessage): string[] {
   -webkit-backdrop-filter: none !important;
   background: var(--nm-surface-raised);
 }
-/* 拖选卡顿根治之二（2026-09-18）：库 NeumorphismTextarea 在悬浮/聚焦态
-   默认给文本域容器 `transform: translateY(-1px)` + transform 过渡——
-   分数像素位移让选区重绘走"变换文本层"慢路径，跨行拖选每帧重绘时卡顿
-   明显。此处置零位移并禁用 transform 过渡（视觉仅差 1px，无感）。 */
-.chat-composer-float :deep(.nm-textarea),
-.chat-composer-float :deep(.nm-textarea:hover),
-.chat-composer-float :deep(.nm-textarea--focused) {
-  transform: none !important;
-  transition-property: box-shadow, background-color, color, border-color !important;
-}
+/* 拖选卡顿根治之二（2026-09-18，2026-10 收敛）：库 NeumorphismTextarea 的
+   hover/focused 1px translateY 抬升已在库侧移除（transform 层导致大段文本
+   拖选慢路径，见 ui-frame CHANGELOG Unreleased）——此处的应用侧
+   `transform: none !important` 覆盖已随之删除，不再需要。 */
 
 /* 吸底跳转按钮（「回到底部」）的落位（2026-09-28 重排）：
    - 库默认贴右下角（right/bottom = 16px）——既被悬浮输入区压住，又被
@@ -1474,7 +1573,7 @@ function imagesOf(message: ChatMessage): string[] {
   position: absolute;
   inset: 0;
   z-index: 50;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--nm-mask-bg);
 }
 .ctx-overlay__panel {
   position: absolute;
@@ -1485,14 +1584,14 @@ function imagesOf(message: ChatMessage): string[] {
   display: flex;
   flex-direction: column;
   border-radius: 20px;
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border: 1px solid var(--panel-glass-border);
   background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.45),
-    0 0 0 0.5px rgba(255, 255, 255, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    var(--panel-glass-shadow-lg),
+    0 0 0 0.5px var(--panel-glass-border),
+    inset 0 1px 0 var(--panel-glass-highlight);
   overflow: hidden;
 }
 .ctx-overlay__head {
@@ -1549,8 +1648,8 @@ function imagesOf(message: ChatMessage): string[] {
   background: color-mix(in srgb, var(--nm-surface-raised) 52%, transparent);
   backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid color-mix(in srgb, #ffffff 14%, transparent);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--panel-glass-border);
+  box-shadow: var(--panel-glass-shadow-lg);
 }
 
 /* ── 实时消息入场动画（历史回放不播） ── */
@@ -1569,13 +1668,13 @@ function imagesOf(message: ChatMessage): string[] {
   gap: 7px;
   padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border: 1px solid var(--panel-glass-border);
   background: color-mix(in srgb, var(--nm-surface-raised) 48%, transparent);
   backdrop-filter: blur(20px) saturate(1.5);
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
   font-size: 12px;
   color: var(--nm-text-secondary);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--panel-glass-shadow-md);
 }
 .chat-activity__spinner {
   flex: 0 0 auto;
@@ -1594,5 +1693,91 @@ function imagesOf(message: ChatMessage): string[] {
 }
 @keyframes activity-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   竖屏移动端（2026-10，断点 768px，与库 useTouchDevice.isMobile 同源）
+   桌面样式即上方默认；本段只做窄屏收敛。参考 document/panel-mobile.md。
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 767.98px) {
+  /* 入口行：7 按钮 + AgentSwitcher 必然超宽——改横向滚动工具条，
+     右界 8px 保证可滑到底（此前无右界、右侧按钮超出屏外不可达）。
+     隐藏滚动条（触摸滑动本身有惯性反馈）。 */
+  .entry-row {
+    left: 8px;
+    right: 8px;
+    /* 键盘弹出时与输入区同步抬升（入口行锚在输入区上方 8px） */
+    bottom: calc(v-bind(entryBottom) + v-bind(keyboardInsetPx));
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    /* 横向滚动容器：纵向滚动完全交给消息区 */
+    touch-action: pan-x;
+    padding-bottom: 2px;
+  }
+  .entry-row::-webkit-scrollbar {
+    display: none;
+  }
+  .entry-row > * {
+    flex: 0 0 auto;
+  }
+  /* 活动浮条不占满：截断更紧，给按钮留浏览空间 */
+  .chat-activity__text {
+    max-width: 42vw;
+  }
+
+  /* 输入区：左右收窄 + 底部安全区（Home 指示条）+ 软键盘偏移；圆角与桌面一致 */
+  .chat-composer-float {
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px) + v-bind(keyboardInsetPx));
+    padding: 10px;
+    border-radius: 20px;
+  }
+  /* iOS 聚焦自动缩放对策：输入字号提至 16px（<16px 聚焦必缩放）。
+     只放大打字面，不改工具栏按钮/占位字号观感。 */
+  .chat-composer-float :deep(.nm-textarea__field) {
+    font-size: 16px;
+  }
+
+  /* 消息气泡：窄屏减少两侧浪费 */
+  .chat-view__list :deep(.nm-chat-bubble) {
+    max-width: 88%;
+  }
+
+  /* 会话区覆盖层（上下文 / Agent 配置）：桌面贴会话框 12px —— 窄屏收为
+     8px 近全屏，最大化内容宽度；内部表格各自横向滚动（见各组件）。 */
+  .ctx-overlay {
+    inset: 6px;
+    bottom: calc(v-bind(entryBottom) + 24px);
+    border-radius: 18px;
+  }
+  .ctx-overlay__panel {
+    border-radius: 16px;
+  }
+
+  /* 弹出层（.checklist-pop）：定位由 popoverStyle() 切换为全宽；
+     高度收紧防顶到入口行。 */
+  .checklist-pop {
+    max-height: 56vh;
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  /* 卡片抽屉内容：列内滚动 + 底部安全区 */
+  .mobile-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .mobile-cards__empty {
+    margin: 12px 0;
+    text-align: center;
+    color: var(--nm-text-secondary);
+    font-size: 13px;
+  }
 }
 </style>

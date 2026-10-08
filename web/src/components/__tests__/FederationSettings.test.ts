@@ -43,7 +43,7 @@ describe('FederationSettings 会话迁移', () => {
     const wrapper = mount(FederationSettings, {
       props: { activeSessionId: 'local:tui::local_user', activeTeamId: 'alix' },
     });
-    await wrapper.find('.fed-migrate button').trigger('click');
+    await wrapper.find('.fed-migrate .fed-migrate__go').trigger('click');
     expect(sendCommand).toHaveBeenCalledWith({
       MigrateSession: {
         session_id: 'local:tui::local_user',
@@ -57,7 +57,7 @@ describe('FederationSettings 会话迁移', () => {
     const wrapper = mount(FederationSettings, {
       props: { activeSessionId: 'global', activeTeamId: 'alix' },
     });
-    expect(wrapper.find('.fed-migrate button').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('.fed-migrate .fed-migrate__go').attributes('disabled')).toBeDefined();
   });
 
   it('无在线节点时禁用迁移', () => {
@@ -71,7 +71,7 @@ describe('FederationSettings 会话迁移', () => {
     const wrapper = mount(FederationSettings, {
       props: { activeSessionId: 'local:tui::local_user', activeTeamId: 'alix' },
     });
-    expect(wrapper.find('.fed-migrate button').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('.fed-migrate .fed-migrate__go').attributes('disabled')).toBeDefined();
   });
 });
 
@@ -92,7 +92,7 @@ describe('FederationSettings 授权表单（2026-10）', () => {
     const wrapper = mount(FederationSettings);
     await wrapper.find('.fed-actions button:last-child').trigger('click'); // 添加 peer
     // 填名称（savePeer 要求非空）
-    const nameInput = wrapper.find('.fed-form-grid input.fed-input');
+    const nameInput = wrapper.find('.fed-form-grid input');
     await nameInput.setValue('gpu-box');
     await wrapper.find('.fed-form .fed-btn--primary').trigger('click'); // 保存
     const call = vi.mocked(sendCommand).mock.calls.find(([c]) =>

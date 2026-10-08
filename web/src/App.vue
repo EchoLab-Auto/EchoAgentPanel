@@ -1,12 +1,13 @@
 <script setup lang="ts">
 //! 应用壳：NeumorphismLayout（库 sider 槽位，覆盖样式去背景/边框）+ 主视图 + 弹窗 + toast 桥。
 
-import { ref, watch } from 'vue';
+import { defineAsyncComponent, ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismLayout,
   NeumorphismToastProvider,
   ThemeProvider,
+  useTouchDevice,
 } from '@echolab-auto/ui-frame';
 import { state } from './store';
 import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
@@ -21,13 +22,22 @@ import {
   workspacePickIntent,
 } from './workspace';
 import ChatView from './components/ChatView.vue';
-import SettingsView from './components/SettingsView.vue';
-import ShellPanel from './components/ShellPanel.vue';
-import BranchModal from './components/BranchModal.vue';
+// 首屏瘦身（2026-10 审计修复）：设置视图（3400+ 行，含 5 个子设置页）、
+// Shell 详情与分支弹窗改为按需加载——不进聊天首屏的代码不进首包，
+// vite 自动按 import() 边界分包。
+const SettingsView = defineAsyncComponent(() => import('./components/SettingsView.vue'));
+const ShellPanel = defineAsyncComponent(() => import('./components/ShellPanel.vue'));
+const BranchModal = defineAsyncComponent(() => import('./components/BranchModal.vue'));
 import FullscreenToggleButton from './components/FullscreenToggleButton.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
+import { mobileCardsDrawerOpen } from './mobile-cards';
 
 startConnection();
+
+// 竖屏移动端（2026-10）：断点与库同源（innerWidth < 768）。移动端隐藏
+// 全屏按钮（CSS），顶栏出现「卡片」入口（打开 ChatView 内的卡片抽屉）。
+const { isMobile } = useTouchDevice();
 
 type View = 'chat' | 'settings' | 'shell';
 
@@ -441,6 +451,18 @@ watch(
           >
             设置
           </NeumorphismButton>
+          <!-- 卡片抽屉入口（仅移动端且会话视图；抽屉本体在 ChatView 内，
+               state 经 mobile-cards.ts 模块级 ref 通信） -->
+          <NeumorphismButton
+            v-if="isMobile && view === 'chat'"
+            size="small"
+            variant="glass"
+            class="mobile-cards-btn"
+            aria-label="打开信息卡片"
+            @click="mobileCardsDrawerOpen = !mobileCardsDrawerOpen"
+          >
+            卡片
+          </NeumorphismButton>
           <FullscreenToggleButton />
           <ThemeToggleButton />
         </div>
@@ -449,25 +471,32 @@ watch(
       <!-- 主区（左侧边栏已移除：会话切换/清单/工作区/临时分支分别
            在入口行与会话视图右侧边栏，2026-09-19） -->
       <div class="main">
-        <ChatView
-          v-if="view === 'chat'"
-          :session-id="activeSessionId"
-          :active-team-id="activeTeamId"
-          :active-branch-id="activeBranchId"
-          @send="send"
-          @cancel="cancelWork"
-          @select-team="onTeamSelect"
-          @select-session="onSessionPick"
-          @select-branch="(id) => (activeBranchId = id)"
-          @open-shell-detail="openShellDetail"
-        />
+        <!-- KeepAlive（2026-10 审计修复）：切到设置/Shell 再回来时保留
+             输入草稿、附件、滚动位置与工具组展开态（此前 v-if 直接销毁）。
+             KeepAlive 常驻（不能带 v-if，否则自身卸载时缓存一并销毁），
+             缓存内部用 v-if 控制显隐；兄弟视图改用显式 v-if——原 v-else-if
+             链被 KeepAlive 打断，且显式条件与链式语义完全等价。 -->
+        <KeepAlive>
+          <ChatView
+            v-if="view === 'chat'"
+            :session-id="activeSessionId"
+            :active-team-id="activeTeamId"
+            :active-branch-id="activeBranchId"
+            @send="send"
+            @cancel="cancelWork"
+            @select-team="onTeamSelect"
+            @select-session="onSessionPick"
+            @select-branch="(id) => (activeBranchId = id)"
+            @open-shell-detail="openShellDetail"
+          />
+        </KeepAlive>
         <SettingsView
-          v-else-if="view === 'settings'"
+          v-if="view === 'settings'"
           :active-session-id="activeSessionId"
           :active-team-id="activeTeamId"
         />
         <ShellPanel
-          v-else-if="shellDetailId"
+          v-if="view === 'shell' && shellDetailId"
           :session-id="shellDetailId"
           @back="setView('chat')"
         />
@@ -479,8 +508,15 @@ watch(
       :branch-id="activeBranchId"
       @close="activeBranchId = null"
     />
+    <!-- 移动端 toast 位置：窄屏改 top-center（右上角贴近拇指操作区易误触遮挡），
+         桌面维持 top-right。position 是库的响应式 prop，旋转/拉伸实时跟随。 -->
+    <NeumorphismToastProvider
+      ref="toastProvider"
+      :position="isMobile ? 'top-center' : 'top-right'"
+      :max-count="8"
+    />
 
-
-    <NeumorphismToastProvider ref="toastProvider" position="top-right" :max-count="8" />
+    <!-- 全局确认对话框（2026-10 审计修复）：window.confirm 的统一替代 -->
+    <ConfirmDialog />
   </ThemeProvider>
 </template>

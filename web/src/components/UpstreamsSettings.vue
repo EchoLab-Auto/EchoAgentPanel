@@ -238,18 +238,18 @@ onMounted(() => {
 .up-title { font-size: 15px; font-weight: 600; }
 .up-sub { color: var(--nm-text-secondary, #888); margin-top: 2px; max-width: 520px; }
 .up-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.up-error-card { padding: 10px 12px; color: var(--nm-error, #d64545); font-size: 12px; }
+.up-error-card { padding: 10px 12px; color: var(--nm-color-error); font-size: 12px; }
 .up-form { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .up-form-title { font-weight: 600; }
 .up-field { display: flex; flex-direction: column; gap: 4px; }
 .up-field span { font-size: 12px; color: var(--nm-text-secondary, #888); }
-.up-error { color: var(--nm-error, #d64545); font-size: 12px; }
+.up-error { color: var(--nm-color-error); font-size: 12px; }
 .up-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .up-list { display: flex; flex-direction: column; gap: 8px; }
 .up-loading { display: flex; justify-content: center; padding: 12px; }
 .up-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; min-height: 68px; }
 .up-item > :first-child { transition: opacity 0.3s ease; }
-.up-item--active { outline: 1px solid var(--nm-primary, #4a7dff); }
+.up-item--active { outline: 1px solid var(--nm-primary-color); }
 .up-item-main { flex: 1; min-width: 0; }
 .up-item-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .up-item-url { font-size: 12px; color: var(--nm-text-secondary, #888); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

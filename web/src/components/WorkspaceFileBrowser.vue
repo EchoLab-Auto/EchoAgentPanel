@@ -396,8 +396,8 @@ function formatSize(size: number): string {
   padding: 4px 8px;
   border-radius: 8px;
   font-size: 11px;
-  color: var(--panel-error, #d15353);
-  background: color-mix(in srgb, var(--panel-error, #d15353) 10%, transparent);
+  color: var(--panel-err);
+  background: color-mix(in srgb, var(--panel-err) 10%, transparent);
   overflow-wrap: anywhere;
 }
 </style>

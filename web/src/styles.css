@@ -17,12 +17,27 @@
   --nm-primary-dark: #0550ae;
   --nm-text-on-primary: #ffffff;
 
+  /* 语义色桥接（2026-10 审计修复）：库组件（FormItem 校验错误 / Upload /
+     FieldLabel…）与 Panel 自绘层共用同一套语义色——不再出现"库红 #e74c3c
+     与 panel 红 #cf222e 同屏"；dark 值在下方主题块覆盖（库 tokens 只定义
+     :root，此覆盖同时修正其暗色不切换的问题）。 */
+  --nm-color-success: #1a7f37;
+  --nm-color-warning: #9a6700;
+  --nm-color-error: #cf222e;
   --panel-accent: #0969da;
   --panel-accent-soft: rgba(9, 105, 218, 0.12);
-  --panel-ok: #1a7f37;
-  --panel-warn: #9a6700;
-  --panel-err: #cf222e;
+  --panel-ok: var(--nm-color-success);
+  --panel-warn: var(--nm-color-warning);
+  --panel-err: var(--nm-color-error);
   --panel-hover: color-mix(in srgb, var(--nm-text-primary) 6%, transparent);
+
+  /* 玻璃浮层配方（2026-10 审计统一）：边框/内高光/投影按主题取值——
+     此前 6 处各自复制"白边 rgba(255,255,255,.14~.16) + 黑影 .35~.45"常量，
+     亮色主题下边框不可见、黑影过重（"仅暗色正确"的配方）。 */
+  --panel-glass-border: var(--nm-border-color);
+  --panel-glass-highlight: rgba(255, 255, 255, 0.6);
+  --panel-glass-shadow-md: 0 12px 32px rgba(15, 23, 42, 0.16);
+  --panel-glass-shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.18);
 }
 
 [data-theme='dark'] {
@@ -31,11 +46,16 @@
   --nm-primary-dark: #3a7bd5;
   --nm-text-on-primary: #ffffff;
 
+  --nm-color-success: #3fb950;
+  --nm-color-warning: #d29922;
+  --nm-color-error: #f85149;
   --panel-accent: #4c9aff;
   --panel-accent-soft: rgba(76, 154, 255, 0.16);
-  --panel-ok: #3fb950;
-  --panel-warn: #d29922;
-  --panel-err: #f85149;
+
+  --panel-glass-border: color-mix(in srgb, #ffffff 16%, transparent);
+  --panel-glass-highlight: rgba(255, 255, 255, 0.12);
+  --panel-glass-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --panel-glass-shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
 
 * { box-sizing: border-box; }
@@ -664,4 +684,64 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   竖屏移动端自适应（2026-10，断点 768px）
+   ───────────────────────────────────────────────────────────────────────
+   口径与 ui-frame 的 useTouchDevice().isMobile（innerWidth < 768）严格一致：
+   库判「移动」与应用判「移动」永不打架。改动全部限定在本段媒体查询内
+   ——≥768px 桌面样式即上方默认值，零回归。
+   分段：① 全局壳（高度/安全区/顶栏）② 触控目标 ③ 各视图自有规则就近写在
+   组件 <style> 内（本文件只放跨组件的壳层规则）。
+   参考设计：document/panel-mobile.md。
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ① 触控目标（与视口宽度无关：平板触摸同样受益） */
+@media (pointer: coarse) {
+  .topbar-actions .nm-button,
+  .ctx-entry.nm-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 767.98px) {
+  /* ── 高度：iOS 地址栏伸缩用 dvh 兜底（回退 vh 由上方默认给） ── */
+  html, body, #app {
+    height: 100dvh;
+  }
+
+  /* ── 顶栏：压缩 + 安全区；品牌缩短 ── */
+  .nm-layout__header {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .brand {
+    font-size: 13px;
+  }
+  .topbar-actions {
+    gap: 4px;
+    flex-wrap: nowrap;
+  }
+  /* 全屏按钮：触摸端意义低（iOS Safari 不支持元素全屏），隐藏省空间 */
+  .topbar-actions .fullscreen-toggle {
+    display: none;
+  }
+  /* 移动端卡片抽屉入口（顶栏，App.vue 按 isMobile 渲染） */
+  .mobile-cards-btn {
+    display: inline-flex;
+  }
+
+  /* ── 主区：给底部安全区留白（输入区自身也有，这里兜住视图滚动端） ── */
+  .main {
+    padding-bottom: 0;
+  }
+
+  /* ── 库 Modal 窄屏边距（2026-10）：mask 无 padding、modal 宽 100%
+        ——375px 屏上贴边难看且触控边缘难按；统一 8px 内缩。 ── */
+  .nm-modal__mask {
+    padding: 8px;
+    box-sizing: border-box;
+  }
 }
