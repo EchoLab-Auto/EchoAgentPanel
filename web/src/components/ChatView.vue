@@ -645,7 +645,15 @@ const timelineLoading = computed(
 );
 
 // 空串占位 → 库回退到 locale 默认（输入消息，Enter 发送…）。
-const placeholder = computed(() => (connected.value ? '' : '未连接到 Core，暂时无法发送'));
+// 移动端（2026-10）：窄输入框里默认占位文本（303px）必然折行——即便库侧
+// 已修「placeholder 撑高」，单行内也会被拦腰截断；且「Enter 发送 / Shift+
+// Enter」在触屏键盘上本就不成立。移动端改用短占位。
+const placeholder = computed(() => {
+  if (!connected.value) {
+    return isMobile.value ? '未连接到 Core…' : '未连接到 Core，暂时无法发送';
+  }
+  return isMobile.value ? '输入消息…' : '';
+});
 
 // ── 图片工具：压缩为 data URL（最长边 1600，优先 JPEG 0.85）──
 // 多模态 API 按像素计 token，但请求体积由编码后大小决定：PNG 截图动辄数 MB，

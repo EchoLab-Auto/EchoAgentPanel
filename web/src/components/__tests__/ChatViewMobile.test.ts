@@ -24,6 +24,10 @@ const MessageItemStub = defineComponent({
 });
 const ChatComposerStub = defineComponent({
   name: 'ChatComposer',
+  props: {
+    // 声明以读取父组件传入的占位文本（测试断言用）
+    placeholder: { type: String, default: '' },
+  },
   setup: () => () => h('div', { class: 'stub-composer' }),
 });
 const DrawerStub = defineComponent({
@@ -127,5 +131,34 @@ describe('ChatView 竖屏移动端', () => {
     );
     expect(raw).toMatch(/visualViewport\.addEventListener\('resize'/);
     expect(raw).toMatch(/visualViewport\.removeEventListener\('resize'/);
+  });
+
+  it('占位文本：移动端用短占位（防窄框折行截断）；桌面保持空串（库 locale 长占位）', async () => {
+    // 移动端 + 已连接 → '输入消息…'
+    setViewportWidth(400);
+    state.connected = true;
+    const wrapper = mountChatView();
+    await nextTick();
+    const composer = wrapper.findComponent({ name: 'ChatComposer' });
+    expect(composer.exists()).toBe(true);
+    expect(composer.props('placeholder')).toBe('输入消息…');
+    wrapper.unmount();
+
+    // 移动端 + 未连接 → 短断连文案
+    state.connected = false;
+    const wrapper2 = mountChatView();
+    await nextTick();
+    expect(wrapper2.findComponent({ name: 'ChatComposer' }).props('placeholder')).toBe(
+      '未连接到 Core…',
+    );
+    wrapper2.unmount();
+
+    // 桌面 + 已连接 → 空串（ChatComposer 回退到库 locale 默认长占位）
+    state.connected = true;
+    setViewportWidth(1280);
+    const wrapper3 = mountChatView();
+    await nextTick();
+    expect(wrapper3.findComponent({ name: 'ChatComposer' }).props('placeholder')).toBe('');
+    wrapper3.unmount();
   });
 });
