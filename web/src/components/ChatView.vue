@@ -37,6 +37,7 @@ import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
 import { railDragEngaged } from '../rail-drag';
+import { claimReasoningAnimation } from '../reasoning-anim';
 // 弹层按需加载（2026-10 审计修复）：入口行弹层与配置/上下文覆盖层首次
 // 打开时才加载对应 chunk（此前全部静态进首包——不打开也付加载成本）。
 const AgentConfigModal = defineAsyncComponent(() => import('./AgentConfigModal.vue'));
@@ -537,13 +538,34 @@ const activityText = computed(() => {
   }
 });
 
+/** 推理消息所属会话当前是否仍在输出（thinking / tool / subagent）——打字机准入条件之一。 */
+function reasoningSessionRunning(sessionId: string | undefined): boolean {
+  if (!sessionId) return false;
+  const phase = state.activities[sessionKey(state.activeRegion, sessionId)]?.phase;
+  return phase === 'thinking' || phase === 'tool' || phase === 'subagent';
+}
+
 // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
 const messages = computed<ChatMessage[]>(() => {
   const list =
     props.sessionId === 'global'
       ? state.trunk
       : state.trunk.filter((m) => m.sessionId === props.sessionId);
-  return list.map(toChatMessage);
+  return list.map((m) => {
+    const cm = toChatMessage(m);
+    // 推理行打字机准入（2026-10）：实时到达 + 消息新鲜 + 会话仍在输出，
+    // 且从未播放过——重新显示已完成卡片（切会话/重挂载）直接全量显示，
+    // 只有正在输出的思考才用打字动画（见 reasoning-anim.ts）。
+    if (m.role === 'reasoning') {
+      cm.animate = claimReasoningAnimation({
+        animate: m.animate,
+        key: m.key,
+        time: m.time,
+        sessionRunning: reasoningSessionRunning(m.sessionId),
+      });
+    }
+    return cm;
+  });
 });
 
 // ── 连续工具调用合并（2026-09-19）──

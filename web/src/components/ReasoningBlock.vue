@@ -1,7 +1,9 @@
 <script setup lang="ts">
 //! 推理块：主时间线中的"思考"可视化。
-//! 实时到达（animate=true）时以打字机效果逐字显示，体现"正在思考"；
-//! 历史回放（animate=false）一次性完整显示，不播动画。
+//! `animate=true` 时以打字机效果逐字显示，体现"正在思考"；
+//! `animate=false`（历史回放 / 已完成的重新显示）一次性完整显示，不播动画。
+//! 注：`animate` 的判定在调用方（ChatView 的推理准入：实时到达 + 新鲜 +
+//! 会话仍在输出 + 仅播一次，见 reasoning-anim.ts）——组件本身不做状态判断。
 //!
 //! 折叠语义（2026-09）：
 //! - 默认折叠：静止态（历史回放 / 推演结束）折叠为一行头部；
@@ -13,7 +15,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const props = defineProps<{
   text: string;
-  /** 是否播放打字机动画（实时消息 true；历史回放 false） */
+  /** 是否播放打字机动画（由调用方按准入规则判定：见 reasoning-anim.ts） */
   animate?: boolean;
 }>();
 

@@ -4,14 +4,13 @@
 //! 修复方案：输入区改为 flex 子项占位（flex: 0 0 auto），消息列表 flex:1 独立滚动。
 //! 本测试锁定该契约，防止回归为 absolute/padding hack。
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { defineComponent, h } from 'vue';
+import { defineComponent, h, nextTick } from 'vue';
 import ChatView from '../ChatView.vue';
 import { state } from '../../store';
 import { displayContentOf } from '../../state_domains/timeline';
-
-// ── 库组件 mock：不渲染真实 ui-frame/chat（避免 markdown/dom 依赖） ──
+import { resetReasoningAnimForTests } from '../../reasoning-anim';
 // ChatView 自渲染消息行（ToolRunGroup 合并 + MessageItem），容器为库 ChatTray。
 const ChatTrayStub = defineComponent({
   name: 'ChatTray',
@@ -360,6 +359,117 @@ describe('ChatView 布局契约', () => {
     expect(raw).not.toContain('🖼');
     // 发送按钮内联 flex 布局（图标+文字）
     expect(styleBlock).toMatch(/chat-view__send\s*\{[^}]*display:\s*inline-flex/s);
+  });
+});
+
+describe('推理行打字机门槛（2026-10）', () => {
+  // 需求：只有「正在输出」的思考播打字动画；已经完成的思考卡片
+  // （重新）加载/显示时直接全量显示（见 reasoning-anim.ts）。
+  // 判定 = 实时标记 + 消息新鲜 + 会话仍在运行 + 仅播一次。
+
+  const SESSION = 'local:tui::a';
+
+  function activity(phase: 'thinking' | 'tool' | 'subagent' | 'completed' | 'failed') {
+    return {
+      phase,
+      detail: null,
+      startedAt: Date.now(),
+      toolsCompleted: 0,
+      subagentsCompleted: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+    };
+  }
+
+  function reasoningMessage(key: string, overrides: Record<string, unknown> = {}) {
+    return {
+      key,
+      role: 'reasoning' as const,
+      content: '这是一段思考内容',
+      time: Math.floor(Date.now() / 1000),
+      sessionId: SESSION,
+      animate: true,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    resetReasoningAnimForTests();
+    state.trunk = [];
+    state.activities = {};
+  });
+
+  it('实时 + 会话运行中：首次显示播打字机（--typing + 正在推演提示）', async () => {
+    state.trunk = [reasoningMessage('r1')];
+    state.activities[SESSION] = activity('thinking');
+    const wrapper = mountChatView(SESSION);
+    // onMounted 的响应式更新需一次 tick 落盘（与 ReasoningBlock.test 一致）
+    await nextTick();
+    expect(wrapper.find('.reasoning-block').exists()).toBe(true);
+    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(true);
+    expect(wrapper.find('.reasoning-block__hint').text()).toContain('正在推演');
+    wrapper.unmount();
+  });
+
+  it('重新显示（切走再切回 / 重挂载）：已播放过的思考卡片不再打字', async () => {
+    state.trunk = [reasoningMessage('r1')];
+    state.activities[SESSION] = activity('thinking');
+    const first = mountChatView(SESSION);
+    await nextTick();
+    expect(first.find('.reasoning-block--typing').exists()).toBe(true);
+    first.unmount();
+    // 重新挂载（同一消息、仍在会话运行中）——已完成展示过，直接全量显示
+    const second = mountChatView(SESSION);
+    await nextTick();
+    expect(second.find('.reasoning-block').exists()).toBe(true);
+    expect(second.find('.reasoning-block--typing').exists()).toBe(false);
+    expect(second.find('.reasoning-block__hint').exists()).toBe(false);
+    second.unmount();
+  });
+
+  it('消息不新鲜（超过 30s 窗口）：不补播打字机', () => {
+    state.trunk = [reasoningMessage('r3', { time: Math.floor(Date.now() / 1000) - 120 })];
+    state.activities[SESSION] = activity('tool');
+    const wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('历史回放（animate=false）：不播打字机', () => {
+    state.trunk = [reasoningMessage('r4', { animate: false })];
+    state.activities[SESSION] = activity('thinking');
+    const wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('切会话查看（期间消息到达）：切回时若会话已结束，不播打字机', async () => {
+    // 用户在会话 B 时，A 的实时推理到达（未被渲染 → 未登记）
+    state.trunk = [reasoningMessage('r5')];
+    state.activities[SESSION] = activity('completed');
+    const wrapper = mountChatView('local:tui::b');
+    expect(wrapper.find('.reasoning-block').exists()).toBe(false);
+    // 切回 A：会话已结束 → 已完成的思考卡片直接全量显示
+    await wrapper.setProps({ sessionId: SESSION });
+    expect(wrapper.find('.reasoning-block').exists()).toBe(true);
+    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('非推理消息不受影响（仍按实时标记播放入场动画）', () => {
+    state.trunk = [
+      {
+        key: 'ans1',
+        role: 'backend',
+        content: '回答',
+        time: Math.floor(Date.now() / 1000),
+        sessionId: SESSION,
+        animate: true,
+      },
+    ];
+    const wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.chat-view__item--enter').exists()).toBe(true);
+    wrapper.unmount();
   });
 });
 
