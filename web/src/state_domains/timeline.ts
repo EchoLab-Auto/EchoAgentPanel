@@ -130,27 +130,19 @@ export function parseSubagentEvent(content: string): SubagentEventInfo | null {
   }
 }
 
-/** 工具结果回填：优先按 toolCallId 精确配对（同名并行调用不再配错对）；
- * id 为空（旧 core）时回退为按名字匹配最新的 running 条目。
+/** 工具结果回填：按 toolCallId 精确配对（同名并行调用不再配错对）——
+ * id 恒由 core 随 ToolCall/ToolResult 提供。
  * timedOut（外圈超时守卫中止）与 error: 前缀一样渲染为失败。 */
 export function finishToolMessage(state: AppState, toolName: string, result: string, toolCallId?: string, timedOut?: boolean, elapsedMs?: number) {
   const failed = timedOut === true || result.trimStart().startsWith('error:');
   for (let i = state.trunk.length - 1; i >= 0; i--) {
     const msg = state.trunk[i];
     if (msg.role !== 'tool' || !msg.tool || msg.tool.status !== 'running') continue;
-    const matched = toolCallId
-      ? msg.tool.toolCallId === toolCallId
-      : msg.tool.name === toolName;
-    if (!matched) continue;
+    if (!toolCallId || msg.tool.toolCallId !== toolCallId) continue;
     msg.tool.output = bounded(result, 4000);
     msg.tool.status = failed ? 'failed' : 'succeeded';
-    // elapsedMs：core 上报的总耗时（毫秒）；缺失时按开始时间回算（旧 core 兜底）。
-    msg.tool.elapsedMs =
-      typeof elapsedMs === 'number'
-        ? elapsedMs
-        : msg.tool.startedAtMs != null
-          ? Math.max(0, Date.now() - msg.tool.startedAtMs)
-          : undefined;
+    // 总耗时：core 随 ToolResult 上报（毫秒）。
+    msg.tool.elapsedMs = elapsedMs;
     return;
   }
   // No running entry (e.g. restored timeline): append a completed entry.

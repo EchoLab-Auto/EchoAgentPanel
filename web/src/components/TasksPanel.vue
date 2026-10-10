@@ -1,5 +1,5 @@
 <script setup lang="ts">
-//! 任务与分支面板：后台任务 / 并行任务 / Subagent / 临时回复分支的实时进度。
+//! 任务与分支面板：Subagent / 临时回复分支的实时进度。
 //! `sessionId` 传入且非 'global' 时只显示该会话的任务（入口行弹层：
 //! 只对应当前 agent 的当前会话）；不传/传 'global' 显示全部。
 
@@ -12,26 +12,20 @@ import { sendCommand } from '../connection';
 const props = defineProps<{ sessionId?: string; core?: string | null }>();
 
 const KIND_LABEL: Record<string, string> = {
-  background: '后台',
-  parallel: '并行',
   subagent: 'Subagent',
   reply: '临时回复',
 };
 
 const STATUS_LABEL: Record<string, string> = {
   running: '运行中',
-  awaiting: '等待整合',
   completed: '已完成',
-  integrated: '已整合',
   failed: '失败',
   cancelled: '已取消',
 };
 
 const STATUS_VARIANT: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'error' | 'info'> = {
   running: 'primary',
-  awaiting: 'info',
   completed: 'success',
-  integrated: 'success',
   failed: 'error',
   cancelled: 'warning',
 };
@@ -65,9 +59,7 @@ const scopedTasks = computed(() => {
     : state.tasks.filter(inCore);
 });
 
-const hasActiveTask = computed(() =>
-  scopedTasks.value.some((task) => task.status === 'running' || task.status === 'awaiting'),
-);
+const hasActiveTask = computed(() => scopedTasks.value.some((task) => task.status === 'running'));
 
 watch(
   hasActiveTask,
@@ -103,7 +95,7 @@ function elapsed(createdAtMs: number): string {
 }
 
 function isActive(status: string): boolean {
-  return status === 'running' || status === 'awaiting';
+  return status === 'running';
 }
 
 function cancel(sessionId: string) {

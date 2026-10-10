@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
-import {
-  LEGACY_MODE_PLUGIN_IDS,
-  LOOP_PARALLEL_PLUGIN_ID,
-  LOOP_SINGLE_PLUGIN_ID,
-} from '../protocol';
+import { applyMode, deriveMode } from '../loop-mode';
+import { LOOP_PARALLEL_PLUGIN_ID, LOOP_SINGLE_PLUGIN_ID } from '../protocol';
 
 const ALL = ['echo-agent.tools.builtin', 'echo-agent.skills.dir', LOOP_SINGLE_PLUGIN_ID];
 
@@ -15,11 +11,9 @@ describe('loop-mode form mapping', () => {
     expect(deriveMode([LOOP_SINGLE_PLUGIN_ID])).toBe('single');
   });
 
-  it('derives parallel from the parallel plugin or any legacy mode id', () => {
+  it('derives parallel only from the parallel plugin id', () => {
     expect(deriveMode([LOOP_PARALLEL_PLUGIN_ID])).toBe('parallel');
-    for (const legacy of LEGACY_MODE_PLUGIN_IDS) {
-      expect(deriveMode(['echo-agent.tools.builtin', legacy])).toBe('parallel');
-    }
+    expect(deriveMode(['echo-agent.tools.builtin', LOOP_PARALLEL_PLUGIN_ID])).toBe('parallel');
   });
 
   it('switching to single keeps the materialised list and writes the single id', () => {
@@ -42,13 +36,5 @@ describe('loop-mode form mapping', () => {
 
   it('an empty allowlist stays empty when single is selected (default is no-op)', () => {
     expect(applyMode([], 'single', ALL)).toEqual([]);
-  });
-
-  it('stripLegacyModeIds drops retired ids only', () => {
-    const list = ['echo-agent.tools.builtin', ...LEGACY_MODE_PLUGIN_IDS, LOOP_PARALLEL_PLUGIN_ID];
-    expect(stripLegacyModeIds(list)).toEqual([
-      'echo-agent.tools.builtin',
-      LOOP_PARALLEL_PLUGIN_ID,
-    ]);
   });
 });

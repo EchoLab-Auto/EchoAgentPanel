@@ -1,4 +1,4 @@
-import { oneLine, truncate, summarizeArguments, summarizeTimerEvent, bounded, targetLabel } from './state_domains/helpers';
+import { oneLine, truncate, summarizeArguments, summarizeTimerEvent, bounded } from './state_domains/helpers';
 import {
   activity,
   setPhase,
@@ -6,10 +6,6 @@ import {
   completeSubagent,
   startReplyBranch,
   completeReplyBranch,
-  startBackgroundTask,
-  completeBackgroundTask,
-  integrateBackgroundTask,
-  stageOrchestrationTool,
 } from './state_domains/orchestration';
 import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
@@ -289,14 +285,8 @@ export interface AgentActivity {
   completionTokens: number;
 }
 
-export type OrchKind = 'background' | 'parallel' | 'subagent' | 'reply';
-export type OrchStatus =
-  | 'running'
-  | 'awaiting'
-  | 'completed'
-  | 'integrated'
-  | 'failed'
-  | 'cancelled';
+export type OrchKind = 'subagent' | 'reply';
+export type OrchStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface BranchActivity {
   branchId: string;
@@ -319,7 +309,6 @@ export interface OrchActivity {
   status: OrchStatus;
   createdAtMs: number;
   completedAtMs: number | null;
-  integratedAtMs: number | null;
   branches: BranchActivity[];
 }
 
@@ -330,15 +319,11 @@ export interface ChecklistEntry {
   total: number;
 }
 
-/** 读某会话的清单快照（team 维度隔离 + 旧 core 回退，2026-10）：
- * 新键 `(core, team, session)` → 旧键 `(core, session)`（旧 core 无
- * team 标注）→ 空。写入侧见 reduce 的 ChecklistUpdated 分支。 */
+/** 读某会话的清单快照（`(core, team, session)` 复合键；2026-10）：
+ * 同一 core 内多 persona 的同名会话（各自的 `local:tui::local_user`）
+ * 不互相覆盖。写入侧见 reduce 的 ChecklistUpdated 分支。 */
 export function checklistsForSession(state: AppState, sessionId: string): ChecklistEntry[] {
-  return (
-    state.checklists[checklistKey(state.activeRegion, state.activeTeamId, sessionId)] ??
-    state.checklists[sessionKey(state.activeRegion, sessionId)] ??
-    []
-  );
+  return state.checklists[checklistKey(state.activeRegion, state.activeTeamId, sessionId)] ?? [];
 }
 
 export interface ApiConfig {
@@ -481,10 +466,10 @@ export interface AppState {
       total: string;
       currency: string;
       message: string;
-      /** 赠送余额（granted_balance；旧 Core 可能缺省）。 */
-      granted?: string;
-      /** 充值余额（topped_up_balance；旧 Core 可能缺省）。 */
-      topped_up?: string;
+      /** 赠送余额（granted_balance；失败时为空串）。 */
+      granted: string;
+      /** 充值余额（topped_up_balance；失败时为空串）。 */
+      topped_up: string;
     }
   >;
   /** API 指标时间序列（name → 近 7 天余额/用量；`ApiMetrics` 事件填充） */
@@ -542,10 +527,6 @@ export interface AppState {
   teamTimelines: Record<string, { seq: number; msgs: DisplayMessage[] }>;
   /** 当前 state.trunk 归属的 team（null = 主/默认），用于校验缓存一致性 */
   trunkTeamId: string | null;
-  pendingBackground: Record<
-    string,
-    { kind: OrchKind; objective: string; branches: BranchActivity[] }
-  >;
   // pendingReasoning/completedReasoning 已删除（2026-10 巡检：死状态，
   // 无任何写入/读取方——reasoning 展示由消息条目自带的 reasoning 字段承载）。
   nextSubagentSeq: number;
@@ -600,7 +581,6 @@ export function initialState(): AppState {
     branchTabs: {},
     teamTimelines: {},
     trunkTeamId: null,
-    pendingBackground: {},
 
     nextSubagentSeq: 0,
   };
@@ -854,31 +834,9 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       }
       return state;
     }
-    case 'BackgroundTaskStarted': {
-      const e = (event as { BackgroundTaskStarted: { session_id: string; task_id: string; sequence: number; branch_count: number; objective: string; created_at_ms: number } }).BackgroundTaskStarted;
-      startBackgroundTask(state, e.session_id, evtCore(e), e.task_id, e.sequence, e.branch_count, e.objective, e.created_at_ms);
-      pushTo(
-        state,
-        'system',
-        `后台任务 #${e.sequence} 已挂起 · ${e.branch_count} 个分支 · ${truncate(oneLine(e.objective), 96)}`,
-        Math.floor(e.created_at_ms / 1000),
-      );
-      return state;
-    }
-    case 'BackgroundTaskCompleted': {
-      const e = (event as { BackgroundTaskCompleted: { task_id: string; success: boolean; completed_at_ms: number } }).BackgroundTaskCompleted;
-      completeBackgroundTask(state, e.task_id, e.success, e.completed_at_ms);
-      return state;
-    }
-    case 'BackgroundTaskIntegrated': {
-      const e = (event as { BackgroundTaskIntegrated: { task_id: string; success: boolean; integrated_at_ms: number } }).BackgroundTaskIntegrated;
-      integrateBackgroundTask(state, e.task_id, e.success, e.integrated_at_ms);
-      return state;
-    }
     case 'ToolCall': {
       const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }).ToolCall;
       const startedAtMs = typeof e.started_at_ms === 'number' ? e.started_at_ms : Date.now();
-      stageOrchestrationTool(state, e.session_id, evtCore(e), e.tool_name, e.arguments);
       setPhase(state, sessionKey(evtCore(e), e.session_id), e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
       // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
@@ -947,8 +905,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { ChecklistUpdated: { session_id: string; team_id?: string | null; state: { lists: Array<{ name: string; items: Array<{ text: string; done: boolean }> }> } } }).ChecklistUpdated;
       // 按 (core, team_id, session_id) 复合键隔离（2026-10）：多 core 下同名
       // 会话不互相覆盖；同一 core 内多 persona 的同名会话（各自的
-      // local:tui::local_user）也不互相覆盖。旧 core 无 team_id → 退化为
-      // (core, session_id)（与既有键兼容）。
+      // local:tui::local_user）也不互相覆盖。
       const key = checklistKey(evtCore(e), e.team_id ?? null, e.session_id);
       state.checklists[key] = (e.state.lists ?? [])
         .filter((list) => list && Array.isArray(list.items))
@@ -982,15 +939,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 污染 trunk（串显 alix 会话/误清空 self-coding 内容）。
       const seq = e.seq ?? 0;
       // 归属键用复合 (core, team_id)：同名 team 跨 core 时缓存不互相覆盖。
-      // 旧 core（无 team_id 标注）沿用旧路由：按当前视图处理。
-      const key =
-        e.team_id !== undefined
-          ? teamKey(e.core, e.team_id)
-          : teamKey(state.activeRegion, state.activeTeamId);
+      const key = teamKey(e.core, e.team_id ?? null);
       const cached = state.teamTimelines[key];
 
       if (e.full === undefined && cached && seq === cached.seq && e.messages.length === 0) {
-        // 旧 core 空增量：仅游标对齐（无变化）。旧版误当全量重建会清空聊天。
+        // 空增量：仅游标对齐（无变化）。
         return state;
       }
       const isFull = e.full !== undefined ? e.full : !(cached && seq > cached.seq);
@@ -1195,8 +1148,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
             total: string;
             currency: string;
             message: string;
-            granted?: string;
-            topped_up?: string;
+            granted: string;
+            topped_up: string;
           };
         }
       ).ApiBalanceResult;
@@ -1481,8 +1434,6 @@ function reduceMessage(
     pushTo(state, 'system', summarizeTimerEvent(e.content), e.timestamp, {
       sessionId: e.session_id,
     });
-  } else if (e.adapter_name === 'background') {
-    applyBackgroundHook(state, e.content);
   } else if (e.adapter_name === 'subagent' && parseSubagentEvent(e.content)) {
     // 子代理完成回报：就地把派发位置的"运行中"行改写为结果行（一份委派一行）；
     // 未命中（行已裁掉/刷新后无合成行）则追加，避免结果丢失。
@@ -1509,49 +1460,6 @@ function reduceMessage(
     });
   }
   return state;
-}
-
-function applyBackgroundHook(state: AppState, content: string) {
-  const match = content.match(/<background_task_event>(.*?)<\/background_task_event>/s);
-  if (!match) return;
-  let value: Record<string, unknown>;
-  try {
-    value = JSON.parse(match[1]) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-  const taskId = String(value['task_id'] ?? '');
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  if (typeof value['objective'] === 'string') task.objective = value['objective'];
-  const cancelled = Boolean(value['cancelled']);
-  task.status = cancelled ? 'cancelled' : 'awaiting';
-  task.completedAtMs = Date.now();
-  const deliveries = (value['deliveries'] as unknown[]) ?? [];
-  for (const raw of deliveries) {
-    const delivery = (raw ?? {}) as Record<string, unknown>;
-    const branchId = String(delivery['branch_id'] ?? '');
-    let branch = task.branches.find((b) => b.branchId === branchId);
-    if (!branch) {
-      branch = {
-        branchId,
-        task: '',
-        target: '',
-        status: 'completed',
-        startedAtMs: task.createdAtMs,
-        completedAtMs: task.completedAtMs,
-        result: null,
-      };
-      task.branches.push(branch);
-    }
-    branch.target = targetLabel(delivery['target'], task.sessionId);
-    branch.status = cancelled
-      ? 'cancelled'
-      : delivery['success']
-        ? 'succeeded'
-        : 'failed';
-    if (typeof delivery['result'] === 'string') branch.result = bounded(delivery['result'], 4000);
-  }
 }
 
 /** 乐观取消：立即中断当前会话的活动动画/任务/工具运行态，
@@ -1611,7 +1519,6 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   state.sessions = state.sessions.filter(s => !removedIds.has(s.id));
   for (const id of removedIds) {
     delete state.activities[sessionKey(core, id)];
-    delete state.pendingBackground[sessionKey(core, id)];
   }
   // 该 core 的任务与 timeline 缓存（复合键前缀）一并清理，避免残留死条目。
   const prefix = `${core}\u0000`;

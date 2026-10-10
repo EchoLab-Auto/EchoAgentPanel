@@ -276,9 +276,7 @@ const sessionTasks = computed(() => {
 
 const sessionRunningTaskCount = computed(
   () =>
-    sessionTasks.value.filter(
-      (task) => task.status === 'running' || task.status === 'awaiting',
-    ).length,
+    sessionTasks.value.filter((task) => task.status === 'running').length,
 );
 
 const tasksAvailable = computed(

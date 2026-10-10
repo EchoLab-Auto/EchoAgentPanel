@@ -1,6 +1,4 @@
-import type { AgentActivity, AgentPhase, OrchActivity, OrchKind, AppState } from '../state';
-import { sessionKey } from '../keys';
-import { targetLabel } from './helpers';
+import type { AgentActivity, AgentPhase, OrchActivity, AppState } from '../state';
 // ── activity helpers ───────────────────────────────────────────────
 
 /**
@@ -54,7 +52,6 @@ export function startSubagent(state: AppState, sessionId: string, core: string |
     status: 'running',
     createdAtMs: now,
     completedAtMs: null,
-    integratedAtMs: null,
     branches: [
       {
         branchId: 'subagent',
@@ -115,7 +112,6 @@ export function startReplyBranch(
     status: 'running',
     createdAtMs: startedAtMs,
     completedAtMs: null,
-    integratedAtMs: null,
     branches: [
       {
         branchId: 'reply',
@@ -148,132 +144,3 @@ export function completeReplyBranch(
   }
 }
 
-export function startBackgroundTask(
-  state: AppState,
-  sessionId: string,
-  core: string | null,
-  taskId: string,
-  sequence: number,
-  branchCount: number,
-  objective: string,
-  createdAtMs: number,
-) {
-  const key = sessionKey(core, sessionId);
-  const pending = state.pendingBackground[key];
-  delete state.pendingBackground[key];
-  const kind: OrchKind = pending
-    ? pending.kind
-    : branchCount > 1
-      ? 'parallel'
-      : 'background';
-  const branches = pending
-    ? pending.branches
-    : Array.from({ length: Math.max(branchCount, 1) }, (_, index) => ({
-        branchId: `branch-${index + 1}`,
-        task: '',
-        target: '源会话',
-        status: 'running' as const,
-        startedAtMs: createdAtMs,
-        completedAtMs: null,
-        result: null,
-      }));
-  branches.forEach((branch) => (branch.startedAtMs = createdAtMs));
-  pushTask(state, {
-    id: taskId,
-    sequence,
-    sessionId,
-    core,
-    kind,
-    objective: objective.trim() ? objective : pending ? pending.objective : '后台任务',
-    status: 'running',
-    createdAtMs,
-    completedAtMs: null,
-    integratedAtMs: null,
-    branches,
-  });
-}
-
-export function completeBackgroundTask(
-  state: AppState,
-  taskId: string,
-  success: boolean,
-  completedAtMs: number,
-) {
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  task.status = 'awaiting';
-  task.completedAtMs = completedAtMs;
-  task.branches.forEach((branch) => {
-    if (branch.status === 'running') {
-      branch.status = success ? 'succeeded' : 'completed';
-      branch.completedAtMs = completedAtMs;
-    }
-  });
-}
-
-export function integrateBackgroundTask(
-  state: AppState,
-  taskId: string,
-  success: boolean,
-  integratedAtMs: number,
-) {
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  task.status = success ? 'integrated' : 'failed';
-  task.integratedAtMs = integratedAtMs;
-}
-
-export function stageOrchestrationTool(
-  state: AppState,
-  sessionId: string,
-  core: string | null,
-  toolName: string,
-  argumentsJson: string,
-) {
-  if (toolName !== 'spawn_background_task' && toolName !== 'spawn_parallel_task') return;
-  let value: Record<string, unknown>;
-  try {
-    value = JSON.parse(argumentsJson) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-  const now = Date.now();
-  const key = sessionKey(core, sessionId);
-  if (toolName === 'spawn_parallel_task') {
-    const objective = String(value['objective'] ?? '并行任务');
-    const branches = (value['branches'] as unknown[]) ?? [];
-    state.pendingBackground[key] = {
-      kind: 'parallel',
-      objective,
-      branches: branches.map((raw, index) => {
-        const branch = (raw ?? {}) as Record<string, unknown>;
-        return {
-          branchId: String(branch['branch_id'] ?? `branch-${index + 1}`),
-          task: String(branch['task'] ?? '分支任务'),
-          target: targetLabel(branch['target'], sessionId),
-          status: 'running' as const,
-          startedAtMs: now,
-          completedAtMs: null,
-          result: null,
-        };
-      }),
-    };
-  } else {
-    const task = String(value['task'] ?? '后台任务');
-    state.pendingBackground[key] = {
-      kind: 'background',
-      objective: task,
-      branches: [
-        {
-          branchId: 'main',
-          task,
-          target: targetLabel(value['target'], sessionId),
-          status: 'running',
-          startedAtMs: now,
-          completedAtMs: null,
-          result: null,
-        },
-      ],
-    };
-  }
-}

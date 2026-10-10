@@ -137,9 +137,11 @@ describe('清单 team 维度（同一 core 多 persona 同名会话）', () => {
     expect(checklistsForSession(state, SID)[0].name).toBe('list-alix');
   });
 
-  it('读助手：旧 core 无 team 标注 → 回退 (core, session) 键', () => {
-    dispatch(teamEvent(SID, null), 'core-a');
-    expect(state.checklists[sessionKey('core-a', SID)]).toHaveLength(1);
+  it('读助手：team 不匹配的会话不串显（各自独立键）', () => {
+    dispatch(teamEvent(SID, 'alix'), 'core-a');
+    // 当前 agent = EchoCode：alix 的清单不可见。
+    expect(checklistsForSession(state, SID)).toHaveLength(0);
+    state.activeTeamId = 'alix';
     expect(checklistsForSession(state, SID)).toHaveLength(1);
   });
 });

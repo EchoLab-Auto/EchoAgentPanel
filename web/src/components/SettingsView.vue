@@ -53,7 +53,7 @@ import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { loopModeOf } from '../protocol';
-import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
+import { applyMode, deriveMode } from '../loop-mode';
 import { MarkdownRenderer } from '@echolab-auto/ui-frame/doc';
 // 子设置页按需加载（2026-10 审计修复）：五个子页约 2300 行（含 LogView
 // 挂载即开始的 5s 轮询），此前全随设置视图进首包；改为首次切入对应
@@ -1244,7 +1244,7 @@ function saveTeam() {
       enabled: teamFormEnabled.value,
       disabled_tools: teamFormDisabledTools.value,
       disabled_skills: teamFormDisabledSkills.value,
-      enabled_plugins: stripLegacyModeIds(teamFormEnabledPlugins.value),
+      enabled_plugins: teamFormEnabledPlugins.value,
       enabled_tools: teamFormEnabledTools.value,
       enabled_skills: teamFormEnabledSkills.value,
       system_skills: teamFormSystemSkills.value,

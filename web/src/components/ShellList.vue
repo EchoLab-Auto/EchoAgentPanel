@@ -18,7 +18,8 @@ const emit = defineEmits<{ openDetail: [sessionId: string] }>();
 
 const teamKey = computed(() => props.teamId ?? state.teams[0]?.id ?? null);
 
-/** 本 agent 的会话（事件按 team_id 过滤；旧 core 无 team_id 字段时不过滤）。 */
+/** 本 agent 的会话（事件按 team_id 过滤）。注：核心服务代理处理的会话
+ *（无 persona 归属）team_id 为空，此类会话对所有 agent 可见（不过滤）。 */
 const sessions = computed(() =>
   state.shellSessions.filter(
     (s) =>

@@ -132,6 +132,8 @@ describe('ApiSettings 快捷模板', () => {
       total: '110.00',
       currency: 'CNY',
       message: '余额已更新',
+      granted: '0.00',
+      topped_up: '110.00',
     };
     const wrapper = mount(ApiSettings);
     const amount = wrapper.find('.profile-card__balance-amount');
@@ -148,6 +150,8 @@ describe('ApiSettings 快捷模板', () => {
       total: '',
       currency: '',
       message: '请求失败: 连接超时',
+      granted: '',
+      topped_up: '',
     };
     const wrapper = mount(ApiSettings);
     const amount = wrapper.find('.profile-card__balance-amount');

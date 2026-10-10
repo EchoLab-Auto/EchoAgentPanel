@@ -3,32 +3,20 @@
 //! `TeamMember::loop_mode`（集合语义，单会话为默认与兜底），这里是其
 //! 表单态镜像——保存时仍只写 enabled_plugins 白名单，core 归一化兜底。
 
-import {
-  LEGACY_MODE_PLUGIN_IDS,
-  LOOP_PARALLEL_PLUGIN_ID,
-  LOOP_SINGLE_PLUGIN_ID,
-  type LoopMode,
-} from './protocol';
-
-const PARALLEL_IDS = [LOOP_PARALLEL_PLUGIN_ID, ...LEGACY_MODE_PLUGIN_IDS];
+import { LOOP_PARALLEL_PLUGIN_ID, LOOP_SINGLE_PLUGIN_ID, type LoopMode } from './protocol';
 
 /**
  * 表单态白名单的循环模式推导。
  * - 空表（=默认）→ single（单会话是默认；并行必须显式选择）
- * - 含 parallel 或任一旧编排模式 id → parallel
+ * - 含 parallel → parallel
  * - 其余 → single
  */
 export function deriveMode(enabledPlugins: string[]): LoopMode {
-  return enabledPlugins.some((p) => PARALLEL_IDS.includes(p)) ? 'parallel' : 'single';
+  return enabledPlugins.includes(LOOP_PARALLEL_PLUGIN_ID) ? 'parallel' : 'single';
 }
 
 function stripModeIds(list: string[]): string[] {
-  return list.filter(
-    (p) =>
-      p !== LOOP_PARALLEL_PLUGIN_ID &&
-      p !== LOOP_SINGLE_PLUGIN_ID &&
-      !LEGACY_MODE_PLUGIN_IDS.includes(p),
-  );
+  return list.filter((p) => p !== LOOP_PARALLEL_PLUGIN_ID && p !== LOOP_SINGLE_PLUGIN_ID);
 }
 
 /**
@@ -50,7 +38,3 @@ export function applyMode(
   return [...new Set([...stripModeIds(base), LOOP_PARALLEL_PLUGIN_ID])];
 }
 
-/** 保存防御：剔除旧模式 id（core 也会迁移映射，这里避免本地陈旧状态回写） */
-export function stripLegacyModeIds(list: string[]): string[] {
-  return list.filter((p) => !LEGACY_MODE_PLUGIN_IDS.includes(p));
-}

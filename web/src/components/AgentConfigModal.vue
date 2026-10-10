@@ -28,7 +28,7 @@ import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 import type { LoopMode, TeamInfo } from '../protocol';
-import { applyMode, deriveMode, stripLegacyModeIds } from '../loop-mode';
+import { applyMode, deriveMode } from '../loop-mode';
 
 const props = defineProps<{
   team: TeamInfo;
@@ -266,7 +266,7 @@ function save() {
       enabled: enabled.value,
       disabled_tools: disabledTools.value,
       disabled_skills: disabledSkills.value,
-      enabled_plugins: stripLegacyModeIds(enabledPlugins.value),
+      enabled_plugins: enabledPlugins.value,
       enabled_tools: enabledTools.value,
       enabled_skills: enabledSkills.value,
       api_profile: apiProfile.value || null,

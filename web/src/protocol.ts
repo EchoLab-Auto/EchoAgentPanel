@@ -190,33 +190,19 @@ export interface TeamInfo {
    * 可见分支）。缺省视为 single（默认模式）。
    */
   loop_mode?: LoopMode;
-  /**
-   * 旧字段（过渡期兼容）：`parallel` 记为 `'chatbot'`。新代码请读 `loop_mode`。
-   */
-  orchestration_mode?: 'single' | 'chatbot';
 }
 
 export type LoopMode = 'single' | 'parallel';
 
-/** 循环模式读取：优先新字段；旧字段（chatbot → parallel）兜底；缺省 single。 */
+/** 循环模式读取：`loop_mode` 缺省 single（默认）。 */
 export function loopModeOf(team?: TeamInfo | null): LoopMode {
   if (!team) return 'single';
-  if (team.loop_mode) return team.loop_mode;
-  return team.orchestration_mode === 'chatbot' ? 'parallel' : 'single';
+  return team.loop_mode ?? 'single';
 }
 
 /** 循环模式插件 id（编辑器写入 enabled_plugins 白名单用，二选一） */
 export const LOOP_SINGLE_PLUGIN_ID = 'echo-agent.loop.single';
 export const LOOP_PARALLEL_PLUGIN_ID = 'echo-agent.loop.parallel';
-/** 旧编排模式 / 旧驱动插件 id（保存防御：从白名单中剔除，core 会迁移映射） */
-export const LEGACY_MODE_PLUGIN_IDS = [
-  'echo-agent.orchestration.single',
-  'echo-agent.orchestration.chatbot',
-  'echo-agent.branch.reply',
-  'echo-agent.session.global',
-  'echo-agent.chatbot.sessions',
-  'echo-agent.loop.runner',
-];
 
 /** 后台 shell 会话摘要（Shell 面板终端可视化） */
 export interface ShellSessionInfo {
@@ -540,34 +526,6 @@ export type BackendEvent =
         completed_at_ms: number;
       };
     }
-  | {
-      BackgroundTaskStarted: {
-        session_id: string;
-        task_id: string;
-        sequence: number;
-        branch_count: number;
-        objective: string;
-        created_at_ms: number;
-      };
-    }
-  | {
-      BackgroundTaskCompleted: {
-        session_id: string;
-        task_id: string;
-        sequence: number;
-        success: boolean;
-        completed_at_ms: number;
-      };
-    }
-  | {
-      BackgroundTaskIntegrated: {
-        session_id: string;
-        task_id: string;
-        sequence: number;
-        success: boolean;
-        integrated_at_ms: number;
-      };
-    }
   | { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }
   | { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null; elapsed_ms?: number } }
   | { ChecklistUpdated: { session_id: string; state: ChecklistState; team_id?: string | null } }
@@ -655,10 +613,10 @@ export type BackendEvent =
         ok: boolean;
         available: boolean;
         total: string;
-        /** 赠送余额（granted_balance；旧 Core 可能缺省）。 */
-        granted?: string;
-        /** 充值余额（topped_up_balance；旧 Core 可能缺省）。 */
-        topped_up?: string;
+        /** 赠送余额（granted_balance；失败时为空串）。 */
+        granted: string;
+        /** 充值余额（topped_up_balance；失败时为空串）。 */
+        topped_up: string;
         currency: string;
         message: string;
       }

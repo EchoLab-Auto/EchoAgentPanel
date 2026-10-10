@@ -33,18 +33,13 @@ const allQqAdapters = computed(() =>
 );
 
 /** 只展示**当前智能体**的实例（persona = team id）——别的 agent 的实例
- * 既不显示状态也不作为命令目标（去主智能体后每个 agent 管自己的 QQ）。
- * 兼容旧 Core（无 persona 元数据）：当没有任何实例匹配且存在无归属实例时，
- * 退化为展示这些实例（旧 Core 无从区分归属，只有单实例）。 */
+ * 既不显示状态也不作为命令目标（去主智能体后每个 agent 管自己的 QQ；
+ * Core 侧每个实例恒有 persona 归属）。 */
 const qqAdapters = computed(() => {
   const all = allQqAdapters.value;
   const team = props.teamId;
   if (!team) return all;
-  const scoped = all.filter((a) => a.persona === team);
-  if (scoped.length === 0 && all.some((a) => a.persona == null)) {
-    return all.filter((a) => a.persona == null);
-  }
-  return scoped;
+  return all.filter((a) => a.persona === team);
 });
 /** 当前面板正在配置的实例名（默认第一个；实例消失时自动回退）。 */
 const activeInstance = ref<string>('');
