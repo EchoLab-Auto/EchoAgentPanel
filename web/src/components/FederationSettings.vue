@@ -474,7 +474,8 @@ function migrateSession() {
       <div v-if="pairError" class="fed-error">{{ pairError }}</div>
       <div v-else-if="pairStatus" class="fed-sub fed-pair__status">{{ pairStatus }}</div>
       <div v-else class="fed-sub">
-        方向说明：邀请方需能被接入方访问到——内网 / NAT 后的 Core 适合做「接入方」主动连向对端。
+        方向只影响**首次建链**（邀请方需能被接入方访问到）；配对成功后双方互换地址、
+        双向自动重连——此后不再有方向。内网 / NAT 后的 Core 适合做「接入方」。
       </div>
     </div>
 
