@@ -20,7 +20,7 @@ export function sessionKey(core: string | null | undefined, sessionId: string): 
 
 /** 清单复合键 `(core, team_id, session_id)`（2026-10）：同一 core 内多
  * persona 的同名会话（各自的 `local:tui::local_user`）的清单不互相覆盖。
- * team_id 为 null（旧 core 未标注）时退化为 `(core, session_id)`。 */
+ * team_id 为 null（无归属）时退化为 `(core, session_id)`。 */
 export function checklistKey(
   core: string | null | undefined,
   teamId: string | null | undefined,

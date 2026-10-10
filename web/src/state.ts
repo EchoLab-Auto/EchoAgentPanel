@@ -120,14 +120,14 @@ export function belongsToActiveTeam(
   if (active === null) return true;
   if (teamId !== active) return false;
   // 多上游：同名 team 跨 core 时靠 activeRegion 区分；事件未带 core
-  // （旧 core / 单上游）时不过滤，保持向后兼容。
+  // （单上游无信封）时不过滤。
   if (core != null && state.activeRegion != null && core !== state.activeRegion) {
     return false;
   }
   return true;
 }
 
-/** 事件载荷的来源 core（dispatch 注入；旧 core / 单上游 → null）。 */
+/** 事件载荷的来源 core（dispatch 注入；单上游 → null）。 */
 function evtCore(e: unknown): string | null {
   return (e as { core?: string | null } | null | undefined)?.core ?? null;
 }
@@ -345,7 +345,7 @@ export interface Toast {
 }
 
 export interface ContextSnapshotData {
-  /** 快照归属的会话 id（多会话，2026-09；旧 Core 缺省为 undefined） */
+  /** 快照归属的会话 id（多会话，2026-09；未指定时为 undefined） */
   session_id?: string | null;
   /** 来源上游 core（多上游聚合；store.dispatch 注入）。 */
   core?: string | null;
@@ -369,7 +369,7 @@ export interface UpstreamStatus {
 
 /// 一个"运行区域"（= 一个承载 agent 的 Core）。
 export interface RegionInfo {
-  /// 区域 id（= Core 的 NodeId；旧 Core 缺省退化为上游名）。
+  /// 区域 id（= Core 的 NodeId；未学习到 NodeId 时退化为上游名）。
   id: string;
   /// 展示名（`[core].region_name`；缺省 = 上游名）。
   name: string;
@@ -513,7 +513,7 @@ export interface AppState {
    * 各会话的上下文快照（复合键 `(core, session_id)` → 快照，2026-10 多上游修复）。
    *
    * ⚠️ 曾是全局单值槽：多 core 下不同 core 的 `ContextSnapshot` 响应互相覆盖。
-   * 按复合键存后写入天然正确；`session_id` 缺失（旧 Core 全局口径）时键为
+   * 按复合键存后写入天然正确；`session_id` 缺失（全局口径请求）时键为
    * `sessionKey(core, '')`。
    */
   contexts: Record<string, ContextSnapshotData>;

@@ -91,7 +91,7 @@ const { phase: ctxPhase, loading: ctxLoading, failed: ctxFailed } = usePending('
 
 const snapshot = computed(() => {
   // 快照按 (core, session_id) 复合键存储（2026-10 多上游修复）——写入侧已
-  // 隔离归属，直接按当前（core, 会话）取；取不到再回退旧 Core 的全局口径
+  // 隔离归属，直接按当前（core, 会话）取；取不到再回退全局口径键
   // （session_id 缺失时 reducer 归入 `sessionKey(core, '')`）。
   return (
     state.contexts[sessionKey(targetCore.value, targetSessionId.value ?? '')] ??

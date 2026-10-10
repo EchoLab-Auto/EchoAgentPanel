@@ -22,7 +22,7 @@ const open = ref(true);
 const lists = computed(() => {
   if (props.lists) return props.lists;
   const id = props.sessionId ?? 'local:tui::local_user';
-  // team 维度隔离 + 旧 core 回退（2026-10）。
+  // team 维度隔离（2026-10）。
   return checklistsForSession(state, id);
 });
 </script>

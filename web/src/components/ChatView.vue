@@ -252,7 +252,7 @@ const checklistAvailable = computed(() =>
 /** 当前会话的清单快照（复合键 (core, session_id)；global 视图聚合当前区域全部）。 */
 const sessionChecklists = computed(() => {
   if (props.sessionId !== 'global') {
-    // team 维度隔离 + 旧 core 回退（2026-10）。
+    // team 维度隔离（2026-10）。
     return checklistsForSession(state, props.sessionId);
   }
   // global 视图：汇总当前运行区域下各会话的清单（跨 core 不串）。

@@ -64,7 +64,7 @@ describe('多上游人格 (core, id) 隔离', () => {
     state.activeRegion = 'core-a';
     expect(belongsToActiveTeam(state, 'default', 'core-a')).toBe(true);
     expect(belongsToActiveTeam(state, 'default', 'core-b')).toBe(false);
-    // 事件未带 core（单上游/旧 core）时不过滤，保持兼容。
+    // 事件未带 core（单上游）时不过滤。
     expect(belongsToActiveTeam(state, 'default')).toBe(true);
   });
 });

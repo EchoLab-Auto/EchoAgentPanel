@@ -61,7 +61,7 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
     for (const s of e.sessions) s.core = core;
   }
   // 让 reducer 的 team/session 过滤、复合键与管理面归属都能区分来源 core：
-  // 给**任何对象载荷**注入 core（单上游/旧 core 不注入）。这样 team_id /
+  // 给**任何对象载荷**注入 core（单上游无信封时不注入）。这样 team_id /
   // session_id 事件、以及 ApiConfigUpdated/SkillsList/FederationStatus 等
   // 无 team/session 的管理事件都能带上归属 core。
   if (core) {

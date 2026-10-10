@@ -88,7 +88,7 @@ describe('多上游：checklists / contexts 按 (core, session_id) 隔离', () =
     expect(state.contexts[sessionKey('core-b', SID)].total_tokens).toBe(2000);
   });
 
-  it('ContextSnapshot：旧 Core 缺 session_id 时归入 sessionKey(core, \'\')', () => {
+  it('ContextSnapshot：未带 session_id 时归入 sessionKey(core, \'\')', () => {
     dispatch(contextEvent(null, 777), 'core-a');
     expect(state.contexts[sessionKey('core-a', '')].total_tokens).toBe(777);
     // 单上游裸帧：键为裸空串。

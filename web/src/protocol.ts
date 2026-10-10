@@ -319,7 +319,7 @@ export interface TimelineTool {
   input: string;
   output: string | null;
   failed: boolean;
-  /** 工具调用精确配对 id（新 core 提供；旧 core 无此字段，回退按名配对） */
+  /** 工具调用精确配对 id（core 随 ToolCall/ToolResult 恒下发） */
   tool_call_id?: string;
   /** 执行被外圈超时守卫中止 */
   timed_out?: boolean;
@@ -554,7 +554,7 @@ export type BackendEvent =
     }
   | {
       ContextSnapshot: {
-        /** 快照归属的会话 id（多会话，2026-09；旧 Core 缺省） */
+        /** 快照归属的会话 id（多会话，2026-09；未指定时缺省） */
         session_id?: string | null;
         messages: ContextMessageInfo[];
         blocks: ContextBlockInfo[];

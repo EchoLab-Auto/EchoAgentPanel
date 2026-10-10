@@ -87,7 +87,7 @@ describe('已删除工作区的残留通道（历史保留）', () => {
     });
   });
 
-  it('未提供已知列表 → 不校验（兼容旧调用）', () => {
+  it('未提供已知列表 → 不校验', () => {
     const id = 'local:workspace:some-ws:local_user';
     expect(workspacePickIntent(id, null, true)).toEqual({
       kind: 'activate',
