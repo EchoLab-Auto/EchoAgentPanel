@@ -202,9 +202,7 @@ async fn multi_upstream_frames_are_core_wrapped() {
             "both cores never wrapped: {seen:?}"
         );
         ws.send(WsMessage::Text(
-            r#"{"broadcast":true,"frame":{"type":"command","payload":"RequestTeamsList"}}"#
-                .to_string()
-                .into(),
+            r#"{"broadcast":true,"frame":{"type":"command","payload":"RequestTeamsList"}}"#.into(),
         ))
         .await
         .unwrap();
@@ -242,17 +240,18 @@ async fn multi_stays_wrapped_when_one_upstream_offline() {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     let broadcast = r#"{"broadcast":true,"frame":{"type":"command","payload":"RequestTeamsList"}}"#;
     loop {
-        assert!(tokio::time::Instant::now() < deadline, "no wrapped frame arrived");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no wrapped frame arrived"
+        );
         ws.send(WsMessage::Text(broadcast.into())).await.unwrap();
-        let text = match tokio::time::timeout(
-            std::time::Duration::from_millis(800),
-            next_text(&mut ws),
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(_) => continue, // 链路尚未就绪：重试
-        };
+        let text =
+            match tokio::time::timeout(std::time::Duration::from_millis(800), next_text(&mut ws))
+                .await
+            {
+                Ok(t) => t,
+                Err(_) => continue, // 链路尚未就绪：重试
+            };
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         let core = value.get("core").and_then(|c| c.as_str());
         assert_eq!(
@@ -260,8 +259,194 @@ async fn multi_stays_wrapped_when_one_upstream_offline() {
             Some("core-a"),
             "frame must be wrapped even with one upstream offline: {text}"
         );
-        assert!(value.get("frame").is_some(), "wrapped frame must carry .frame");
+        assert!(
+            value.get("frame").is_some(),
+            "wrapped frame must carry .frame"
+        );
         break;
+    }
+    ws.close(None).await.unwrap();
+}
+
+/// 握手期广播补投（2026-10 修复）：浏览器在**页面加载的握手期**就广播
+/// 发现命令（`RequestState` / `RequestTeamsList`），而链路是异步建立的——
+/// 若广播先于某条链路建成到达路由泵，旧实现把该次请求**静默丢弃**，
+/// 远端上游（跨网络、建链慢）尤其容易踩中：表现为该 core 的智能体/会话
+/// 在面板中缺失（联邦配置流程「一套 Panel 管全联邦」因此时好时坏）。
+/// 本测试：第二上游链路晚于广播建成，断言它建成后收到补投（幂等重放）。
+#[tokio::test]
+async fn broadcast_before_late_link_is_replayed() {
+    // core-a：即时在线（浏览器链路先有可路由对象）。
+    let l1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url1 = format!("ws://127.0.0.1:{}", l1.local_addr().unwrap().port());
+    tokio::spawn(fake_core(l1));
+
+    // core-b：先占端口拿地址后释放（首连必失败），稍后同端口重启
+    // ——模拟"建链慢/晚就绪"的上游。
+    let l2 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port2 = l2.local_addr().unwrap().port();
+    drop(l2);
+    let url2 = format!("ws://127.0.0.1:{port2}");
+
+    let panel_ws = spawn_panel_multi(vec![("core-a", url1), ("core-b", url2)]).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+
+    // 握手期立即广播（此刻 core-b 链路必然尚未建成）。
+    ws.send(WsMessage::Text(
+        r#"{"broadcast":true,"frame":{"type":"command","payload":"RequestTeamsList"}}"#.into(),
+    ))
+    .await
+    .unwrap();
+
+    // 保活帧：定向 core-a 的只读命令（假 Core 原样回显，不干扰断言）。
+    // 同进程其他测试会把"浏览器静默收割阈值"调小（全局 env），等待期间
+    // 必须持续发帧，否则本测试的浏览器链路会被提前收割。
+    let keepalive = r#"{"core":"core-a","frame":{"type":"command","payload":"RequestState"}}"#;
+
+    // 让首连失败发生，然后在 core-b 端口上启动假 Core（中继 ~1s 退避后重连）。
+    let start_listener_at = tokio::time::Instant::now() + std::time::Duration::from_millis(400);
+    while tokio::time::Instant::now() < start_listener_at {
+        ws.send(WsMessage::Text(keepalive.into())).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let l2b = TcpListener::bind(("127.0.0.1", port2)).await.unwrap();
+    tokio::spawn(fake_core(l2b));
+
+    // 补投断言窗口：持续保活 + 每轮读一帧，直到看见 core-b 的补投回显
+    // （假 Core 原样回显 → 中继加壳 → `{core:"core-b", ...RequestTeamsList...}`）。
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "broadcast was not replayed to the late link"
+        );
+        ws.send(WsMessage::Text(keepalive.into())).await.unwrap();
+        let text =
+            match tokio::time::timeout(std::time::Duration::from_millis(120), next_text(&mut ws))
+                .await
+            {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        if value.get("core").and_then(|c| c.as_str()) == Some("core-b")
+            && text.contains("RequestTeamsList")
+        {
+            break; // 补投成功
+        }
+    }
+    ws.close(None).await.unwrap();
+}
+
+/// 单上游握手期（无壳）命令的链路就绪等待：命令可能先于链路建成到达
+/// （页面加载即打引导请求），旧实现直接静默丢弃。本测试：链路晚于
+/// 命令建成（首连失败、1s 退避后重连），断言命令被有界等待后投递。
+#[tokio::test]
+async fn unwrapped_command_waits_for_link_and_is_delivered() {
+    // 先占端口拿地址后释放（首连必失败），稍后同端口重启。
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    drop(l);
+    let core_url = format!("ws://127.0.0.1:{port}");
+
+    let panel_ws = spawn_panel(core_url).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+
+    // 握手期立即发无壳命令（此刻链路必然尚未建成）。
+    let command = r#"{"type":"command","payload":"RequestTeamsList"}"#;
+    ws.send(WsMessage::Text(command.into())).await.unwrap();
+
+    // 保活（同进程其他测试可能调小收割阈值）并稍后启动假 Core。
+    let keepalive = r#"{"type":"command","payload":"RequestState"}"#;
+    let start_listener_at = tokio::time::Instant::now() + std::time::Duration::from_millis(300);
+    while tokio::time::Instant::now() < start_listener_at {
+        ws.send(WsMessage::Text(keepalive.into())).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let l2 = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+    tokio::spawn(fake_core(l2));
+
+    // 中继 ~1s 退避后重连成功，等待中的命令应被投递（假 Core 回显）。
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "unwrapped command was not delivered after link became ready"
+        );
+        ws.send(WsMessage::Text(keepalive.into())).await.unwrap();
+        let text =
+            match tokio::time::timeout(std::time::Duration::from_millis(120), next_text(&mut ws))
+                .await
+            {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+        if text == command {
+            break; // 命令原样回显（直达投递成功）
+        }
+    }
+    ws.close(None).await.unwrap();
+}
+
+/// 定向命令的链路就绪等待：握手期（远端链路跨网络建链慢）定向命令可能先于
+/// 链路建成到达，旧实现静默丢弃——表现为「生成邀请/刷新没反应」式抖动。
+/// 本测试：core-b 的监听晚于命令 300ms 启动（首连必失败、退避重连），
+/// 定向到 core-b 的命令应被有界等待后投递（假 Core 原样回显）。
+#[tokio::test]
+async fn targeted_command_waits_for_link_and_is_delivered() {
+    // core-a 即时在线；core-b 先占端口拿地址后释放（首连必失败）。
+    let l1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url1 = format!("ws://127.0.0.1:{}", l1.local_addr().unwrap().port());
+    tokio::spawn(fake_core(l1));
+    let lb = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port_b = lb.local_addr().unwrap().port();
+    drop(lb);
+    let url2 = format!("ws://127.0.0.1:{port_b}");
+
+    let panel_ws = spawn_panel_multi(vec![("core-a", url1), ("core-b", url2)]).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+
+    // 握手期立即定向发送到 core-b（此刻其链路必然尚未建成）。
+    let command = r#"{"type":"command","payload":{"Probe":"late-link"}}"#;
+    let targeted = format!(r#"{{"core":"core-b","frame":{command}}}"#);
+    ws.send(WsMessage::Text(targeted)).await.unwrap();
+
+    // 保活（同进程其他测试可能调小收割阈值）并稍后启动 core-b。
+    let keepalive = r#"{"core":"core-a","frame":{"type":"command","payload":"RequestState"}}"#;
+    let start_listener_at = tokio::time::Instant::now() + std::time::Duration::from_millis(300);
+    while tokio::time::Instant::now() < start_listener_at {
+        ws.send(WsMessage::Text(keepalive.into())).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let l2b = TcpListener::bind(("127.0.0.1", port_b)).await.unwrap();
+    tokio::spawn(fake_core(l2b));
+
+    // core-b 链路建成后，等待中的定向命令应被补投（原样回显）。
+    let expected: serde_json::Value = serde_json::from_str(command).unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "targeted command was not delivered after link became ready"
+        );
+        ws.send(WsMessage::Text(keepalive.into())).await.unwrap();
+        let text =
+            match tokio::time::timeout(std::time::Duration::from_millis(120), next_text(&mut ws))
+                .await
+            {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        if value.get("core").and_then(|c| c.as_str()) == Some("core-b")
+            && value.get("frame") == Some(&expected)
+        {
+            break; // 定向命令已在链路就绪后投递
+        }
     }
     ws.close(None).await.unwrap();
 }

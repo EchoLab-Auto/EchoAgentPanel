@@ -28,6 +28,12 @@ const REAP_AFTER: Duration = Duration::from_secs(90);
 /// 只看"有没有帧路过"，写入阻塞发生在帧路过之前的转发里，两者互补。
 const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// 定向/无壳命令等待链路就绪的上限与轮询间隔：链路异步建立，握手期
+/// 命令可能先于链路建成到达；有界等待吸收毫秒级建链竞态，上游确实离线
+/// 时到点丢弃。
+const LINK_READY_WAIT: Duration = Duration::from_secs(2);
+const LINK_READY_POLL: Duration = Duration::from_millis(20);
+
 // 测试可用 ECHO_RELAY_HEARTBEAT_MS / ECHO_RELAY_REAP_AFTER_MS 缩短周期
 //（暂停时钟下运行时 idle 自动推进与真实 I/O 存在竞争，集成测试走真实时间）。
 fn heartbeat_interval() -> Duration {
@@ -369,6 +375,46 @@ struct CoreLink {
     abort: tokio::task::AbortHandle,
 }
 
+/// 广播命令重放缓冲（每浏览器桥一份）。
+///
+/// 背景（2026-10 修复）：桥接的上游链路是**异步**建立的，而浏览器在页面
+/// 加载的握手期就发出发现类广播（`RequestState` / `RequestTeamsList`）。
+/// 若广播先于某条链路建成到达路由泵，该链路就会**静默丢失**这次请求——
+/// 远端上游（跨网络、建链慢）尤其容易踩中，表现为该 core 的智能体/会话
+/// 在面板中缺失（直到下一次广播，如切后台再回来触发 heal）——「一套
+/// Panel 管全联邦」的联邦配置流程因此时好时坏。
+///
+/// 修复：路由泵把最近的广播帧记入环形缓冲；每条链路（含断线重连）注册
+/// 进 `links` 后，把缓冲内的帧补投给它。发现命令幂等只读，重放安全；
+/// 缓冲有界（只保留最近 [`BroadcastReplay::CAP`] 条），避免无界内存。
+struct BroadcastReplay {
+    frames: std::collections::VecDeque<String>,
+}
+
+impl BroadcastReplay {
+    /// 环形缓冲容量：握手期发现命令只有个位数条，上限只做防御性封顶。
+    const CAP: usize = 8;
+
+    fn new() -> Self {
+        Self {
+            frames: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// 记一条广播帧（超出容量丢弃最旧）。
+    fn remember(&mut self, frame: &str) {
+        if self.frames.len() >= Self::CAP {
+            self.frames.pop_front();
+        }
+        self.frames.push_back(frame.to_string());
+    }
+
+    /// 快照当前缓冲（新链路接入时按序补投）。
+    fn snapshot(&self) -> Vec<String> {
+        self.frames.iter().cloned().collect()
+    }
+}
+
 async fn bridge(browser: WebSocket, state: AppState) {
     let (mut browser_tx, mut browser_rx) = browser.split();
     // 每上游一条「浏览器→Core」转发任务（命令按壳路由/无壳广播）与
@@ -379,6 +425,8 @@ async fn bridge(browser: WebSocket, state: AppState) {
     let reap_after = reap_after();
     let links: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CoreLink>>> =
         Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+    // 最近广播帧（每条链路建成/重连后补投；见 BroadcastReplay 注释）。
+    let broadcast_replay = Arc::new(tokio::sync::Mutex::new(BroadcastReplay::new()));
 
     // ── 动态上游接入（RelayHub 编排，2026-10）──
     // spawn_link：连一个上游并注册进 links（读泵 + 写泵两件套）；
@@ -390,11 +438,13 @@ async fn bridge(browser: WebSocket, state: AppState) {
         let event_tx = event_tx.clone();
         let state2 = state.clone();
         let spawn_multi = multi.clone();
+        let replay = broadcast_replay.clone();
         std::sync::Arc::new(move |cfg: crate::upstreams::UpstreamConfig| {
             let links = links.clone();
             let event_tx = event_tx.clone();
             let state = state2.clone();
             let multi = spawn_multi.clone();
+            let replay = replay.clone();
             let _handle = tokio::spawn(async move {
                 let upstream = Upstream {
                     name: Arc::from(cfg.name.as_str()),
@@ -526,6 +576,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     });
                     let abort = reader.abort_handle();
                     let writer_abort = writer.abort_handle();
+                    let replay_tx = cmd_tx.clone();
                     links
                         .write()
                         .await
@@ -537,6 +588,18 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     // 一份，最后一个覆盖前一个（表现为某些 agent 消失）。
                     refresh_multi(&state.registry, &multi, &links).await;
                     state.set_online_ok(&name);
+                    // 握手期广播补投（见 BroadcastReplay）：本链路晚于浏览器
+                    // 的发现广播（RequestState / RequestTeamsList）建成时，
+                    // 把最近的广播帧补发一份——否则这次请求对本链路永久丢失
+                    // （远端 core 的智能体/会话直到下一次广播前都不会出现）。
+                    // 先快照再发送，避免持锁跨 await；重放与时序无关、幂等。
+                    let replay_frames = {
+                        let guard = replay.lock().await;
+                        guard.snapshot()
+                    };
+                    for frame in replay_frames {
+                        let _ = tokio::time::timeout(SEND_TIMEOUT, replay_tx.send(frame)).await;
+                    }
                     // 读泵退出 = 链路死亡：**必须在本循环内 await**，绝不能
                     // 丢进 spawn 分流——否则外层 loop 每 ~50ms 无脑重连，而
                     // 旧 socket 的读半边一直被 reader 持有、永不关闭，到 Core
@@ -646,38 +709,76 @@ async fn bridge(browser: WebSocket, state: AppState) {
     // 目标表是动态 links（管理面增删即时生效）。
     let route_pump = {
         let links = links.clone();
+        let replay = broadcast_replay.clone();
         tokio::spawn(async move {
             while let Some((route, text)) = cmd_rx.recv().await {
-                let links = links.read().await;
                 match route {
                     CommandRoute::Target(name) => {
-                        if let Some(link) = links.get(&name) {
-                            let _ =
-                                tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text)).await;
+                        // 定向命令：目标链路**异步**建立（页面刚开、远端上游
+                        // 跨网络建链慢），握手期命令可能先于链路建成到达——
+                        // 旧实现静默丢弃，表现为「点生成邀请/刷新没反应」式
+                        // 抖动（联邦配置流程时好时坏）。改为**有界等待链路
+                        // 就绪**：吸收建链竞态；上游确实离线时到点丢弃附告警
+                        // （与旧行为一致）。
+                        let deadline = Instant::now() + LINK_READY_WAIT;
+                        loop {
+                            let sender = {
+                                let links = links.read().await;
+                                links.get(&name).map(|link| link.cmd_tx.clone())
+                            };
+                            if let Some(tx) = sender {
+                                let _ = tokio::time::timeout(SEND_TIMEOUT, tx.send(text)).await;
+                                break;
+                            }
+                            if Instant::now() >= deadline {
+                                warn!(core = %name, "targeted command dropped: upstream link not ready");
+                                break;
+                            }
+                            tokio::time::sleep(LINK_READY_POLL).await;
                         }
                     }
                     CommandRoute::Broadcast => {
                         // 客户端显式声明的广播（只读发现命令）。
+                        // 先记入重放缓冲（供晚建成的链路补投——见
+                        // BroadcastReplay），再向当前在线链路扇出。
+                        replay.lock().await.remember(&text);
+                        let links = links.read().await;
                         for link in links.values() {
-                            let _ = tokio::time::timeout(
-                                SEND_TIMEOUT,
-                                link.cmd_tx.send(text.clone()),
-                            )
-                            .await;
+                            let _ =
+                                tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text.clone()))
+                                    .await;
                         }
                     }
                     CommandRoute::Unwrapped => {
                         // 无意图壳：仅单上游语义下放行（此时加壳开关为 false，
                         // 前端发的就是裸帧）；多上游下拒绝——不猜测命令语义。
-                        if links.len() == 1 {
-                            if let Some(link) = links.values().next() {
-                                let _ = tokio::time::timeout(SEND_TIMEOUT, link.cmd_tx.send(text))
-                                    .await;
+                        //
+                        // 链路异步建立：握手期命令可能先于链路建成到达（页面
+                        // 加载即打引导请求），旧实现直接静默丢弃——单上游
+                        // 下表现为早期命令偶发丢失/测试抖动。改为**有界等待
+                        // 链路就绪**：把毫秒级建链竞态吸收掉；上游确实离线
+                        // 时到点仍丢弃（附告警，与旧行为一致）。
+                        let deadline = Instant::now() + LINK_READY_WAIT;
+                        loop {
+                            let sender = {
+                                let links = links.read().await;
+                                if links.len() > 1 {
+                                    warn!(
+                                        "rejected untargeted command (need {{core}} or {{broadcast:true}} envelope)"
+                                    );
+                                    break;
+                                }
+                                links.values().next().map(|link| link.cmd_tx.clone())
+                            };
+                            if let Some(tx) = sender {
+                                let _ = tokio::time::timeout(SEND_TIMEOUT, tx.send(text)).await;
+                                break;
                             }
-                        } else {
-                            warn!(
-                                "rejected untargeted command (need {{core}} or {{broadcast:true}} envelope)"
-                            );
+                            if Instant::now() >= deadline {
+                                warn!("untargeted command dropped: upstream link not ready");
+                                break;
+                            }
+                            tokio::time::sleep(LINK_READY_POLL).await;
                         }
                     }
                 }
@@ -771,7 +872,9 @@ mod tests {
     /// 定向壳：解析出目标上游名。
     #[test]
     fn unwrap_targets_named_core() {
-        let (route, frame) = unwrap_command(r#"{"core":"core-a","frame":{"type":"command","payload":"RequestState"}}"#);
+        let (route, frame) = unwrap_command(
+            r#"{"core":"core-a","frame":{"type":"command","payload":"RequestState"}}"#,
+        );
         assert!(matches!(route, CommandRoute::Target(name) if name == "core-a"));
         assert!(frame.contains("RequestState"));
     }
@@ -786,17 +889,34 @@ mod tests {
         assert!(frame.contains("RequestTeamsList"));
 
         // 即使命令名"看起来只读"，没有 broadcast 意图也不是广播。
-        let (route, _) = unwrap_command(
-            r#"{"frame":{"type":"command","payload":"RequestTeamsList"}}"#,
-        );
+        let (route, _) =
+            unwrap_command(r#"{"frame":{"type":"command","payload":"RequestTeamsList"}}"#);
         assert!(matches!(route, CommandRoute::Unwrapped));
     }
-
     /// 无壳裸命令：交给单上游兜底（多上游由 route pump 拒绝）。
     #[test]
     fn unwrap_plain_command_is_unwrapped() {
         let (route, frame) = unwrap_command(r#"{"type":"command","payload":"RequestState"}"#);
         assert!(matches!(route, CommandRoute::Unwrapped));
         assert!(frame.contains("RequestState"));
+    }
+
+    /// 广播重放缓冲：按序记录、越容量丢最旧（供晚建成的链路补投）。
+    #[test]
+    fn broadcast_replay_keeps_most_recent_in_order() {
+        let mut replay = BroadcastReplay::new();
+        assert!(replay.snapshot().is_empty());
+
+        for i in 0..(BroadcastReplay::CAP + 3) {
+            replay.remember(&format!(r#"{{"n":{i}}}"#));
+        }
+        let snapshot = replay.snapshot();
+        assert_eq!(snapshot.len(), BroadcastReplay::CAP);
+        // 只保留最近 CAP 条，顺序保持（最旧的 3 条已被挤出）。
+        assert_eq!(snapshot.first().unwrap(), r#"{"n":3}"#);
+        assert_eq!(
+            snapshot.last().unwrap(),
+            &format!(r#"{{"n":{}}}"#, BroadcastReplay::CAP + 2)
+        );
     }
 }
