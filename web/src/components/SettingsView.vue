@@ -69,7 +69,7 @@ const TOOL_BUILTIN = '内置工具';
 const TOOL_OTHER = '扩展工具';
 
 // ── 一级菜单：当前分类 ──
-type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'cores' | 'federation' | 'system' | 'logs';
+type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'cores' | 'system' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
 
 // ── 列表加载跟踪（pending.ts）：四类清单各自的加载/慢/超时三态 ──
@@ -104,7 +104,7 @@ const categories = computed(() => [
   { key: 'plugin' as const, label: '插件', count: (pluginLoading.value ? null : state.plugins.length) as number | null },
   { key: 'team' as const, label: '智能体', count: (teamLoading.value ? null : state.teams.length) as number | null },
   { key: 'cores' as const, label: 'Core 连接', count: null as number | null },
-  { key: 'federation' as const, label: '联邦', count: (state.federation?.peers.length ?? null) as number | null },
+  // 连接管理合并页（2026-10：联邦并入）：上游 Core + 联邦节点。
   { key: 'system' as const, label: '系统', count: null as number | null },
   { key: 'logs' as const, label: '日志', count: null as number | null },
 ]);
@@ -116,7 +116,6 @@ const disabledCount = computed(() => {
     case 'api':
     case 'logs':
     case 'cores':
-    case 'federation':
       return 0;
     case 'skill':
       return state.skills.filter((s) => !s.enabled).length;
@@ -138,6 +137,14 @@ const toolbarSubtitle = computed(() => {
   }
   if (activeCategory.value === 'logs') {
     return 'Core / Panel 运行日志 · 自动刷新 5s';
+  }
+  if (activeCategory.value === 'cores') {
+    // 连接管理合并页（2026-10：联邦并入）：上游 Core + 联邦节点计数
+    // （此前 cores 的 count 为 null，落到兜底分支会显示「共 null 项」）。
+    const parts = [`上游 ${state.upstreams.length}`];
+    const peers = state.federation?.peers.length;
+    if (peers != null) parts.push(`联邦节点 ${peers}`);
+    return parts.join(' · ');
   }
   if (activeCategory.value === 'skill') {
     const c = skillFilterCounts.value;
@@ -902,7 +909,6 @@ const EMPTY_HINT: Record<CategoryKey, string> = {
   plugin: '在左侧列表选择插件查看详情与启停',
   team: '在左侧列表选择智能体进行配置；或点右上角「新建智能体」',
   cores: '',
-  federation: '',
   system: '',
   logs: '',
 };
@@ -1631,16 +1637,12 @@ watch(
         </div>
       </div>
 
-      <!-- Core 连接工作区：上游管理（多上游聚合视图） -->
+      <!-- Core 连接工作区（2026-10 合并）：上游 Core（聚合视图）+ 联邦网络
+           （运行区域 peer 管理 + 邀请串配对）——连接管理统一入口。 -->
       <div v-else-if="activeCategory === 'cores'" class="caps-workspace">
         <div class="caps-detail-pane">
           <UpstreamsSettings />
-        </div>
-      </div>
-
-      <!-- 联邦工作区：整页设置（peers 管理 + 邀请串配对） -->
-      <div v-else-if="activeCategory === 'federation'" class="caps-workspace">
-        <div class="caps-detail-pane">
+          <NeumorphismDivider class="cores-merged__sep" />
           <FederationSettings
             :active-session-id="props.activeSessionId"
             :active-team-id="props.activeTeamId"
@@ -2804,6 +2806,12 @@ watch(
   flex: 1;
   min-height: 0;
   display: flex;
+}
+
+/* Core 连接合并页：上游 Core 与联邦网络两区块之间的分隔线
+   （两子页各带 16px 内边距，分隔线贴齐页宽并微收） */
+.cores-merged__sep {
+  margin: 2px 16px;
 }
 
 /* ── 条目列表 ── */

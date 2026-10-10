@@ -1,6 +1,5 @@
-//! 联邦设置页（federation Phase 4）：peers 列表、链路状态、添加/删除
-//! peer、邀请串配对。
-//!
+//! 联邦区块（federation Phase 4；2026-10 末并入「Core 连接」页展示）：
+//! peers 列表、链路状态、添加/删除 peer、邀请串配对。
 //! 协议：`RequestFederationStatus` → `FederationStatus`（状态快照；
 //! peer 增删与链路 Up/Down 时 Core 主动广播）；`SaveFederationPeer` /
 //! `DeleteFederationPeer` / `RequestFederationInvite`。

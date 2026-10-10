@@ -1,6 +1,7 @@
-//! Core 连接设置页（多上游聚合视图的管理面，2026-10）：
+//! 「Core 连接」页 · 上游区块（多上游聚合视图的管理面，2026-10）：
 //! 部署零配置——在线增删上游 Core 连接，写回 Panel 配置文件
 //! （`[[cores]]` 段）持久化，中继动态并入/摘除。
+//! 2026-10 末：与联邦区块（FederationSettings）合并进同一「Core 连接」页展示。
 //!
 //! API（Panel 后端本地，不经 Core）：
 //! - `GET    /api/upstreams`        → 列表（含在线状态，token 脱敏）
@@ -152,7 +153,7 @@ onMounted(() => {
   <div class="up-page">
     <div class="up-header">
       <div>
-        <div class="up-title">Core 连接</div>
+        <div class="up-title">上游 Core</div>
         <div class="up-sub">
           Panel 同时连接的上游 Core（聚合视图）。配置写回 Panel 配置文件持久化；
           变更即时生效，无需重启。
