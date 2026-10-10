@@ -63,6 +63,9 @@ function seed() {
       },
     ],
   } as never;
+  // 按 Core 归档的联邦状态（新计数来源）与本用例隔离：默认空 → 回落单值。
+  state.federations = {};
+  state.federationInvites = {};
 }
 
 describe('SettingsView · Core 连接合并页（联邦并入）', () => {
@@ -103,6 +106,31 @@ describe('SettingsView · Core 连接合并页（联邦并入）', () => {
     expect(subtitle).toContain('联邦节点 1');
     // 回归：count 为 null 的分类不得落到「共 null 项」兜底文案
     expect(subtitle).not.toContain('null');
+  });
+
+  it('联邦节点计数按 Core 归档求和（联邦是 Core 之间的网络）', async () => {
+    state.federations = {
+      core: {
+        enabled: true,
+        node_id: 'n1',
+        node_name: null,
+        listen: '',
+        peers: [{ name: 'gpu-box', link: 'Online' }],
+      },
+      ai_station: {
+        enabled: true,
+        node_id: 'n2',
+        node_name: null,
+        listen: '',
+        peers: [{ name: 'box-a', link: 'Online' }, { name: 'box-b', link: 'Offline' }],
+      },
+    } as never;
+    const wrapper = mount(SettingsView);
+    const nav = wrapper.findAll('.caps-nav-item').find((n) => n.text().includes('Core 连接'));
+    await nav!.trigger('click');
+    await nextTick();
+    const subtitle = wrapper.find('.caps-toolbar-title').text();
+    expect(subtitle).toContain('联邦节点 3');
   });
 
   it('联邦状态未加载时副标题只显示上游计数（不显示 null）', async () => {

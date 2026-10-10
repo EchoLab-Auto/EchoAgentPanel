@@ -402,12 +402,19 @@ export interface AppState {
   trunk: DisplayMessage[];
   activities: Record<string, AgentActivity>;
   /// 联邦状态快照（`FederationStatus` 事件；None = 未加载或联邦关闭）。
+  /// 仅保存"当前运行区域"那一份（activate 区域切换清空）；多 Core 视角见
+  /// `federations`。
   federation: FederationStatus | null;
+  /// 各 Core 的联邦状态（键 = 上游名；`''` = 单上游/未加壳事件）。
+  /// 联邦是 **Core 之间**的网络：管理页按 Core 逐张卡片展示，不跟随当前
+  /// Agent/运行区域；单值 `federation` 仍服务区域相关视图（自更新/调度等）。
+  federations: Record<string, FederationStatus>;
   /** 自更新状态（`SelfUpdateStatus` 事件；None = 未加载）。 */
   selfUpdateStatus: { state: string; phase?: string | null; revision?: string | null; message?: string | null; updated_at?: string | null } | null;
   /// 本机邀请串（`FederationInvite` 响应；一次性展示，离开联邦页清除）。
   federationInvite: string | null;
-  /// 已发现的上游名集合（连接层由事件信封登记；Core 切换器展示）。
+  /// 各 Core 最近生成的邀请串（键 = 上游名；`''` = 单上游）。
+  federationInvites: Record<string, string>;
   knownCores: Set<string>;
   /// 上游 Core 连接状态（`/api/upstreams` 周期轮询；连接状态卡逐 core 展示）。
   upstreams: UpstreamStatus[];
@@ -552,8 +559,10 @@ export function initialState(): AppState {
     trunk: [],
     activities: {},
     federation: null,
+    federations: {},
     selfUpdateStatus: null,
     federationInvite: null,
+    federationInvites: {},
     knownCores: new Set(),
     upstreams: [],
     regions: {},
@@ -727,15 +736,18 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'FederationStatus': {
-      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { FederationStatus: FederationStatus }).FederationStatus;
-      state.federation = e;
+      // 按来源 core 归档（联邦是 Core 之间的网络：多 Core 各存一份，
+      // 管理页逐 Core 展示，不跟随当前 Agent/运行区域）。
+      state.federations[payloadCore(event) ?? ''] = e;
+      // 单值字段仍服务"运行区域相关"视图（自更新/调度/目录浏览等）。
+      if (managementCoreCurrent(state, payloadCore(event))) state.federation = e;
       return state;
     }
     case 'FederationInvite': {
-      if (!managementCoreCurrent(state, payloadCore(event))) return state;
       const e = (event as { FederationInvite: { invite: string } }).FederationInvite;
-      state.federationInvite = e.invite;
+      state.federationInvites[payloadCore(event) ?? ''] = e.invite;
+      if (managementCoreCurrent(state, payloadCore(event))) state.federationInvite = e.invite;
       return state;
     }
     case 'LlmRequest': {

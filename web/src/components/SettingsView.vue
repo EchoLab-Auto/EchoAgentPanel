@@ -142,7 +142,12 @@ const toolbarSubtitle = computed(() => {
     // 连接管理合并页（2026-10：联邦并入）：上游 Core + 联邦节点计数
     // （此前 cores 的 count 为 null，落到兜底分支会显示「共 null 项」）。
     const parts = [`上游 ${state.upstreams.length}`];
-    const peers = state.federation?.peers.length;
+    // 联邦节点计数：优先按 Core 归档求和（联邦是 Core 之间的网络，
+    // 不再只数"运行区域"那一份）；无归档时回落单值字段。
+    const fedAll = Object.values(state.federations ?? {});
+    const peers = fedAll.length
+      ? fedAll.reduce((n, f) => n + (f?.peers?.length ?? 0), 0)
+      : state.federation?.peers.length;
     if (peers != null) parts.push(`联邦节点 ${peers}`);
     return parts.join(' · ');
   }

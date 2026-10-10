@@ -1,14 +1,20 @@
-//! 联邦区块（federation Phase 4；2026-10 末并入「Core 连接」页展示）：
-//! peers 列表、链路状态、添加/删除 peer、邀请串配对。
-//! 协议：`RequestFederationStatus` → `FederationStatus`（状态快照；
-//! peer 增删与链路 Up/Down 时 Core 主动广播）；`SaveFederationPeer` /
-//! `DeleteFederationPeer` / `RequestFederationInvite`。
+//! 联邦网络（Core ↔ Core）：以 **Core** 为单位的组网管理。
 //!
-//! 配对流（邀请串，推荐）：A 机点「生成邀请」→ 复制串给 B；B 机把串
-//! 粘贴进「从邀请串添加」→ 自动解析 url/token → 保存即连。
+//! 2026-10 校正：联邦是 **Core 之间**的事（peer 链路、邀请串、授权都随
+//! Core 配置走），管理面不应跟随"当前选中的 Agent / 运行区域"。本页为
+//! 每个上游 Core 各展示一张卡片（节点身份 / 监听地址 / peer 列表 / 邀请
+//! 串），并提供「跨 Core 配对」：选定两个 Core 后一键完成
+//! 邀请（一侧生成）→ 接入（另一侧添加 peer 并主动连接）。
+//!
+//! 命令路由：联邦命令全部**显式定向**到目标 Core（`sendCommand(cmd, core)`：
+//! 多上游由中继包 `{core, frame}` 定向；单上游无壳直发）。状态按来源 core
+//! 归档在 `state.federations` / `state.federationInvites`（reducer 注入）。
+//!
+//! 手动配对流（等价于跨 Core 配对的两步）：A 点「生成邀请」→ 复制串给 B；
+//! B「添加 peer」粘贴串 → 自动解析 url/token → 保存即连。
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   NeumorphismButton,
   NeumorphismCheckbox,
@@ -19,22 +25,201 @@ import {
 } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { sendCommand } from '../connection';
+import { currentRegion } from '../state';
 import type { BackendCommand } from '../protocol';
-import type { FederationPeerInfo } from '../state';
+import type { FederationPeerInfo, FederationStatus } from '../state';
 
 const props = defineProps<{
   activeSessionId?: string | null;
   activeTeamId?: string | null;
 }>();
 
-// ── 状态（reduce 注入 state.federation / state.federationInvite）──
-const fed = computed(() => state.federation);
-const enabled = computed(() => fed.value?.enabled ?? false);
-const peers = computed(() => fed.value?.peers ?? []);
-const onlineCount = computed(() => peers.value.filter((p: FederationPeerInfo) => p.link === 'Online').length);
+// ── Core 目标解析 ──
+/** 多上游 = 命令必须显式定向；单上游走无壳直发（与中继语义一致）。 */
+const multi = computed(() => state.upstreams.length > 1);
 
-// ── 添加/编辑表单 ──
+/** 发一条命令到指定 Core（单上游/空名 → 无壳直发）。 */
+function sendTo(core: string, cmd: BackendCommand) {
+  const target = multi.value && core ? core : undefined;
+  if (target) sendCommand(cmd, target);
+  else sendCommand(cmd);
+}
+
+/** Core 列表（来自 Panel 已配置的上游；尚未拉到清单时留一个占位卡片）。 */
+const coreList = computed<Array<{ name: string; online: boolean }>>(() => {
+  if (state.upstreams.length) {
+    return state.upstreams.map((u) => ({ name: u.name, online: u.connectivity === 'online' }));
+  }
+  return [{ name: '', online: true }];
+});
+
+/** 某 Core 的联邦状态（按来源 core 归档；单上游回落唯一桶）。 */
+function fedOf(core: string): FederationStatus | null {
+  const exact = state.federations[core];
+  if (exact) return exact;
+  if (multi.value) return null;
+  return Object.values(state.federations)[0] ?? null;
+}
+
+/** 某 Core 最近生成的邀请串。 */
+function inviteOf(core: string): string {
+  const exact = state.federationInvites[core];
+  if (exact) return exact;
+  if (multi.value) return '';
+  const values = Object.values(state.federationInvites);
+  return values.length === 1 ? values[0] : '';
+}
+
+/** 卡片数据（一次算好，避免模板里反复调用函数）。 */
+const cards = computed(() =>
+  coreList.value.map((c) => {
+    const fed = fedOf(c.name);
+    return {
+      name: c.name,
+      label: c.name || '（当前 Core）',
+      online: c.online,
+      fed,
+      enabled: fed?.enabled ?? false,
+      peers: fed?.peers ?? [],
+      invite: inviteOf(c.name),
+      onlinePeers: (fed?.peers ?? []).filter((p) => p.link === 'Online').length,
+    };
+  }),
+);
+
+function refreshCore(core: string) {
+  sendTo(core, { RequestFederationStatus: null } as unknown as BackendCommand);
+}
+
+function refreshAll() {
+  if (state.upstreams.length) state.upstreams.forEach((u) => refreshCore(u.name));
+  else refreshCore('');
+}
+
+onMounted(refreshAll);
+// 上游清单是异步轮询来的：首次到达时补一次全量刷新。
+watch(
+  () => state.upstreams.length,
+  (n, prev) => {
+    if (n > 0 && n !== prev) refreshAll();
+  },
+);
+
+// ── 邀请串 ──
+function requestInvite(core: string) {
+  sendTo(core, { RequestFederationInvite: null } as unknown as BackendCommand);
+}
+
+const copiedCore = ref('');
+async function copyInvite(core: string) {
+  const text = inviteOf(core);
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    copiedCore.value = core;
+    window.setTimeout(() => {
+      if (copiedCore.value === core) copiedCore.value = '';
+    }, 1500);
+  } catch {
+    /* 剪贴板不可用时用户自行选择复制 */
+  }
+}
+
+// ── 跨 Core 配对（一键）──
+const pairLeft = ref(''); // 邀请方（被连入；需被接入方网络可达）
+const pairRight = ref(''); // 接入方（主动连接）
+const pairing = ref(false);
+const pairStatus = ref('');
+const pairError = ref('');
+
+const pairOptions = computed(() =>
+  coreList.value.filter((c) => c.name).map((c) => ({ label: c.name, value: c.name })),
+);
+
+/** 默认选中前两个 Core（可在选择器里改方向；⇄ 交换）。 */
+watch(
+  pairOptions,
+  (opts) => {
+    const names = opts.map((o) => o.value);
+    if (!pairLeft.value && names[0]) pairLeft.value = names[0];
+    if (!pairRight.value && names[1]) pairRight.value = names[1];
+  },
+  { immediate: true },
+);
+
+function swapPair() {
+  const t = pairLeft.value;
+  pairLeft.value = pairRight.value;
+  pairRight.value = t;
+}
+
+/** 等待某 Core 返回**新的**邀请串（事件异步到达；超时返回 null）。 */
+function waitForInvite(core: string, before: string, ms: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const tick = () => {
+      const cur = inviteOf(core);
+      if (cur && cur !== before) return resolve(cur);
+      if (Date.now() - start >= ms) return resolve(null);
+      window.setTimeout(tick, 120);
+    };
+    tick();
+  });
+}
+
+async function pairCores() {
+  const a = pairLeft.value;
+  const b = pairRight.value;
+  pairStatus.value = '';
+  pairError.value = '';
+  if (!a || !b) {
+    pairError.value = '请先选择两个 Core（在「上游 Core」里确认都已配置）';
+    return;
+  }
+  if (a === b) {
+    pairError.value = '请选择两个不同的 Core';
+    return;
+  }
+  pairing.value = true;
+  try {
+    const before = inviteOf(a);
+    requestInvite(a);
+    const invite = await waitForInvite(a, before, 8000);
+    if (!invite) {
+      pairError.value = `「${a}」未返回邀请串——确认该 Core 在线且联邦功能正常`;
+      return;
+    }
+    const parsed = parseInvite(invite);
+    if (!parsed) {
+      pairError.value = '邀请串解析失败（须为 echofed://host:port…#token）';
+      return;
+    }
+    // 在接入方登记邀请方为 peer：保存即触发对方主动连接。
+    // 邀请串即凭证 → 默认满权限（可在卡片里随时收紧）。
+    sendTo(b, {
+      SaveFederationPeer: {
+        peer: {
+          name: a || parsed.name || 'peer',
+          url: parsed.url,
+          token: parsed.token,
+          token_set: false,
+          allow_tools: ['*'],
+          allow_subagent: true,
+          require_confirm: [],
+          allow_queries: ['*'],
+          link: 'Offline',
+        },
+      },
+    } as unknown as BackendCommand);
+    pairStatus.value = `已发起：「${a}」生成邀请 →「${b}」接入连接；数秒内两侧 peer 应转为在线（可点卡片「刷新」查看）。`;
+  } finally {
+    pairing.value = false;
+  }
+}
+
+// ── 添加/编辑表单（作用于指定 Core）──
 const showAdd = ref(false);
+const formCore = ref('');
 const editName = ref('');
 const formName = ref('');
 const formUrl = ref('');
@@ -50,6 +235,11 @@ const QUERY_KINDS: Array<{ key: string; label: string }> = [
   { key: 'browse_directories', label: '目录浏览（选择器）' },
 ];
 const formQueries = ref<string[]>(QUERY_KINDS.map((k) => k.key));
+const formAllowSubagent = ref(true);
+/** 需人工确认的调用（命中即拒；空 = 无需确认）。 */
+const formRequireConfirm = ref('');
+const inviteInput = ref('');
+const inviteError = ref('');
 
 /** 查询授权勾选（库 Checkbox 为布尔模型；数组语义在本层维护）。 */
 function toggleQuery(key: string, checked: boolean) {
@@ -59,16 +249,6 @@ function toggleQuery(key: string, checked: boolean) {
     formQueries.value = formQueries.value.filter((k) => k !== key);
   }
 }
-
-/** 迁移目标下拉（库 Select options；空值 = 自动选首个在线节点）。 */
-const migrateOptions = computed(() => [
-  { label: '（自动：首个在线节点）', value: '' },
-  ...onlinePeers.value.map((p) => ({ label: p.name, value: p.name })),
-]);
-const formAllowSubagent = ref(true);
-/** 需人工确认的调用（命中即拒；空 = 无需确认）。 */
-const formRequireConfirm = ref('');
-const inviteInput = ref('');
 
 /** 解析自定义列表（换行/逗号分隔，去空、去重）。 */
 function parseList(raw: string): string[] {
@@ -81,39 +261,9 @@ function parseList(raw: string): string[] {
     ),
   );
 }
-// ── 会话迁移（P3-2b）：把当前会话的历史搬到某个在线 peer ──
-const migratePeer = ref('');
-const onlinePeers = computed(() => peers.value.filter((p: FederationPeerInfo) => p.link === 'Online'));
-/** 迁移要求前端持有的当前会话（global 聚合视图无单一归属，不支持）。 */
-const canMigrate = computed(
-  () =>
-    enabled.value &&
-    !!props.activeSessionId &&
-    props.activeSessionId !== 'global' &&
-    peers.value.some((p: FederationPeerInfo) => p.link === 'Online'),
-);
-function migrateSession() {
-  const sessionId = props.activeSessionId;
-  if (!sessionId || sessionId === 'global') return;
-  const target =
-    migratePeer.value ||
-    peers.value.find((p: FederationPeerInfo) => p.link === 'Online')?.name;
-  if (!target) return;
-  sendCommand({
-    MigrateSession: {
-      session_id: sessionId,
-      team_id: props.activeTeamId ?? null,
-      target_peer: target,
-    },
-  });
-}
-const inviteError = ref('');
 
-// ── 邀请串（本机生成）──
-const inviteText = computed(() => state.federationInvite ?? '');
-const inviteCopied = ref(false);
-
-function openAdd() {
+function openAdd(core: string) {
+  formCore.value = core;
   editName.value = '';
   formName.value = '';
   formUrl.value = '';
@@ -129,7 +279,8 @@ function openAdd() {
   showAdd.value = true;
 }
 
-function openEdit(peer: FederationPeerInfo) {
+function openEdit(core: string, peer: FederationPeerInfo) {
+  formCore.value = core;
   editName.value = peer.name;
   formName.value = peer.name;
   formUrl.value = peer.url;
@@ -144,38 +295,9 @@ function openEdit(peer: FederationPeerInfo) {
     : queries.filter((q) => QUERY_KINDS.some((k) => k.key === q));
   formAllowSubagent.value = peer.allow_subagent ?? true;
   formRequireConfirm.value = (peer.require_confirm ?? []).join('\n');
-  showAdd.value = true;
-}
-
-// 解析 echofed:// 邀请串填入表单（与 echo-federation invite.rs 同规则：
-// echofed://host:port?name=<别名>#<token>）。
-function applyInvite() {
+  inviteInput.value = '';
   inviteError.value = '';
-  const raw = inviteInput.value.trim();
-  if (!raw.startsWith('echofed://')) {
-    inviteError.value = '不是 echofed:// 邀请串';
-    return;
-  }
-  const hash = raw.indexOf('#');
-  if (hash < 0 || hash === raw.length - 1) {
-    inviteError.value = '邀请串缺少 #<token>';
-    return;
-  }
-  const token = raw.slice(hash + 1).trim();
-  const before = raw.slice('echofed://'.length, hash);
-  const [hostPort, query] = before.split('?');
-  const hp = hostPort.replace(/\/+$/, '');
-  if (!hp.includes(':')) {
-    inviteError.value = '邀请串 host:port 非法';
-    return;
-  }
-  formUrl.value = `ws://${hp}`;
-  formToken.value = token;
-  const nameParam = query?.split('&').find((kv) => kv.startsWith('name='));
-  if (nameParam && !formName.value) {
-    formName.value = decodeURIComponent(nameParam.slice(5));
-  }
-  if (!formName.value) formName.value = hp.split(':')[0];
+  showAdd.value = true;
 }
 
 function savePeer() {
@@ -185,7 +307,7 @@ function savePeer() {
     return;
   }
   const queries = formQueries.value;
-  sendCommand({
+  sendTo(formCore.value, {
     SaveFederationPeer: {
       peer: {
         name,
@@ -196,8 +318,7 @@ function savePeer() {
         allow_subagent: formAllowSubagent.value,
         require_confirm: parseList(formRequireConfirm.value),
         // 全选（覆盖全部四种）→ 等价 "*"（对端可新增查询种类时自动覆盖）。
-        allow_queries:
-          queries.length === QUERY_KINDS.length ? ['*'] : queries,
+        allow_queries: queries.length === QUERY_KINDS.length ? ['*'] : queries,
         link: 'Offline',
       },
     },
@@ -205,33 +326,85 @@ function savePeer() {
   showAdd.value = false;
 }
 
-function deletePeer(name: string) {
-  sendCommand({ DeleteFederationPeer: { name } } as unknown as BackendCommand);
+function deletePeer(core: string, name: string) {
+  sendTo(core, { DeleteFederationPeer: { name } } as unknown as BackendCommand);
 }
 
-function requestInvite() {
-  sendCommand({ RequestFederationInvite: null } as unknown as BackendCommand);
+// ── 邀请串解析（与 echo-federation invite.rs 同规则：
+//    echofed://host:port?name=<别名>#<token>）──
+function parseInvite(raw: string): { url: string; token: string; name: string | null } | null {
+  const text = raw.trim();
+  if (!text.startsWith('echofed://')) return null;
+  const hash = text.indexOf('#');
+  if (hash < 0 || hash === text.length - 1) return null;
+  const token = text.slice(hash + 1).trim();
+  if (!token) return null;
+  const before = text.slice('echofed://'.length, hash);
+  const [hostPortRaw, query] = before.split('?');
+  const hp = (hostPortRaw ?? '').replace(/\/+$/, '');
+  if (!hp.includes(':')) return null;
+  const nameParam = query?.split('&').find((kv) => kv.startsWith('name='));
+  let name: string | null = null;
+  if (nameParam) {
+    try {
+      name = decodeURIComponent(nameParam.slice(5));
+    } catch {
+      name = nameParam.slice(5);
+    }
+  }
+  return { url: `ws://${hp}`, token, name };
 }
 
-async function copyInvite() {
-  if (!inviteText.value) return;
-  try {
-    await navigator.clipboard.writeText(inviteText.value);
-    inviteCopied.value = true;
-    setTimeout(() => (inviteCopied.value = false), 1500);
-  } catch {
-    /* 剪贴板不可用时用户自行选择复制 */
+/** 解析 echofed:// 邀请串填入表单。 */
+function applyInvite() {
+  inviteError.value = '';
+  const parsed = parseInvite(inviteInput.value);
+  if (!parsed) {
+    inviteError.value = '不是合法的 echofed:// 邀请串（缺 host:port 或 #token）';
+    return;
+  }
+  formUrl.value = parsed.url;
+  formToken.value = parsed.token;
+  if (!formName.value) {
+    formName.value = parsed.name || parsed.url.replace(/^ws:\/\//, '').split(':')[0];
   }
 }
 
-function refresh() {
-  sendCommand({ RequestFederationStatus: null } as unknown as BackendCommand);
-}
+// ── 会话迁移（会话级操作；作用于当前会话所属 Core 的在线 peer）──
+const migratePeer = ref('');
+/** 会话所属 Core（= 当前运行区域；迁移命令按会话路由）。 */
+const sessionCore = computed(() => currentRegion(state) ?? '');
+const sessionFed = computed(() => fedOf(sessionCore.value));
+const onlinePeers = computed(() =>
+  (sessionFed.value?.peers ?? []).filter((p: FederationPeerInfo) => p.link === 'Online'),
+);
+/** 迁移目标下拉（库 Select options；空值 = 自动选首个在线节点）。 */
+const migrateOptions = computed(() => [
+  { label: '（自动：首个在线节点）', value: '' },
+  ...onlinePeers.value.map((p) => ({ label: p.name, value: p.name })),
+]);
+/** 迁移要求前端持有的当前会话（global 聚合视图无单一归属，不支持）。 */
+const canMigrate = computed(
+  () =>
+    !!sessionFed.value?.enabled &&
+    !!props.activeSessionId &&
+    props.activeSessionId !== 'global' &&
+    onlinePeers.value.length > 0,
+);
 
-onMounted(refresh);
-onUnmounted(() => {
-  state.federationInvite = null;
-});
+function migrateSession() {
+  const sessionId = props.activeSessionId;
+  if (!sessionId || sessionId === 'global') return;
+  const target = migratePeer.value || onlinePeers.value[0]?.name;
+  if (!target) return;
+  sendCommand({
+    MigrateSession: {
+      session_id: sessionId,
+      team_id: props.activeTeamId ?? null,
+      target_peer: target,
+    },
+  });
+}
 </script>
 
 <template>
@@ -239,44 +412,310 @@ onUnmounted(() => {
     <div class="fed-header">
       <div>
         <div class="fed-title">联邦网络</div>
-        <div class="fed-sub" v-if="state.knownCores.size > 0">
-          作用于运行区域：{{ state.activeRegion ?? '（未指定）' }}
-        </div>
-        <div class="fed-sub" v-if="enabled && fed">
-          节点 {{ fed.node_name || fed.node_id }}
-          <template v-if="fed.listen"> · 监听 {{ fed.listen }}</template>
-          · {{ onlineCount }}/{{ peers.length }} 在线
-        </div>
-        <div class="fed-sub fed-sub--warn" v-else>
-          联邦状态不可用——该区域未响应或尚未加载（确认 Core 在线后点「刷新」）
+        <div class="fed-sub">
+          Core ↔ Core 直连组网：下方每个 Core 各一份状态与邀请串，或用「跨 Core
+          配对」一键互联——与当前选中的 Agent / 运行区域无关。
         </div>
       </div>
-      <div class="fed-actions" v-if="enabled">
-        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="refresh">
-          刷新
-        </NeumorphismButton>
-        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="requestInvite">
-          生成邀请
-        </NeumorphismButton>
+      <div class="fed-actions">
         <NeumorphismButton
           size="small"
-          variant="primary"
-          class="fed-btn fed-btn--primary"
-          @click="openAdd"
+          variant="glass"
+          class="fed-btn fed-refresh"
+          @click="refreshAll"
         >
-          添加 peer
+          刷新全部
         </NeumorphismButton>
       </div>
     </div>
 
-    <!-- 会话迁移（P3-2b）：导出当前会话事件日志 → 分块搬运到目标 peer -->
+    <!-- 跨 Core 配对：选定两个 Core，一键完成 邀请（一侧）→ 接入（另一侧） -->
+    <div class="fed-pair">
+      <div class="fed-pair__title">跨 Core 配对</div>
+      <div class="fed-pair__row">
+        <label class="fed-field fed-pair__field">
+          <span>邀请方（被连入；需被接入方网络可达）</span>
+          <NeumorphismSelect
+            v-model="pairLeft"
+            class="fed-input"
+            size="small"
+            :options="pairOptions"
+            placeholder="选择 Core"
+          />
+        </label>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          class="fed-btn fed-pair__swap"
+          @click="swapPair"
+        >
+          ⇄ 交换
+        </NeumorphismButton>
+        <label class="fed-field fed-pair__field">
+          <span>接入方（主动连接；负责到达邀请方）</span>
+          <NeumorphismSelect
+            v-model="pairRight"
+            class="fed-input"
+            size="small"
+            :options="pairOptions"
+            placeholder="选择 Core"
+          />
+        </label>
+        <NeumorphismButton
+          size="small"
+          variant="primary"
+          class="fed-btn fed-btn--primary fed-pair__go"
+          :disabled="pairing || pairOptions.length < 2"
+          @click="pairCores"
+        >
+          {{ pairing ? '配对中…' : '开始配对' }}
+        </NeumorphismButton>
+      </div>
+      <div v-if="pairError" class="fed-error">{{ pairError }}</div>
+      <div v-else-if="pairStatus" class="fed-sub fed-pair__status">{{ pairStatus }}</div>
+      <div v-else class="fed-sub">
+        方向说明：邀请方需能被接入方访问到——内网 / NAT 后的 Core 适合做「接入方」主动连向对端。
+      </div>
+    </div>
+
+    <!-- 每个 Core 一张卡片 -->
+    <div class="fed-cores">
+      <div v-for="c in cards" :key="c.name || '(core)'" class="fed-core">
+        <div class="fed-core__head">
+          <span class="fed-dot">
+            <NeumorphismStatusDot :status="c.online ? 'online' : 'offline'" size="small" />
+          </span>
+          <div class="fed-core__id">
+            <div class="fed-core__name">{{ c.label }}</div>
+            <div v-if="c.fed" class="fed-sub">
+              节点 {{ c.fed.node_name || c.fed.node_id }}
+              <template v-if="c.fed.listen"> · 监听 {{ c.fed.listen }}</template>
+              · {{ c.onlinePeers }}/{{ c.peers.length }} peer 在线
+            </div>
+            <div v-else class="fed-sub fed-sub--warn">
+              联邦状态未加载（点「刷新」重试；Core 离线时不可用）
+            </div>
+          </div>
+          <div class="fed-core__actions">
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              class="fed-btn fed-refresh-core"
+              @click="refreshCore(c.name)"
+            >
+              刷新
+            </NeumorphismButton>
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              class="fed-btn fed-gen-invite"
+              @click="requestInvite(c.name)"
+            >
+              生成邀请
+            </NeumorphismButton>
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              class="fed-btn fed-add-peer"
+              @click="openAdd(c.name)"
+            >
+              添加 peer
+            </NeumorphismButton>
+          </div>
+        </div>
+
+        <!-- 邀请串输出 -->
+        <div v-if="c.invite" class="fed-invite">
+          <div class="fed-invite-label">
+            邀请串（含共享密钥，按 SSH 密钥同等级保密；发给对端粘贴即可配对）
+          </div>
+          <div class="fed-invite-row">
+            <code class="fed-invite-text">{{ c.invite }}</code>
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              class="fed-btn fed-copy-invite"
+              @click="copyInvite(c.name)"
+            >
+              {{ copiedCore === c.name ? '已复制' : '复制' }}
+            </NeumorphismButton>
+          </div>
+        </div>
+
+        <!-- 添加/编辑表单（归属本卡片 Core） -->
+        <div v-if="showAdd && formCore === c.name" class="fed-form">
+          <div class="fed-form-title">
+            {{ editName ? `编辑 peer「${editName}」` : `在「${c.label}」上添加 peer` }}
+          </div>
+          <div class="fed-form-invite">
+            <NeumorphismInput
+              v-model="inviteInput"
+              class="fed-input"
+              size="small"
+              placeholder="粘贴 echofed:// 邀请串自动填充（推荐）"
+              @update:model-value="applyInvite"
+            />
+          </div>
+          <div class="fed-form-grid">
+            <label class="fed-field">
+              <span>名称</span>
+              <NeumorphismInput
+                v-model="formName"
+                class="fed-input"
+                size="small"
+                :disabled="!!editName"
+                placeholder="gpu-box"
+              />
+            </label>
+            <label class="fed-field">
+              <span>地址（留空 = 仅接受对方连入）</span>
+              <NeumorphismInput
+                v-model="formUrl"
+                class="fed-input"
+                size="small"
+                placeholder="ws://192.168.1.20:3133"
+              />
+            </label>
+            <label class="fed-field">
+              <span>共享密钥{{ editName ? '（留空 = 不变）' : '' }}</span>
+              <NeumorphismInput
+                v-model="formToken"
+                class="fed-input"
+                size="small"
+                placeholder="与对端一致"
+              />
+            </label>
+            <div class="fed-field fed-field--check">
+              <NeumorphismCheckbox
+                v-model="formAllowAll"
+                size="small"
+                label="允许对端调用本机全部工具（默认满权限；联邦互信 ≈ SSH 免密）"
+              />
+            </div>
+            <label v-if="!formAllowAll" class="fed-field fed-field--wide">
+              <span>允许的工具（换行/逗号分隔；如 bash、read_file）</span>
+              <NeumorphismTextarea
+                v-model="formToolsCustom"
+                class="fed-input fed-textarea"
+                size="small"
+                :rows="3"
+                placeholder="bash&#10;read_file"
+              />
+            </label>
+            <div class="fed-field fed-field--wide">
+              <span>允许的只读查询（跨机工作区/git/浏览所需）</span>
+              <div class="fed-checks">
+                <div v-for="kind in QUERY_KINDS" :key="kind.key" class="fed-check">
+                  <NeumorphismCheckbox
+                    :model-value="formQueries.includes(kind.key)"
+                    size="small"
+                    :label="kind.label"
+                    @update:model-value="(v: boolean) => toggleQuery(kind.key, v)"
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="fed-field fed-field--check">
+              <NeumorphismCheckbox
+                v-model="formAllowSubagent"
+                size="small"
+                label="接受对端的子代理委派（spawn_subagent node=本机）"
+              />
+            </div>
+            <label class="fed-field fed-field--wide">
+              <span>需确认的调用（可选；命中即拒，换行/逗号分隔）</span>
+              <NeumorphismInput
+                v-model="formRequireConfirm"
+                class="fed-input"
+                size="small"
+                placeholder="（空 = 无需确认）"
+              />
+            </label>
+          </div>
+          <div v-if="inviteError" class="fed-error">{{ inviteError }}</div>
+          <div class="fed-form-actions">
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              class="fed-btn fed-form-cancel"
+              @click="showAdd = false"
+            >
+              取消
+            </NeumorphismButton>
+            <NeumorphismButton
+              size="small"
+              variant="primary"
+              class="fed-btn fed-btn--primary fed-form-save"
+              @click="savePeer"
+            >
+              保存
+            </NeumorphismButton>
+          </div>
+        </div>
+
+        <!-- peers 列表 -->
+        <div v-if="c.enabled" class="fed-list">
+          <div v-if="!c.peers.length" class="fed-empty">
+            该 Core 尚未配置 peer——点「生成邀请」把串发给对端，或「添加 peer」粘贴对端邀请串。
+          </div>
+          <div v-for="p in c.peers" :key="p.name" class="fed-peer">
+            <span class="fed-dot" :title="p.link === 'Online' ? '在线' : '离线'">
+              <NeumorphismStatusDot
+                :status="p.link === 'Online' ? 'online' : 'offline'"
+                size="small"
+              />
+            </span>
+            <div class="fed-peer-main">
+              <div class="fed-peer-name">{{ p.name }}</div>
+              <div class="fed-peer-url">{{ p.url || '（仅接受连入）' }}</div>
+            </div>
+            <div class="fed-peer-meta">
+              {{ p.token_set ? '已配置密钥' : '无密钥' }}
+              <template v-if="(p.allow_tools ?? []).includes('*')"> · 全部工具</template>
+              <template v-else-if="(p.allow_tools ?? []).length">
+                · {{ p.allow_tools.length }} 工具
+              </template>
+              <template v-else> · 无工具授权</template>
+              <template v-if="(p.allow_queries ?? []).includes('*')"> · 全部查询</template>
+              <template v-else-if="(p.allow_queries ?? []).length">
+                · {{ p.allow_queries.length }} 类查询
+              </template>
+              <template v-else> · 无查询授权</template>
+              <template v-if="p.allow_subagent"> · 接受委派</template>
+            </div>
+            <div class="fed-peer-actions">
+              <NeumorphismButton
+                size="small"
+                variant="glass"
+                class="fed-btn fed-btn--small fed-peer-edit"
+                @click="openEdit(c.name, p)"
+              >
+                编辑
+              </NeumorphismButton>
+              <NeumorphismButton
+                size="small"
+                variant="glass"
+                class="fed-btn fed-btn--small fed-btn--danger fed-peer-del"
+                @click="deletePeer(c.name, p.name)"
+              >
+                删除
+              </NeumorphismButton>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="c.fed" class="fed-empty">该 Core 未启用联邦（在其配置中开启 federation）。</div>
+      </div>
+    </div>
+
+    <!-- 会话迁移（会话级操作；作用于当前会话所属 Core 的在线 peer） -->
     <div class="fed-migrate">
       <div class="fed-migrate__text">
         <div class="fed-migrate__title">迁移当前会话</div>
         <div class="fed-sub">
           会话：
           {{ props.activeSessionId && props.activeSessionId !== 'global' ? props.activeSessionId : '（全局视图无单一会话）' }}
-          · 人格：{{ props.activeTeamId ?? '（未指定）' }}
+          · 人格：{{ props.activeTeamId ?? '（未指定）' }} · 目标 Core 的在线
+          peer：{{ onlinePeers.length }}
         </div>
       </div>
       <NeumorphismSelect
@@ -296,173 +735,69 @@ onUnmounted(() => {
         迁移
       </NeumorphismButton>
     </div>
-
-    <!-- 邀请串输出 -->
-    <div v-if="inviteText" class="fed-invite">
-      <div class="fed-invite-label">
-        邀请串（含共享密钥，按 SSH 密钥同等级保密；发给对端粘贴即可配对）
-      </div>
-      <div class="fed-invite-row">
-        <code class="fed-invite-text">{{ inviteText }}</code>
-        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="copyInvite">
-          {{ inviteCopied ? '已复制' : '复制' }}
-        </NeumorphismButton>
-      </div>
-    </div>
-
-    <!-- 添加/编辑表单 -->
-    <div v-if="showAdd" class="fed-form">
-      <div class="fed-form-title">{{ editName ? `编辑 peer「${editName}」` : '添加 peer' }}</div>
-      <div class="fed-form-invite">
-        <NeumorphismInput
-          v-model="inviteInput"
-          class="fed-input"
-          size="small"
-          placeholder="粘贴 echofed:// 邀请串自动填充（推荐）"
-          @update:model-value="applyInvite"
-        />
-      </div>
-      <div class="fed-form-grid">
-        <label class="fed-field">
-          <span>名称</span>
-          <NeumorphismInput
-            v-model="formName"
-            class="fed-input"
-            size="small"
-            :disabled="!!editName"
-            placeholder="gpu-box"
-          />
-        </label>
-        <label class="fed-field">
-          <span>地址（留空 = 仅接受对方连入）</span>
-          <NeumorphismInput
-            v-model="formUrl"
-            class="fed-input"
-            size="small"
-            placeholder="ws://192.168.1.20:3133"
-          />
-        </label>
-        <label class="fed-field">
-          <span>共享密钥{{ editName ? '（留空 = 不变）' : '' }}</span>
-          <NeumorphismInput v-model="formToken" class="fed-input" size="small" placeholder="与对端一致" />
-        </label>
-        <div class="fed-field fed-field--check">
-          <NeumorphismCheckbox
-            v-model="formAllowAll"
-            size="small"
-            label="允许对端调用本机全部工具（默认满权限；联邦互信 ≈ SSH 免密）"
-          />
-        </div>
-        <label v-if="!formAllowAll" class="fed-field fed-field--wide">
-          <span>允许的工具（换行/逗号分隔；如 bash、read_file）</span>
-          <NeumorphismTextarea
-            v-model="formToolsCustom"
-            class="fed-input fed-textarea"
-            size="small"
-            :rows="3"
-            placeholder="bash&#10;read_file"
-          />
-        </label>
-        <div class="fed-field fed-field--wide">
-          <span>允许的只读查询（跨机工作区/git/浏览所需）</span>
-          <div class="fed-checks">
-            <div v-for="kind in QUERY_KINDS" :key="kind.key" class="fed-check">
-              <NeumorphismCheckbox
-                :model-value="formQueries.includes(kind.key)"
-                size="small"
-                :label="kind.label"
-                @update:model-value="(v: boolean) => toggleQuery(kind.key, v)"
-              />
-            </div>
-          </div>
-        </div>
-        <div class="fed-field fed-field--check">
-          <NeumorphismCheckbox
-            v-model="formAllowSubagent"
-            size="small"
-            label="接受对端的子代理委派（spawn_subagent node=本机）"
-          />
-        </div>
-        <label class="fed-field fed-field--wide">
-          <span>需确认的调用（可选；命中即拒，换行/逗号分隔）</span>
-          <NeumorphismInput
-            v-model="formRequireConfirm"
-            class="fed-input"
-            size="small"
-            placeholder="（空 = 无需确认）"
-          />
-        </label>
-      </div>
-      <div v-if="inviteError" class="fed-error">{{ inviteError }}</div>
-      <div class="fed-form-actions">
-        <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="showAdd = false">
-          取消
-        </NeumorphismButton>
-        <NeumorphismButton
-          size="small"
-          variant="primary"
-          class="fed-btn fed-btn--primary"
-          @click="savePeer"
-        >
-          保存
-        </NeumorphismButton>
-      </div>
-    </div>
-
-    <!-- peers 列表 -->
-    <div v-if="enabled" class="fed-list">
-      <div v-if="!peers.length" class="fed-empty">
-        尚未配置 peer。点「生成邀请」把本机串发给对端，或「添加 peer」粘贴对端的邀请串。
-      </div>
-      <div v-for="p in peers" :key="p.name" class="fed-peer">
-        <span class="fed-dot" :title="p.link === 'Online' ? '在线' : '离线'">
-          <NeumorphismStatusDot
-            :status="p.link === 'Online' ? 'online' : 'offline'"
-            size="small"
-          />
-        </span>
-        <div class="fed-peer-main">
-          <div class="fed-peer-name">{{ p.name }}</div>
-          <div class="fed-peer-url">{{ p.url || '（仅接受连入）' }}</div>
-        </div>
-        <div class="fed-peer-meta">
-          {{ p.token_set ? '已配置密钥' : '无密钥' }}
-          <template v-if="p.allow_tools.includes('*')"> · 全部工具</template>
-          <template v-else-if="p.allow_tools.length"> · {{ p.allow_tools.length }} 工具</template>
-          <template v-else> · 无工具授权</template>
-          <template v-if="(p.allow_queries ?? []).includes('*')"> · 全部查询</template>
-          <template v-else-if="(p.allow_queries ?? []).length">
-            · {{ p.allow_queries.length }} 类查询
-          </template>
-          <template v-else> · 无查询授权</template>
-          <template v-if="p.allow_subagent"> · 接受委派</template>
-        </div>
-        <div class="fed-peer-actions">
-          <NeumorphismButton size="small" variant="glass" class="fed-btn" @click="openEdit(p)">
-            编辑
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
-            class="fed-btn fed-btn--danger"
-            @click="deletePeer(p.name)"
-          >
-            删除
-          </NeumorphismButton>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.fed-textarea {
-  resize: vertical;
-  min-height: 52px;
-  font-family: var(--nm-font-mono, monospace);
+.fed-pair {
+  border: 1px solid var(--nm-border-color);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.fed-field--wide {
-  grid-column: 1 / -1;
+.fed-pair__title {
+  font-weight: 600;
+}
+.fed-pair__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fed-pair__field {
+  flex: 1;
+  min-width: 180px;
+}
+.fed-pair__swap {
+  margin-bottom: 1px;
+}
+.fed-pair__go {
+  margin-bottom: 1px;
+}
+.fed-pair__status {
+  color: var(--panel-ok, var(--nm-text-secondary));
+}
+.fed-cores {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fed-core {
+  border: 1px solid var(--nm-border-color);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fed-core__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.fed-core__id {
+  flex: 1;
+  min-width: 0;
+}
+.fed-core__name {
+  font-weight: 600;
+}
+.fed-core__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .fed-checks {
   display: flex;
@@ -616,7 +951,7 @@ onUnmounted(() => {
 }
 .fed-empty {
   color: var(--nm-text-secondary);
-  padding: 20px;
+  padding: 12px;
   text-align: center;
 }
 .fed-peer {
