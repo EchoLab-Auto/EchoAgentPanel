@@ -847,7 +847,7 @@ const pluginImpactText = computed(() => {
     return '平台通道：禁用即卸载该适配器/管理通道注册，对应平台会话与连接停止；对其他插件无影响。';
   }
   if (sem === 'mode') {
-    return '模式插件：全局停用 = 卸载 echo-loop 驱动（单会话与并行多会话都停用则回退内置循环，行为等同旧版内置实现）。某智能体的「单会话 / 并行多会话」在「智能体」配置的循环模式里选择，与这里的全局开关是两层。';
+    return '模式插件：全局停用 = 卸载 echo-loop 驱动（单会话与并行多会话都停用则回退内置循环实现）。某智能体的「单会话 / 并行多会话」在「智能体」配置的循环模式里选择，与这里的全局开关是两层。';
   }
   return '名义挂载插件：启停写入 disabled_plugins，重启 Core 后生效。';
 });
@@ -1113,7 +1113,7 @@ const capabilityToolGroups = computed(() => {
     }));
 });
 
-// 兼容旧引用：capabilityToolOptions 现在等价于全部工具平铺（含编排）
+// 能力工具选项：全部工具平铺。
 const capabilityToolOptions = computed(() =>
   state.tools.map((t) => ({ key: t.name, label: t.name })),
 );

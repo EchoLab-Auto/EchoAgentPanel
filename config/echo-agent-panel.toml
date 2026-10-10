@@ -24,11 +24,6 @@ connect_url = "ws://127.0.0.1:3132"
 # 必须与 Core [core].management_access_token 一致；留空表示不发送认证头。
 access_token = ""
 
-# 注：旧版曾有 [qq] 段（NapCat 容器名 / OneBot / WebUI 地址，Panel 直连 NapCat 用）。
-# 2026-09-13 起 QQ 登录与二维码由 Core 代理走 WS（RequestQqLoginStatus /
-# RequestQqQrcode → QqLoginStatus / QqQrcode 事件），该段已移除；
-# 旧配置文件中的 [qq] 段会被静默忽略，无需手工清理。
-
 # ── 多上游（聚合视图，2026-10）──
 # 本节可完全省略：设置·Core 连接页支持**在线增删**上游并自动写回本段
 # （tmp+rename 原子写，其余段原样保留）。零上游部署时本段留空即可，
@@ -37,7 +32,7 @@ access_token = ""
 # 配置任意多条 [[cores]] 后，浏览器单连接同时中继到全部上游：
 # 事件按来源加壳 {core, frame}，会话列表按来源着色/徽标区分；
 # 命令默认发往当前选中会话所属的上游。单上游（[core] 或一条 [[cores]]）
-# 行为与此前完全一致（无壳）。
+# 为无壳直发路径。
 # [[cores]]
 # name = "a"
 # url = "ws://192.168.1.10:3132"

@@ -216,7 +216,7 @@ function toggleRow(list: string[], all: GroupedItem[], row: Record<string, unkno
   );
 }
 
-/** 能力分区（可折叠；默认全展开，保持与旧版一致的初始视图） */
+/** 能力分区（可折叠；默认全展开） */
 const CAP_SECTIONS = [
   { key: 'plugins', title: '启用插件' },
   { key: 'tools', title: '启用工具（按 pkg 分组）' },
