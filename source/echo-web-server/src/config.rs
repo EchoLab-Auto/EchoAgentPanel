@@ -277,7 +277,6 @@ connect_url = "ws://10.0.0.5:3132"
         assert_eq!(config.server.bind_address, "0.0.0.0:8080");
     }
 
-
     #[test]
     fn invalid_logging_level_is_rejected() {
         let dir = std::env::temp_dir();
