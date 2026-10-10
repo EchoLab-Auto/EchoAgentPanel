@@ -60,7 +60,8 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // 此断言是"提醒器"：Core 加事件/自己补定义后，这里失败提醒你确认
     // 变体集合是有意变更，而不是漏同步。数字随协议演进更新。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(54);
+    // 54 → 56（2026-10 流式输出：+AgentContentDelta / AgentReasoningDelta）。
+    expect(variants.size).toBe(56);
   });
 
   it('ChecklistUpdated 携带 team_id（同一 core 多 persona 隔离，2026-10）', () => {

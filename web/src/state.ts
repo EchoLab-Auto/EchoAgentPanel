@@ -7,7 +7,7 @@ import {
   startReplyBranch,
   completeReplyBranch,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, type SubagentEventInfo } from './state_domains/timeline';
+import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
@@ -201,6 +201,11 @@ export interface DisplayMessage {
   };
   /** 子代理完成回报（role='subagent' 时的结构化载荷）。 */
   subagent?: SubagentEventInfo;
+  /** 流式状态（2026-10）：'streaming' = 增量拼接中；'frozen' = 已冻结
+   *（工具开始/取消/错误）；undefined = 非流式或已终值对账。 */
+  streamState?: 'streaming' | 'frozen';
+  /** 流式归属分支（对账用；终值替换后清除）。 */
+  streamBranch?: string;
   source?: {
     adapter_name: string;
     platform: string;
@@ -752,14 +757,34 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 后附加在末尾（分支合并块因此不再需要在结束时归档）。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
-        pushTo(state, 'reasoning', content, Math.floor(Date.now() / 1000), {
-          sessionId: e.session_id,
-          animate: true,
-        });
+        // 流式对账：本步推理已按增量实时展示过 → 全量替换该行（不再第二遍
+        // 打字动画）；无流式行（非流式路径）→ 既有整段 + 打字动画。
+        if (!settleStream(state, 'reasoning', e.session_id, e.branch_id, content)) {
+          pushTo(state, 'reasoning', content, Math.floor(Date.now() / 1000), {
+            sessionId: e.session_id,
+            animate: true,
+          });
+        }
       }
       const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
       if (tab) {
         tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
+      }
+      return state;
+    }
+    case 'AgentContentDelta': {
+      const e = (event as { AgentContentDelta: { session_id: string; branch_id: string; delta: string; team_id?: string | null } }).AgentContentDelta;
+      // 流式正文增量：实时追加到流式行（终值 AgentOutput 到达时全量对账）。
+      if (e.delta && belongsToActiveTeam(state, e.team_id, evtCore(e))) {
+        appendStreamDelta(state, 'backend', e.session_id, e.branch_id, e.delta);
+      }
+      return state;
+    }
+    case 'AgentReasoningDelta': {
+      const e = (event as { AgentReasoningDelta: { session_id: string; branch_id: string; delta: string; team_id?: string | null } }).AgentReasoningDelta;
+      // 流式推理增量：实时追加到流式行（终值 AgentReasoning 到达时全量对账）。
+      if (e.delta && belongsToActiveTeam(state, e.team_id, evtCore(e))) {
+        appendStreamDelta(state, 'reasoning', e.session_id, e.branch_id, e.delta);
       }
       return state;
     }
@@ -838,6 +863,12 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }).ToolCall;
       const startedAtMs = typeof e.started_at_ms === 'number' ? e.started_at_ms : Date.now();
       setPhase(state, sessionKey(evtCore(e), e.session_id), e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
+      // 流式分步切分：工具开始 = 该步内容为中间叙述（此后不再有终值到达）
+      // ——冻结当前正文流式行（保留已显示文本）；下一步的增量将新建一行。
+      freezeStreams(state, e.session_id, {
+        role: 'backend',
+        branch: e.branch_id || undefined,
+      });
       // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
       const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
@@ -983,10 +1014,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // full 标志 + 条目级 seq 使兜底拉取不再重复/串显）。
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         // 正式回答实时进主时间线（推理已按序穿插，无需再附加尾巴）。
-        pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
-          sessionId: e.session_id,
-          animate: true,
-        });
+        // 流式对账：全量替换流式行（branch_id 缺失=后端路径时取最新流式
+        // 行）；无流式行（非流式路径）→ 既有整段 + 入场动画。
+        if (!settleStream(state, 'backend', e.session_id, e.branch_id ?? null, e.content)) {
+          pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
+            sessionId: e.session_id,
+            animate: true,
+          });
+        }
       }
       if (e.branch_id) {
         const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
@@ -1392,6 +1427,8 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'Error': {
       const e = (event as { Error: { session_id: string | null; message: string } }).Error;
+      // 流式：错误中断当前步——冻结该会话流式行（保留已显示的部分文本）。
+      if (e.session_id) freezeStreams(state, e.session_id);
       pushToast(state, e.message, 'info');
       return state;
     }
@@ -1465,6 +1502,8 @@ function reduceMessage(
 /** 乐观取消：立即中断当前会话的活动动画/任务/工具运行态，
  * 不等后端确认（后端随后会发 AgentCompleted/ReplyBranchCompleted 对齐）。 */
 export function cancelSessionWork(state: AppState, sessionId: string, core: string | null = null) {
+  // 0) 流式：取消即冻结——保留已显示的部分文本，不再等待终值。
+  freezeStreams(state, sessionId);
   // 1) 活动 phase → completed：活动浮条/取消按钮立即消失
   //    活动态键是复合 (core, session_id)：同名跨 core 不误伤。
   const act = state.activities[sessionKey(core, sessionId)];

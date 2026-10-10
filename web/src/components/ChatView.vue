@@ -1004,6 +1004,7 @@ function imagesOf(message: ChatMessage): string[] {
             v-if="(row.message as { role: string }).role === 'reasoning'"
             :text="row.message.content"
             :animate="(row.message as ChatMessageWithImages).animate !== false"
+            :streaming="(row.message as ChatMessageWithImages).streaming === true"
           />
           <!-- 子代理完成回报：紧凑一行（任务摘要 + 可展开结论），非 JSON 气泡 -->
           <SubagentEventBlock

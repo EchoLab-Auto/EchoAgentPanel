@@ -41,6 +41,109 @@ export function pushTo(state: AppState, role: MsgRole, content: string, time: nu
   pushMessage(state, { key: nextKey(), role, content, time, ...extra });
 }
 
+// ── 流式消息（2026-10）──────────────────────────────────────────────
+//
+// provider 增量（`AgentContentDelta` / `AgentReasoningDelta`）逐段进入主
+// 时间线；终值（`AgentOutput` / `AgentReasoning` 全量）到达时**对账替换**
+// 流式行内容（丢帧/乱序可自愈，展示以终值为准）。
+//
+// 生命周期标记（DisplayMessage.streamState）：
+//   'streaming' —— 增量拼接中（可继续追加、可被终值替换）
+//   'frozen'    —— 已冻结：工具调用开始（该步为中间叙述，不再有终值）或
+//                  取消/错误——保留已显示文本，不再接受增量与替换
+//   undefined   —— 非流式消息，或已终值对账
+// 分支归属（streamBranch）参与对账：turn 的 branch id 跨 step 不变，故
+// 「工具开始 → 冻结当前行 → 下一步增量新建一行」是分步切分的关键。
+
+/// 增量追加：同 (session, branch, role) 的流式行追加；无则新建一行。
+export function appendStreamDelta(
+  state: AppState,
+  role: 'backend' | 'reasoning',
+  sessionId: string,
+  branch: string,
+  delta: string,
+) {
+  const want = branch ?? '';
+  for (let i = state.trunk.length - 1; i >= 0; i--) {
+    const msg = state.trunk[i];
+    if (
+      msg.role === role &&
+      msg.sessionId === sessionId &&
+      msg.streamState === 'streaming' &&
+      (msg.streamBranch ?? '') === want
+    ) {
+      msg.content += delta;
+      return;
+    }
+  }
+  pushTo(state, role, delta, Math.floor(Date.now() / 1000), {
+    sessionId,
+    animate: false, // 真流式：文字实时生长，不再叠客户端打字动画
+    streamState: 'streaming',
+    streamBranch: want,
+  });
+}
+
+/// 终值对账：把流式行替换为全量文本（并清除流式标记）。
+///
+/// 匹配：先按精确分支；分支缺失（`AgentOutput.branch_id = null` 的后端
+/// 路径）时取该会话最新一条仍在流式的行。命中返回 true；未命中（无流式
+/// 行，调用方走普通 push 路径）返回 false。
+export function settleStream(
+  state: AppState,
+  role: 'backend' | 'reasoning',
+  sessionId: string,
+  branch: string | null | undefined,
+  fullText: string,
+): boolean {
+  const want = branch ?? '';
+  const settle = (msg: DisplayMessage) => {
+    msg.content = fullText;
+    msg.streamState = undefined;
+    msg.streamBranch = undefined;
+  };
+  // 1) 精确分支匹配。
+  for (let i = state.trunk.length - 1; i >= 0; i--) {
+    const msg = state.trunk[i];
+    if (msg.role !== role || msg.sessionId !== sessionId || msg.streamState !== 'streaming') {
+      continue;
+    }
+    if ((msg.streamBranch ?? '') === want) {
+      settle(msg);
+      return true;
+    }
+  }
+  // 2) 分支缺失：无约束取最新流式行（后端 SendMessage 路径）。
+  if (want === '') {
+    for (let i = state.trunk.length - 1; i >= 0; i--) {
+      const msg = state.trunk[i];
+      if (msg.role !== role || msg.sessionId !== sessionId || msg.streamState !== 'streaming') {
+        continue;
+      }
+      settle(msg);
+      return true;
+    }
+  }
+  return false;
+}
+
+/// 冻结流式行：保留已显示文本，不再接受增量与终值替换。
+///
+/// - `role`：限定角色（工具开始的中间叙述只冻结 backend 行）；
+/// - `branch`：限定分支（undefined = 不限，取消/错误场景按会话冻结）。
+export function freezeStreams(
+  state: AppState,
+  sessionId: string,
+  opts: { role?: 'backend' | 'reasoning'; branch?: string } = {},
+) {
+  for (const msg of state.trunk) {
+    if (msg.streamState !== 'streaming' || msg.sessionId !== sessionId) continue;
+    if (opts.role && msg.role !== opts.role) continue;
+    if (opts.branch !== undefined && (msg.streamBranch ?? '') !== (opts.branch ?? '')) continue;
+    msg.streamState = 'frozen';
+  }
+}
+
 /** `<subagent_event>`（子代理完成合并钩子）的结构化载荷。 */
 export interface SubagentEventInfo {
   /** 子任务 id（Core 受理时分配，如 `task-…`） */

@@ -107,4 +107,23 @@ describe('ReasoningBlock', () => {
     await vi.advanceTimersByTimeAsync(8000);
     expect(bodyHidden(wrapper)).toBe(false);
   });
+
+  it('真流式：内容随增量增长（全量跟随、不播打字机）、自动展开 + 实时提示；结束后回到折叠', async () => {
+    const wrapper = mount(ReasoningBlock, {
+      props: { text: '第一段', animate: false, streaming: true },
+    });
+    await nextTick();
+    // 流式期间：自动展开 + 实时提示 + 全量显示（内容自身在增长，无打字机会话）。
+    expect(bodyHidden(wrapper)).toBe(false);
+    expect(wrapper.find('.reasoning-block__hint').text()).toContain('实时输出');
+    expect(wrapper.find('.reasoning-block__text').text()).toBe('第一段');
+    // 增量增长：全量跟随（分帧由数据驱动，不做打字机切片）。
+    await wrapper.setProps({ text: '第一段，继续第二段' });
+    await nextTick();
+    expect(wrapper.find('.reasoning-block__text').text()).toBe('第一段，继续第二段');
+    // 流结束（终值对账）：回到与打字完成一致的默认折叠态。
+    await wrapper.setProps({ streaming: false });
+    await nextTick();
+    expect(bodyHidden(wrapper)).toBe(true);
+  });
 });

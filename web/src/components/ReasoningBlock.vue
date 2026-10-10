@@ -17,6 +17,9 @@ const props = defineProps<{
   text: string;
   /** 是否播放打字机动画（由调用方按准入规则判定：见 reasoning-anim.ts） */
   animate?: boolean;
+  /** 真流式（2026-10）：内容随增量增长（不播打字机）——流式期间自动展开并
+   *  钉底跟随；流结束（streaming → false）回到与打字完成一致的默认折叠态。 */
+  streaming?: boolean;
 }>();
 
 const shown = ref(0);
@@ -48,6 +51,12 @@ function pinToBottom() {
 
 onMounted(() => {
   const len = props.text.length;
+  // 真流式：全量跟随（内容自身在增长），流式期间自动展开。
+  if (props.streaming) {
+    shown.value = len;
+    if (!userToggled.value) collapsed.value = false;
+    return;
+  }
   if (!props.animate || len === 0) {
     shown.value = len;
     return;
@@ -73,6 +82,32 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (timer !== undefined) window.clearInterval(timer);
 });
+
+// 真流式：文本随增量增长——shown 全量跟随 + 钉底（保持"看最新一行"）。
+watch(
+  () => props.text,
+  () => {
+    if (!props.streaming) return;
+    shown.value = props.text.length;
+    nextTick(() => pinToBottom());
+  },
+  { flush: 'post' },
+);
+
+// 真流式起止：开始 → 展开钉底；结束 → 与打字完成同口径回到默认折叠态
+//（用户手动操作过则尊重其选择）。
+watch(
+  () => props.streaming,
+  (streaming) => {
+    if (streaming) {
+      shown.value = props.text.length;
+      if (!userToggled.value) collapsed.value = false;
+      nextTick(() => pinToBottom());
+    } else if (!userToggled.value) {
+      collapsed.value = true;
+    }
+  },
+);
 
 // 打字机每次推进后（DOM 更新完成）滚动跟随最后一行。
 watch(
@@ -112,7 +147,9 @@ watch(
     >
       <span class="reasoning-block__dot" />
       <span class="reasoning-block__label">思考</span>
-      <span v-if="isTyping" class="reasoning-block__hint">正在推演…</span>
+      <span v-if="isTyping || streaming" class="reasoning-block__hint">
+        {{ isTyping ? '正在推演…' : '实时输出…' }}
+      </span>
       <span v-else-if="collapsed" class="reasoning-block__meta">{{ charCount() }}</span>
       <svg
         class="reasoning-block__chevron"
@@ -130,7 +167,7 @@ watch(
     </button>
     <div v-show="!collapsed" ref="bodyRef" class="reasoning-block__body">
       <span class="reasoning-block__text">{{ text.slice(0, shown) }}</span>
-      <span v-if="shown < text.length" class="reasoning-block__caret" />
+      <span v-if="streaming || shown < text.length" class="reasoning-block__caret" />
     </div>
   </div>
 </template>

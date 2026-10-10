@@ -37,6 +37,8 @@ export interface ChatMessageWithImages extends ChatMessage {
   images?: string[];
   /** 实时消息标记（渲染层据此播放场动画/打字机；历史回放不播放） */
   animate?: boolean;
+  /** 真流式（2026-10）：内容随增量增长中（推理块自动展开并钉底，不播打字机）。 */
+  streaming?: boolean;
   /** 子代理完成回报（role='subagent'）的结构化载荷。 */
   subagent?: SubagentEventInfo;
   /** 覆盖基类 ChatToolCall：追加计时字段（结构兼容）。 */
@@ -70,6 +72,7 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
     content: compactForDisplay(m.content, m.images),
     time: m.time, // 双方都是秒级 Unix 时间戳，无需换算
     animate: m.animate,
+    streaming: m.streamState === 'streaming',
     images: m.images,
     reasoning: m.reasoning,
     tool: m.tool && {

@@ -503,6 +503,10 @@ export type BackendEvent =
       };
     }
   | { AgentReasoning: { session_id: string; branch_id: string; content: string; team_id?: string | null } }
+  // 流式推理增量（`AgentReasoning` 的逐段版本；终值全量收敛，前端对账替换）
+  | { AgentReasoningDelta: { session_id: string; branch_id: string; delta: string; team_id?: string | null } }
+  // 流式正文增量（`AgentOutput` 的逐段版本；终值全量收敛，前端对账替换）
+  | { AgentContentDelta: { session_id: string; branch_id: string; delta: string; team_id?: string | null } }
   | { SubagentStarted: { session_id: string; task: string } }
   | { SubagentCompleted: { session_id: string; success: boolean } }
   | {
