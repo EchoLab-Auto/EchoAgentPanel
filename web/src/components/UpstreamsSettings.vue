@@ -12,16 +12,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismInput,
-  NeumorphismCard,
-  NeumorphismEmpty,
-  NeumorphismSegmented,
-  NeumorphismStatusDot,
-  NeumorphismTag,
-  NeumorphismSpinner,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
+import NeumorphismEmpty from '@echolab-auto/ui-frame/components/NeumorphismEmpty';
+import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
+import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
+import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
+import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
+import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { panelFetch } from '../connection';
 import { state } from '../store';
 import { removeSessionsOfCore, type UpstreamStatus } from '../state';

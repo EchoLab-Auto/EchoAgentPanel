@@ -2,7 +2,7 @@
 //! Shell 面板：后台持久 shell 会话的终端可视化。
 //! 每个会话一张终端卡片：启动/停止会话、逐条命令回显 + 流式输出、运行态指示。
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';

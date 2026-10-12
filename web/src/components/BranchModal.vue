@@ -7,7 +7,8 @@
 //! 「同概念同实现」，不再依赖库的 chat 组合组件（已移除）。
 
 import { computed, nextTick, ref, watch } from 'vue';
-import { NeumorphismModal, NeumorphismTag } from '@echolab-auto/ui-frame';
+import NeumorphismModal from '@echolab-auto/ui-frame/components/NeumorphismModal';
+import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { state } from '../store';
 import type { BranchTab } from '../state';
 import { formatTime } from '../chat-adapter';

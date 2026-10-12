@@ -6,7 +6,8 @@
 //! - `slow`     → 加注「Core 响应较慢，可能正在重启」（>6s）；
 //! - `timeout`  → 错误 + 重试按钮（>20s；请求幂等，重发安全）；
 //! - `idle`     → 不渲染（由调用方无条件放置，无需自行判断）。
-import { NeumorphismButton, NeumorphismSpinner } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 import type { PendingPhase } from '../pending';
 
 defineProps<{

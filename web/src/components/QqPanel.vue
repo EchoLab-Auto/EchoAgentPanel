@@ -3,13 +3,11 @@
 //! 名单无本地草稿态——点击即发送更新命令，展示派生自 state.qqFilter。
 
 import { computed, onMounted, ref, watch } from 'vue';
-import {
-  NeumorphismBadge,
-  NeumorphismButton,
-  NeumorphismSegmented,
-  NeumorphismStatusDot,
-  NeumorphismTag,
-} from '@echolab-auto/ui-frame';
+import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
+import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
+import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { state } from '../store';
 import { defaultQqInstanceState } from '../state';
 import { scopedKey } from '../keys';

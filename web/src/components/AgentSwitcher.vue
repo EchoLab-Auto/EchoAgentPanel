@@ -5,7 +5,7 @@
 //! 显示第一个 team（Core 的 default_id = 配置的第一个 team）。
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { NeumorphismStatusDot } from '@echolab-auto/ui-frame';
+import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
 import { state } from '../store';
 import { regionLabel } from '../state';
 

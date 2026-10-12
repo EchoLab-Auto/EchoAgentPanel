@@ -16,7 +16,8 @@
 //! `overflow-y: auto` 裁剪）。
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { NeumorphismSpinner, NeumorphismButton } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import { scopedKey } from '../keys';

@@ -4,7 +4,8 @@
 //! 只对应当前 agent 的当前会话）；不传/传 'global' 显示全部。
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { NeumorphismButton, NeumorphismTag } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { state } from '../store';
 import { cancelSessionWork } from '../state';
 import { sendCommand } from '../connection';

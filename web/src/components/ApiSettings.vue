@@ -7,14 +7,12 @@
 //! profiles 只是可供 persona 引用的供应商池，不再有"哪个是默认"的概念。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismCard,
-  NeumorphismChartLine,
-  NeumorphismInput,
-  NeumorphismSelect,
-  NeumorphismTag,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
+import NeumorphismChartLine from '@echolab-auto/ui-frame/components/NeumorphismChartLine';
+import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
+import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
+import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { ChatCopyButton } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
 import {

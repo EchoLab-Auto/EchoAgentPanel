@@ -8,13 +8,11 @@
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import {
-  NeumorphismBadge,
-  NeumorphismButton,
-  NeumorphismDrawer,
-  NeumorphismSpinner,
-  useTouchDevice,
-} from '@echolab-auto/ui-frame';
+import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismDrawer from '@echolab-auto/ui-frame/components/NeumorphismDrawer';
+import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
+import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
 import {
   ChatComposer,
   ChatTray,

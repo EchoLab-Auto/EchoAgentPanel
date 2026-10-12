@@ -2,7 +2,7 @@
 //! 侧边栏通用折叠卡片：标题 + 折叠箭头 + 可选数量徽标 + 内容插槽。
 //! 卡片壳用 ui-frame 的 NeumorphismCard（凸起、悬浮于页面背景）。
 
-import { NeumorphismCard } from '@echolab-auto/ui-frame';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 
 defineProps<{
   title: string;

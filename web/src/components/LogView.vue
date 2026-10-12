@@ -5,7 +5,8 @@
 //! 提供上游选择器（列出 SSH 上游；「本机」= 读取本机 journal）。
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { NeumorphismButton, NeumorphismSegmented } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
 import { fetchWithTimeout } from '../api';
 import { state } from '../store';
 

@@ -3,7 +3,8 @@
 //! 样式/键盘/焦点圈全部来自库 `NeumorphismModal`（Esc 关闭、焦点陷阱、
 //! aria-modal 与主题跟随）——替代原生 window.confirm 的阻塞与样式不可控。
 
-import { NeumorphismButton, NeumorphismModal } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismModal from '@echolab-auto/ui-frame/components/NeumorphismModal';
 import { confirmActive, settleConfirm } from '../confirm';
 
 const active = confirmActive();

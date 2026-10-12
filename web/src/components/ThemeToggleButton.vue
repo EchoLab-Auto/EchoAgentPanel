@@ -3,7 +3,8 @@
 //! 组件内部 useTheme() 注入 ThemeProvider 提供的共享主题状态
 //!（storageKey=echo-panel-theme），切换即持久化。
 
-import { NeumorphismThemeToggle, useTheme } from '@echolab-auto/ui-frame';
+import NeumorphismThemeToggle from '@echolab-auto/ui-frame/components/NeumorphismThemeToggle';
+import { useTheme } from '@echolab-auto/ui-frame/composables/useTheme';
 
 const { theme } = useTheme();
 </script>

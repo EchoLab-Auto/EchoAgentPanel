@@ -6,7 +6,7 @@
 //! `QqLoginStatus` / `QqQrcode` 事件回推（二维码为 PNG base64）。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import type { AdapterStatus } from '../protocol';
 import { state } from '../store';
 import { sendCommand } from '../connection';

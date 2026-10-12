@@ -4,16 +4,14 @@
 //! Drain 保当前回复完整）→ 轮询 SelfUpdateStatus 观察；看到 restarting
 //! 即停止轮询（服务即将重启，后续验证属新 turn）。
 import { onUnmounted, ref } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismCard,
-  NeumorphismTag,
-  NeumorphismSpinner,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
+import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
+import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import { schedulePolicy, setSchedulePolicy, type SchedulePolicy } from '../scheduler';
-import { NeumorphismSegmented } from '@echolab-auto/ui-frame';
+import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
 
 // ── 节点调度（P2/P4）──
 const policy = ref<SchedulePolicy>(schedulePolicy());

@@ -2,13 +2,11 @@
 //! 应用壳：NeumorphismLayout（库 sider 槽位，覆盖样式去背景/边框）+ 主视图 + 弹窗 + toast 桥。
 
 import { defineAsyncComponent, ref, watch } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismLayout,
-  NeumorphismToastProvider,
-  ThemeProvider,
-  useTouchDevice,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismLayout from '@echolab-auto/ui-frame/components/NeumorphismLayout';
+import NeumorphismToastProvider from '@echolab-auto/ui-frame/components/NeumorphismToast';
+import ThemeProvider from '@echolab-auto/ui-frame/components/ThemeProvider';
+import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
 import { state } from './store';
 import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';

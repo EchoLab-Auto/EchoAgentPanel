@@ -3,7 +3,7 @@
 //! 终端内容不在此展示——点「详情」经 `openDetail` 事件打开 Shell 详情卡。
 
 import { computed, onMounted, onUnmounted, watch } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
 import { sessionKey } from '../keys';

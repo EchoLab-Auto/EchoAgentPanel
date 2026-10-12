@@ -14,7 +14,7 @@
 //!   其后是时间；`copyText` 提供悬停复制。
 
 import { computed } from 'vue';
-import { useLocale } from '@echolab-auto/ui-frame';
+import { useLocale } from '@echolab-auto/ui-frame/composables/useLocale';
 import { ChatBubble } from '@echolab-auto/ui-frame/chat';
 import MarkdownLazy from './MarkdownLazy.vue';
 import type { ChatMessageWithImages } from '../chat-adapter';

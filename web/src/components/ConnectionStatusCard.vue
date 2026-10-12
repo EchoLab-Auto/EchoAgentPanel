@@ -14,7 +14,7 @@
 //! （`AdapterList` / `AdapterStateChanged` 事件维护）。
 
 import { computed } from 'vue';
-import { NeumorphismStatusDot } from '@echolab-auto/ui-frame';
+import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
 import { state } from '../store';
 import { regionLabel } from '../state';
 

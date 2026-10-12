@@ -6,7 +6,7 @@
 //! - 失败（不被支持 / 非用户手势 / iframe 限制）时 toast 告知，不静默失败。
 
 import { onMounted, onUnmounted, ref } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import { state } from '../store';
 import { pushToast } from '../state';
 

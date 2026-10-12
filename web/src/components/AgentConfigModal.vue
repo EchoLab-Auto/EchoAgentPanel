@@ -7,20 +7,18 @@
 //! `NeumorphismCard glass`（磨砂配方见样式区）。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismCard,
-  NeumorphismCheckbox,
-  NeumorphismCollapse,
-  NeumorphismDivider,
-  NeumorphismFormItem,
-  NeumorphismInput,
-  NeumorphismSegmented,
-  NeumorphismSelect,
-  NeumorphismSwitch,
-  NeumorphismTable,
-  NeumorphismTextarea,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
+import NeumorphismCheckbox from '@echolab-auto/ui-frame/components/NeumorphismCheckbox';
+import NeumorphismCollapse from '@echolab-auto/ui-frame/components/NeumorphismCollapse';
+import NeumorphismDivider from '@echolab-auto/ui-frame/components/NeumorphismDivider';
+import { NeumorphismFormItem } from '@echolab-auto/ui-frame/components/NeumorphismForm';
+import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
+import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
+import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
+import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwitch';
+import NeumorphismTable from '@echolab-auto/ui-frame/components/NeumorphismTable';
+import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTextarea';
 import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';

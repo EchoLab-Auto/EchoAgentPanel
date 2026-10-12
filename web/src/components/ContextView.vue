@@ -2,12 +2,10 @@
 //! 上下文分块视图（内嵌于 SessionPanel，取代原 ContextModal 弹窗）。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismProgress,
-  NeumorphismSkeleton,
-  NeumorphismSpinner,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismProgress from '@echolab-auto/ui-frame/components/NeumorphismProgress';
+import NeumorphismSkeleton from '@echolab-auto/ui-frame/components/NeumorphismSkeleton';
+import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 import { ChatFold } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
 import { sessionKey } from '../keys';

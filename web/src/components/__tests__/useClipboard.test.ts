@@ -5,7 +5,7 @@
 //! 补丁：Clipboard API 不可用或抛错时，回退 textarea + document.execCommand('copy')。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useClipboard } from '@echolab-auto/ui-frame';
+import { useClipboard } from '@echolab-auto/ui-frame/composables/useClipboard';
 
 function setClipboard(value: unknown) {
   Object.defineProperty(navigator, 'clipboard', { value, configurable: true });

@@ -27,14 +27,12 @@ export const wizardTimeouts = {
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import {
-  NeumorphismButton,
-  NeumorphismCheckbox,
-  NeumorphismInput,
-  NeumorphismSelect,
-  NeumorphismStatusDot,
-  NeumorphismTextarea,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismCheckbox from '@echolab-auto/ui-frame/components/NeumorphismCheckbox';
+import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
+import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
+import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
+import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTextarea';
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import { currentRegion } from '../state';

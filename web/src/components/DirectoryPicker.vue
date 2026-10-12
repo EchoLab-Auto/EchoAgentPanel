@@ -16,7 +16,9 @@ import { computed, ref, watch } from 'vue';
 import { state } from '../store';
 import { scopedKey } from '../keys';
 import { sendCommand } from '../connection';
-import { NeumorphismButton, NeumorphismSelect, NeumorphismSpinner } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
+import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 
 const props = defineProps<{
   /** 初始位置（编辑现有目录时可预置；缺省 local）。 */

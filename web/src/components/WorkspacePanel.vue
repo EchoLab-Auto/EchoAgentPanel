@@ -8,7 +8,7 @@
 //! 弹层几何由 ChatView 的 `.checklist-pop` 提供。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { NeumorphismButton } from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
 import { sessionKey } from '../keys';

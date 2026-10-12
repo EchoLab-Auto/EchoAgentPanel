@@ -19,25 +19,22 @@ const props = defineProps<{
   activeSessionId?: string | null;
   activeTeamId?: string | null;
 }>();
-import {
-  NeumorphismButton,
-  NeumorphismCard,
-  NeumorphismCheckbox,
-  NeumorphismCollapse,
-  NeumorphismDivider,
-  NeumorphismEmpty,
-  NeumorphismForm,
-  NeumorphismFormItem,
-  NeumorphismInput,
-  NeumorphismModal,
-  NeumorphismSegmented,
-  NeumorphismSwitch,
-  NeumorphismTable,
-  NeumorphismTag,
-  NeumorphismTextarea,
-  useToast,
-  useTouchDevice,
-} from '@echolab-auto/ui-frame';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
+import NeumorphismCheckbox from '@echolab-auto/ui-frame/components/NeumorphismCheckbox';
+import NeumorphismCollapse from '@echolab-auto/ui-frame/components/NeumorphismCollapse';
+import NeumorphismDivider from '@echolab-auto/ui-frame/components/NeumorphismDivider';
+import NeumorphismEmpty from '@echolab-auto/ui-frame/components/NeumorphismEmpty';
+import { NeumorphismForm, NeumorphismFormItem } from '@echolab-auto/ui-frame/components/NeumorphismForm';
+import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
+import NeumorphismModal from '@echolab-auto/ui-frame/components/NeumorphismModal';
+import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
+import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwitch';
+import NeumorphismTable from '@echolab-auto/ui-frame/components/NeumorphismTable';
+import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
+import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTextarea';
+import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
+import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
 import { confirmDialog } from '../confirm';
 import { state } from '../store';
 import { regionLabel } from '../state';

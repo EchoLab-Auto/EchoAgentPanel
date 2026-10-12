@@ -10,7 +10,7 @@
 //! - 相邻卡高亮/分隔条拖动逻辑不变。
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { NeumorphismCard } from '@echolab-auto/ui-frame';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import {
   armCardDrag,
   cancelCardDrag,
