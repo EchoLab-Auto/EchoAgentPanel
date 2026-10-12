@@ -1,5 +1,5 @@
 import { computed, createApp } from 'vue';
-// ui-frame 基础样式（设计令牌 --nm-* + 通用 keyframes��——必须先于组件
+// ui-frame 基础样式（设计令牌 --nm-* + 通用 keyframes）——必须先于组件
 // 样式与 styles.css 加载。注意这是子路径直引（非 barrel）：barrel 的
 // `app.use(NeumorphismUI)` 会全局注册 58 个组件、把整库 JS/CSS 拖进首包
 // （2026-10 加载审计：ui-frame chunk 282→118KB、CSS 254→按需 的根因）。
