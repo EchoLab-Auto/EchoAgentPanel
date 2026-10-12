@@ -4,6 +4,7 @@ pub mod config;
 pub mod log;
 pub mod media;
 pub mod proxy;
+pub mod ssh;
 pub mod static_files;
 pub mod upstreams;
 pub mod upstreams_api;

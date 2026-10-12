@@ -363,13 +363,33 @@ export interface ContextSnapshotData {
 /// 一个上游 Core 的连接状态（Panel 后端 `/api/upstreams` 的元素）。
 export interface UpstreamStatus {
   name: string;
+  /// 直连地址（SSH 接入时为空串——展示走 ssh 字段）。
   url: string;
   token_set: boolean;
+  /// 接入方式：direct（直连）| ssh（SSH 隧道，2026-10 末）。
+  access: 'direct' | 'ssh';
+  /// SSH 接入详情（access = 'ssh' 时非空；凭据仅以 password_set 标记）。
+  ssh: UpstreamSshStatus | null;
   online: boolean;
   connectivity: 'online' | 'connecting' | 'offline';
   auth: 'ok' | 'failed' | 'unknown';
   last_error: string | null;
   last_checked: number;
+}
+
+/// SSH 接入的运行状态（面板「Core 连接」页展示隧道阶段与失败原因）。
+export interface UpstreamSshStatus {
+  host: string;
+  port: number;
+  user: string;
+  remote_port: number;
+  identity_file: string;
+  password_set: boolean;
+  remote_media_dir: string;
+  /// 隧道阶段：connecting / online / offline。
+  phase: 'connecting' | 'online' | 'offline';
+  error: string | null;
+  local_port: number | null;
 }
 
 /// 一个"运行区域"（= 一个承载 agent 的 Core）。

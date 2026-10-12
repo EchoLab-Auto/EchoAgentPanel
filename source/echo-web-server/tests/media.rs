@@ -10,22 +10,34 @@ use echo_web_server::media::media_handler;
 use echo_web_server::proxy::AppState;
 
 async fn spawn_panel(media_dir: String) -> String {
+    spawn_panel_with(
+        media_dir,
+        vec![echo_web_server::upstreams::UpstreamConfig::direct(
+            "core",
+            "ws://127.0.0.1:1",
+            "",
+        )],
+    )
+    .await
+}
+
+/// 指定上游集合的面板实例（SSH 上游取图测试用）。
+async fn spawn_panel_with(
+    media_dir: String,
+    upstreams: Vec<echo_web_server::upstreams::UpstreamConfig>,
+) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let app = Router::new()
         .route("/media/{name}", get(media_handler))
         .with_state(AppState::new(
-            echo_web_server::upstreams::UpstreamRegistry::new(
-                vec![echo_web_server::upstreams::UpstreamConfig {
-                    name: "core".to_string(),
-                    url: "ws://127.0.0.1:1".to_string(),
-                    access_token: String::new(),
-                }],
-                None,
-            ),
+            echo_web_server::upstreams::UpstreamRegistry::new(upstreams, None),
             "/nonexistent".into(),
             media_dir.into(),
             "".into(),
+            echo_web_server::ssh::SshTunnels::new(
+                std::env::temp_dir().join("echo-panel-test-tunnels"),
+            ),
         ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -89,4 +101,32 @@ async fn rejects_traversal_and_unknown_files() {
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(&outside);
+}
+
+/// SSH 上游但隧道没建起来（未 ensure）时：远端取图静默失败 → 404
+/// （与改造前"远端图不可见"行为一致，不得 500）。
+#[tokio::test]
+async fn ssh_upstream_without_tunnel_returns_404() {
+    let dir = temp_dir("ssh-miss");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ssh = echo_web_server::ssh::SshConfig {
+        host: "127.0.0.1".into(),
+        user: "nobody".into(),
+        ..echo_web_server::ssh::SshConfig::default()
+    };
+    let base = spawn_panel_with(
+        dir.to_string_lossy().into_owned(),
+        vec![echo_web_server::upstreams::UpstreamConfig {
+            name: "cloud".into(),
+            url: String::new(),
+            access_token: String::new(),
+            ssh: Some(ssh),
+        }],
+    )
+    .await;
+    let resp = reqwest::get(format!("{base}/media/missing.png?core=cloud"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    std::fs::remove_dir_all(&dir).ok();
 }

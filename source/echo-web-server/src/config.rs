@@ -45,6 +45,10 @@ pub struct ServerSection {
     /// 留空 = 默认 `~/.local/share/echo-agent-core/media`（与 Core 的
     /// `$ECHO_MEDIA_DIR` 缺省一致；两进程同机部署时开箱即用）。
     pub media_dir: String,
+    /// 远端媒体缓存目录（SSH 接入时经隧道拉取的图片落这里；`/media/<id>`
+    /// 远端命中不到本地媒体库时从这里读/写入）。留空 = 默认
+    /// `~/.local/share/echo-agent-panel/media-cache`。
+    pub media_cache_dir: String,
     /// 访问令牌（2026-10 安全收紧）：非空时全站（WS/HTTP API/媒体）
     /// 要求 `Authorization: Bearer <token>` 或 `?token=` 查询参数；
     /// 静态前端资源豁免（登录页可加载）。空 = 无认证（仅建议绑
@@ -59,6 +63,7 @@ impl Default for ServerSection {
             bind_address: "0.0.0.0:8080".to_string(),
             static_dir: "web/dist".to_string(),
             media_dir: String::new(),
+            media_cache_dir: String::new(),
             access_token: String::new(),
         }
     }
@@ -81,6 +86,21 @@ impl ServerSection {
             },
         }
     }
+
+    /// 远端媒体缓存目录（SSH 拉取的图片；留空 =
+    /// `~/.local/share/echo-agent-panel/media-cache`）。
+    pub fn effective_media_cache_dir(&self) -> std::path::PathBuf {
+        let configured = self.media_cache_dir.trim();
+        if !configured.is_empty() {
+            return std::path::PathBuf::from(configured);
+        }
+        match std::env::var_os("HOME") {
+            Some(home) if !home.is_empty() => {
+                std::path::PathBuf::from(home).join(".local/share/echo-agent-panel/media-cache")
+            }
+            _ => std::path::PathBuf::from("media-cache"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -101,7 +121,7 @@ impl Default for CoreSection {
     }
 }
 
-/// `[[cores]]` 条目（多上游形态，2026-10 聚合视图）。
+/// `[[cores]]` 条目（多上游形态，2026-10 聚合视图；SSH 接入 2026-10 末）。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct UpstreamSection {
@@ -110,6 +130,9 @@ pub struct UpstreamSection {
     pub url: String,
     #[serde(default)]
     pub access_token: String,
+    /// SSH 接入参数（出现该段即"接入方式 = SSH"，`url` 被忽略）。
+    #[serde(default)]
+    pub ssh: Option<crate::ssh::SshConfig>,
 }
 
 /// Panel 侧配置：日志、HTTP 服务与 Core 连接。
@@ -139,6 +162,7 @@ impl PanelConfig {
             name: "core".to_string(),
             url: self.core.connect_url.clone(),
             access_token: self.core.access_token.clone(),
+            ssh: None,
         }]
     }
 }
@@ -284,5 +308,42 @@ connect_url = "ws://10.0.0.5:3132"
         std::fs::write(&path, "[logging]\nlevel = \"loud\"\n").unwrap();
         assert!(PanelConfig::load(&path).is_err());
         std::fs::remove_file(&path).ok();
+    }
+
+    /// `[[cores]]` 的 `[cores.ssh]` 段解析：默认值 + 覆盖。
+    #[test]
+    fn upstream_ssh_section_parses() {
+        let dir = std::env::temp_dir().join(format!("echo-cfg-ssh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("panel.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[cores]]
+name = "cloud"
+access_token = "tok"
+
+[cores.ssh]
+host = "203.0.113.7"
+user = "root"
+identity_file = "~/.ssh/cloud"
+
+[[cores]]
+name = "direct"
+url = "ws://10.0.0.5:3132"
+"#,
+        )
+        .unwrap();
+        let cfg = PanelConfig::load(&path).unwrap();
+        let upstreams = cfg.upstreams();
+        assert_eq!(upstreams.len(), 2);
+        let ssh = upstreams[0].ssh.as_ref().expect("ssh section");
+        assert_eq!(ssh.host, "203.0.113.7");
+        assert_eq!(ssh.user, "root");
+        assert_eq!(ssh.port, 22); // 默认值
+        assert_eq!(ssh.remote_port, 3132); // 默认值
+        assert!(ssh.accept_new_host_key);
+        assert!(upstreams[1].ssh.is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

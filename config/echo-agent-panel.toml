@@ -17,6 +17,9 @@ static_dir = "web/dist"
 # 媒体库目录（Core 落盘的入站图片；/media/<id> 从这里读）。
 # 留空 = ~/.local/share/echo-agent-core/media（与 Core 缺省一致）。
 media_dir = ""
+# 远端媒体缓存目录（SSH 接入时经隧道拉取的图片落这里；/media/<id> 远端命中
+# 不到本地媒体库时从这里读/写入）。留空 = ~/.local/share/echo-agent-panel/media-cache。
+media_cache_dir = ""
 
 [core]
 # EchoAgentCore management WebSocket 地址（与 Core 的 [core] management_address 对应）。
@@ -42,3 +45,24 @@ access_token = ""
 # name = "b"
 # url = "ws://192.168.1.20:3132"
 # access_token = ""
+#
+# ── SSH 接入（2026-10）：云服务器只开 SSH 端口时的接入方式 ──
+# 出现 [cores.ssh] 段即"接入方式 = SSH"（url 被忽略）：Panel 以 SSH 隧道
+# 把远端 management 拨号到本地回环（隧道自动重连、端口稳定），并复用该
+# 连接读取远端日志（日志页可选该上游）与媒体文件（聊天图片同源回源）。
+# 认证：私钥文件 → ssh-agent → 默认密钥 → 密码（后两者可选）。
+# 主机密钥：默认 TOFU（首连写入 ~/.ssh/known_hosts；之后变更一律拒绝）。
+# 注意：ssh_user 须为运行 Core 的用户（读日志/媒体依赖其权限）。
+# SSH 模式下建议远端 Core 把 management_address 绑回 127.0.0.1（配合隧道更安全）。
+# [[cores]]
+# name = "cloud"
+# access_token = ""
+#
+# [cores.ssh]
+# host = "203.0.113.7"
+# port = 22                      # 可省略（默认 22）
+# user = "root"
+# identity_file = "~/.ssh/id_ed25519"   # 可省略 → ssh-agent / 默认密钥
+# remote_port = 3132             # 远端 management 端口（默认 3132）
+# remote_media_dir = ""          # 可省略（默认 ~/.local/share/echo-agent-core/media）
+# accept_new_host_key = true     # 默认 true；false = 只信 known_hosts 已有记录

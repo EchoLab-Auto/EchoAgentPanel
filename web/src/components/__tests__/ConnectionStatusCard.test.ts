@@ -12,6 +12,8 @@ function upstream(over: Partial<UpstreamStatus>): UpstreamStatus {
     name: 'core',
     url: 'ws://127.0.0.1:3132',
     token_set: false,
+    access: 'direct',
+    ssh: null,
     online: true,
     connectivity: 'online',
     auth: 'ok',

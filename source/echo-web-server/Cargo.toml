@@ -24,7 +24,10 @@ clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 toml.workspace = true
+russh.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
 flate2.workspace = true
+# 测试假 sshd（russh server）生成 host key 用
+rand = { version = "0.10", features = ["thread_rng"] }

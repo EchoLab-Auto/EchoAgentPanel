@@ -43,6 +43,11 @@
 - Core 连接（设置·Core 连接，2026-10 末联邦并入本页）：连接管理统一入口——
   上游区块（多上游聚合管理：在线增删/编辑上游、在线状态指示）+
   联邦区块（Core↔Core 配对：`echofed://` 邀请串、peers 列表与在线状态、会话迁移）
+- **SSH 接入（2026-10）**：云服务器只开 SSH 端口时，上游可配「SSH 隧道」
+  接入方式——Panel 内嵌 russh 直连 SSH，把远端 management 端口本地端口
+  转发（direct-tcpip）给中继拨号（自动重连、指数退避、主机密钥 TOFU
+  校验）；同一连接顺带读远端 Core 日志（日志页上游选择器）与聊天图片
+  （媒体文件经隧道 `cat` 回源 + 本地缓存，`/media/<id>` 对远端图不再裂图）
 
 ## 快速开始（开发）
 
@@ -126,6 +131,9 @@ echo-agent-panel
 - `[server] static_dir`：前端静态目录（安装器注入绝对路径，一般无需改）
 - `[core] connect_url`：Core management WS 地址（默认 `ws://127.0.0.1:3132`；单上游形态——`[[cores]]` 键出现过即以在线管理为准）
 - `[[cores]]`：多上游（可空 = 零上游部署；设置·Core 连接页在线增删并自动写回）
+- `[[cores]]` 的 `[cores.ssh]` 段：SSH 接入（`host` / `user` / 可选
+  `identity_file`、`port`、`remote_port`、`remote_media_dir` 等——出现即
+  SSH 隧道模式，`url` 被忽略）；`[server] media_cache_dir`：远端媒体缓存目录
 
 ## 文档
 

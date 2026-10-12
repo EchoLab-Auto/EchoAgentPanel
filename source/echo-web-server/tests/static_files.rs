@@ -16,16 +16,19 @@ async fn spawn_panel(static_dir: String) -> String {
         .fallback(static_handler)
         .with_state(AppState::new(
             echo_web_server::upstreams::UpstreamRegistry::new(
-                vec![echo_web_server::upstreams::UpstreamConfig {
-                    name: "core".to_string(),
-                    url: "ws://127.0.0.1:1".to_string(),
-                    access_token: String::new(),
-                }],
+                vec![echo_web_server::upstreams::UpstreamConfig::direct(
+                    "core",
+                    "ws://127.0.0.1:1",
+                    "",
+                )],
                 None,
             ),
             static_dir.into(),
             "/nonexistent".into(),
             "".into(),
+            echo_web_server::ssh::SshTunnels::new(
+                std::env::temp_dir().join("echo-panel-test-tunnels"),
+            ),
         ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

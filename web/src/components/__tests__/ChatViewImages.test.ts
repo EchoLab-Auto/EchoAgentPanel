@@ -40,6 +40,8 @@ function seedWithImages(images: string[]) {
   state.connected = true;
   state.teams = [];
   state.activeTeamId = null;
+  // 默认无运行区域 → 媒体引用不带 core 提示（用例显式覆盖）。
+  state.activeRegion = null;
 }
 
 function mountChat() {
@@ -88,5 +90,21 @@ describe('ChatView 消息图片渲染', () => {
     const img = wrapper.find('img.chat-view__image');
     expect(img.exists()).toBe(true);
     expect(img.attributes('src')).toBe(legacy);
+  });
+
+  it('SSH 远端 Core：媒体引用附 core 提示（后端据此优先远端拉取）', () => {
+    seedWithImages(['/media/abc123.png']);
+    state.activeRegion = 'cloud';
+    const wrapper = mountChat();
+    const img = wrapper.find('img.chat-view__image');
+    expect(img.attributes('src')).toBe('/media/abc123.png?core=cloud');
+  });
+
+  it('data URI 不附 core 提示（仅媒体引用加壳）', () => {
+    seedWithImages(['data:image/png;base64,QUJD']);
+    state.activeRegion = 'cloud';
+    const wrapper = mountChat();
+    const img = wrapper.find('img.chat-view__image');
+    expect(img.attributes('src')).toBe('data:image/png;base64,QUJD');
   });
 });

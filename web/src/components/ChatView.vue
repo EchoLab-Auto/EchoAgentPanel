@@ -756,6 +756,16 @@ function onSend(content: string) {
 function imagesOf(message: ChatMessage): string[] {
   return (message as ChatMessageWithImages).images ?? [];
 }
+
+// 媒体引用地址：`/media/<id>` 附当前运行区域的 `?core=` 提示——Panel 后端
+// 优先在该上游（SSH 隧道）拉取；本机媒体库命中路径不受影响（多一个查询
+// 参数而已）。data URI 等其它形式原样返回。
+function mediaSrc(img: string): string {
+  if (!img.startsWith('/media/')) return img;
+  const core = state.activeRegion;
+  if (!core) return img;
+  return `${img}${img.includes('?') ? '&' : '?'}core=${encodeURIComponent(core)}`;
+}
 </script>
 
 <template>
@@ -1025,7 +1035,7 @@ function imagesOf(message: ChatMessage): string[] {
                      强缓存）或遗留的 data URI。省略项（空串）计数占位。 -->
                 <img
                   v-if="img"
-                  :src="img"
+                  :src="mediaSrc(img)"
                   class="chat-view__image"
                   alt=""
                   loading="lazy"

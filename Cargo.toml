@@ -32,6 +32,10 @@ serde_json = "1"
 # error handling
 anyhow = "1"
 
+# SSH 接入（2026-10）：只有 SSH 端口的 Core 云服务器——russh 直连做
+# 本地端口转发（direct-tcpip）+ 远程 exec（日志/媒体）。
+russh = "0.64"
+
 # logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

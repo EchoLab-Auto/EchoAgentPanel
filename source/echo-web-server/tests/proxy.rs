@@ -47,10 +47,8 @@ async fn spawn_panel_multi(upstreams: Vec<(&str, String)>) -> String {
             echo_web_server::upstreams::UpstreamRegistry::new(
                 upstreams
                     .into_iter()
-                    .map(|(name, url)| echo_web_server::upstreams::UpstreamConfig {
-                        name: name.to_string(),
-                        url,
-                        access_token: String::new(),
+                    .map(|(name, url)| {
+                        echo_web_server::upstreams::UpstreamConfig::direct(name, url, "")
                     })
                     .collect(),
                 None,
@@ -58,6 +56,9 @@ async fn spawn_panel_multi(upstreams: Vec<(&str, String)>) -> String {
             "/nonexistent".into(),
             "/nonexistent-media".into(),
             "".into(),
+            echo_web_server::ssh::SshTunnels::new(
+                std::env::temp_dir().join("echo-panel-test-tunnels"),
+            ),
         ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

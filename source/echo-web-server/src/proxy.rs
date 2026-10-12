@@ -94,6 +94,8 @@ pub struct AppState {
     pub static_dir: Arc<str>,
     /// Media library directory: Core 落盘的入站图片（`/media/<id>` 从这里读）。
     pub media_dir: Arc<str>,
+    /// SSH 隧道管理器（SSH 接入的上游；媒体拉取/远端日志也经它）。
+    pub tunnels: Arc<crate::ssh::SshTunnels>,
     /// 访问令牌（空 = 无认证；见 config::ServerSection::access_token）。
     pub access_token: Arc<str>,
 }
@@ -104,12 +106,14 @@ impl AppState {
         static_dir: Arc<str>,
         media_dir: Arc<str>,
         access_token: Arc<str>,
+        tunnels: Arc<crate::ssh::SshTunnels>,
     ) -> Self {
         Self {
             registry,
             health: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             static_dir,
             media_dir,
+            tunnels,
             access_token,
         }
     }
@@ -201,6 +205,24 @@ struct ConnectFailure {
     message: String,
 }
 
+/// 解析上游的有效拨号地址：SSH 上游 = 本地隧道端口
+/// （`ws://127.0.0.1:<port>`）；直连上游 = 配置地址。`None` = 暂未就绪
+/// （SSH 隧道未建立 / 地址未配置）——调用方按自己的退避重试，
+/// 不要当成永久离线。
+async fn effective_url(state: &AppState, cfg: &crate::upstreams::UpstreamConfig) -> Option<String> {
+    match &cfg.ssh {
+        Some(_) => state
+            .tunnels
+            .local_port(&cfg.name)
+            .await
+            .map(|port| format!("ws://127.0.0.1:{port}")),
+        None => {
+            let url = cfg.url.trim();
+            (!url.is_empty()).then(|| url.to_string())
+        }
+    }
+}
+
 async fn connect_upstream(
     upstream: &Upstream,
 ) -> Result<
@@ -284,16 +306,45 @@ pub async fn probe_pump(state: AppState) {
     loop {
         interval.tick().await;
         for cfg in state.registry.list().await {
-            if cfg.url.is_empty() {
+            if !cfg.has_endpoint() {
                 continue;
             }
             // 有活跃中继链路：链路状态优先，不覆盖。
             if state.has_active_link(&cfg.name) {
                 continue;
             }
+            // SSH 上游：隧道未在线时直接按隧道状态上报——比底层"连本地
+            // 端口被拒"的表象信息量高，也省一次无谓探测。
+            if cfg.ssh.is_some() {
+                let tunnel = state.tunnels.status(&cfg.name).await;
+                let ready = tunnel
+                    .as_ref()
+                    .map(|t| t.phase == "online")
+                    .unwrap_or(false);
+                if !ready {
+                    let (connectivity, error) = match tunnel {
+                        Some(t) if t.phase == "connecting" => ("connecting", t.error),
+                        Some(t) => ("offline", t.error),
+                        None => ("connecting", Some("SSH 隧道未创建".to_string())),
+                    };
+                    state.set_health(
+                        &cfg.name,
+                        UpstreamHealth {
+                            connectivity: connectivity.into(),
+                            auth: "unknown".into(),
+                            last_error: error.map(|e| format!("SSH: {e}")),
+                            last_checked: now_unix(),
+                        },
+                    );
+                    continue;
+                }
+            }
+            let Some(url) = effective_url(&state, &cfg).await else {
+                continue;
+            };
             let upstream = Upstream {
                 name: Arc::from(cfg.name.as_str()),
-                url: Arc::from(cfg.url.as_str()),
+                url: Arc::from(url.as_str()),
                 access_token: Arc::from(cfg.access_token.as_str()),
             };
             match connect_upstream(&upstream).await {
@@ -440,11 +491,6 @@ async fn bridge(browser: WebSocket, state: AppState) {
             let multi = spawn_multi.clone();
             let replay = replay.clone();
             let _handle = tokio::spawn(async move {
-                let upstream = Upstream {
-                    name: Arc::from(cfg.name.as_str()),
-                    url: Arc::from(cfg.url.as_str()),
-                    access_token: Arc::from(cfg.access_token.as_str()),
-                };
                 let name = cfg.name.clone();
                 // 断连重连循环：Core 重启/闪断后退避重试（1s→30s），不再
                 // 一断即永久离线。浏览器断开（event_tx 关闭）即停止。
@@ -460,6 +506,30 @@ async fn bridge(browser: WebSocket, state: AppState) {
                             last_checked: now_unix(),
                         },
                     );
+                    // 每次尝试都**重新解析**拨号地址：SSH 上游为本地隧道
+                    // 端口（隧道未就绪时等待而不是误拨）；直连上游为配置地址。
+                    let url = match effective_url(&state, &cfg).await {
+                        Some(url) => url,
+                        None => {
+                            state.set_health(
+                                &name,
+                                UpstreamHealth {
+                                    connectivity: "connecting".into(),
+                                    auth: "unknown".into(),
+                                    last_error: Some("SSH 隧道未就绪，等待重试".into()),
+                                    last_checked: now_unix(),
+                                },
+                            );
+                            tokio::time::sleep(backoff).await;
+                            backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                            continue;
+                        }
+                    };
+                    let upstream = Upstream {
+                        name: Arc::from(cfg.name.as_str()),
+                        url: Arc::from(url.as_str()),
+                        access_token: Arc::from(cfg.access_token.as_str()),
+                    };
                     let core = match connect_upstream(&upstream).await {
                         Ok(core) => core,
                         Err(failure) => {
@@ -631,14 +701,14 @@ async fn bridge(browser: WebSocket, state: AppState) {
             .list()
             .await
             .iter()
-            .filter(|u| !u.url.is_empty())
+            .filter(|u| u.has_endpoint())
             .count();
         multi.store(configured > 1, std::sync::atomic::Ordering::Relaxed);
     }
 
     // 初始上游接入（零上游 = 空转等待——管理面添加后变更泵接入）。
     for cfg in state.registry.list().await {
-        if !cfg.url.is_empty() {
+        if cfg.has_endpoint() {
             spawn_link(cfg);
         }
     }
@@ -665,7 +735,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                             if links2.read().await.contains_key(&cfg.name) {
                                 continue;
                             }
-                            if !cfg.url.is_empty() {
+                            if cfg.has_endpoint() {
                                 spawn_link2(cfg);
                             }
                         }
@@ -680,8 +750,8 @@ async fn bridge(browser: WebSocket, state: AppState) {
                             old.abort.abort();
                         }
                         state2.set_offline(&cfg.name, None);
-                        if !cfg.url.is_empty() {
-                            spawn_link2(cfg);
+                        if cfg.has_endpoint() {
+                            spawn_link2(*cfg);
                         }
                         refresh_multi(&state2.registry, &multi2, &links2).await;
                     }

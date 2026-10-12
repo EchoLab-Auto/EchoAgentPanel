@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
 
     // 媒体目录要在 `cfg.server` 被部分移动前解析（effective_media_dir 借用）。
     let media_dir = cfg.server.effective_media_dir();
+    let media_cache_dir = cfg.server.effective_media_cache_dir();
     // 上游列表同样在任何部分移动前物化（见下「上游物化」注释）。
     let upstream_list = cfg.upstreams();
     let config_path_for_persist = args.config_path();
@@ -72,6 +73,7 @@ async fn main() -> Result<()> {
             name: "core".to_string(),
             url,
             access_token: cfg.core.access_token.clone(),
+            ssh: None,
         }],
         None => {
             // 启动物化校验：空名/非法名拒绝、重名去重（保留首条）——
@@ -92,6 +94,7 @@ async fn main() -> Result<()> {
                         name: u.name,
                         url: u.url,
                         access_token: u.access_token,
+                        ssh: u.ssh,
                     })
                 })
                 .collect()
@@ -102,7 +105,10 @@ async fn main() -> Result<()> {
     } else {
         initial
             .iter()
-            .map(|u| format!("{}={}", u.name, u.url))
+            .map(|u| match &u.ssh {
+                Some(ssh) => format!("{}=ssh://{}@{}:{}", u.name, ssh.user, ssh.host, ssh.port),
+                None => format!("{}={}", u.name, u.url),
+            })
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -114,11 +120,24 @@ async fn main() -> Result<()> {
     };
     let registry = echo_web_server::upstreams::UpstreamRegistry::new(initial, persist_path);
 
+    // SSH 接入（2026-10）：为每个 SSH 上游预建隧道——本地转发端口即时
+    // 可拨（中继异步重连），SSH 建连/认证在后台进行，状态经健康表/管理
+    // API 上报。无效配置仅告警（面板仍可在线修正）。
+    let tunnels = echo_web_server::ssh::SshTunnels::new(media_cache_dir);
+    for upstream in registry.list().await {
+        if let Some(ssh) = &upstream.ssh {
+            if let Err(message) = tunnels.ensure(&upstream.name, ssh).await {
+                warn!(upstream = %upstream.name, %message, "ssh upstream disabled (invalid config)");
+            }
+        }
+    }
+
     let state = proxy::AppState::new(
         registry,
         Arc::from(static_dir.to_string_lossy().into_owned().as_str()),
         Arc::from(media_dir.to_string_lossy().into_owned().as_str()),
         Arc::from(cfg.server.access_token.as_str()),
+        tunnels,
     );
     if !cfg.server.access_token.is_empty() {
         info!("access token auth enabled for WS/HTTP API");
