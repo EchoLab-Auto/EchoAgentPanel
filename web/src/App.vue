@@ -401,7 +401,11 @@ watch(
   (next, prev) => {
     if (next === prev) return;
     resetManagementState(state);
-    requestActiveRegionManagement();
+    // 首次区域确定（prev 为 null = 首屏引导）：技能/工具目录（合计
+    // ~36KB）此时没有任何消费方——设置页/Agent 配置弹窗打开时会自拉；
+    // 不预取，慢网络下把 WS 带宽留给时间线等首屏数据。切换区域时保留
+    // 全量重拉（设置页可能开着，需要立即显示新 core 的列表）。
+    requestActiveRegionManagement({ includeCatalogs: prev !== null });
   },
 );
 

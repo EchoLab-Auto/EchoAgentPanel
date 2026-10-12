@@ -272,13 +272,22 @@ function coreForCommand(command: BackendCommand): string | null {
  * 切换到某个 core 后重新拉取"单值管理面"数据（配置/技能/工具/插件/适配器/
  * shell/联邦）。这些响应会被 `managementCoreCurrent` 过滤到 activeRegion，
  * 所以切 core 必须重拉一次，否则会短暂显示上一个 core 的值。
+ *
+ * `includeCatalogs`（2026-10 慢网络加载优化）：技能目录（~20KB）与工具
+ * 目录（~16KB）是全部"管理面"响应里最大的两项，且**首屏没有任何消费方**
+ * （仅设置页 / Agent 配置弹窗使用，二者打开时各自会拉）。首次区域确定
+ * （首屏引导）传 `false` 跳过预取——慢网络下把带宽留给时间线等首屏数据；
+ * 切换区域保持 `true`（设置页可能正开着，切完要立即看到新 core 的列表）。
  */
-export function requestActiveRegionManagement(): void {
+export function requestActiveRegionManagement(options?: { includeCatalogs?: boolean }): void {
+  const includeCatalogs = options?.includeCatalogs ?? true;
   sendCommand('RequestState'); // → ApiConfigUpdated / ApiProfilesUpdated
   sendCommand('RequestSystemPrompt');
   sendCommand('RequestAdapterStatus');
-  sendCommand('RequestSkillsList');
-  sendCommand('RequestToolsList');
+  if (includeCatalogs) {
+    sendCommand('RequestSkillsList');
+    sendCommand('RequestToolsList');
+  }
   sendCommand('RequestPluginsList');
   sendCommand({ RequestShellSessions: {} });
   sendCommand({ RequestFederationStatus: null } as unknown as BackendCommand);
