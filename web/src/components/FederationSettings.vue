@@ -13,6 +13,18 @@
 //! 手动配对流（等价于跨 Core 配对的两步）：A 点「生成邀请」→ 复制串给 B；
 //! B「添加 peer」粘贴串 → 自动解析 url/token → 保存即连。
 
+<script lang="ts">
+/** 组建向导的超时/轮询参数（测试注入小值；生产默认）。 */
+export const wizardTimeouts = {
+  /** 等邀请串返回（含 Core 生成 + 事件回程）。 */
+  inviteMs: 8000,
+  /** 等链路建立（拨号 + 握手 + 状态广播）。 */
+  linkMs: 20000,
+  /** 状态轮询间隔。 */
+  pollMs: 400,
+};
+</script>
+
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import {
@@ -125,32 +137,299 @@ async function copyInvite(core: string) {
   }
 }
 
-// ── 跨 Core 配对（一键）──
-const pairLeft = ref(''); // 邀请方（被连入；需被接入方网络可达）
-const pairRight = ref(''); // 接入方（主动连接）
-const pairing = ref(false);
-const pairStatus = ref('');
-const pairError = ref('');
+// ── 联邦拓扑（组建向导的数据层）──
+//
+// 联邦没有中心实体：拓扑从各 Core 的 FederationStatus 推导——节点 =
+// Panel 已接入的上游；边 = 某侧 peers 表里指向对方节点的条目。在线
+// 链路回传 node_id（精确匹配）；离线条目按名字兜底（Panel 配置名 /
+// node_name / node-<id 前 8>）。
 
-const pairOptions = computed(() =>
-  coreList.value.filter((c) => c.name).map((c) => ({ label: c.name, value: c.name })),
+interface TopoNode {
+  name: string;
+  online: boolean;
+  fedLoaded: boolean;
+  nodeId: string | null;
+  nodeName: string | null;
+  listen: string;
+}
+
+interface TopoEdge {
+  a: string;
+  b: string;
+  online: boolean; // 任一侧链路在线
+}
+
+const topoNodes = computed<TopoNode[]>(() =>
+  coreList.value
+    .filter((c) => c.name)
+    .map((c) => {
+      const fed = fedOf(c.name);
+      return {
+        name: c.name,
+        online: c.online,
+        fedLoaded: !!fed,
+        nodeId: fed?.node_id ?? null,
+        nodeName: fed?.node_name ?? null,
+        listen: fed?.listen ?? '',
+      };
+    }),
 );
 
-/** 默认选中前两个 Core（可在选择器里改方向；⇄ 交换）。 */
-watch(
-  pairOptions,
-  (opts) => {
-    const names = opts.map((o) => o.value);
-    if (!pairLeft.value && names[0]) pairLeft.value = names[0];
-    if (!pairRight.value && names[1]) pairRight.value = names[1];
-  },
-  { immediate: true },
+function nodeByName(name: string): TopoNode | undefined {
+  return topoNodes.value.find((n) => n.name === name);
+}
+
+/** 占位提升命名规则的镜像（Core `pick_promoted_peer_name` 无 node_name
+ * 分支）：`node-<剥前缀后前 8 位>`；旧 Core 曾产出双前缀 `node-node-…`，
+ * 一并兜底匹配。 */
+function fallbackPeerNames(nodeId: string): string[] {
+  const stripped = nodeId.startsWith('node-') ? nodeId.slice(5) : nodeId;
+  return [`node-${stripped.slice(0, 8)}`, `node-${nodeId.slice(0, 8)}`];
+}
+
+/** peer 条目是否指向目标节点（node_id 精确优先，名字兜底）。 */
+function peerMatchesNode(p: FederationPeerInfo, node: TopoNode): boolean {
+  if (p.node_id && node.nodeId) return p.node_id === node.nodeId;
+  if (p.name === node.name) return true;
+  if (node.nodeName && p.name === node.nodeName) return true;
+  if (node.nodeId && fallbackPeerNames(node.nodeId).includes(p.name)) return true;
+  return false;
+}
+
+/** a 侧 peers 表是否含指向 b 的条目（占位 `invite-*` 不参与——无法归属）。 */
+function peerPointsTo(a: TopoNode, b: TopoNode): boolean {
+  const fed = fedOf(a.name);
+  if (!fed) return false;
+  return fed.peers.some((p) => !p.name.startsWith('invite-') && peerMatchesNode(p, b));
+}
+
+/** a↔b 是否有在线链路（任一侧在线即在线）。 */
+function edgeOnline(a: TopoNode, b: TopoNode): boolean {
+  const hit = (from: TopoNode, to: TopoNode) =>
+    (fedOf(from.name)?.peers ?? []).some(
+      (p) => !p.name.startsWith('invite-') && p.link === 'Online' && peerMatchesNode(p, to),
+    );
+  return hit(a, b) || hit(b, a);
+}
+
+/** 已配置的互联边（全互联补全的输入）。 */
+const topoEdges = computed<TopoEdge[]>(() => {
+  const nodes = topoNodes.value;
+  const edges: TopoEdge[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i];
+      const b = nodes[j];
+      if (!a.fedLoaded && !b.fedLoaded) continue;
+      if (peerPointsTo(a, b) || peerPointsTo(b, a)) {
+        edges.push({ a: a.name, b: b.name, online: edgeOnline(a, b) });
+      }
+    }
+  }
+  return edges;
+});
+
+const hasFederation = computed(() => topoEdges.value.length > 0);
+
+const topoSummary = computed(() => {
+  const loaded = topoNodes.value.filter((n) => n.fedLoaded);
+  const total = (loaded.length * (loaded.length - 1)) / 2;
+  const online = topoEdges.value.filter((e) => e.online).length;
+  return `${loaded.length} 个节点 · ${topoEdges.value.length}/${total} 条链路已配置 · ${online} 条在线`;
+});
+
+// ── 组建向导（创建联邦 / 添加节点）──
+//
+// 目标：所选节点两两直连（全互联）。已配置的对跳过，缺失的对逐对执行
+// 「一侧生成邀请 → 另一侧登记接入」；默认方向失败自动换向重试一次
+// （NAT / 多网卡场景首次方向不通常见）。链路建立后 Core 侧握手互告
+// 地址、双向自动重连——方向只影响首次建链。
+
+interface PairTask {
+  a: string;
+  b: string;
+  status: 'pending' | 'running' | 'ok' | 'failed';
+  detail: string;
+}
+
+const wizardOpen = ref(false);
+const wizardStep = ref<'select' | 'run'>('select');
+const wizardSel = ref<Record<string, boolean>>({});
+const wizardTasks = ref<PairTask[]>([]);
+const wizardRunning = ref(false);
+
+function openWizard() {
+  const sel: Record<string, boolean> = {};
+  for (const c of coreList.value) if (c.name) sel[c.name] = c.online;
+  wizardSel.value = sel;
+  wizardTasks.value = [];
+  wizardStep.value = 'select';
+  wizardOpen.value = true;
+}
+
+function closeWizard() {
+  wizardOpen.value = false;
+  wizardTasks.value = [];
+  refreshAll();
+}
+
+function toggleWizardSel(name: string, checked: boolean) {
+  wizardSel.value = { ...wizardSel.value, [name]: checked };
+}
+
+/** 所选节点计划：待建立对（全互联补全）+ 已互联对数。 */
+const wizardPlan = computed(() => {
+  const picked = topoNodes.value.filter((n) => wizardSel.value[n.name] && n.online);
+  const pairs: Array<[string, string]> = [];
+  let existing = 0;
+  for (let i = 0; i < picked.length; i++) {
+    for (let j = i + 1; j < picked.length; j++) {
+      if (peerPointsTo(picked[i], picked[j]) || peerPointsTo(picked[j], picked[i])) {
+        existing += 1;
+      } else {
+        pairs.push([picked[i].name, picked[j].name]);
+      }
+    }
+  }
+  return { count: picked.length, pairs, existing };
+});
+
+const wizardOkCount = computed(() => wizardTasks.value.filter((t) => t.status === 'ok').length);
+const wizardFailCount = computed(
+  () => wizardTasks.value.filter((t) => t.status === 'failed').length,
 );
 
-function swapPair() {
-  const t = pairLeft.value;
-  pairLeft.value = pairRight.value;
-  pairRight.value = t;
+async function runWizard() {
+  wizardTasks.value = wizardPlan.value.pairs.map(([a, b]) => ({
+    a,
+    b,
+    status: 'pending' as const,
+    detail: '',
+  }));
+  wizardStep.value = 'run';
+  if (!wizardTasks.value.length) return;
+  wizardRunning.value = true;
+  try {
+    for (const task of wizardTasks.value) {
+      if (!wizardOpen.value) break;
+      await executeTask(task);
+    }
+  } finally {
+    wizardRunning.value = false;
+  }
+  refreshAll();
+}
+
+/** 用户手动重试失败项（保留成功项）。 */
+async function retryFailed() {
+  const failed = wizardTasks.value.filter((t) => t.status === 'failed');
+  if (!failed.length) return;
+  wizardRunning.value = true;
+  try {
+    for (const task of failed) {
+      await executeTask(task);
+    }
+  } finally {
+    wizardRunning.value = false;
+  }
+  refreshAll();
+}
+
+/** 执行单个配对任务（默认方向 + 换向重试一次）。 */
+async function executeTask(task: PairTask) {
+  task.status = 'running';
+  task.detail = `「${task.a}」邀请，「${task.b}」接入…`;
+  let result = await attemptPair(task.a, task.b, false);
+  if (!result.ok && wizardOpen.value) {
+    task.detail = `换向重试：「${task.b}」邀请，「${task.a}」接入…`;
+    result = await attemptPair(task.b, task.a, true);
+    if (result.ok) {
+      task.status = 'ok';
+      task.detail = '已建立（换向重试成功）';
+      return;
+    }
+  }
+  if (result.ok) {
+    task.status = 'ok';
+    task.detail = '已建立';
+  } else {
+    task.status = 'failed';
+    task.detail = result.reason;
+  }
+}
+
+/** 尝试一次配对：inviter 生成邀请 → joiner 登记接入 → 等链路。失败清理。 */
+async function attemptPair(
+  inviter: string,
+  joiner: string,
+  reversed: boolean,
+): Promise<{ ok: boolean; reason: string }> {
+  const inviterNode = nodeByName(inviter);
+  const joinerNode = nodeByName(joiner);
+  if (!inviterNode || !joinerNode) return { ok: false, reason: '节点信息缺失（刷新后重试）' };
+  if (!inviterNode.online || !joinerNode.online) {
+    return { ok: false, reason: '节点离线（命令无法送达）' };
+  }
+  // 1. 邀请方生成邀请串（等待**新的**邀请事件回程）。
+  const before = inviteOf(inviter);
+  requestInvite(inviter);
+  const invite = await waitForInvite(inviter, before, wizardTimeouts.inviteMs);
+  if (!invite) {
+    return { ok: false, reason: `「${inviter}」未返回邀请串（联邦未监听 / 无对端可达地址）` };
+  }
+  const parsed = parseInvite(invite);
+  if (!parsed) return { ok: false, reason: '邀请串解析失败（须为 echofed://host:port#token）' };
+  // 2. 接入方登记 peer（满权限默认，与 Core 侧占位提升语义一致，可事后收紧）。
+  const peerName = inviterNode.nodeName || parsed.name || inviter;
+  sendTo(joiner, {
+    SaveFederationPeer: {
+      peer: {
+        name: peerName,
+        url: parsed.url,
+        token: parsed.token,
+        token_set: false,
+        allow_tools: ['*'],
+        allow_subagent: true,
+        require_confirm: [],
+        allow_queries: ['*'],
+        link: 'Offline',
+      },
+    },
+  } as unknown as BackendCommand);
+  // 3. 等链路（轮询状态；周期性主动刷新兜底）。
+  const ok = await waitForPairLink(inviterNode, joinerNode, wizardTimeouts.linkMs);
+  if (ok) return { ok: true, reason: '' };
+  // 4. 失败清理：移除接入方刚登记的离线条目（防残留；换向重试也依赖干净状态）。
+  sendTo(joiner, { DeleteFederationPeer: { name: peerName } } as unknown as BackendCommand);
+  return {
+    ok: false,
+    reason: reversed
+      ? '双向均未在限时内建立链路（检查双方防火墙 / advertise 可达地址）'
+      : '链路未建立',
+  };
+}
+
+/** 等待两节点间链路在线（轮询最新状态；超时 false）。 */
+function waitForPairLink(a: TopoNode, b: TopoNode, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let lastRefresh = 0;
+    const tick = () => {
+      const curA = nodeByName(a.name) ?? a;
+      const curB = nodeByName(b.name) ?? b;
+      if (edgeOnline(curA, curB)) return resolve(true);
+      const now = Date.now();
+      if (now - lastRefresh > 3000) {
+        lastRefresh = now;
+        // 主动刷新兜底（链路广播之外的保险）。
+        sendTo(curA.name, { RequestFederationStatus: null } as unknown as BackendCommand);
+        sendTo(curB.name, { RequestFederationStatus: null } as unknown as BackendCommand);
+      }
+      if (now - start >= ms) return resolve(false);
+      window.setTimeout(tick, wizardTimeouts.pollMs);
+    };
+    tick();
+  });
 }
 
 /** 等待某 Core 返回**新的**邀请串（事件异步到达；超时返回 null）。 */
@@ -165,56 +444,6 @@ function waitForInvite(core: string, before: string, ms: number): Promise<string
     };
     tick();
   });
-}
-
-async function pairCores() {
-  const a = pairLeft.value;
-  const b = pairRight.value;
-  pairStatus.value = '';
-  pairError.value = '';
-  if (!a || !b) {
-    pairError.value = '请先选择两个 Core（在「上游 Core」里确认都已配置）';
-    return;
-  }
-  if (a === b) {
-    pairError.value = '请选择两个不同的 Core';
-    return;
-  }
-  pairing.value = true;
-  try {
-    const before = inviteOf(a);
-    requestInvite(a);
-    const invite = await waitForInvite(a, before, 8000);
-    if (!invite) {
-      pairError.value = `「${a}」未返回邀请串——确认该 Core 在线且联邦功能正常`;
-      return;
-    }
-    const parsed = parseInvite(invite);
-    if (!parsed) {
-      pairError.value = '邀请串解析失败（须为 echofed://host:port…#token）';
-      return;
-    }
-    // 在接入方登记邀请方为 peer：保存即触发对方主动连接。
-    // 邀请串即凭证 → 默认满权限（可在卡片里随时收紧）。
-    sendTo(b, {
-      SaveFederationPeer: {
-        peer: {
-          name: a || parsed.name || 'peer',
-          url: parsed.url,
-          token: parsed.token,
-          token_set: false,
-          allow_tools: ['*'],
-          allow_subagent: true,
-          require_confirm: [],
-          allow_queries: ['*'],
-          link: 'Offline',
-        },
-      },
-    } as unknown as BackendCommand);
-    pairStatus.value = `已发起：「${a}」生成邀请 →「${b}」接入连接；数秒内两侧 peer 应转为在线（可点卡片「刷新」查看）。`;
-  } finally {
-    pairing.value = false;
-  }
 }
 
 // ── 添加/编辑表单（作用于指定 Core）──
@@ -413,11 +642,19 @@ function migrateSession() {
       <div>
         <div class="fed-title">联邦网络</div>
         <div class="fed-sub">
-          Core ↔ Core 直连组网：下方每个 Core 各一份状态与邀请串，或用「跨 Core
-          配对」一键互联——与当前选中的 Agent / 运行区域无关。
+          Core ↔ Core 直连组网（需 ≥2 个已接入的 Core）：点「{{ hasFederation ? '添加节点' : '创建联邦' }}」选择节点，一键把所选节点两两互联（全互联）；下方每个 Core
+          各一份状态、邀请串与权限明细，可手动微调。
         </div>
       </div>
       <div class="fed-actions">
+        <NeumorphismButton
+          size="small"
+          variant="primary"
+          class="fed-btn fed-btn--primary fed-create"
+          @click="openWizard"
+        >
+          {{ hasFederation ? '添加节点' : '创建联邦' }}
+        </NeumorphismButton>
         <NeumorphismButton
           size="small"
           variant="glass"
@@ -429,53 +666,151 @@ function migrateSession() {
       </div>
     </div>
 
-    <!-- 跨 Core 配对：选定两个 Core，一键完成 邀请（一侧）→ 接入（另一侧） -->
-    <div class="fed-pair">
-      <div class="fed-pair__title">跨 Core 配对</div>
-      <div class="fed-pair__row">
-        <label class="fed-field fed-pair__field">
-          <span>邀请方（被连入；需被接入方网络可达）</span>
-          <NeumorphismSelect
-            v-model="pairLeft"
-            class="fed-input"
+    <!-- 组建向导（创建联邦 / 添加节点）：选定节点 → 全互联自动配对 -->
+    <div v-if="wizardOpen" class="fed-wizard">
+      <!-- 步骤 1：选择节点 -->
+      <template v-if="wizardStep === 'select'">
+        <div class="fed-wizard__title">加入联邦的节点（两两直连；已互联的对自动跳过）</div>
+        <div class="fed-wizard__nodes">
+          <label
+            v-for="n in topoNodes"
+            :key="n.name"
+            class="fed-wizard__node"
+            :class="{ 'fed-wizard__node--off': !n.online }"
+          >
+            <NeumorphismCheckbox
+              :model-value="!!wizardSel[n.name]"
+              size="small"
+              :disabled="!n.online"
+              @update:model-value="(v: boolean) => toggleWizardSel(n.name, v)"
+            />
+            <span class="fed-dot">
+              <NeumorphismStatusDot :status="n.online ? 'online' : 'offline'" size="small" />
+            </span>
+            <span class="fed-wizard__name">{{ n.name }}</span>
+            <span class="fed-sub fed-wizard__meta">
+              {{ n.nodeId ? n.nodeId : n.fedLoaded ? '（无节点 id）' : '（联邦状态未加载）' }}
+            </span>
+          </label>
+          <div v-if="!topoNodes.length" class="fed-empty">
+            尚无已接入的 Core——先在「上游 Core」中添加（联邦是 Core 之间的网络）。
+          </div>
+        </div>
+        <div v-if="wizardPlan.count >= 2" class="fed-sub">
+          已选 {{ wizardPlan.count }} 个节点：已互联 {{ wizardPlan.existing }} 对，将新建
+          <b>{{ wizardPlan.pairs.length }}</b> 对{{
+            wizardPlan.pairs.length ? '' : '（无需配置）'
+          }}。
+        </div>
+        <div v-else class="fed-sub fed-sub--warn">至少选择 2 个在线节点。</div>
+        <div class="fed-wizard__actions">
+          <NeumorphismButton
             size="small"
-            :options="pairOptions"
-            placeholder="选择 Core"
-          />
-        </label>
-        <NeumorphismButton
-          size="small"
-          variant="glass"
-          class="fed-btn fed-pair__swap"
-          @click="swapPair"
-        >
-          ⇄ 交换
-        </NeumorphismButton>
-        <label class="fed-field fed-pair__field">
-          <span>接入方（主动连接；负责到达邀请方）</span>
-          <NeumorphismSelect
-            v-model="pairRight"
-            class="fed-input"
+            variant="glass"
+            class="fed-btn fed-wizard__cancel"
+            @click="closeWizard"
+          >
+            取消
+          </NeumorphismButton>
+          <NeumorphismButton
             size="small"
-            :options="pairOptions"
-            placeholder="选择 Core"
-          />
-        </label>
-        <NeumorphismButton
-          size="small"
-          variant="primary"
-          class="fed-btn fed-btn--primary fed-pair__go"
-          :disabled="pairing || pairOptions.length < 2"
-          @click="pairCores"
-        >
-          {{ pairing ? '配对中…' : '开始配对' }}
-        </NeumorphismButton>
+            variant="primary"
+            class="fed-btn fed-btn--primary fed-wizard__go"
+            :disabled="wizardPlan.pairs.length === 0"
+            @click="runWizard"
+          >
+            开始配置{{
+              wizardPlan.pairs.length ? `（${wizardPlan.pairs.length} 对）` : ''
+            }}
+          </NeumorphismButton>
+        </div>
+      </template>
+
+      <!-- 步骤 2：执行 -->
+      <template v-else>
+        <div class="fed-wizard__title">
+          {{ wizardRunning ? '配置互联中…' : '配置完成' }}（{{ wizardOkCount }}/{{
+            wizardTasks.length
+          }}
+          成功<template v-if="wizardFailCount"> · {{ wizardFailCount }} 失败</template>）
+        </div>
+        <div class="fed-wizard__tasks">
+          <div v-for="t in wizardTasks" :key="`${t.a}|${t.b}`" class="fed-wizard__task">
+            <span class="fed-dot">
+              <NeumorphismStatusDot
+                :status="
+                  t.status === 'ok'
+                    ? 'online'
+                    : t.status === 'running'
+                      ? 'busy'
+                      : 'offline'
+                "
+                size="small"
+              />
+            </span>
+            <span class="fed-wizard__pair">{{ t.a }} ⇄ {{ t.b }}</span>
+            <span class="fed-sub fed-wizard__detail">
+              {{
+                t.status === 'ok'
+                  ? t.detail || '已建立'
+                  : t.status === 'running'
+                    ? t.detail
+                    : t.status === 'failed'
+                      ? t.detail
+                      : '待执行'
+              }}
+            </span>
+          </div>
+          <div v-if="!wizardTasks.length" class="fed-empty">
+            所选节点已全部互联，无需配置。
+          </div>
+        </div>
+        <div class="fed-wizard__actions">
+          <NeumorphismButton
+            v-if="!wizardRunning && wizardFailCount"
+            size="small"
+            variant="glass"
+            class="fed-btn fed-wizard__retry"
+            @click="retryFailed"
+          >
+            重试失败项（{{ wizardFailCount }}）
+          </NeumorphismButton>
+          <NeumorphismButton
+            size="small"
+            variant="primary"
+            class="fed-btn fed-btn--primary fed-wizard__done"
+            :disabled="wizardRunning"
+            @click="closeWizard"
+          >
+            {{ wizardRunning ? '配置中…' : '完成' }}
+          </NeumorphismButton>
+        </div>
+      </template>
+    </div>
+
+    <!-- 拓扑视图（联邦组建后）：节点间链路一览 -->
+    <div v-else class="fed-topo">
+      <div class="fed-topo__head">
+        <div class="fed-topo__title">互联拓扑</div>
+        <div class="fed-sub">{{ topoSummary }}</div>
       </div>
-      <div v-if="pairError" class="fed-error">{{ pairError }}</div>
-      <div v-else-if="pairStatus" class="fed-sub fed-pair__status">{{ pairStatus }}</div>
-      <div v-else class="fed-sub">
-        方向只影响**首次建链**（邀请方需能被接入方访问到）；配对成功后双方互换地址、
-        双向自动重连——此后不再有方向。内网 / NAT 后的 Core 适合做「接入方」。
+      <div v-if="topoEdges.length" class="fed-topo__edges">
+        <div v-for="e in topoEdges" :key="`${e.a}|${e.b}`" class="fed-topo__edge">
+          <span class="fed-topo__node">{{ e.a }}</span>
+          <span class="fed-topo__line">
+            <span class="fed-topo__dash" :class="{ 'fed-topo__dash--on': e.online }" />
+          </span>
+          <span class="fed-dot">
+            <NeumorphismStatusDot :status="e.online ? 'online' : 'offline'" size="small" />
+          </span>
+          <span class="fed-topo__line">
+            <span class="fed-topo__dash" :class="{ 'fed-topo__dash--on': e.online }" />
+          </span>
+          <span class="fed-topo__node">{{ e.b }}</span>
+        </div>
+      </div>
+      <div v-else class="fed-sub fed-topo__empty">
+        尚未建立任何互联——点「创建联邦」选择节点并一键配置全互联。
       </div>
     </div>
 
@@ -668,7 +1003,10 @@ function migrateSession() {
             </span>
             <div class="fed-peer-main">
               <div class="fed-peer-name">{{ p.name }}</div>
-              <div class="fed-peer-url">{{ p.url || '（仅接受连入）' }}</div>
+              <div class="fed-peer-url">
+                {{ p.url || '（仅接受连入）' }}
+                <template v-if="p.node_id"> · 节点 {{ p.node_id }}</template>
+              </div>
             </div>
             <div class="fed-peer-meta">
               {{ p.token_set ? '已配置密钥' : '无密钥' }}
@@ -740,35 +1078,107 @@ function migrateSession() {
 </template>
 
 <style scoped>
-.fed-pair {
+.fed-wizard {
   border: 1px solid var(--nm-border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-.fed-pair__title {
+.fed-wizard__title {
   font-weight: 600;
 }
-.fed-pair__row {
+.fed-wizard__nodes {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 6px;
 }
-.fed-pair__field {
+.fed-wizard__node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.fed-wizard__node--off {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.fed-wizard__name {
+  font-weight: 500;
+}
+.fed-wizard__meta {
+  margin-top: 0;
+}
+.fed-wizard__tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fed-wizard__task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fed-wizard__pair {
+  font-weight: 500;
+  min-width: 220px;
+}
+.fed-wizard__detail {
   flex: 1;
-  min-width: 180px;
+  margin-top: 0;
 }
-.fed-pair__swap {
-  margin-bottom: 1px;
+.fed-wizard__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
-.fed-pair__go {
-  margin-bottom: 1px;
+.fed-topo {
+  border: 1px solid var(--nm-border-color);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.fed-pair__status {
-  color: var(--panel-ok, var(--nm-text-secondary));
+.fed-topo__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.fed-topo__title {
+  font-weight: 600;
+}
+.fed-topo__edges {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fed-topo__edge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fed-topo__node {
+  font-weight: 500;
+  min-width: 120px;
+}
+.fed-topo__line {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.fed-topo__dash {
+  flex: 1;
+  height: 1px;
+  background: var(--nm-border-color);
+}
+.fed-topo__dash--on {
+  background: var(--panel-ok, #4caf50);
+  height: 2px;
+}
+.fed-topo__empty {
+  padding: 4px 0;
 }
 .fed-cores {
   display: flex;

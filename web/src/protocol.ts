@@ -20,6 +20,9 @@ export interface FederationPeerInfo {
   link: 'Online' | 'Offline';
   /** 节点负载（活跃 turn 数；P2 调度器输入，Core status_event 回传）。 */
   active_turns?: number;
+  /** 对端 node_id（链路在线时 Core 回填；离线/旧 Core 缺失——2026-10
+   * 组建向导用于「已互联」精确判定与拓扑渲染，缺失时按名字兜底）。 */
+  node_id?: string | null;
 }
 
 /** 联邦状态快照（`FederationStatus` 事件）。 */
