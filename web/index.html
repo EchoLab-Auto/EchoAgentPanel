@@ -29,6 +29,39 @@
         } catch (e) {}
       })();
     </script>
+    <style>
+      /* 首屏加载骨架（2026-10 慢网络加载优化）：
+         纯内联（样式 + DOM，不依赖任何外链资源与 JS），在慢网络下
+         JS/CSS 尚在传输时（实测 1.5Mbps 冷启动 ~2.4s）立即给出视觉
+         反馈——此前 #app 为空，用户面对纯白屏。Vue 挂载时自动清空
+         #app 内容，骨架随之被替换。 */
+      html, body { height: 100%; margin: 0; }
+      body { background: #e0e0e0; }
+      html[data-theme='dark'] body { background: #1c1c1c; }
+      .boot {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 16px;
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+          'Helvetica Neue', Arial, sans-serif;
+        color: #666;
+        user-select: none; -webkit-user-select: none;
+      }
+      html[data-theme='dark'] .boot { color: #9a9a9a; }
+      .boot__ring {
+        width: 34px; height: 34px; border-radius: 50%;
+        border: 3px solid rgba(0, 0, 0, 0.12); border-top-color: #0969da;
+        animation: boot-spin 0.9s linear infinite;
+      }
+      html[data-theme='dark'] .boot__ring {
+        border-color: rgba(255, 255, 255, 0.14); border-top-color: #4c9aff;
+      }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      .boot__slow { font-size: 12px; opacity: 0; animation: boot-reveal 0.4s ease 8s forwards; }
+      @keyframes boot-reveal { to { opacity: 0.85; } }
+      @media (prefers-reduced-motion: reduce) {
+        .boot__ring { animation-duration: 2.4s; }
+      }
+    </style>
     <script>
       // 视口高度兜底（2026-10）：--app-h = 实测 window.innerHeight（px），
       // 供 styles.css 移动段高度链消费（var(--app-h, 100dvh)）。
@@ -57,7 +90,13 @@
     </script>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot" aria-hidden="true">
+        <div class="boot__ring"></div>
+        <div>正在加载 EchoAgent Panel…</div>
+        <div class="boot__slow">网络较慢，仍在努力加载…</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -2,9 +2,11 @@
 //! 消息行（user / agent / system）——面板自组（2026-09-30）。
 //!
 //! 背景：ui-frame 已移除 chat 组合组件（ChatMessageItem 等）——聊天组合属
-//! 产品语义，由宿主自行组装。本组件用库保留的元组件（`ChatBubble`）+ doc
-//! 模块（`MarkdownRenderer`）实现面板的消息行；工具行 / 推理块 / 子代理行
-//! 由 ChatView 分派给 ToolRunGroup / ReasoningBlock / SubagentEventBlock。
+//! 产品语义，由宿主自行组装。本组件用库保留的元组件（`ChatBubble`）+
+//! 延迟加载的 Markdown 渲染（`MarkdownLazy`，2026-10 首屏加载优化：doc
+//! 模块不再静态进入首屏关键路径）实现面板的消息行；工具行 / 推理块 /
+//! 子代理行由 ChatView 分派给 ToolRunGroup / ReasoningBlock /
+//! SubagentEventBlock。
 //!
 //! 语义与迁移前（库版 ChatMessageItem）一致：
 //! - user 居右主色气泡、agent 居左中性气泡（正文走 Markdown）、system 居中平铺；
@@ -14,7 +16,7 @@
 import { computed } from 'vue';
 import { useLocale } from '@echolab-auto/ui-frame';
 import { ChatBubble } from '@echolab-auto/ui-frame/chat';
-import { MarkdownRenderer } from '@echolab-auto/ui-frame/doc';
+import MarkdownLazy from './MarkdownLazy.vue';
 import type { ChatMessageWithImages } from '../chat-adapter';
 
 const props = defineProps<{
@@ -73,7 +75,7 @@ const timeLabel = computed(() => {
       <span v-if="sourceLabel" class="msg-item__source">{{ sourceLabel }}</span>
       <span v-if="timeLabel" class="msg-item__time">{{ timeLabel }}</span>
     </template>
-    <MarkdownRenderer v-if="!isUser" :content="message.content" :show-toc="false" />
+    <MarkdownLazy v-if="!isUser" :content="message.content" />
     <template v-else>{{ message.content }}</template>
   </ChatBubble>
 </template>

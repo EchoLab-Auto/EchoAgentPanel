@@ -4,7 +4,8 @@
 //! `ChatBubble` 元组件自组消息行。本测试锁定角色 → 气泡形态的映射，
 //! 以及头部（角色名 / 来源 / 时间）与 Markdown 渲染的分派：
 //! - user：居右主色气泡、纯文本；
-//! - agent：居左中性气泡、正文走 MarkdownRenderer；
+//! - agent：居左中性气泡、正文走 MarkdownLazy（2026-10 起为延迟加载的
+//!   Markdown 渲染包装，内部异步加载 doc 模块——测试以 stub 拦截）；
 //! - system：居中平铺。
 
 import { describe, it, expect } from 'vitest';
@@ -27,7 +28,8 @@ function mountItem(msg: ChatMessageWithImages) {
     props: { message: msg, formatTime: (t: number) => `T${t}` },
     global: {
       stubs: {
-        MarkdownRenderer: { template: '<div class="md-stub">{{ content }}</div>', props: ['content'] },
+        // Markdown 渲染（延迟加载包装）：stub 后不触碰异步 chunk 加载。
+        MarkdownLazy: { template: '<div class="md-stub">{{ content }}</div>', props: ['content'] },
         ChatCopyButton: true,
       },
     },
