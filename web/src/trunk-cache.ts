@@ -163,8 +163,21 @@ export function saveTrunkCacheNow(): void {
  * 返回卸载函数（测试/热更新用）。
  */
 export function installTrunkCacheAutosave(): () => void {
+  // 周期落盘放 idle（2026-10 审计）：全量 JSON.stringify 可达 2.2M 字符，
+  // 同步执行在低端机上会掉帧；requestIdleCallback 让出渲染/交互帧，
+  // timeout 兜底保证最迟 2s 内完成。隐藏/pagehide 路径仍立即写
+  //（保正确性优先，此时无渲染压力）。
+  const scheduleIdle = (fn: () => void) => {
+    const ric = (window as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
+      .requestIdleCallback;
+    if (typeof ric === 'function') {
+      ric(fn, { timeout: 2000 });
+    } else {
+      window.setTimeout(fn, 0);
+    }
+  };
   const timer = window.setInterval(() => {
-    if (document.visibilityState === 'visible') saveTrunkCacheNow();
+    if (document.visibilityState === 'visible') scheduleIdle(saveTrunkCacheNow);
   }, AUTOSAVE_INTERVAL_MS);
   const onVisibility = () => {
     if (document.visibilityState === 'hidden') saveTrunkCacheNow();

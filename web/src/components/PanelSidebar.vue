@@ -13,14 +13,21 @@
 //! 门控只决定「是否渲染」，不决定「放哪里」（用户拖动过的位置不因门控
 //! 抖动而漂移）。
 
-import { computed } from 'vue';
+import { computed, defineAsyncComponent } from 'vue';
 import { state } from '../store';
 import { railCardsFor, workspaceCardFor } from '../rail-cards';
 import type { RailSide } from '../rail-layout';
 import RailStack, { type RailCardDef } from './RailStack.vue';
-import ConnectionStatusCard from './ConnectionStatusCard.vue';
-import WorkspaceFileBrowser from './WorkspaceFileBrowser.vue';
-import ShellList from './ShellList.vue';
+// 右栏卡片按需加载（2026-10 审计）：连接状态卡 / 文件浏览器 / Shell 列表
+// 合计约 1100 行 + 依赖，不在首帧关键路径上（右栏在挂载后渲染）——转为
+// 异步 chunk，首屏 JS 不再被它们拖累。
+const ConnectionStatusCard = defineAsyncComponent(
+  () => import('./ConnectionStatusCard.vue'),
+);
+const WorkspaceFileBrowser = defineAsyncComponent(
+  () => import('./WorkspaceFileBrowser.vue'),
+);
+const ShellList = defineAsyncComponent(() => import('./ShellList.vue'));
 
 const props = defineProps<{
   activeBranchId: string | null;

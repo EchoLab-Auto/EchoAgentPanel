@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { nextTick } from 'vue';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 vi.mock('../../connection', () => {
   const sendCommand = vi.fn();
@@ -43,10 +43,19 @@ function session(over: Partial<SessionInfo>): SessionInfo {
   } as SessionInfo;
 }
 
-function mountSidebar(side: 'left' | 'right' = 'right') {
-  return mount(PanelSidebar, {
+async function mountSidebar(side: 'left' | 'right' = 'right') {
+  // 右栏卡片（连接状态 / 文件浏览器 / Shell 列表）为异步组件
+  // （2026-10 按需加载）：加载链含多层 promise（loader → 渲染 → 子组件），
+  // 需多轮微任务/宏任务推进后才能断言。
+  const wrapper = mount(PanelSidebar, {
     props: { activeBranchId: null, teamId: 'alix', side },
   });
+  for (let i = 0; i < 6; i++) {
+    await flushPromises();
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  return wrapper;
 }
 
 describe('PanelSidebar（边栏卡片栈）', () => {
@@ -64,8 +73,8 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.workspaceTeamId = null;
   });
 
-  it('卡片顺序与门控：连接状态置顶常驻、Shell 常驻（在文件浏览器下方）、临时分支仅并行模式、无激活工作区时无文件浏览器卡', () => {
-    const wrapper = mountSidebar();
+  it('卡片顺序与门控：连接状态置顶常驻、Shell 常驻（在文件浏览器下方）、临时分支仅并行模式、无激活工作区时无文件浏览器卡', async () => {
+    const wrapper = await mountSidebar();
     const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
     expect(titles[0]).toContain('连接状态');
     expect(titles.some((t) => t.startsWith('Shell'))).toBe(true);
@@ -73,7 +82,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     expect(titles.some((t) => t.includes('文件浏览器'))).toBe(false);
   });
 
-  it('连接状态卡：Core 状态 + QQ 适配器实例（紧凑卡固定高度、不参与 flex 分配）', () => {
+  it('连接状态卡：Core 状态 + QQ 适配器实例（紧凑卡固定高度、不参与 flex 分配）', async () => {
     state.adapters = [
       {
         name: 'qq',
@@ -96,7 +105,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
         persona: 'alix',
       },
     ] as typeof state.adapters;
-    const wrapper = mountSidebar();
+    const wrapper = await mountSidebar();
     // 置顶且为紧凑卡（不参与剩余空间分配）
     const cards = wrapper.findAll('.rail-stack__card');
     expect(cards[0].classes()).toContain('rail-stack__card--compact');
@@ -113,10 +122,10 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.adapters = [];
   });
 
-  it('连接状态卡：断连时展示重连提示；无适配器时显示空态', () => {
+  it('连接状态卡：断连时展示重连提示；无适配器时显示空态', async () => {
     state.connected = false;
     state.adapters = [];
-    const wrapper = mountSidebar();
+    const wrapper = await mountSidebar();
     const status = wrapper.find('.conn-card');
     expect(status.text()).toContain('连接中');
     expect(status.text()).toContain('正在自动重连');
@@ -124,13 +133,13 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.connected = true;
   });
 
-  it('有激活工作区会话：文件浏览器卡在连接状态下方、Shell 在其下', () => {
+  it('有激活工作区会话：文件浏览器卡在连接状态下方、Shell 在其下', async () => {
     state.workspaceSessions = [
       { id: 'core', name: '框架', description: '', directories: ['/srv/core'] },
     ];
     state.workspaceActive = 'core';
     state.workspaceTeamId = 'alix';
-    const wrapper = mountSidebar();
+    const wrapper = await mountSidebar();
     const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
     // [连接状态, 文件浏览器, Shell]
     expect(titles[0]).toContain('连接状态');
@@ -139,15 +148,15 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     expect(titles[2]).toContain('Shell');
   });
 
-  it('并行多会话模式：临时分支卡出现在栈尾', () => {
+  it('并行多会话模式：临时分支卡出现在栈尾', async () => {
     state.teams = [team({ loop_mode: 'parallel' })];
-    const wrapper = mountSidebar();
+    const wrapper = await mountSidebar();
     const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
     expect(titles[titles.length - 1]).toContain('临时分支');
   });
 
   it('卡片可折叠为横条：点卡头收起内容（折叠态持久化）', async () => {
-    const wrapper = mountSidebar();
+    const wrapper = await mountSidebar();
     const head = wrapper.findAll('.rail-stack__head').find((el) => el.text().includes('Shell'));
     expect(head).toBeTruthy();
     await head!.trigger('click');
@@ -165,7 +174,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     ];
     state.workspaceActive = 'core';
     state.workspaceTeamId = 'alix';
-    const wrapper = mountSidebar();
+    const wrapper = await mountSidebar();
     // 卡片：[连接状态(紧凑), 文件浏览器, Shell]；与紧凑卡相邻的分隔条不可拖，
     // 文件浏览器 ↔ Shell 之间的那条可拖。
     const dividers = wrapper.findAll('.rail-stack__divider');
@@ -182,31 +191,31 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     );
   });
 
-  it('左右列共用组件：side 决定渲染本列卡片（默认布局右列全有、左列为空）', () => {
-    const rightWrapper = mountSidebar('right');
+  it('左右列共用组件：side 决定渲染本列卡片（默认布局右列全有、左列为空）', async () => {
+    const rightWrapper = await mountSidebar('right');
     const rightTitles = rightWrapper.findAll('.rail-stack__title').map((t) => t.text());
     expect(rightTitles.some((t) => t.includes('连接状态'))).toBe(true);
     expect(rightTitles.some((t) => t.startsWith('Shell'))).toBe(true);
 
-    const leftWrapper = mountSidebar('left');
+    const leftWrapper = await mountSidebar('left');
     expect(leftWrapper.findAll('.rail-stack__title').length).toBe(0);
     expect(leftWrapper.find('.rail-stack').exists()).toBe(true);
   });
 
   it('卡片归属由 rail-layout 决定：换列后只在本列渲染', async () => {
     moveToOtherSide('shell');
-    const leftWrapper = mountSidebar('left');
+    const leftWrapper = await mountSidebar('left');
     const leftTitles = leftWrapper.findAll('.rail-stack__title').map((t) => t.text());
     expect(leftTitles.some((t) => t.startsWith('Shell'))).toBe(true);
 
-    const rightWrapper = mountSidebar('right');
+    const rightWrapper = await mountSidebar('right');
     const rightTitles = rightWrapper.findAll('.rail-stack__title').map((t) => t.text());
     expect(rightTitles.some((t) => t.startsWith('Shell'))).toBe(false);
     expect(rightTitles.some((t) => t.includes('连接状态'))).toBe(true);
   });
 
   it('卡头「移到另一侧」按钮：迁移布局并冒泡 relocate 事件', async () => {
-    const wrapper = mountSidebar('right');
+    const wrapper = await mountSidebar('right');
     const shellHead = wrapper
       .findAll('.rail-stack__head')
       .find((h) => h.text().includes('Shell'))!;
@@ -217,7 +226,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
   });
 
   it('分隔条拖动比例与折叠态按卡片 id 存（换列后保留）', async () => {
-    const rightWrapper = mountSidebar('right');
+    const rightWrapper = await mountSidebar('right');
     const shellHead = rightWrapper
       .findAll('.rail-stack__head')
       .find((h) => h.text().includes('Shell'))!;
@@ -226,16 +235,16 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     expect(saved.open?.shell).toBe(false);
 
     moveToOtherSide('shell');
-    const leftWrapper = mountSidebar('left');
+    const leftWrapper = await mountSidebar('left');
     // 换列后仍是折叠态（状态按 id 存，与所在列无关）
     expect(leftWrapper.find('.rail-stack__body').exists()).toBe(false);
   });
 
-  it('分隔条净占位为 0：卡片间距 = 槽位间距（不因 divider 负边距被压缩）', () => {
+  it('分隔条净占位为 0：卡片间距 = 槽位间距（不因 divider 负边距被压缩）', async () => {
     // 结构不变量：轨道槽位里「divider + 卡片」的总占位必须等于 0 偏移，
     // 否则卡间距会被 divider 的负 margin 吃掉（2026-09-24 实测回归：1px）。
     // 这里锁定 DOM 结构与类名契约（像素级由 Playwright 实测守护）。
-    const wrapper = mountSidebar('right');
+    const wrapper = await mountSidebar('right');
     const slots = wrapper.findAll('.rail-stack__slot');
     expect(slots.length).toBeGreaterThan(1);
     // 第二个槽（含 divider 的常规槽）应同时包含 divider 与卡片，且顺序为 divider → card
@@ -248,7 +257,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
 
   it('落点指示线绝对定位（不参与布局，出现/消失不推挤卡片）', async () => {
     const { railDrag } = await import('../../rail-drag');
-    const wrapper = mountSidebar('right');
+    const wrapper = await mountSidebar('right');
     // 制造拖动中的落点状态（dropSide 命中本列、index 0）
     railDrag.active = true;
     railDrag.dropSide = 'right';
@@ -263,7 +272,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     railDrag.dropIndex = null;
   });
 
-  it('不渲染「会话」切换卡（切换统一走入口行按钮）', () => {
+  it('不渲染「会话」切换卡（切换统一走入口行按钮）', async () => {
     state.sessions.push(
       session({
         id: 'qq:dm::1828980067',
@@ -274,7 +283,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
         last_message: 'hi',
       }),
     );
-    const wrapper = mountSidebar();
+    const wrapper = await mountSidebar();
     expect(wrapper.text()).not.toContain('Evence');
   });
 });

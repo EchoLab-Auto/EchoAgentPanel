@@ -139,7 +139,11 @@ describe('重连引导命令（去主智能体）', () => {
     expect(state.toasts[0].text).toContain('未连接到 Core');
   });
 
-  it('其余引导命令照常发送', async () => {
+  it('重连引导：区域已知时管理面命令定向补发', async () => {
+    // 刷新/重连场景：App.vue 会把 localStorage 的 activeRegion 同步进
+    // state（此处在测试里直接预置，等价效果）。
+    const { state } = await import('../store');
+    state.activeRegion = 'core-a';
     const sent = await bootstrapCommands();
     for (const cmd of [
       'RequestState',
@@ -149,5 +153,17 @@ describe('重连引导命令（去主智能体）', () => {
     ]) {
       expect(sent.some((c) => c.includes(cmd)), cmd).toBe(true);
     }
+  });
+
+  it('首访（区域未定）不盲发单值管理面命令——避免「尚未选择 agent」误报', async () => {
+    const sent = await bootstrapCommands();
+    // 广播发现命令照常（只读、覆盖全部上游）。
+    for (const cmd of ['RequestState', 'RequestTeamsList']) {
+      expect(sent.some((c) => c.includes(cmd)), cmd).toBe(true);
+    }
+    // 单值管理面（适配器/Shell 会话）：区域未定时跳过；TeamsList 到达后
+    // 由 App.vue 的 activeRegion watcher 统一拉取（2026-10 审计修复）。
+    expect(sent.some((c) => c.includes('RequestAdapterStatus'))).toBe(false);
+    expect(sent.some((c) => c.includes('RequestShellSessions'))).toBe(false);
   });
 });

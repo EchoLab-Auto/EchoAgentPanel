@@ -18,18 +18,18 @@
   },
   "dependencies": {
     "@echolab-auto/ui-frame": "file:./vendor/ui-frame",
-    "@types/three": "^0.186.0",
-    "@types/webxr": "^0.5.24",
     "dompurify": "^3.2.4",
     "marked": "^18.0.5",
-    "three": "^0.186.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@types/three": "^0.186.0",
+    "@types/webxr": "^0.5.24",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/test-utils": "^2.4.11",
     "happy-dom": "^20.11.6",
     "iwer": "^2.5.0",
+    "three": "^0.186.1",
     "typescript": "~5.6.3",
     "vite": "^6.4.3",
     "vitest": "^4.1.11",

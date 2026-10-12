@@ -98,10 +98,15 @@ export function startConnection(): void {
       for (const command of broadcastBootstrap) {
         ws.send(broadcastEnvelope(command));
       }
-      // 定向引导：多上游下必须带 core，否则非只读命令会被中继拒收。core 未知
-      // 时 sendCommand 兜底裸发，中继白名单已放行这两条（广播各 core）。
-      sendCommand('RequestAdapterStatus');
-      sendCommand({ RequestShellSessions: {} });
+      // 定向引导（重连场景补发）：单值管理面（适配器/Shell 会话）仅当目标
+      // 区域已解析时发送。首访（activeRegion 未定）跳过——多上游下这两条
+      // 会因解析不出目标被拒发并弹「尚未选择 agent」误报 toast，且随后
+      // TeamsList 到达时 App.vue 的 activeRegion watcher 会统一拉全
+      // （含这两条），重发纯属重复请求（2026-10 审计修复）。
+      if (currentRegion(state)) {
+        sendCommand('RequestAdapterStatus');
+        sendCommand({ RequestShellSessions: {} });
+      }
       // 上次使用的 Agent 的 timeline：经 sendCommand 走统一路由（多上游下
       // core 已从 localStorage 还原/teams 已知时定向；未知则裸广播，
       // TeamsList 到达后 App watcher 会再定向补拉，覆盖竞态结果）。

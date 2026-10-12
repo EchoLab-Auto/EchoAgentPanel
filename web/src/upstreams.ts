@@ -25,11 +25,25 @@ export async function refreshUpstreams(): Promise<void> {
 
 const POLL_MS = 8_000;
 
-/** 启动周期轮询；返回停止函数。 */
+/**
+ * 启动周期轮询；返回停止函数。
+ *
+ * 后台标签页暂停轮询、回到前台立即补一次（2026-10 审计）：状态卡不在
+ * 视野内，后台 8s 一次的 fetch 纯属浪费（移动端耗电/流量）；回前台补
+ * 一次保证看到的是最新状态。
+ */
 export function startUpstreamsPolling(): () => void {
   void refreshUpstreams();
   const timer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return; // 后台暂停
     void refreshUpstreams();
   }, POLL_MS);
-  return () => window.clearInterval(timer);
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') void refreshUpstreams();
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  return () => {
+    window.clearInterval(timer);
+    document.removeEventListener('visibilitychange', onVisible);
+  };
 }
