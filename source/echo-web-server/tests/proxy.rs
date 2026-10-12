@@ -451,3 +451,118 @@ async fn targeted_command_waits_for_link_and_is_delivered() {
     }
     ws.close(None).await.unwrap();
 }
+
+/// 面板实例 + **注册表句柄**（测试内运行时改上游配置用；其余同
+/// `spawn_panel_multi`）。
+async fn spawn_panel_with_registry(
+    upstreams: Vec<(&str, String)>,
+) -> (
+    String,
+    std::sync::Arc<echo_web_server::upstreams::UpstreamRegistry>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let registry = echo_web_server::upstreams::UpstreamRegistry::new(
+        upstreams
+            .into_iter()
+            .map(|(name, url)| echo_web_server::upstreams::UpstreamConfig::direct(name, url, ""))
+            .collect(),
+        None,
+    );
+    let app = Router::new()
+        .route("/ws", get(ws_handler))
+        .with_state(AppState::new(
+            registry.clone(),
+            "/nonexistent".into(),
+            "/nonexistent-media".into(),
+            "".into(),
+            echo_web_server::ssh::SshTunnels::new(
+                std::env::temp_dir().join("echo-panel-test-tunnels"),
+            ),
+        ));
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("ws://127.0.0.1:{}/ws", address.port()), registry)
+}
+
+/// 配置变更中止旧重连循环（2026-10 修复）：上游处于**失败重试中**时把地址
+/// 改掉，旧地址必须停止被尝试——此前失败重试中的循环无从中止（links 里
+/// 只有已连上链路的 reader），改址后旧循环继续拨旧地址：面板持续显示旧
+/// 地址的错误（"改了端口仍报 Connection refused"）、健康表在新旧错误间
+/// 抖动；浏览器关闭后僵尸循环仍无限重试。
+#[tokio::test]
+async fn upsert_aborts_stale_retry_loop() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc as StdArc;
+
+    /// 「接受即断开」的假端口：计数每个连接尝试（上游永远连不成）。
+    fn counting_listener() -> (u16, StdArc<AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let count = StdArc::new(AtomicUsize::new(0));
+        let count2 = count.clone();
+        tokio::spawn(async move {
+            let listener = TcpListener::from_std(listener).unwrap();
+            // 接受即断开 → 上游握手失败、进入重试。
+            while let Ok((socket, _)) = listener.accept().await {
+                count2.fetch_add(1, Ordering::SeqCst);
+                drop(socket);
+            }
+        });
+        (port, count)
+    }
+
+    let (stale_port, stale_count) = counting_listener();
+    let (fresh_port, fresh_count) = counting_listener();
+
+    let (panel_ws, registry) =
+        spawn_panel_with_registry(vec![("a", format!("ws://127.0.0.1:{stale_port}"))]).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+    // 保活：浏览器静默会被（可能被同进程其他测试调小的）收割阈值断开，
+    // 桥接死在半途则本测试失去意义。Ping 帧即可刷新浏览器侧活跃时间。
+    let keepalive = tokio::spawn(async move {
+        loop {
+            if ws.send(WsMessage::Ping(Vec::new())).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        }
+    });
+
+    // 旧地址先被尝试至少一次。
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    while stale_count.load(Ordering::SeqCst) == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "旧地址从未被尝试");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    // 改址（模拟面板「编辑上游」）。
+    registry
+        .upsert(echo_web_server::upstreams::UpstreamConfig::direct(
+            "a",
+            format!("ws://127.0.0.1:{fresh_port}"),
+            "",
+        ))
+        .await
+        .unwrap();
+
+    // 新地址接管。
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while fresh_count.load(Ordering::SeqCst) == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "新地址未被尝试");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    // 旧地址此后不得再被尝试（窗口覆盖旧循环的下一次退避重试：1s 起步）。
+    let stale_after = stale_count.load(Ordering::SeqCst);
+    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+    assert_eq!(
+        stale_count.load(Ordering::SeqCst),
+        stale_after,
+        "改址后旧地址仍被重试（旧重连循环未被中止）"
+    );
+
+    keepalive.abort();
+}

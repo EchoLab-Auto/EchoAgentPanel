@@ -470,6 +470,18 @@ async fn bridge(browser: WebSocket, state: AppState) {
     let reap_after = reap_after();
     let links: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CoreLink>>> =
         Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+    // 重连循环登记表（2026-10 修复）：每个上游的**重连循环任务**句柄，
+    // 含尚未连上（失败重试中）的循环。此前只登记已连上链路的 reader
+    // （CoreLink.abort 仅在 links 里），配置变更/删除时失败重试中的旧循环
+    // 无从中止——它会一直用**旧地址**重试（面板改了地址仍持续显示旧地址
+    // 的错误：改了端口还报 "Connection refused"，健康表在新旧错误间抖动），
+    // 且浏览器关闭后也不退出（循环顶部的存活检查此前只在链路建立后的
+    // 读泵退出路径可达 → 僵尸循环无限重试、白耗连接）。
+    // 现在：Upsert/Removed 先中止旧循环再接新配置；循环顶部检查 event_tx
+    // 是否关闭（浏览器走了即退出）；Lagged 重同步以本表判重（links 只含
+    // 已连上的，判重会漏掉重试中的上游、重复接入）。
+    let loops: Arc<std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
     // 最近广播帧（每条链路建成/重连后补投；见 BroadcastReplay 注释）。
     let broadcast_replay = Arc::new(tokio::sync::Mutex::new(BroadcastReplay::new()));
 
@@ -484,18 +496,28 @@ async fn bridge(browser: WebSocket, state: AppState) {
         let state2 = state.clone();
         let spawn_multi = multi.clone();
         let replay = broadcast_replay.clone();
+        let loops = loops.clone();
         std::sync::Arc::new(move |cfg: crate::upstreams::UpstreamConfig| {
             let links = links.clone();
             let event_tx = event_tx.clone();
             let state = state2.clone();
             let multi = spawn_multi.clone();
             let replay = replay.clone();
-            let _handle = tokio::spawn(async move {
+            let loops = loops.clone();
+            let cfg_name = cfg.name.clone();
+            let handle = tokio::spawn(async move {
                 let name = cfg.name.clone();
                 // 断连重连循环：Core 重启/闪断后退避重试（1s→30s），不再
                 // 一断即永久离线。浏览器断开（event_tx 关闭）即停止。
                 let mut backoff = std::time::Duration::from_secs(1);
                 loop {
+                    // 浏览器已断开（事件出口无接收方）→ 退出整个重连循环。
+                    // （2026-10 修复：此前该存活检查只在链路建立后的读泵
+                    // 退出路径可达，失败重试中的循环在浏览器关闭后仍无限
+                    // 重试——僵尸循环。）
+                    if event_tx.is_closed() {
+                        break;
+                    }
                     // 重连中状态（首次与每次重试前）——前端可见"正在连接"。
                     state.set_health(
                         &name,
@@ -682,6 +704,15 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
             });
+            // 登记循环句柄（并兜底中止同名的上一枚循环——调用方在
+            // Upsert/Removed 时已按约定中止，这里防重复登记）。
+            let previous = loops
+                .lock()
+                .unwrap()
+                .insert(cfg_name, handle.abort_handle());
+            if let Some(previous) = previous {
+                previous.abort();
+            }
         })
     };
 
@@ -718,6 +749,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
     {
         let mut events = state.registry.subscribe();
         let links2 = links.clone();
+        let loops2 = loops.clone();
         let state2 = state.clone();
         let multi2 = multi.clone();
         let spawn_link2 = spawn_link.clone();
@@ -732,7 +764,10 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         tracing::warn!("upstream event pump lagged {n}, resyncing links");
                         // 以注册表当前态重放 Upsert（幂等接入/重连）。
                         for cfg in state2.registry.list().await {
-                            if links2.read().await.contains_key(&cfg.name) {
+                            // 判重用循环登记表（含失败重试中、尚未建链的
+                            // 循环）——links 只含已连上的，会对重试中的
+                            // 上游重复接入（多个循环互抢、健康表抖动）。
+                            if loops2.lock().unwrap().contains_key(&cfg.name) {
                                 continue;
                             }
                             if cfg.has_endpoint() {
@@ -746,6 +781,12 @@ async fn bridge(browser: WebSocket, state: AppState) {
                 };
                 match event {
                     crate::upstreams::UpstreamEvent::Upsert(cfg) => {
+                        // 先中止旧**重连循环**（含失败重试中的——此前只中止
+                        // 已连上链路的 reader，旧循环会用旧配置继续重试），
+                        // 再摘旧链路；新配置由 spawn_link2 全新接入。
+                        if let Some(old_loop) = loops2.lock().unwrap().remove(&cfg.name) {
+                            old_loop.abort();
+                        }
                         if let Some(old) = links2.write().await.remove(&cfg.name) {
                             old.abort.abort();
                         }
@@ -756,6 +797,9 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         refresh_multi(&state2.registry, &multi2, &links2).await;
                     }
                     crate::upstreams::UpstreamEvent::Removed { name } => {
+                        if let Some(old_loop) = loops2.lock().unwrap().remove(&name) {
+                            old_loop.abort();
+                        }
                         if let Some(old) = links2.write().await.remove(&name) {
                             old.abort.abort();
                         }
