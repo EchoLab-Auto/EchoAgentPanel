@@ -60,3 +60,7 @@ jobs:
       # dev-testing 文档声称 CI 含 vitest，2026-09-26 补齐。
       - run: npm test
         working-directory: web
+      # 样式令牌守卫（对照 ui-frame tokens.scss 校验 --nm-* 令牌与字号/
+      # 间距字面量）。此前只在本地跑——与 vitest 同批补进 CI，防令牌漂移。
+      - run: npm run lint:styles
+        working-directory: web
