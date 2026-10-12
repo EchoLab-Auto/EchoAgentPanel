@@ -284,15 +284,27 @@ async fn connect_upstream(
                 tokio_tungstenite::tungstenite::Error::Io(_) => "network",
                 _ => "protocol",
             };
+            // 握手期静默断开（读到 EOF、没有任何 HTTP 响应）最常见根因是
+            // 「对端令牌校验拒绝」或「连的不是 Core 管理端口」——给出可操作
+            // 提示而不是裸的 "Handshake not finished"（2026-10 云机端口
+            // 映射实况：旧版 Core 的未授权拒绝路径不发送响应，二者症状
+            // 完全一致，纯看错误文案无法排查）。
+            let message = match &error {
+                tokio_tungstenite::tungstenite::Error::Protocol(
+                    tokio_tungstenite::tungstenite::error::ProtocolError::HandshakeIncomplete,
+                ) => "对端在 WebSocket 握手完成前直接断开（未返回任何 HTTP 响应）。\
+                        常见原因：① 对端为 EchoAgentCore 且配置了 management_access_token，\
+                        但此处访问令牌缺失或不对——请填入与 Core `echo-agent-core token` \
+                        一致的令牌；② 地址/端口映射指向的不是 Core 管理端口"
+                    .to_string(),
+                _ => error.to_string(),
+            };
             warn!(
                 core = %upstream.url,
                 %error, kind,
                 "cannot connect to Core management WS; upstream skipped"
             );
-            Err(ConnectFailure {
-                kind,
-                message: error.to_string(),
-            })
+            Err(ConnectFailure { kind, message })
         }
     }
 }

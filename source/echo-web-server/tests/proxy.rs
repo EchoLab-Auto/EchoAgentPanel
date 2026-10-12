@@ -452,6 +452,34 @@ async fn targeted_command_waits_for_link_and_is_delivered() {
     ws.close(None).await.unwrap();
 }
 
+/// 面板实例 + **AppState 句柄**（测试内轮询健康表用；其余同
+/// `spawn_panel_multi`）。
+async fn spawn_panel_with_state(upstreams: Vec<(&str, String)>) -> (String, AppState) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let registry = echo_web_server::upstreams::UpstreamRegistry::new(
+        upstreams
+            .into_iter()
+            .map(|(name, url)| echo_web_server::upstreams::UpstreamConfig::direct(name, url, ""))
+            .collect(),
+        None,
+    );
+    let state = AppState::new(
+        registry,
+        "/nonexistent".into(),
+        "/nonexistent-media".into(),
+        "".into(),
+        echo_web_server::ssh::SshTunnels::new(std::env::temp_dir().join("echo-panel-test-tunnels")),
+    );
+    let app = Router::new()
+        .route("/ws", get(ws_handler))
+        .with_state(state.clone());
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("ws://127.0.0.1:{}/ws", address.port()), state)
+}
+
 /// 面板实例 + **注册表句柄**（测试内运行时改上游配置用；其余同
 /// `spawn_panel_multi`）。
 async fn spawn_panel_with_registry(
@@ -564,5 +592,66 @@ async fn upsert_aborts_stale_retry_loop() {
         "改址后旧地址仍被重试（旧重连循环未被中止）"
     );
 
+    keepalive.abort();
+}
+
+/// 握手期静默断开（没有任何 HTTP 响应）→ 健康表给出**可操作提示**
+/// （令牌 / 映射两个嫌疑），而非裸的 "Handshake not finished"。
+///
+/// 背景（2026-10 云机端口映射实况）：对端在 WS 握手完成前 EOF 的情况与
+/// 「Core 配置了 management_access_token 但面板令牌缺失/不符」症状完全
+/// 一致（旧版 Core 的未授权拒绝路径不发送响应），也与「端口映射指向非
+/// Core 服务」一致——错误文案必须把两种可能都点出来。
+#[tokio::test]
+async fn silent_handshake_close_reports_actionable_hint() {
+    // 假「Core」：读到握手请求后直接关闭（0 字节响应）。
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt as _;
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).await;
+                drop(stream); // 静默断开（没有任何 HTTP 响应）
+            });
+        }
+    });
+
+    let (panel_ws, state) =
+        spawn_panel_with_state(vec![("cloud", format!("ws://127.0.0.1:{port}"))]).await;
+    let (ws, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+    // 保活：同进程其他测试可能把收割阈值调小，浏览器静默会被断开。
+    let keepalive = tokio::spawn(async move {
+        let mut ws = ws;
+        loop {
+            if ws.send(WsMessage::Ping(Vec::new())).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if let Some(health) = state.upstream_health().get("cloud") {
+            if let Some(error) = &health.last_error {
+                assert!(
+                    error.contains("访问令牌"),
+                    "handshake-incomplete 错误应含令牌排查提示: {error}"
+                );
+                assert!(
+                    error.contains("端口映射"),
+                    "handshake-incomplete 错误应含映射排查提示: {error}"
+                );
+                break;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "health 未在超时内更新"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
     keepalive.abort();
 }
