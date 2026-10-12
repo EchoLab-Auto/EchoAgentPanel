@@ -96,7 +96,7 @@ npm run ui-frame:diff -- 1.3.2   # 对比指定版本 / 标签
 
 ```bash
 cd web
-npm test              # vitest（44 文件 / 289 用例）
+npm test              # vitest（54 文件 / 366 用例）
 npm run lint:styles   # 样式令牌守卫：幻影令牌 / --nf-* 禁用命名空间 / 拼写错
 npm run build         # vue-tsc + vite 生产构建（视图与弹层按 import() 自动分包）
 ```
