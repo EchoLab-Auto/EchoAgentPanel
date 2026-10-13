@@ -7,6 +7,7 @@ import { nextTick } from 'vue';
 import WorkRunGroup, {
   type ToolWorkItem,
   type ReasoningWorkItem,
+  type SubagentWorkItem,
 } from '../WorkRunGroup.vue';
 
 function tool(over: Partial<ToolWorkItem> = {}): ToolWorkItem {
@@ -283,5 +284,79 @@ describe('WorkRunGroup', () => {
     expect(detail.exists()).toBe(true);
     expect(detail.text()).toContain('read_file');
     expect(detail.text()).toContain('error: boom');
+  });
+
+  // ── 子代理完成（<subagent_event>）：并入工作 chip 行 ──────────────────
+
+  function subagent(over: Partial<SubagentWorkItem> = {}): SubagentWorkItem {
+    return {
+      kind: 'subagent',
+      key: 'sa1',
+      task: '审计 Panel 文档',
+      result: '结论正文',
+      success: true,
+      ...over,
+    };
+  }
+
+  it('子代理完成：与工具/思考同排同规格 chip（悬停提示状态+任务），点击展开结论', async () => {
+    const wrapper = mount(WorkRunGroup, {
+      props: { items: [tool({ key: 't1' }), subagent({ key: 'sa' }), reasoning({ key: 'r1' })] },
+    });
+    const chips = wrapper.findAll('.work-run-group__chip');
+    expect(chips.length).toBe(3);
+    expect(chips[1].classes()).toContain('work-run-group__chip--subagent');
+    // 悬停提示：状态 + 任务摘要
+    expect(chips[1].attributes('title')).toContain('子代理完成');
+    expect(chips[1].attributes('title')).toContain('审计 Panel 文档');
+    // 静止 → 折叠（无详情卡）
+    expect(wrapper.find('.work-run-group__detail').exists()).toBe(false);
+    // 点击 → 浮现结论正文（头部为任务摘要 + 状态胶囊）
+    await chips[1].trigger('click');
+    const detail = wrapper.find('.work-run-group__detail');
+    expect(detail.exists()).toBe(true);
+    expect(detail.text()).toContain('审计 Panel 文档');
+    expect(detail.text()).toContain('成功');
+    expect(detail.text()).toContain('结论正文');
+    // 再点收起
+    await chips[1].trigger('click');
+    expect(wrapper.find('.work-run-group__detail').exists()).toBe(false);
+  });
+
+  it('子代理运行中：呼吸态 + 转圈点；详情提示「结果未到」', async () => {
+    const wrapper = mount(WorkRunGroup, {
+      props: { items: [subagent({ running: true, result: '' })] },
+    });
+    const chip = wrapper.find('.work-run-group__chip--subagent');
+    expect(chip.classes()).toContain('work-run-group__chip--active');
+    expect(wrapper.find('.work-run-group__dot--live').exists()).toBe(true);
+    expect(chip.attributes('title')).toContain('子代理运行中');
+    await chip.trigger('click');
+    expect(wrapper.find('.work-run-group__detail').text()).toContain('结果未到');
+  });
+
+  it('子代理失败：自动展开首个失败项（与工具失败同策略）+ 失败样式', () => {
+    const wrapper = mount(WorkRunGroup, {
+      props: {
+        items: [
+          subagent({ key: 'ok' }),
+          subagent({ key: 'bad', success: false, result: '出错了' }),
+        ],
+      },
+    });
+    const failedChip = wrapper.findAll('.work-run-group__chip')[1];
+    expect(failedChip.classes()).toContain('work-run-group__chip--failed');
+    const detail = wrapper.find('.work-run-group__detail');
+    expect(detail.exists()).toBe(true);
+    expect(detail.text()).toContain('失败');
+    expect(detail.text()).toContain('出错了');
+  });
+
+  it('子代理空结果：详情显示占位「（无结果内容）」', async () => {
+    const wrapper = mount(WorkRunGroup, {
+      props: { items: [subagent({ result: '   ' })] },
+    });
+    await wrapper.find('.work-run-group__chip').trigger('click');
+    expect(wrapper.find('.work-run-group__detail').text()).toContain('（无结果内容）');
   });
 });

@@ -211,7 +211,7 @@ export function finishSubagentRun(
  * `dispatch_subagent_hook` 注入的**新入站分支**）。
  *
  * 该钩子此前以原始 JSON 直接渲染为 user 气泡（一条数千字符的 JSON，
- * 既占屏又难读）；结构化解析后由 `SubagentEventBlock` 以一行摘要 +
+ * 既占屏又难读）；结构化解析后并入工作 chip 行（2026-10），以子代理 chip +
  * 可展开结果呈现。非该钩子 / JSON 损坏返回 null，调用方按普通消息降级。
  */
 export function parseSubagentEvent(content: string): SubagentEventInfo | null {

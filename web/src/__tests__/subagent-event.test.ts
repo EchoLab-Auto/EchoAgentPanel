@@ -2,8 +2,8 @@
 //!
 //! 背景（2026-09-28）：该钩子此前以原始 JSON 直接渲染为 user 气泡
 //! （一条数千字符的 JSON，占满半屏且不可读）。修复 = 解析为结构化载荷，
-//! 由 SubagentEventBlock 紧凑呈现；实时（MessageReceived）与历史回放
-//! （toDisplayMessage）两条路径必须一致。
+//! 由工作 chip 行的子代理 chip 呈现（2026-10；前身为紧凑行）；实时
+//! （MessageReceived）与历史回放（toDisplayMessage）两条路径必须一致。
 
 import { describe, expect, it } from 'vitest';
 import {

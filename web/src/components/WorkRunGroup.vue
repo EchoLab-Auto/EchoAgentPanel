@@ -48,7 +48,22 @@ export interface ReasoningWorkItem {
   time?: string;
 }
 
-export type WorkRunItem = ToolWorkItem | ReasoningWorkItem;
+/** 子代理完成（`<subagent_event>` 合并钩子）条目。 */
+export interface SubagentWorkItem {
+  kind: 'subagent';
+  key: string;
+  /** 委派任务摘要（自含背景；悬停/详情头部展示） */
+  task?: string;
+  /** 子代理结论正文（运行中时结果未到） */
+  result?: string;
+  /** 完成是否成功（运行中时未定） */
+  success?: boolean;
+  /** 运行中：chip 呼吸 + 转圈点；详情提示「结果未到」 */
+  running?: boolean;
+  time?: string;
+}
+
+export type WorkRunItem = ToolWorkItem | ReasoningWorkItem | SubagentWorkItem;
 
 const props = defineProps<{ items: WorkRunItem[] }>();
 
@@ -70,15 +85,23 @@ const openToolItem = computed<ToolWorkItem | null>(() =>
 const openReasoningItem = computed<ReasoningWorkItem | null>(() =>
   openItem.value?.kind === 'reasoning' ? openItem.value : null,
 );
+const openSubagentItem = computed<SubagentWorkItem | null>(() =>
+  openItem.value?.kind === 'subagent' ? openItem.value : null,
+);
 
 // ── 工具：运行/失败信号（原 ToolRunGroup 逻辑）─────────────────────────
 /** 运行中：图标行转圈；默认折叠。 */
 const hasRunning = computed(() =>
   props.items.some((i) => i.kind === 'tool' && i.status === 'running'),
 );
-/** 有失败：完成态下保持展开（首个失败项），便于直接看到错误。 */
+/** 有失败：完成态下保持展开（首个失败项）——工具失败与子代理失败同策略。 */
 const firstFailedKey = computed(
-  () => props.items.find((i) => i.kind === 'tool' && i.status === 'failed')?.key ?? null,
+  () =>
+    props.items.find(
+      (i) =>
+        (i.kind === 'tool' && i.status === 'failed') ||
+        (i.kind === 'subagent' && i.running !== true && i.success === false),
+    )?.key ?? null,
 );
 
 // ── 思考：播放中判定（打字机进行 / 真流式未结束）───────────────────────
@@ -127,15 +150,17 @@ function reconcile() {
   openBy.value = null;
 }
 
-// 状态信号：条目增删 / 工具状态 / 思考流式起止——任一变化触发重估。
+// 状态信号：条目增删 / 工具状态 / 思考流式起止 / 子代理运行态——任一变化触发重估。
 watch(
   () =>
     props.items
-      .map((i) =>
-        i.kind === 'tool'
-          ? `t:${i.key}:${i.status ?? ''}`
-          : `r:${i.key}:${i.streaming ? 1 : 0}:${i.animate ? 1 : 0}`,
-      )
+      .map((i) => {
+        if (i.kind === 'tool') return `t:${i.key}:${i.status ?? ''}`;
+        if (i.kind === 'subagent') {
+          return `s:${i.key}:${i.running ? 1 : 0}:${i.success === false ? 'f' : ''}`;
+        }
+        return `r:${i.key}:${i.streaming ? 1 : 0}:${i.animate ? 1 : 0}`;
+      })
       .join('|'),
   () => reconcile(),
   { immediate: true },
@@ -236,14 +261,50 @@ function durationLabel(item: ToolWorkItem | null | undefined): string | null {
   return item.status === 'running' ? `运行中 ${fmtDuration(ms)}` : `耗时 ${fmtDuration(ms)}`;
 }
 
-/** chip 角标：工具=运行中耗时 / 思考=播放中字数（仅活动期显示）。 */
+/** chip 角标：工具=运行中耗时 / 思考=播放中字数（仅活动期显示）；子代理无角标。 */
 function badgeOf(item: WorkRunItem): string | null {
   if (item.kind === 'tool') {
     if (item.status !== 'running') return null;
     const ms = elapsedOf(item);
     return ms == null ? null : fmtCompact(ms);
   }
+  if (item.kind === 'subagent') return null;
   return reasoningActive(item) ? fmtCharCompact(item.text.length) : null;
+}
+
+// ── 子代理：文案与状态 ───────────────────────────────────────────────
+/** 运行/成功/失败 状态文案。 */
+function subagentLabel(item: SubagentWorkItem): string {
+  if (item.running) return '子代理运行中';
+  return item.success === false ? '子代理失败' : '子代理完成';
+}
+/** 详情头状态胶囊（与工具状态同款三态色）。 */
+function subagentStatus(item: SubagentWorkItem): { label: string; cls: string } {
+  if (item.running) return { label: '运行中', cls: 'running' };
+  return item.success === false
+    ? { label: '失败', cls: 'failed' }
+    : { label: '成功', cls: 'succeeded' };
+}
+/** 任务摘要单行化（悬停/详情头部）。 */
+function subagentTaskLine(item: SubagentWorkItem): string {
+  return (item.task ?? '').replace(/\s+/g, ' ').trim();
+}
+/** 结论正文（空结果占位；运行中提示结果未到）。 */
+function subagentResultText(item: SubagentWorkItem): string {
+  if (item.running) return '（结果未到）';
+  return item.result?.trim() || '（无结果内容）';
+}
+
+/** chip 失败态（工具失败 / 子代理失败，自动展开策略共用）。 */
+function chipFailed(item: WorkRunItem): boolean {
+  if (item.kind === 'tool') return item.status === 'failed';
+  return item.kind === 'subagent' && item.running !== true && item.success === false;
+}
+
+/** chip 活动态（思考播放中 / 子代理运行中，呼吸提示）。 */
+function chipActive(item: WorkRunItem): boolean {
+  if (item.kind === 'reasoning') return reasoningActive(item);
+  return item.kind === 'subagent' && item.running === true;
 }
 
 /** chip 悬停提示。 */
@@ -255,12 +316,21 @@ function titleOf(item: WorkRunItem): string {
     if (duration) parts.push(duration);
     return parts.join(' · ');
   }
+  if (item.kind === 'subagent') {
+    const parts = [subagentLabel(item)];
+    const task = subagentTaskLine(item);
+    if (task) parts.push(task);
+    if (item.time) parts.push(item.time);
+    return parts.join(' · ');
+  }
   return `思考 · ${reasoningStatusText(item)}`;
 }
 
 /** chip 无障碍标签。 */
 function ariaOf(item: WorkRunItem): string {
-  return item.kind === 'tool' ? (item.label ?? item.name) : '思考';
+  if (item.kind === 'tool') return item.label ?? item.name;
+  if (item.kind === 'subagent') return subagentLabel(item);
+  return '思考';
 }
 </script>
 
@@ -276,8 +346,8 @@ function ariaOf(item: WorkRunItem): string {
           `work-run-group__chip--${item.kind}`,
           {
             'work-run-group__chip--open': openKey === item.key,
-            'work-run-group__chip--failed': item.kind === 'tool' && item.status === 'failed',
-            'work-run-group__chip--active': item.kind === 'reasoning' && reasoningActive(item),
+            'work-run-group__chip--failed': chipFailed(item),
+            'work-run-group__chip--active': chipActive(item),
           },
         ]"
         :title="titleOf(item)"
@@ -291,7 +361,7 @@ function ariaOf(item: WorkRunItem): string {
         />
         <!-- 思考：双闪星（与工具图标的 stroke 风格一致） -->
         <svg
-          v-else
+          v-else-if="item.kind === 'reasoning'"
           class="work-run-group__think"
           viewBox="0 0 24 24"
           fill="none"
@@ -304,9 +374,26 @@ function ariaOf(item: WorkRunItem): string {
           <path d="M10.5 5 12.1 9.9 17 11.5 12.1 13.1 10.5 18 8.9 13.1 4 11.5 8.9 9.9 Z" />
           <path d="M17.5 4 18.3 6.2 20.5 7 18.3 7.8 17.5 10 16.7 7.8 14.5 7 16.7 6.2 Z" />
         </svg>
+        <!-- 子代理：分叉流程（一任务派出一子代理） -->
+        <svg
+          v-else
+          class="work-run-group__agent"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="6" cy="6" r="2.5" />
+          <circle cx="18" cy="18" r="2.5" />
+          <path d="M8.5 6h5.5a4 4 0 0 1 4 4v5.5" />
+        </svg>
+        <span v-if="chipFailed(item)" class="work-run-group__dot work-run-group__dot--failed" />
         <span
-          v-if="item.kind === 'tool' && item.status === 'failed'"
-          class="work-run-group__dot work-run-group__dot--failed"
+          v-if="item.kind === 'subagent' && item.running"
+          class="work-run-group__dot work-run-group__dot--live"
         />
         <span
           v-if="badgeOf(item)"
@@ -374,6 +461,37 @@ function ariaOf(item: WorkRunItem): string {
           />
         </div>
       </template>
+
+      <!-- 子代理：任务 / 时间 / 状态 + 结论正文 -->
+      <template v-else-if="openSubagentItem">
+        <div class="work-run-group__detail-head">
+          <svg
+            class="work-run-group__detail-icon work-run-group__detail-icon--subagent"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="6" cy="6" r="2.5" />
+            <circle cx="18" cy="18" r="2.5" />
+            <path d="M8.5 6h5.5a4 4 0 0 1 4 4v5.5" />
+          </svg>
+          <span class="work-run-group__detail-name work-run-group__detail-name--agent">
+            {{ subagentTaskLine(openSubagentItem) || subagentLabel(openSubagentItem) }}
+          </span>
+          <span v-if="openSubagentItem.time" class="work-run-group__detail-time">{{ openSubagentItem.time }}</span>
+          <span
+            class="work-run-group__detail-status"
+            :class="`work-run-group__detail-status--${subagentStatus(openSubagentItem).cls}`"
+          >
+            {{ subagentStatus(openSubagentItem).label }}
+          </span>
+        </div>
+        <pre class="work-run-group__pre work-run-group__pre--output">{{ subagentResultText(openSubagentItem) }}</pre>
+      </template>
     </div>
   </div>
 </template>
@@ -440,6 +558,21 @@ function ariaOf(item: WorkRunItem): string {
   border-color: color-mix(in srgb, #8b5cf6 55%, transparent);
 }
 
+/* 子代理 chip：青色系（与既有"子代理完成"行同色），与工具/思考同规格 */
+.work-run-group__chip--subagent {
+  color: color-mix(in srgb, #14b8a6 78%, var(--nm-text-secondary));
+}
+.work-run-group__chip--subagent:hover {
+  color: #5eead4;
+}
+.work-run-group__chip--subagent.work-run-group__chip--open {
+  color: #14b8a6;
+  border-color: color-mix(in srgb, #14b8a6 55%, transparent);
+}
+.work-run-group__chip--subagent.work-run-group__chip--failed {
+  color: var(--panel-err);
+}
+
 /* 运行中的工具：整行轻微呼吸（原 ToolRunGroup 行为） */
 .work-run-group--running .work-run-group__chip--tool {
   animation: work-run-pulse 1.6s ease-in-out infinite;
@@ -472,6 +605,19 @@ function ariaOf(item: WorkRunItem): string {
   }
 }
 
+/* 运行中的子代理：青色呼吸 + 图标闪烁（与思考同语汇、换色区分） */
+.work-run-group__chip--subagent.work-run-group__chip--active {
+  animation: work-run-pulse-subagent 1.6s ease-in-out infinite;
+}
+@keyframes work-run-pulse-subagent {
+  50% {
+    box-shadow: 0 3px 12px color-mix(in srgb, #14b8a6 32%, transparent);
+  }
+}
+.work-run-group__chip--active .work-run-group__agent {
+  animation: work-think-pulse 1.2s ease-in-out infinite;
+}
+
 .work-run-group__dot {
   position: absolute;
   top: -3px;
@@ -488,6 +634,11 @@ function ariaOf(item: WorkRunItem): string {
   border: none;
   background: var(--panel-err);
   animation: none;
+}
+/* 子代理运行中的转圈点：青色（与 chip 同色系） */
+.work-run-group__dot--live {
+  border-color: color-mix(in srgb, #14b8a6 30%, transparent);
+  border-top-color: #14b8a6;
 }
 @keyframes work-run-spin {
   to {
@@ -524,17 +675,27 @@ function ariaOf(item: WorkRunItem): string {
   margin-bottom: 6px;
 }
 .work-run-group__detail-icon {
-  width: 14px;
-  height: 14px;
-  color: var(--panel-accent);
-  flex: 0 0 auto;
-}
 .work-run-group__detail-icon--reasoning {
   color: #a78bfa;
+}
+.work-run-group__detail-icon--subagent {
+  color: #14b8a6;
 }
 .work-run-group__detail-name {
   font-family: var(--nm-font-mono, monospace);
   font-size: 12.5px;
+  color: var(--nm-text-primary);
+}
+.work-run-group__detail-name--reasoning {
+  font-family: inherit;
+}
+.work-run-group__detail-name--agent {
+  font-family: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
   color: var(--nm-text-primary);
 }
 .work-run-group__detail-name--reasoning {

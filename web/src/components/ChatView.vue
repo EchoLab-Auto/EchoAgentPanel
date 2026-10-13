@@ -3,8 +3,7 @@
 //! 分工（2026-09-30）：机制层来自 ui-frame 元组件——`ChatTray`（吸底滚动、
 //! 回到底部）、`ChatComposer`（IME 组合保护）；**行模型与组合由面板自组**：
 //! 连续工作条目合并（WorkRunGroup：工具调用 + 思考统一为小圆角矩形 chip
-//! 的通用排布）、子代理（SubagentEventBlock）、消息行（MessageItem，内部用
-//! 库 `ChatBubble` + doc `MarkdownRenderer`）。库的 chat 组合组件已移除
+//! 的通用排布）、子代理（同列 chip）、消息行（MessageItem，内部用
 //! （组合权归产品）。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
@@ -27,7 +26,6 @@ import { checklistKey, sessionKey } from '../keys';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
-import SubagentEventBlock from './SubagentEventBlock.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
@@ -609,6 +607,20 @@ const workRowOf = (m: ChatMessageWithImages): WorkRunItem | null => {
       time: m.time ? formatTime(m.time) : undefined,
     };
   }
+  // 子代理完成回报（`<subagent_event>` 合并钩子→结构化载荷）：与工具/思考
+  // 同列 chip（同一套一般化排布），点击展开结论。载荷缺失时按内容降级。
+  if ((m.role as string) === 'subagent') {
+    const sub = m.subagent;
+    return {
+      kind: 'subagent',
+      key: String(m.id),
+      task: sub?.task ?? m.content,
+      result: sub?.result ?? '',
+      success: sub?.success ?? true,
+      running: sub?.running === true,
+      time: m.time ? formatTime(m.time) : undefined,
+    };
+  }
   const tool = m.tool;
   if (m.role !== 'tool' || !tool) return null;
   return {
@@ -995,9 +1007,8 @@ function mediaSrc(img: string): string {
       </div>
     </div>
     <!-- 消息列表：flex:1，内部 ChatTray 独立滚动。
-         行模型由面板自组：连续工作条目（工具调用 + 思考）合并为一排
-         小圆角矩形 chip（WorkRunGroup），子代理走 SubagentEventBlock，
-         其余消息逐条 MessageItem。
+         行模型由面板自组：连续工作条目（工具调用 + 思考 + 子代理完成）合并
+         为一排小圆角矩形 chip（WorkRunGroup），其余消息逐条 MessageItem。
          （库 chat 组合件已移除；滚动/吸底沿用库元组件 ChatTray。） -->
     <ChatTray
       class="chat-view__list"
@@ -1021,16 +1032,7 @@ function mediaSrc(img: string): string {
           class="chat-view__item"
         />
         <template v-else-if="row.kind === 'single'">
-          <!-- 子代理完成回报：紧凑一行（任务摘要 + 可展开结论），非 JSON 气泡 -->
-          <SubagentEventBlock
-            v-if="(row.message as { role: string }).role === 'subagent'"
-            :event="(row.message as ChatMessageWithImages).subagent ?? { id: '', task: '', success: true, result: '' }"
-            :time="row.message.time ? formatTime(row.message.time) : undefined"
-            class="chat-view__item"
-            :class="{ 'chat-view__item--enter': (row.message as ChatMessageWithImages).animate }"
-          />
           <div
-            v-else
             class="chat-view__item chat-view__item--msg"
             :class="{ 'chat-view__item--enter': (row.message as ChatMessageWithImages).animate }"
           >

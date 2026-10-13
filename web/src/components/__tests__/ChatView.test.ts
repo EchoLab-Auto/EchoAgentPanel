@@ -93,7 +93,7 @@ describe('ChatView 布局契约', () => {
     expect(scoped.findAll('.stub-item').length).toBe(1);
   });
 
-  it('子代理完成回报渲染为紧凑行（.subagent-event），不落用户气泡', () => {
+  it('子代理完成回报渲染为工作 chip（.work-run-group__chip--subagent），不落用户气泡', () => {
     state.trunk = [
       { key: 'u1', role: 'user', content: '普通消息', time: 1, sessionId: 'local:tui::a' },
       {
@@ -106,9 +106,11 @@ describe('ChatView 布局契约', () => {
       },
     ];
     const wrapper = mountChatView('local:tui::a');
-    expect(wrapper.find('.subagent-event').exists()).toBe(true);
-    expect(wrapper.find('.subagent-event').text()).toContain('子代理完成');
-    expect(wrapper.find('.subagent-event').text()).toContain('审计 Panel 文档');
+    const chip = wrapper.find('.work-run-group__chip--subagent');
+    expect(chip.exists()).toBe(true);
+    // 悬停提示：状态 + 任务摘要
+    expect(chip.attributes('title')).toContain('子代理完成');
+    expect(chip.attributes('title')).toContain('审计 Panel 文档');
     // 普通消息仍走气泡（stub）；子代理行不经过 MessageItem
     expect(wrapper.findAll('.stub-item').length).toBe(1);
   });
