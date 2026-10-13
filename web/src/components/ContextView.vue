@@ -11,8 +11,11 @@ import { state } from '../store';
 import { sessionKey } from '../keys';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
+import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
 import LoadHint from './LoadHint.vue';
 import { confirmDialog } from '../confirm';
+
+const { addToast } = useToast();
 
 //! 块种类 → 中文徽标（Core 侧 kind 全集的镜像；缺项会裸显英文 kind）。
 //! `displayLabel` 会据此剥掉 label 里重复的种类前缀（如「常驻技能 · xx」）。
@@ -146,13 +149,28 @@ function blockBarWidth(tokens: number): string {
 }
 
 // 两步确认：第一次点击武装，第二次发送清空命令。
+// 只清**当前会话**（2026-10 修复）：此前不带 session_id，Core 会把同一
+// 人格下所有会话（QQ 群/私聊、其他 workspace 会话）的记忆一并清空。
 function handleClear() {
   if (!confirmClear.value) {
     confirmClear.value = true;
     return;
   }
-  sendCommand({ ClearHistory: { team_id: targetTeamId.value } });
   confirmClear.value = false;
+  // fail-closed：会话未知时不发命令——缺 session_id 在 Core 语义是
+  // 「清空该人格全部会话」，与按钮「只清当前会话」的承诺不符；误触代价
+  // 不可恢复，宁可拒绝（2026-10 用户报告教训）。
+  if (!targetSessionId.value) {
+    addToast({
+      message: '当前会话尚未确定，无法执行清理（防止误清其他会话）。请先选择会话。',
+      type: 'warning',
+      duration: 5000,
+    });
+    return;
+  }
+  sendCommand({
+    ClearHistory: { team_id: targetTeamId.value, session_id: targetSessionId.value },
+  });
 }
 
 function refresh() {
@@ -199,7 +217,7 @@ async function compactHistory() {
       <button
         class="ctx-clear"
         :class="{ confirm: confirmClear }"
-        title="清空 agent 的全部对话历史与上下文记忆（不可恢复）"
+        title="清空**当前会话**的对话历史与上下文记忆（不可恢复；不影响其他会话）"
         @click="handleClear"
       >
         {{ confirmClear ? '确认清理？不可恢复' : '清理历史记忆' }}

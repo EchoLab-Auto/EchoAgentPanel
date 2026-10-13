@@ -443,7 +443,15 @@ export type BackendCommand =
   | { ShellStart: { workdir?: string | null } }
   | { ShellExec: { session_id: string; command: string; timeout_secs?: number } }
   | { ShellStop: { session_id: string } }
-  | { ClearHistory: { team_id?: string | null } }
+  | {
+      ClearHistory: {
+        team_id?: string | null;
+        /** 清理范围（2026-10）：会话 id —— 仅清该会话；缺省/null = 清空该
+         *  人格全部会话（显式全清的管理语义）。Core 此前只有 team 维度，
+         *  面板「清理历史记忆」把同人格下所有会话一并清掉（已修复）。 */
+        session_id?: string | null;
+      };
+    }
   | { CancelRequestedWork: { session_id: string; all: boolean; team_id?: string | null } }
   | { StartAdapter: { name: string } }
   | { StopAdapter: { name: string } }
