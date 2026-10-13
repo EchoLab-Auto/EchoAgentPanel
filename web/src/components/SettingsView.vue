@@ -196,6 +196,7 @@ function resetTransient() {
 async function switchCategory(cat: CategoryKey) {
   if (activeCategory.value === cat) return;
   if (activeCategory.value === 'skill' && !(await confirmDiscardSkillEdit())) return;
+  if (activeCategory.value === 'team' && !(await confirmDiscardTeamEdit())) return;
   activeCategory.value = cat;
   resetTransient();
 }
@@ -895,7 +896,9 @@ function selectPluginItem(p: PluginInfo) {
   resetTransient();
   selectedPlugin.value = p;
 }
-function selectTeamItem(t: TeamInfo) {
+async function selectTeamItem(t: TeamInfo) {
+  // 编辑中切条目（含点回自己——会重填表单）先走脏确认，防静默丢改动。
+  if (!(await confirmDiscardTeamEdit())) return;
   editing.value = false;
   creating.value = false;
   selectedTeam.value = t;
@@ -962,6 +965,9 @@ async function closeMobileDetail() {
   if (activeCategory.value === 'skill' && (editing.value || creating.value)) {
     if (!(await confirmDiscardSkillEdit())) return;
   }
+  if (activeCategory.value === 'team' && teamEditing.value) {
+    if (!(await confirmDiscardTeamEdit())) return;
+  }
   resetTransient();
   selectedSkill.value = null;
   selectedTool.value = null;
@@ -1010,6 +1016,40 @@ const teamFormEnabledSkills = ref<string[]>([]);
 const teamFormSystemSkills = ref<string[]>([]);
 /** 编辑已有成员时 ID 锁定；新建时 ID 可自由输入 */
 const teamFormIsEdit = ref(false);
+
+// ── 脏检查（与技能工作台同构；2026-10 巡检补齐）──
+// 此前 team 编辑无任何脏保护：点另一条、点「新建智能体」、切分类都会静默
+// 丢弃未保存的表单改动（技能工作台早有 skillFormDirty + 切换确认）。
+function teamSnapshotOf(): string {
+  return [
+    teamFormId.value,
+    teamFormName.value,
+    teamFormDescription.value,
+    teamFormPrompt.value,
+    teamFormEnabled.value ? '1' : '0',
+    JSON.stringify(teamFormDisabledTools.value),
+    JSON.stringify(teamFormDisabledSkills.value),
+    JSON.stringify(teamFormEnabledPlugins.value),
+    JSON.stringify(teamFormEnabledTools.value),
+    JSON.stringify(teamFormEnabledSkills.value),
+    JSON.stringify(teamFormSystemSkills.value),
+  ].join('\u0000');
+}
+const teamFormSnapshot = ref('');
+const teamFormDirty = computed(
+  () =>
+    teamEditing.value && !!teamFormSnapshot.value && teamSnapshotOf() !== teamFormSnapshot.value,
+);
+
+/** 有未保存改动时询问；返回 false = 取消当前动作（与技能工作台同口径）。 */
+async function confirmDiscardTeamEdit(): Promise<boolean> {
+  if (!teamFormDirty.value) return true;
+  return confirmDialog('智能体配置尚未保存，放弃更改？', {
+    title: '放弃未保存的编辑',
+    danger: true,
+    confirmText: '放弃',
+  });
+}
 
 const teamFormModel = computed(() => ({
   id: teamFormId.value,
@@ -1191,7 +1231,9 @@ function setTeamLoopMode(value: string | number) {
   );
 }
 
-function startTeamCreate() {
+async function startTeamCreate() {
+  // 编辑中再点「新建智能体」→ 先确认（否则表单被静默清空）。
+  if (!(await confirmDiscardTeamEdit())) return;
   activeCategory.value = 'team';
   teamEditing.value = true;
   teamFormIsEdit.value = false;
@@ -1207,6 +1249,7 @@ function startTeamCreate() {
   teamFormEnabledSkills.value = [];
   teamFormSystemSkills.value = [];
   selectedTeam.value = null;
+  teamFormSnapshot.value = teamSnapshotOf();
 }
 
 function startTeamEdit(agent: TeamInfo) {
@@ -1223,10 +1266,12 @@ function startTeamEdit(agent: TeamInfo) {
   teamFormEnabledTools.value = agent.enabled_tools ?? [];
   teamFormEnabledSkills.value = agent.enabled_skills ?? [];
   teamFormSystemSkills.value = agent.system_skills ?? [];
+  teamFormSnapshot.value = teamSnapshotOf();
 }
 
 function cancelTeamEdit() {
   teamEditing.value = false;
+  teamFormSnapshot.value = '';
 }
 
 function saveTeam() {
@@ -1248,6 +1293,7 @@ function saveTeam() {
     },
   });
   teamEditing.value = false;
+  teamFormSnapshot.value = '';
 }
 
 async function deleteTeam(team: TeamInfo) {
@@ -1266,6 +1312,7 @@ async function deleteTeam(team: TeamInfo) {
   sendCommand({ DeleteTeam: { id: team.id } });
   selectedTeam.value = null;
   teamEditing.value = false;
+  teamFormSnapshot.value = '';
 }
 
 // ── 技能启停 ──
@@ -2431,6 +2478,12 @@ watch(
               </NeumorphismCollapse>
 
               <div class="form-actions form-actions--corner">
+                <span
+                  class="form-actions__state"
+                  :class="{ 'form-actions__state--dirty': teamFormDirty }"
+                >
+                  {{ teamFormDirty ? '● 有未保存的更改' : '○ 无更改' }}
+                </span>
                 <NeumorphismButton
                   v-if="teamFormIsEdit && selectedTeam && state.teams.length > 1"
                   variant="glass"

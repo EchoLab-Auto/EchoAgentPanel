@@ -3,9 +3,16 @@
 //! （基础信息 / 系统提示词 / 启用的能力 / 禁用的能力），
 //! 每个分区标题行带摘要；能力分区内含 插件/包/工具/技能 四个子块。
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mount, flushPromises } from '@vue/test-utils';
+
+vi.mock('../../confirm', () => ({
+  // 确认框服务（与技能工作台测试同款）：默认同意，需要"拒绝"的用例再覆盖。
+  confirmDialog: vi.fn(() => Promise.resolve(true)),
+}));
+
 import SettingsView from '../SettingsView.vue';
+import { confirmDialog } from '../../confirm';
 import { state } from '../../store';
 
 function seed() {
@@ -144,5 +151,52 @@ describe('SettingsView 智能体编辑器', () => {
     expect(detail.text()).toContain('EchoCode');
     const editBtn = wrapper.findAll('.nm-button').find((b) => b.text().trim() === '编辑');
     expect(editBtn).toBeTruthy();
+  });
+
+  // ── 脏检查（2026-10 巡检补齐；与技能工作台同口径）──
+
+  it('编辑表单脏状态：改动后底栏显示「有未保存的更改」', async () => {
+    const wrapper = await openTeamEditor();
+    const footer = wrapper.find('.form-actions--corner');
+    expect(footer.text()).toContain('无更改');
+    // 修改名称输入（placeholder 定位，避开 disabled 的 ID 输入）
+    const nameInput = wrapper.find('.team-editor input[placeholder="写作助理"]');
+    expect(nameInput.exists()).toBe(true);
+    await nameInput.setValue('EchoCode-改');
+    expect(footer.text()).toContain('有未保存的更改');
+  });
+
+  it('编辑中点击其他条目先确认（拒绝留在原编辑，同意才切换）', async () => {
+    const wrapper = await openTeamEditor();
+    const nameInput = wrapper.find('.team-editor input[placeholder="写作助理"]');
+    await nameInput.setValue('EchoCode-改');
+    const other = wrapper.findAll('.caps-list-item').find((el) => el.text().includes('base'))!;
+    // 拒绝放弃 → 留在 EchoCode 编辑（改动保留）
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await other.trigger('click');
+    await flushPromises();
+    expect(confirmDialog).toHaveBeenCalled();
+    expect((nameInput.element as HTMLInputElement).value).toBe('EchoCode-改');
+    // 同意放弃 → 切到 base 编辑（表单已重填）
+    await other.trigger('click');
+    await flushPromises();
+    expect((nameInput.element as HTMLInputElement).value).toBe('base');
+  });
+
+  it('编辑中切换分类先确认（拒绝留守智能体分类）', async () => {
+    const wrapper = await openTeamEditor();
+    const nameInput = wrapper.find('.team-editor input[placeholder="写作助理"]');
+    await nameInput.setValue('EchoCode-改');
+    const skillNav = wrapper.findAll('.caps-nav-item').find((n) => n.text().includes('技能'))!;
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await skillNav.trigger('click');
+    await flushPromises();
+    expect(confirmDialog).toHaveBeenCalled();
+    // 仍在智能体编辑区
+    expect(wrapper.find('.team-editor').exists()).toBe(true);
+    // 同意 → 切走（编辑区消失）
+    await skillNav.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.team-editor').exists()).toBe(false);
   });
 });
