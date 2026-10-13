@@ -1,7 +1,8 @@
-//! MessageItem（面板自组消息行）契约测试（2026-09-30）。
+//! MessageItem（面板自组消息行）契约测试（2026-09-30；2026-10-13 气泡壳收敛）。
 //!
-//! 背景：ui-frame 移除了 chat 组合组件（ChatMessageItem 等），面板改用
-//! `ChatBubble` 元组件自组消息行。本测试锁定角色 → 气泡形态的映射，
+//! 背景：ui-frame 移除了 chat 组合组件（ChatMessageItem 等）；2026-10-13
+//! 原库 `ChatBubble` 元组件亦被解散（角色→样式映射烘进壳），气泡壳样式
+//! 改由面板 CSS 配方承担。本测试锁定角色 → 气泡形态的映射，
 //! 以及头部（角色名 / 来源 / 时间）与 Markdown 渲染的分派：
 //! - user：居右主色气泡、纯文本；
 //! - agent：居左中性气泡、正文走 MarkdownLazy（2026-10 起为延迟加载的
@@ -52,9 +53,8 @@ describe('MessageItem 消息行', () => {
         } as ChatMessageWithImages['source'],
       }),
     );
-    const bubble = wrapper.find('.nm-chat-bubble');
-    expect(bubble.classes()).toContain('nm-chat-bubble--end');
-    expect(bubble.classes()).toContain('nm-chat-bubble--primary');
+    const bubble = wrapper.find('.msg-item__bubble');
+    expect(bubble.classes()).toContain('msg-item__bubble--user');
     // 头部：来源标签（适配器 · 用户名）+ 时间；user 不显示角色名
     expect(wrapper.text()).toContain('local · local user');
     expect(wrapper.text()).toContain('T1700000000');
@@ -66,9 +66,8 @@ describe('MessageItem 消息行', () => {
 
   it('agent：居左中性气泡，正文走 Markdown；头部有角色名', () => {
     const wrapper = mountItem(message({ role: 'agent', content: '# 标题' }));
-    const bubble = wrapper.find('.nm-chat-bubble');
-    expect(bubble.classes()).toContain('nm-chat-bubble--start');
-    expect(bubble.classes()).toContain('nm-chat-bubble--default');
+    const bubble = wrapper.find('.msg-item__bubble');
+    expect(bubble.classes()).toContain('msg-item__bubble--agent');
     expect(wrapper.text()).toContain('Agent');
     expect(wrapper.find('.md-stub').text()).toBe('# 标题');
     // 无障碍名标注角色
@@ -77,9 +76,8 @@ describe('MessageItem 消息行', () => {
 
   it('system：居中平铺 + 时间，不渲染气泡头部角色', () => {
     const wrapper = mountItem(message({ role: 'system', content: '定时器触发' }));
-    const bubble = wrapper.find('.nm-chat-bubble');
-    expect(bubble.classes()).toContain('nm-chat-bubble--center');
-    expect(bubble.classes()).toContain('nm-chat-bubble--plain');
+    const bubble = wrapper.find('.msg-item__bubble');
+    expect(bubble.classes()).toContain('msg-item__bubble--system');
     expect(wrapper.text()).toContain('定时器触发');
     expect(wrapper.text()).toContain('T1700000000');
   });
@@ -90,8 +88,9 @@ describe('MessageItem 消息行', () => {
       'utf-8',
     );
     const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
-    // 双写类名压过库样式，max-width 解除到 100%（短贴内容、长撑满列宽）
-    expect(style).toMatch(/\.msg-item__bubble\.msg-item__bubble\s*\{[^}]*max-width:\s*100%/s);
+    // max-width 100%（短贴内容、长撑满列宽；2026-10-13 收敛为面板自有样式，
+    // 不再需要双写类名压库样式）
+    expect(style).toMatch(/\.msg-item__bubble\s*\{[^}]*max-width:\s*100%/s);
     // 标题锚点（绝对定位 -22px）会撑出横向溢出，气泡内隐藏
     expect(style).toMatch(/heading-anchor[^{]*\{[^}]*display:\s*none/s);
   });

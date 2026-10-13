@@ -11,7 +11,7 @@
 //!
 //! 修复（styles.css 移动媒体查询段）：以 `#app` 前缀（特异性 1,1,0，覆盖
 //! 库 scoped 的 `[data-v-*]` 规则）把布局拉回定高 + 恢复收缩能力，让
-//! ChatTray 等内部滚动区正常形成。本测试锁定该契约，防止回归（样式在全局
+//! 会话滚动区等内部滚动区正常形成。本测试锁定该契约，防止回归（样式在全局
 //! CSS 中无法经 jsdom 生效，采用与 ChatViewMobile.test.ts 同款的源码断言）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';

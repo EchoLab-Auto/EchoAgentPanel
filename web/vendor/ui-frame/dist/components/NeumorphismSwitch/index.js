@@ -1,4 +1,4 @@
-import { N as f } from "../../chunks/NeumorphismSwitch-Caas9-Oj.js";
+import { N as f } from "../../chunks/NeumorphismSwitch-Bg5yf_Pl.js";
 export {
   f as default
 };

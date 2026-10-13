@@ -1,23 +1,22 @@
 <script setup lang="ts">
 //! 聊天主视图：消息列表 + 固定底部输入区（flex 布局，输入区占位不遮挡消息）。
-//! 分工（2026-09-30）：机制层来自 ui-frame 元组件——`ChatTray`（吸底滚动、
-//! 回到底部）、`ChatComposer`（IME 组合保护）；**行模型与组合由面板自组**：
-//! 连续工作条目合并（WorkRunGroup：工具调用 + 思考统一为小圆角矩形 chip
-//! 的通用排布）、子代理（同列 chip）、消息行（MessageItem，内部用
-//! （组合权归产品）。
+//! 分工（2026-09-30；2026-10-13 元组件层继续收敛）：机制层来自 ui-frame——
+//! `useChatScroll`（headless 吸底滚动）+ `ChatComposer`（IME 组合保护）；
+//! **行模型与组合由面板自组**：连续工作条目合并（WorkRunGroup：工具调用 +
+//! 思考统一为小圆角矩形 chip 的通用排布）、子代理（同列 chip）、消息行
+//! （MessageItem，气泡壳为面板 CSS 配方）。滚动区（原 `ChatTray` 组装件）
+//! 与跳转钮亦自组（2026-10-13：库侧该组装件因"视觉+行为+按钮+语义四事
+//! 打包"被解散，组合权归产品）。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismDrawer from '@echolab-auto/ui-frame/components/NeumorphismDrawer';
 import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
-import {
-  ChatComposer,
-  ChatTray,
-  type ChatMessage,
-} from '@echolab-auto/ui-frame/chat';
+import { useChatScroll } from '@echolab-auto/ui-frame/composables/useChatScroll';
+import { ChatComposer, type ChatMessage } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
 import { checklistsForSession } from '../state';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
@@ -658,7 +657,7 @@ const messageRows = computed<ChatRow[]>(() => {
 function rowKey(row: ChatRow): string {
   return row.kind === 'work-group' ? row.key : String(row.message.id);
 }
-/** ChatTray 吸底观察源：最后一条消息的尾部内容（托盘内容同源）。 */
+/** 吸底观察源：最后一条消息的尾部内容（滚动区内容同源）。 */
 function trayWatchSource(): unknown {
   const last = messages.value[messages.value.length - 1];
   return [
@@ -669,6 +668,20 @@ function trayWatchSource(): unknown {
     last?.branch?.entries.length,
   ];
 }
+
+// 吸底滚动（headless，2026-10-13 起直用 useChatScroll——原 ChatTray 组装件
+// 已解散：滚动井视觉与跳转钮由本组件自组，见样式区与模板）。
+const listRef = ref<HTMLElement | null>(null);
+const { showJumpButton, handleScroll, scrollToBottom } = useChatScroll({
+  container: listRef,
+  watchSource: trayWatchSource,
+});
+
+// 初始挂载即定位到底部（瞬时，无平滑动画；同原 ChatTray 行为）。
+onMounted(async () => {
+  await nextTick();
+  scrollToBottom('auto');
+});
 
 const emptyText = computed(() =>
   props.sessionId === 'global'
@@ -1006,14 +1019,18 @@ function mediaSrc(img: string): string {
         </div>
       </div>
     </div>
-    <!-- 消息列表：flex:1，内部 ChatTray 独立滚动。
+    <!-- 消息列表：flex:1，滚动区独立（2026-10-13 起自组——原 ChatTray 组装件
+         解散，吸底行为改直用 headless useChatScroll）。
          行模型由面板自组：连续工作条目（工具调用 + 思考 + 子代理完成）合并
-         为一排小圆角矩形 chip（WorkRunGroup），其余消息逐条 MessageItem。
-         （库 chat 组合件已移除；滚动/吸底沿用库元组件 ChatTray。） -->
-    <ChatTray
-      class="chat-view__list"
-      :watch-source="trayWatchSource"
-    >
+         为一排小圆角矩形 chip（WorkRunGroup），其余消息逐条 MessageItem。 -->
+    <div class="chat-view__tray">
+      <div
+        ref="listRef"
+        class="chat-view__list"
+        role="log"
+        aria-live="polite"
+        @scroll="handleScroll"
+      >
       <div v-if="messageRows.length === 0" class="chat-view__empty">
         <template v-if="!connected">
           <NeumorphismSpinner size="large" />
@@ -1057,7 +1074,32 @@ function mediaSrc(img: string): string {
           </div>
         </template>
       </template>
-    </ChatTray>
+      </div>
+      <!-- 「回到底部」：离开底部时浮现（信号来自 useChatScroll；落位与
+           隐藏规则见样式区——避开悬浮输入区与右侧栏卡片）。 -->
+      <button
+        v-if="showJumpButton"
+        type="button"
+        class="chat-view__jump"
+        aria-label="跳转到最新消息"
+        title="跳转到最新消息"
+        @click="scrollToBottom()"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 5v14M19 12l-7 7-7-7" />
+        </svg>
+      </button>
+    </div>
 
     <!-- Agent 配置悬浮弹层：覆盖会话区（上/左/右 12px，底距配置按钮 12px） -->
     <AgentConfigModal
@@ -1243,9 +1285,10 @@ function mediaSrc(img: string): string {
 /*
  * 布局契约（有对应测试，改动需同步更新 src/components/ChatView.test.ts）：
  * 1. .chat-view 是纵向 flex 容器 + position:relative（定位上下文）；
- * 2. .chat-view__list flex:1 + min-height:0 —— 滚动只在 ChatTray 内部发生，
- *    内容可滚动到输入框之下（输入框悬浮在上层，毛玻璃透出下层消息）；
- *    底部 padding-bottom 预留输入框高度，保证最后一条消息仍可滚出可见；
+ * 2. .chat-view__list（2026-10-13 起自身即滚动区——原 ChatTray 组装件解散）
+ *    flex:1 + min-height:0 + overflow-y:auto，内容可滚动到输入框之下
+ *    （输入框悬浮在上层，毛玻璃透出下层消息）；底部 padding-bottom 在
+ *    滚动区内部预留输入框高度，保证最后一条消息仍可滚出可见；
  * 3. .chat-composer-float position:absolute 固定于底部（吸底悬浮），
  *    z-index 高于消息列表；半透明毛玻璃背景透出滚过的消息。
  */
@@ -1290,27 +1333,44 @@ function mediaSrc(img: string): string {
   outline-offset: -4px;
 }
 
-/* ChatTray 需要定高父级才能出现滚动区。
-   注意：预留空间必须加在*滚动区内部*（nm-chat-tray__scroll），
-   而不是本容器上——外层 padding 会压缩滚动区高度，消息永远
-   滚不到输入框后面；滚动区自身延伸到输入框后方，消息才能
-   从毛玻璃底下划过。 */
+/* 托盘包装（2026-10-13）：跳转钮的定位上下文（原 ChatTray 根元素的职责）。 */
+.chat-view__tray {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 滚动区（2026-10-13 起本元素自身即滚动区——原 ChatTray 组装件解散，
+   滚动井视觉 / 吸底行为（headless useChatScroll）/ 跳转钮全部自组）。
+   预留空间加在滚动区*内部*——外层 padding 会压缩滚动高度，消息将永远
+   无法滚到输入框后方；滚动区自身延伸到输入框后方，消息才能从毛玻璃
+   底下划过。滚动井：凹陷背景（--nm-chat-tray-bg + inset 阴影）。 */
 .chat-view__list {
   flex: 1;
   min-height: 0;
-}
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--nm-chat-tray-bg);
+  box-shadow:
+    inset 2px 2px 6px var(--nm-shadow-dark),
+    inset -2px -2px 6px var(--nm-shadow-light);
+  scrollbar-width: thin;
+  scrollbar-color: var(--nm-neutral-300) transparent;
 
-/* 滚动区内部预留：
-   - 底部：按输入框最大高度(5行,约156px) + 边距(12px) + 松量；
-   - 左右：有卡片的边栏列宽（正文不被悬浮卡片压住）；拖动中归零，
-     避免落位时行宽二次跳变。
+  /* 预留：
+     - 底部：按输入框最大高度(5行,约156px) + 边距(12px) + 松量；
+     - 左右：有卡片的边栏列宽（正文不被悬浮卡片压住）；拖动中归零，
+       避免落位时行宽二次跳变。
 
-   行距（2026-09-28 紧凑化）：库默认 gap 12px 对"工作行"（推理块 / 工具行）
-   过宽——一回合里推理与工具交替十几次，屏幕被空白吃掉。改为 gap 6px：
-   消息气泡用 .chat-view__item--msg 的 3px 边距补回呼吸（气泡间仍约 12px），
-   工作行保持 6px 紧排；推理块/工具行自身不再带外边距。 */
-.chat-view__list :deep(.nm-chat-tray__scroll) {
+     行距（2026-09-28 紧凑化）：库默认 12px 对"工作行"（推理块 / 工具行）
+     过宽——一回合里推理与工具交替十几次，屏幕被空白吃掉。改为 6px：
+     消息气泡用 .chat-view__item--msg 的 3px 边距补回呼吸（气泡间仍约 12px），
+     工作行保持 6px 紧排；推理块/工具行自身不再带外边距。 */
   gap: 6px;
+  padding: 18px var(--nm-spacing-md);
   padding-bottom: 190px;
   padding-left: v-bind(trayPadLeft);
   padding-right: v-bind(trayPadRight);
@@ -1383,22 +1443,53 @@ function mediaSrc(img: string): string {
    拖选慢路径，见 ui-frame CHANGELOG Unreleased）——此处的应用侧
    `transform: none !important` 覆盖已随之删除，不再需要。 */
 
-/* 吸底跳转按钮（「回到底部」）的落位（2026-09-28 重排）：
+/* 吸底跳转按钮（「回到底部」，2026-10-13 起自组——视觉吸收自原 ChatTray，
+   落位沿用 2026-09-28 重排）：
    - 库默认贴右下角（right/bottom = 16px）——既被悬浮输入区压住，又被
-     右侧栏卡片盖住（rail 列 z-index 4，按钮 z-index auto，实测
-     elementFromPoint 命中的是 rail-stack__body）。
-   - 现落位：**右侧栏列左侧 16px**（无右栏时回到默认 16px 边距），
-     纵向与边栏列底对齐（入口行上方 8px，同 `calc(entryBottom + 45px)`）。
+     右侧栏卡片盖住（rail 列 z-index 4）；现落位：**右侧栏列左侧 16px**
+     （无右栏时回到默认 16px 边距），纵向与边栏列底对齐（入口行上方 8px，
+     同 `calc(entryBottom + 45px)`）。
    - 显式 z-index 5：高于 rail 列（4）、低于入口行（6）；纵向已错开，
      仅作防御。 */
-.chat-view :deep(.nm-chat-tray__jump) {
+.chat-view__jump {
+  position: absolute;
   right: calc(v-bind(trayPadRight) + 16px);
   bottom: calc(v-bind(entryBottom) + 45px);
   z-index: 5;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--nm-border-radius-full);
+  background-color: var(--nm-surface-color);
+  color: var(--nm-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow:
+    4px 4px 10px var(--nm-shadow-dark),
+    -3px -3px 8px var(--nm-shadow-light);
+  transition:
+    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+    color 0.2s ease;
+}
+@media (hover: hover) {
+  .chat-view__jump:hover {
+    transform: translateY(-2px);
+    color: var(--nm-text-primary);
+  }
+}
+.chat-view__jump:active {
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-view__jump {
+    transition: none;
+  }
 }
 /* 会话区浮层打开期间隐藏（浮层从入口行向上展开，窄视口下会盖住按钮；
    见 anyOverlayOpen 注释——隐藏比叠层更好）。 */
-.chat-view--overlay-open :deep(.nm-chat-tray__jump) {
+.chat-view--overlay-open .chat-view__jump {
   display: none;
 }
 
@@ -1788,7 +1879,7 @@ function mediaSrc(img: string): string {
   }
 
   /* 消息气泡：窄屏减少两侧浪费 */
-  .chat-view__list :deep(.nm-chat-bubble) {
+  .chat-view__list :deep(.msg-item__bubble) {
     max-width: 88%;
   }
 

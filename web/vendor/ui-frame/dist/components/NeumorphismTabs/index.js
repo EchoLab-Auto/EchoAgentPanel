@@ -1,4 +1,4 @@
-import { N as f } from "../../chunks/NeumorphismTabs-Duap_z9d.js";
+import { N as f } from "../../chunks/NeumorphismTabs-D5OwLAaC.js";
 export {
   f as default
 };

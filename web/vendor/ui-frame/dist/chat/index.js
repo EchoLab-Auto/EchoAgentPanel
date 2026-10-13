@@ -1,168 +1,14 @@
-import { defineComponent as C, computed as m, openBlock as o, createElementBlock as d, withModifiers as j, unref as c, normalizeClass as w, toDisplayString as x, renderSlot as h, createElementVNode as v, createBlock as R, createCommentVNode as f, ref as O, onMounted as F, nextTick as J, withCtx as L, createTextVNode as N, createVNode as I } from "vue";
+import { defineComponent as b, computed as u, openBlock as a, createElementBlock as l, normalizeClass as _, renderSlot as m, createBlock as z, withCtx as $, createTextVNode as x, toDisplayString as B, createCommentVNode as v, createElementVNode as h, createVNode as V, unref as c, ref as I, withModifiers as M } from "vue";
+import { N as O } from "../chunks/NeumorphismTextarea-D4alPN-q.js";
+import { N as L } from "../chunks/NeumorphismButton-CTLPjGe-.js";
+import { useLocale as N } from "../composables/useLocale.js";
+import { useChatInput as j } from "../composables/useChatInput.js";
+import { _ as k } from "../chunks/_plugin-vue_export-helper-CHgC5LLL.js";
 import { useClipboard as K } from "../composables/useClipboard.js";
-import { useLocale as T } from "../composables/useLocale.js";
-import { _ as $ } from "../chunks/_plugin-vue_export-helper-CHgC5LLL.js";
-import { u as P } from "../chunks/createComponent-jnXBYqCm.js";
-import { useChatScroll as E } from "../composables/useChatScroll.js";
-import { N as M } from "../chunks/NeumorphismTextarea--YsTkmI1.js";
-import { N as z } from "../chunks/NeumorphismButton-DEVgFO0I.js";
-import { useChatInput as A } from "../composables/useChatInput.js";
-import '../index.css';const D = ["aria-label", "title"], U = /* @__PURE__ */ C({
-  __name: "ChatCopyButton",
-  props: {
-    text: {}
-  },
-  setup(e) {
-    const { t: s } = T(), { copied: t, copy: u } = K(), n = m(() => t.value ? s("chatCopied") : s("chatCopy"));
-    return (l, p) => (o(), d("button", {
-      type: "button",
-      class: w(["nm-chat-copy", { "nm-chat-copy--copied": c(t) }]),
-      "aria-label": n.value,
-      title: n.value,
-      onClick: p[0] || (p[0] = j((a) => c(u)(e.text), ["stop"]))
-    }, x(c(t) ? "✓" : "⧉"), 11, D));
-  }
-}), q = /* @__PURE__ */ $(U, [["__scopeId", "data-v-aef64e01"]]), G = {
-  key: 0,
-  class: "nm-chat-bubble__head"
-}, H = { class: "nm-chat-bubble__content" }, Q = /* @__PURE__ */ C({
-  __name: "ChatBubble",
-  props: {
-    align: { default: "start" },
-    tone: { default: "default" },
-    copyText: { default: "" }
-  },
-  setup(e) {
-    return (s, t) => (o(), d("div", {
-      class: w(["nm-chat-bubble", [`nm-chat-bubble--${e.align}`, `nm-chat-bubble--${e.tone}`]])
-    }, [
-      s.$slots.head || e.copyText ? (o(), d("div", G, [
-        h(s.$slots, "head", {}, void 0, !0),
-        t[0] || (t[0] = v("span", { class: "nm-chat-bubble__head-spacer" }, null, -1)),
-        e.copyText ? (o(), R(q, {
-          key: 0,
-          class: "nm-chat-bubble__copy",
-          text: e.copyText
-        }, null, 8, ["text"])) : f("", !0)
-      ])) : f("", !0),
-      v("div", H, [
-        h(s.$slots, "default", {}, void 0, !0)
-      ])
-    ], 2));
-  }
-}), _e = /* @__PURE__ */ $(Q, [["__scopeId", "data-v-4d0c2b26"]]), W = { class: "nm-chat-tray" }, X = ["aria-label", "title"], Y = /* @__PURE__ */ C({
-  __name: "ChatTray",
-  props: {
-    autoScroll: { type: Boolean, default: void 0 },
-    scrollThreshold: { default: void 0 },
-    watchSource: { type: Function, default: void 0 },
-    jumpLabel: { default: "" }
-  },
-  setup(e, { expose: s }) {
-    const t = e, { t: u } = T(), { config: n, resolveProp: l } = P(), p = m(
-      () => {
-        var i;
-        return l(t.autoScroll, (i = n.value.chat) == null ? void 0 : i.autoScroll, !0);
-      }
-    ), a = m(
-      () => {
-        var i;
-        return l(t.scrollThreshold, (i = n.value.chat) == null ? void 0 : i.scrollThreshold, 120);
-      }
-    ), _ = m(() => t.jumpLabel || u("chatJumpToBottom")), k = O(null), { isNearBottom: B, showJumpButton: y, handleScroll: r, scrollToBottom: b, recheck: S } = E({
-      container: k,
-      threshold: a,
-      autoScroll: p,
-      watchSource: () => {
-        var i;
-        return (i = t.watchSource) == null ? void 0 : i.call(t);
-      }
-    });
-    return F(async () => {
-      await J(), b("auto");
-    }), s({ isNearBottom: B, showJumpButton: y, scrollToBottom: b, recheck: S }), (i, g) => (o(), d("div", W, [
-      v("div", {
-        ref_key: "containerRef",
-        ref: k,
-        class: "nm-chat-tray__scroll",
-        role: "log",
-        "aria-live": "polite",
-        onScroll: g[0] || (g[0] = //@ts-ignore
-        (...V) => c(r) && c(r)(...V))
-      }, [
-        h(i.$slots, "default", {}, void 0, !0)
-      ], 544),
-      c(y) ? (o(), d("button", {
-        key: 0,
-        type: "button",
-        class: "nm-chat-tray__jump",
-        "aria-label": _.value,
-        title: _.value,
-        onClick: g[1] || (g[1] = (V) => c(b)())
-      }, " ↓ ", 8, X)) : f("", !0)
-    ]));
-  }
-}), ye = /* @__PURE__ */ $(Y, [["__scopeId", "data-v-723f6d5f"]]), Z = { class: "nm-chat-fold__head" }, ee = ["aria-expanded"], te = {
-  class: "nm-chat-fold__caret",
-  "aria-hidden": "true"
-}, ae = {
-  key: 1,
-  class: "nm-chat-fold__head-static"
-}, oe = {
-  key: 0,
-  class: "nm-chat-fold__subhead"
-}, le = {
-  key: 1,
-  class: "nm-chat-fold__body"
-}, se = /* @__PURE__ */ C({
-  __name: "ChatFold",
-  props: {
-    open: { type: Boolean, default: void 0 },
-    defaultOpen: { type: Boolean, default: !1 },
-    sunk: { type: Boolean, default: !0 },
-    expandable: { type: Boolean, default: !0 }
-  },
-  emits: ["update:open", "toggle"],
-  setup(e, { emit: s }) {
-    const t = e, u = s, n = O(t.defaultOpen), l = m(() => t.open ?? n.value);
-    function p() {
-      if (!t.expandable) return;
-      const a = !l.value;
-      t.open === void 0 && (n.value = a), u("update:open", a), u("toggle", a);
-    }
-    return (a, _) => (o(), d("div", {
-      class: w(["nm-chat-fold", [
-        e.sunk ? "nm-chat-fold--sunk" : "nm-chat-fold--raised",
-        { "nm-chat-fold--open": l.value }
-      ]])
-    }, [
-      v("div", Z, [
-        e.expandable ? (o(), d("button", {
-          key: 0,
-          type: "button",
-          class: "nm-chat-fold__trigger",
-          "aria-expanded": l.value,
-          onClick: p
-        }, [
-          v("span", te, x(l.value ? "▾" : "▸"), 1),
-          h(a.$slots, "head", { open: l.value }, void 0, !0)
-        ], 8, ee)) : (o(), d("div", ae, [
-          h(a.$slots, "head", { open: l.value }, void 0, !0)
-        ])),
-        h(a.$slots, "actions", {}, void 0, !0)
-      ]),
-      a.$slots.subhead ? (o(), d("div", oe, [
-        h(a.$slots, "subhead", {}, void 0, !0)
-      ])) : f("", !0),
-      e.expandable && l.value ? (o(), d("div", le, [
-        h(a.$slots, "default", {}, void 0, !0)
-      ])) : f("", !0)
-    ], 2));
-  }
-}), Ce = /* @__PURE__ */ $(se, [["__scopeId", "data-v-7886f9f3"]]), ne = {
+import '../index.css';const R = {
   key: 0,
   class: "nm-chat-composer__meta"
-}, de = { class: "nm-chat-composer__row" }, ce = /* @__PURE__ */ C({
+}, E = { class: "nm-chat-composer__row" }, F = /* @__PURE__ */ b({
   __name: "ChatComposer",
   props: {
     modelValue: { default: "" },
@@ -176,58 +22,58 @@ import '../index.css';const D = ["aria-label", "title"], U = /* @__PURE__ */ C({
     maxlength: { default: void 0 }
   },
   emits: ["update:modelValue", "send", "cancel"],
-  setup(e, { emit: s }) {
-    const t = e, u = s, { t: n } = T(), l = m(() => t.placeholder || n("chatInputPlaceholder")), p = m(() => t.sendLabel || n("chatSend")), a = m(() => t.cancelLabel || n("chatCancel")), _ = m({
+  setup(e, { emit: p }) {
+    const t = e, d = p, { t: i } = N(), n = u(() => t.placeholder || i("chatInputPlaceholder")), s = u(() => t.sendLabel || i("chatSend")), o = u(() => t.cancelLabel || i("chatCancel")), y = u({
       get: () => t.modelValue,
-      set: (r) => u("update:modelValue", r)
-    }), { handleKeydown: k, submit: B, canSubmit: y } = A({
-      modelValue: _,
-      disabled: m(() => t.disabled),
-      onSubmit: (r) => u("send", r)
+      set: (r) => d("update:modelValue", r)
+    }), { handleKeydown: S, submit: C, canSubmit: g } = j({
+      modelValue: y,
+      disabled: u(() => t.disabled),
+      onSubmit: (r) => d("send", r)
     });
-    return (r, b) => (o(), d("div", {
-      class: w(["nm-chat-composer", { "nm-chat-composer--disabled": e.disabled }])
+    return (r, f) => (a(), l("div", {
+      class: _(["nm-chat-composer", { "nm-chat-composer--disabled": e.disabled }])
     }, [
-      r.$slots.meta || e.cancelable ? (o(), d("div", ne, [
-        h(r.$slots, "meta", {}, void 0, !0),
-        e.cancelable ? (o(), R(z, {
+      r.$slots.meta || e.cancelable ? (a(), l("div", R, [
+        m(r.$slots, "meta", {}, void 0, !0),
+        e.cancelable ? (a(), z(L, {
           key: 0,
           class: "nm-chat-composer__cancel",
           size: "small",
           disabled: e.disabled,
-          onClick: b[0] || (b[0] = (S) => u("cancel"))
+          onClick: f[0] || (f[0] = (w) => d("cancel"))
         }, {
-          default: L(() => [
-            N(x(a.value), 1)
+          default: $(() => [
+            x(B(o.value), 1)
           ]),
           _: 1
-        }, 8, ["disabled"])) : f("", !0)
-      ])) : f("", !0),
-      v("div", de, [
-        I(M, {
+        }, 8, ["disabled"])) : v("", !0)
+      ])) : v("", !0),
+      h("div", E, [
+        V(O, {
           class: "nm-chat-composer__field",
           "model-value": e.modelValue,
-          placeholder: l.value,
+          placeholder: n.value,
           disabled: e.disabled,
           rows: e.rows,
           "auto-resize": e.autoResize,
           maxlength: e.maxlength,
-          "onUpdate:modelValue": b[1] || (b[1] = (S) => u("update:modelValue", S)),
-          onKeydown: c(k)
+          "onUpdate:modelValue": f[1] || (f[1] = (w) => d("update:modelValue", w)),
+          onKeydown: c(S)
         }, null, 8, ["model-value", "placeholder", "disabled", "rows", "auto-resize", "maxlength", "onKeydown"]),
-        h(r.$slots, "actions", {
-          submit: c(B),
-          canSubmit: c(y)
+        m(r.$slots, "actions", {
+          submit: c(C),
+          canSubmit: c(g)
         }, () => [
-          I(z, {
+          V(L, {
             class: "nm-chat-composer__send",
             variant: "raised",
             shape: "pill",
-            disabled: e.disabled || !c(y),
-            onClick: c(B)
+            disabled: e.disabled || !c(g),
+            onClick: c(C)
           }, {
-            default: L(() => [
-              N(x(p.value), 1)
+            default: $(() => [
+              x(B(s.value), 1)
             ]),
             _: 1
           }, 8, ["disabled", "onClick"])
@@ -235,11 +81,131 @@ import '../index.css';const D = ["aria-label", "title"], U = /* @__PURE__ */ C({
       ])
     ], 2));
   }
-}), $e = /* @__PURE__ */ $(ce, [["__scopeId", "data-v-862b16aa"]]);
+}), se = /* @__PURE__ */ k(F, [["__scopeId", "data-v-c0c75efa"]]), P = { class: "nm-chat-fold__head" }, T = ["aria-expanded"], D = {
+  class: "nm-chat-fold__caret",
+  "aria-hidden": "true"
+}, H = {
+  width: "12",
+  height: "12",
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  "stroke-width": "2.5",
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round"
+}, U = ["d"], q = {
+  key: 1,
+  class: "nm-chat-fold__head-static"
+}, A = {
+  key: 0,
+  class: "nm-chat-fold__subhead"
+}, G = {
+  key: 1,
+  class: "nm-chat-fold__body"
+}, J = /* @__PURE__ */ b({
+  __name: "ChatFold",
+  props: {
+    open: { type: Boolean, default: void 0 },
+    defaultOpen: { type: Boolean, default: !1 },
+    sunk: { type: Boolean, default: !0 },
+    expandable: { type: Boolean, default: !0 }
+  },
+  emits: ["update:open", "toggle"],
+  setup(e, { emit: p }) {
+    const t = e, d = p, i = I(t.defaultOpen), n = u(() => t.open ?? i.value);
+    function s() {
+      if (!t.expandable) return;
+      const o = !n.value;
+      t.open === void 0 && (i.value = o), d("update:open", o), d("toggle", o);
+    }
+    return (o, y) => (a(), l("div", {
+      class: _(["nm-chat-fold", [
+        e.sunk ? "nm-chat-fold--sunk" : "nm-chat-fold--raised",
+        { "nm-chat-fold--open": n.value }
+      ]])
+    }, [
+      h("div", P, [
+        e.expandable ? (a(), l("button", {
+          key: 0,
+          type: "button",
+          class: "nm-chat-fold__trigger",
+          "aria-expanded": n.value,
+          onClick: s
+        }, [
+          h("span", D, [
+            (a(), l("svg", H, [
+              h("path", {
+                d: n.value ? "M6 9l6 6 6-6" : "M9 6l6 6-6 6"
+              }, null, 8, U)
+            ]))
+          ]),
+          m(o.$slots, "head", { open: n.value }, void 0, !0)
+        ], 8, T)) : (a(), l("div", q, [
+          m(o.$slots, "head", { open: n.value }, void 0, !0)
+        ])),
+        m(o.$slots, "actions", {}, void 0, !0)
+      ]),
+      o.$slots.subhead ? (a(), l("div", A, [
+        m(o.$slots, "subhead", {}, void 0, !0)
+      ])) : v("", !0),
+      e.expandable && n.value ? (a(), l("div", G, [
+        m(o.$slots, "default", {}, void 0, !0)
+      ])) : v("", !0)
+    ], 2));
+  }
+}), de = /* @__PURE__ */ k(J, [["__scopeId", "data-v-2fb7d2e2"]]), Q = ["aria-label", "title"], W = {
+  key: 0,
+  width: "14",
+  height: "14",
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  "stroke-width": "3",
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round",
+  "aria-hidden": "true"
+}, X = {
+  key: 1,
+  width: "14",
+  height: "14",
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  "stroke-width": "2",
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round",
+  "aria-hidden": "true"
+}, Y = /* @__PURE__ */ b({
+  __name: "ChatCopyButton",
+  props: {
+    text: {}
+  },
+  setup(e) {
+    const { t: p } = N(), { copied: t, copy: d } = K(), i = u(() => t.value ? p("chatCopied") : p("chatCopy"));
+    return (n, s) => (a(), l("button", {
+      type: "button",
+      class: _(["nm-chat-copy", { "nm-chat-copy--copied": c(t) }]),
+      "aria-label": i.value,
+      title: i.value,
+      onClick: s[0] || (s[0] = M((o) => c(d)(e.text), ["stop"]))
+    }, [
+      c(t) ? (a(), l("svg", W, [...s[1] || (s[1] = [
+        h("path", { d: "M5 13l4 4L19 7" }, null, -1)
+      ])])) : (a(), l("svg", X, [...s[2] || (s[2] = [
+        h("rect", {
+          x: "9",
+          y: "9",
+          width: "13",
+          height: "13",
+          rx: "2"
+        }, null, -1),
+        h("path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }, null, -1)
+      ])]))
+    ], 10, Q));
+  }
+}), ie = /* @__PURE__ */ k(Y, [["__scopeId", "data-v-c5c27227"]]);
 export {
-  _e as ChatBubble,
-  $e as ChatComposer,
-  q as ChatCopyButton,
-  Ce as ChatFold,
-  ye as ChatTray
+  se as ChatComposer,
+  ie as ChatCopyButton,
+  de as ChatFold
 };

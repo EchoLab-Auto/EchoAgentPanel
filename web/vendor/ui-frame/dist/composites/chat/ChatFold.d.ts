@@ -8,6 +8,10 @@ export interface ChatFoldProps {
     /** 是否有可展开内容；false 时头部渲染为静态行（无箭头、不可点击、无折叠体） */
     expandable?: boolean;
 }
+export type ChatFoldEmits = {
+    (e: 'update:open', value: boolean): void;
+    (e: 'toggle', value: boolean): void;
+};
 declare function __VLS_template(): {
     head?(_: {
         open: boolean;

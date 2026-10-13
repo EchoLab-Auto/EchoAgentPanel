@@ -11,13 +11,8 @@ import ChatView from '../ChatView.vue';
 import { state } from '../../store';
 import { displayContentOf } from '../../state_domains/timeline';
 import { resetReasoningAnimForTests } from '../../reasoning-anim';
-// ChatView 自渲染消息行（WorkRunGroup 合并 + MessageItem），容器为库 ChatTray。
-const ChatTrayStub = defineComponent({
-  name: 'ChatTray',
-  setup(_, { slots }) {
-    return () => h('div', { class: 'stub-list' }, slots.default?.());
-  },
-});
+// ChatView 自渲染消息行（WorkRunGroup 合并 + MessageItem）；滚动区自组
+// （2026-10-13 起直用 useChatScroll，无 ChatTray 组件——头部 stub 已移除）。
 const MessageItemStub = defineComponent({
   name: 'MessageItem',
   props: ['message'],
@@ -50,7 +45,6 @@ function mountChatView(sessionId = 'local:tui::local_user') {
     props: { sessionId },
     global: {
       stubs: {
-        ChatTray: ChatTrayStub,
         MessageItem: MessageItemStub,
         ChatComposer: ChatComposerStub,
       },
@@ -64,22 +58,25 @@ describe('ChatView 布局契约', () => {
     expect(wrapper.find('.chat-view').exists()).toBe(true);
     expect(wrapper.find('.chat-view__list').exists()).toBe(true);
     expect(wrapper.find('.chat-composer-float').exists()).toBe(true);
-    // 两个子项必须是 .chat-view 的直接子级（同一 flex 流，非嵌套遮挡）
+    // 两个子项必须是 .chat-view 的直接子级（同一 flex 流，非嵌套遮挡）；
+    // 2026-10-13 起对话区为 .chat-view__tray（滚动区 + 跳转钮的包装）。
     const children = Array.from(wrapper.find('.chat-view').element.children);
-    const withList = children.filter((el) => el.className.includes('chat-view__list'));
+    const withTray = children.filter((el) => el.className.includes('chat-view__tray'));
     const withComposer = children.filter((el) => el.className.includes('chat-composer-float'));
-    expect(withList.length).toBe(1);
+    expect(withTray.length).toBe(1);
     expect(withComposer.length).toBe(1);
+    // 滚动区在托盘内部
+    expect(wrapper.find('.chat-view__tray .chat-view__list').exists()).toBe(true);
   });
 
   it('消息列表在输入区之前（DOM 顺序：列表 → 输入区）', () => {
     const wrapper = mountChatView();
     const container = wrapper.find('.chat-view');
     const children = Array.from(container.element.children);
-    const listIndex = children.findIndex((el) => el.className.includes('chat-view__list'));
+    const trayIndex = children.findIndex((el) => el.className.includes('chat-view__tray'));
     const composerIndex = children.findIndex((el) => el.className.includes('chat-composer-float'));
-    expect(listIndex).toBeGreaterThanOrEqual(0);
-    expect(composerIndex).toBeGreaterThan(listIndex);
+    expect(trayIndex).toBeGreaterThanOrEqual(0);
+    expect(composerIndex).toBeGreaterThan(trayIndex);
   });
 
   it('按会话过滤消息：global 显示全部，具体会话只显示归属消息', () => {
@@ -128,11 +125,13 @@ describe('ChatView 布局契约', () => {
     expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*min-height:\s*0/s);
     // 输入框必须以 absolute 盖在消息列表上（叠层悬浮）
     expect(styleBlock).toMatch(/\.chat-composer-float\s*\{[^}]*position:\s*absolute/s);
-    // 预留空间必须在滚动区内部（nm-chat-tray__scroll）：外层 padding
-    // 会压缩滚动高度，消息将永远无法滚到输入框后方
-    expect(styleBlock).toMatch(/nm-chat-tray__scroll[^}]*padding-bottom:\s*\d+px/s);
-    // 外层不得出现 padding-bottom（避免压缩滚动区）
-    expect(styleBlock).not.toMatch(/\.chat-view__list\s*\{[^}]*padding-bottom/s);
+    // 列表自身即滚动区（2026-10-13 起，原 ChatTray 组装件解散）+ 预留空间
+    // 加在滚动区内部——外层 padding 会压缩滚动高度，消息将永远无法滚到
+    // 输入框后方
+    expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(styleBlock).toMatch(/\.chat-view__list\s*\{[^}]*padding-bottom:\s*190px/s);
+    // 外层包装（.chat-view__tray）不得出现 padding-bottom（避免压缩滚动区）
+    expect(styleBlock).not.toMatch(/\.chat-view__tray\s*\{[^}]*padding-bottom/s);
   });
 
   it('消息行容器为 flex 列：气泡对齐与宽度动态化前提（2026-09-30）', () => {
@@ -157,15 +156,14 @@ describe('ChatView 布局契约', () => {
       'utf-8',
     );
     const styleBlock = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
-    const jumpRule =
-      styleBlock.match(/\.chat-view :deep\(\.nm-chat-tray__jump\)\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    const jumpRule = styleBlock.match(/\.chat-view__jump\s*\{([\s\S]*?)\}/)?.[1] ?? '';
     // 横向避让右侧栏列（trayPadRight）+ 纵向与边栏列底对齐（entryBottom + 45）
     expect(jumpRule).toMatch(/right:\s*calc\(v-bind\(trayPadRight\)\s*\+\s*16px\)/);
     expect(jumpRule).toMatch(/bottom:\s*calc\(v-bind\(entryBottom\)\s*\+\s*45px\)/);
     expect(jumpRule).toMatch(/z-index:\s*5/);
     // 浮层打开时隐藏（覆盖 rail 之上不再被盖住）
     expect(styleBlock).toMatch(
-      /\.chat-view--overlay-open :deep\(\.nm-chat-tray__jump\)\s*\{[^}]*display:\s*none/s,
+      /\.chat-view--overlay-open \.chat-view__jump\s*\{[^}]*display:\s*none/s,
     );
 
     // 行为：打开入口行浮层（清单）→ 根节点带 overlay-open 类
@@ -294,7 +292,6 @@ describe('ChatView 布局契约', () => {
       props: { sessionId: 'local:tui::local_user' },
       global: {
         stubs: {
-          ChatTray: ChatTrayStub,
           MessageItem: MessageItemStub,
           ChatComposer: ChatComposerStub,
           TasksPanel: TasksPanelStub,
@@ -326,7 +323,6 @@ describe('ChatView 布局契约', () => {
       props: { sessionId: 'local:tui::local_user', activeTeamId: 'alix' },
       global: {
         stubs: {
-          ChatTray: ChatTrayStub,
           MessageItem: MessageItemStub,
           ChatComposer: ChatComposerStub,
         },

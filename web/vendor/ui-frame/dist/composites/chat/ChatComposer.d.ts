@@ -18,6 +18,13 @@ export interface ChatComposerProps {
     /** 最大输入长度 */
     maxlength?: number | string;
 }
+export type ChatComposerEmits = {
+    (e: 'update:modelValue', value: string): void;
+    /** 提交（内容为 trim 后的非空字符串；IME 组合中的 Enter 不会触发） */
+    (e: 'send', content: string): void;
+    /** 点击"取消任务" */
+    (e: 'cancel'): void;
+};
 declare function __VLS_template(): {
     meta?(_: {}): any;
     actions?(_: {

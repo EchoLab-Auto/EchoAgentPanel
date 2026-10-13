@@ -8,17 +8,30 @@ export interface NeumorphismTreeNodeProps {
     focusedKey?: string | null;
     level?: number;
 }
-declare function handleSlotToggle(event?: Event): void;
-declare function handleSelect(): void;
-declare function __VLS_template(): {
-    "node-label"?(_: {
+declare function __VLS_template(): Readonly<{
+    icon?(props: {
+        node: TreeNodeData;
+    }): unknown;
+    'node-label'?(props: {
         node: TreeNodeData;
         selected: boolean;
         expanded: boolean;
         level: number;
-        select: typeof handleSelect;
-        toggle: typeof handleSlotToggle;
-    }): any;
+        select: () => void;
+        toggle: () => void;
+    }): unknown;
+}> & {
+    icon?(props: {
+        node: TreeNodeData;
+    }): unknown;
+    'node-label'?(props: {
+        node: TreeNodeData;
+        selected: boolean;
+        expanded: boolean;
+        level: number;
+        select: () => void;
+        toggle: () => void;
+    }): unknown;
 };
 declare const __VLS_component: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismTreeNodeProps>, {
     level: number;

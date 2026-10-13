@@ -11,13 +11,7 @@ import { defineComponent, h, nextTick } from 'vue';
 import ChatView from '../ChatView.vue';
 import { state } from '../../store';
 
-// ── 库组件 stub（不渲染真实 ui-frame/chat） ──
-const ChatTrayStub = defineComponent({
-  name: 'ChatTray',
-  setup(_, { slots }) {
-    return () => h('div', { class: 'stub-list' }, slots.default?.());
-  },
-});
+// ── 库组件 stub（不渲染真实 ui-frame/chat；2026-10-13 起无 ChatTray） ──
 const MessageItemStub = defineComponent({
   name: 'MessageItem',
   setup: () => () => h('div'),
@@ -51,7 +45,6 @@ function mountChatView() {
     props: { sessionId: 'local:tui::local_user' },
     global: {
       stubs: {
-        ChatTray: ChatTrayStub,
         MessageItem: MessageItemStub,
         ChatComposer: ChatComposerStub,
         NeumorphismDrawer: DrawerStub,

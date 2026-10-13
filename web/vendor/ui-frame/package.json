@@ -74,6 +74,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:registry": "node scripts/check-component-registry.mjs",
+    "check:styles": "node scripts/check-styles.mjs",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -82,7 +83,7 @@
     "version": "changeset version && npm run format",
     "release": "npm run build && changeset publish --provenance --access public",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build -o dist-storybook"
   },
   "lint-staged": {
     "*.{ts,tsx,vue}": [

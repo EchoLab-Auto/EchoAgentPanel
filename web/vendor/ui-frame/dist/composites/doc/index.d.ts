@@ -23,7 +23,7 @@
  */
 export declare const componentCategories: {
     readonly composite: readonly ["DocViewer", "DocEditor", "MarkdownRenderer", "MarkdownEditor", "DocFlowCanvas"];
-    readonly meta: readonly ["DocCodeBlock", "DocTocNav", "TocNodeItem"];
+    readonly meta: readonly ["DocCodeBlock", "DocTocNav", "TocNodeItem", "DocTreeIcon"];
 };
 /** @category 组合组件 */
 export { default as DocViewer } from './DocViewer';
@@ -48,6 +48,8 @@ export { default as DocTocNav } from './DocTocNav';
 export type { DocTocNavProps } from './DocTocNav';
 /** @category 元组件 */
 export { default as TocNodeItem } from './TocNodeItem';
+export { default as DocTreeIcon } from './DocTreeIcon';
+export type { DocTreeIconProps } from './DocTreeIcon';
 export { useMarkdownToc } from './useMarkdownToc';
 export type { TocItem, TocNode, UseMarkdownTocReturn } from './useMarkdownToc';
 export { useScrollSpy, getScrollBehavior } from './useScrollSpy';

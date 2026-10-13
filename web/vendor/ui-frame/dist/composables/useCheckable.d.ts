@@ -2,7 +2,8 @@ export interface UseCheckableOptions {
     prefix: 'checkbox' | 'radio' | 'switch';
     isChecked: boolean;
     isDisabled: boolean;
-    size: 'small' | 'medium' | 'large';
+    /** 尺寸档位修饰类；省略时不生成尺寸类（几何由组件自身 CSS 变量驱动） */
+    size?: 'small' | 'medium' | 'large';
     /** 额外类名（如 indeterminate） */
     extraClasses?: Record<string, boolean>;
 }

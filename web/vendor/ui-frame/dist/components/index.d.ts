@@ -14,7 +14,7 @@
 export { default as NeumorphismButton } from './NeumorphismButton';
 export type { NeumorphismButtonProps, ButtonVariant, ButtonSize, ButtonShape, } from './NeumorphismButton';
 export { default as NeumorphismSwitch } from './NeumorphismSwitch';
-export type { NeumorphismSwitchProps } from './NeumorphismSwitch';
+export type { NeumorphismSwitchProps, SwitchVariant, SwitchSize } from './NeumorphismSwitch';
 export { default as NeumorphismCard } from './NeumorphismCard';
 export type { NeumorphismCardProps, CardVariant, CardDepth } from './NeumorphismCard';
 export { default as NeumorphismInput } from './NeumorphismInput';
@@ -99,6 +99,8 @@ export { default as NeumorphismArt } from './NeumorphismArt';
 export type { NeumorphismArtProps, ArtEffectName } from './NeumorphismArt';
 export { default as NeumorphismAsciiArt } from './NeumorphismAsciiArt';
 export type { NeumorphismAsciiArtProps, AsciiArtRadius } from './NeumorphismAsciiArt';
+export { default as NeumorphismPixelFont } from './NeumorphismPixelFont';
+export type { NeumorphismPixelFontProps, PixelFontAlign } from './NeumorphismPixelFont';
 export { NeumorphismRadio, NeumorphismRadioGroup } from './NeumorphismRadio';
 export type { NeumorphismRadioProps, NeumorphismRadioGroupProps } from './NeumorphismRadio';
 export { default as NeumorphismSlider } from './NeumorphismSlider';

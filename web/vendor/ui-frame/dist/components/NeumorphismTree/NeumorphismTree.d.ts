@@ -9,7 +9,16 @@ export interface NeumorphismTreeProps {
     showSearch?: boolean;
     multiple?: boolean;
 }
-declare const _default: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismTreeProps>, {
+declare function __VLS_template(): Readonly<{
+    icon?(props: {
+        node: TreeNodeData;
+    }): unknown;
+}> & {
+    icon?(props: {
+        node: TreeNodeData;
+    }): unknown;
+};
+declare const __VLS_component: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismTreeProps>, {
     multiple: undefined;
     showSearch: undefined;
     selectedKeys: () => never[];
@@ -35,6 +44,7 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     expandedKeys: string[];
     showSearch: boolean;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
+declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;
 type __VLS_NonUndefinedable<T> = T extends undefined ? never : T;
 type __VLS_TypePropsToRuntimeProps<T> = {
@@ -53,3 +63,8 @@ type __VLS_WithDefaults<P, D> = {
 type __VLS_Prettify<T> = {
     [K in keyof T]: T[K];
 } & {};
+type __VLS_WithTemplateSlots<T, S> = T & {
+    new (): {
+        $slots: S;
+    };
+};

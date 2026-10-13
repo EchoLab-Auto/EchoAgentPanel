@@ -1,52 +1,54 @@
-function b(d, e) {
-  const t = d.getContext("2d");
-  function v(h, f = []) {
+function y(d, t) {
+  const e = d.getContext("2d");
+  function P(h, f = []) {
     var R;
-    const { width: c, height: i } = e;
-    d.width = c * e.devicePixelRatio, d.height = i * e.devicePixelRatio, t.scale(e.devicePixelRatio, e.devicePixelRatio), t.clearRect(0, 0, c, i);
-    const r = h.flatMap((a) => a.data), m = Math.max(...r, 1), g = ((R = h[0]) == null ? void 0 : R.data.length) ?? 0, l = c / Math.max(g, 1), u = l * 0.7 / Math.max(h.length, 1), n = { top: 16, bottom: 32, left: 48 };
-    for (let a = 0; a < h.length; a++) {
-      const x = h[a];
-      t.fillStyle = x.color;
-      for (let o = 0; o < x.data.length; o++) {
-        const s = x.data[o] / m * (i - n.top - n.bottom), P = n.left + o * l + l * 0.15 + a * u, y = i - n.bottom - s;
-        t.fillRect(P, y, u, s);
+    const { width: c, height: l } = t;
+    d.width = c * t.devicePixelRatio, d.height = l * t.devicePixelRatio, e.scale(t.devicePixelRatio, t.devicePixelRatio), e.clearRect(0, 0, c, l);
+    const r = h.flatMap((o) => o.data), m = Math.max(...r, 1), g = ((R = h[0]) == null ? void 0 : R.data.length) ?? 0, i = c / Math.max(g, 1), u = i * 0.7 / Math.max(h.length, 1), n = { top: 16, bottom: 32, left: 48 };
+    for (let o = 0; o < h.length; o++) {
+      const x = h[o];
+      e.fillStyle = x.color;
+      for (let a = 0; a < x.data.length; a++) {
+        const s = x.data[a] / m * (l - n.top - n.bottom), b = n.left + a * i + i * 0.15 + o * u, w = l - n.bottom - s;
+        e.fillRect(b, w, u, s);
       }
     }
-    t.fillStyle = "#888", t.font = "11px sans-serif", t.textAlign = "center";
-    for (let a = 0; a < f.length; a++) {
-      const x = n.left + a * l + l / 2;
-      t.fillText(f[a], x, i - 8);
+    e.fillStyle = t.labelColor ?? "#888", e.font = t.labelFont ?? "11px sans-serif", e.textAlign = "center";
+    for (let o = 0; o < f.length; o++) {
+      const x = n.left + o * i + i / 2;
+      e.fillText(f[o], x, l - 8);
     }
     return Promise.resolve(null);
   }
-  function w(h) {
-    const { width: f, height: c } = e;
-    d.width = f * e.devicePixelRatio, d.height = c * e.devicePixelRatio, t.scale(e.devicePixelRatio, e.devicePixelRatio), t.clearRect(0, 0, f, c);
-    for (const i of h) {
-      if (i.data.length < 2) continue;
-      t.strokeStyle = i.color, t.lineWidth = i.lineWidth ?? 2, t.beginPath();
-      const r = { top: 16, right: 16, bottom: 32, left: 48 }, m = i.data.map((o) => o.x), g = i.data.map((o) => o.y), l = Math.min(...m), u = Math.max(...m, l + 1), n = Math.min(...g, 0), R = Math.max(...g, n + 1), a = (f - r.left - r.right) / (u - l), x = (c - r.top - r.bottom) / (R - n);
-      for (let o = 0; o < i.data.length; o++) {
-        const s = r.left + (i.data[o].x - l) * a, P = c - r.bottom - (i.data[o].y - n) * x;
-        o === 0 ? t.moveTo(s, P) : t.lineTo(s, P);
+  function v(h) {
+    const { width: f, height: c } = t;
+    d.width = f * t.devicePixelRatio, d.height = c * t.devicePixelRatio, e.scale(t.devicePixelRatio, t.devicePixelRatio), e.clearRect(0, 0, f, c);
+    for (const l of h) {
+      if (l.data.length < 2) continue;
+      e.strokeStyle = l.color, e.lineWidth = l.lineWidth ?? 2, e.beginPath();
+      const r = { top: 16, right: 16, bottom: 32, left: 48 }, m = l.data.map((a) => a.x), g = l.data.map((a) => a.y), i = Math.min(...m), u = Math.max(...m, i + 1), n = Math.min(...g, 0), R = Math.max(...g, n + 1), o = (f - r.left - r.right) / (u - i), x = (c - r.top - r.bottom) / (R - n);
+      for (let a = 0; a < l.data.length; a++) {
+        const s = r.left + (l.data[a].x - i) * o, b = c - r.bottom - (l.data[a].y - n) * x;
+        a === 0 ? e.moveTo(s, b) : e.lineTo(s, b);
       }
-      t.stroke();
+      e.stroke();
     }
     return Promise.resolve(null);
   }
-  return { renderBarChart: v, renderLineChart: w, destroy: () => {
+  return { renderBarChart: P, renderLineChart: v, destroy: () => {
   } };
 }
-function M(d, e) {
-  const t = {
-    width: e.width,
-    height: e.height,
-    useWorker: e.useWorker ?? !0,
-    devicePixelRatio: e.devicePixelRatio ?? (typeof window < "u" && window.devicePixelRatio || 1)
+function C(d, t) {
+  const e = {
+    width: t.width,
+    height: t.height,
+    useWorker: t.useWorker ?? !0,
+    devicePixelRatio: t.devicePixelRatio ?? (typeof window < "u" && window.devicePixelRatio || 1),
+    labelFont: t.labelFont ?? "11px sans-serif",
+    labelColor: t.labelColor ?? "#888"
   };
-  return b(d, t);
+  return y(d, e);
 }
 export {
-  M as createChartRenderer
+  C as createChartRenderer
 };
