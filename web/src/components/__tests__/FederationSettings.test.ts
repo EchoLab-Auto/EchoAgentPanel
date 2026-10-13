@@ -5,6 +5,8 @@
 //!   失败自动换向重试一次、失败清理已保存条目）
 //! - 拓扑视图：从 FederationStatus 推导互联边（node_id 精确 + 名字兜底）
 //! - 会话迁移（P3-2b）：会话 + 人格 + 目标 peer
+//! - 连出诊断（2026-10 地址漂移事故）：离线 peer 显示连续失败/最后在线；
+//!   对端宣告地址与配置不同时给出「改用此地址」一键修复
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 
@@ -17,7 +19,11 @@ import FederationSettings, { wizardTimeouts } from '../FederationSettings.vue';
 import { state } from '../../store';
 import { sendCommand } from '../../connection';
 
-function peer(name: string, link: 'Online' | 'Offline', nodeId?: string) {
+function peer(
+  name: string,
+  link: 'Online' | 'Offline',
+  nodeId?: string,
+): Partial<import('../../protocol').FederationPeerInfo> {
   return {
     name,
     url: `ws://${name}:3133`,
@@ -387,5 +393,80 @@ describe('FederationSettings 组建向导（2026-10）', () => {
     expect(wrapper.find('.fed-wizard__node--off').exists()).toBe(true);
     expect(wrapper.text()).toContain('至少选择 2 个在线节点');
     expect(wrapper.find('.fed-wizard__go').attributes('disabled')).toBeDefined();
+  });
+});
+
+describe('FederationSettings 连出诊断（地址漂移）', () => {
+  it('离线 peer：显示连续失败次数与最后错误；在线 peer 不显示失败', async () => {
+    seed({
+      peers: [
+        {
+          ...peer('stale-box', 'Offline'),
+          consecutive_failures: 42,
+          last_error: 'IO error: Connection refused',
+          last_online_at: 1791880000,
+        },
+        peer('healthy-box', 'Online'),
+      ],
+    });
+    const wrapper = mount(FederationSettings);
+    const diag = wrapper.findAll('.fed-peer-diag');
+    // 两个 peer 都有 last_online 以外信息的才渲染——离线有失败信息必然渲染
+    const texts = diag.map((d) => d.text()).join(' | ');
+    expect(texts).toContain('连续拨号失败 42 次');
+    expect(texts).toContain('Connection refused');
+    expect(texts).toContain('最后在线');
+    // 在线 peer 不出现"连续拨号失败"
+    const onlineRow = wrapper
+      .findAll('.fed-peer')
+      .find((row) => row.text().includes('healthy-box'));
+    expect(onlineRow!.find('.fed-peer-diag').exists()).toBe(false);
+  });
+
+  it('地址漂移：显示对端宣告地址并可一键改用（SaveFederationPeer，token 留空保留）', async () => {
+    seed({
+      peers: [
+        {
+          ...peer('drifted', 'Offline'),
+          url: 'ws://old.example:13370',
+          consecutive_failures: 7,
+          last_error: 'Connection refused',
+          last_advertise: 'ws://new.example:57024',
+        },
+      ],
+    });
+    const wrapper = mount(FederationSettings);
+    const drift = wrapper.find('.fed-peer-drift');
+    expect(drift.exists()).toBe(true);
+    expect(drift.text()).toContain('ws://new.example:57024');
+
+    await drift.find('.fed-peer-drift-apply').trigger('click');
+    expect(sendCommand).toHaveBeenCalledWith({
+      SaveFederationPeer: {
+        peer: {
+          name: 'drifted',
+          url: 'ws://new.example:57024',
+          token: '',
+          token_set: false,
+          allow_tools: [],
+          allow_subagent: true,
+          require_confirm: [],
+          allow_queries: [],
+          link: 'Offline',
+        },
+      },
+    });
+  });
+
+  it('无漂移不显示提示：宣告地址与配置一致 / 在线 / 无宣告 三种情形', async () => {
+    seed({
+      peers: [
+        { ...peer('same', 'Offline'), last_advertise: 'ws://same:3133' },
+        { ...peer('online-adv', 'Online'), last_advertise: 'ws://other:9000' },
+        peer('no-adv', 'Offline'),
+      ],
+    });
+    const wrapper = mount(FederationSettings);
+    expect(wrapper.findAll('.fed-peer-drift')).toHaveLength(0);
   });
 });

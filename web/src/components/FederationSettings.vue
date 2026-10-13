@@ -557,6 +557,62 @@ function deletePeer(core: string, name: string) {
   sendTo(core, { DeleteFederationPeer: { name } });
 }
 
+// ── 连出诊断（2026-10 地址漂移事故）：连续拨号失败/最后错误/最后在线 ──
+// 此前拨号失败只有 Core debug 日志，对端外部地址变化（NAT 映射更换）后
+// 两边对死地址空转、界面无任何提示——这里把"持续连不上"显性化。
+
+function fmtUnix(sec?: number | null): string {
+  if (!sec) return '';
+  try {
+    return new Date(sec * 1000).toLocaleString(undefined, { hour12: false });
+  } catch {
+    return '';
+  }
+}
+
+/** 离线诊断行（连续失败/最后错误 + 最后在线）；无信息时返回空串。 */
+function peerDiagLine(p: FederationPeerInfo): string {
+  const parts: string[] = [];
+  if (p.link !== 'Online') {
+    const fails = p.consecutive_failures ?? 0;
+    if (fails > 0) {
+      parts.push(`连续拨号失败 ${fails} 次`);
+      if (p.last_error) parts.push(`最近错误：${String(p.last_error).slice(0, 120)}`);
+    }
+  }
+  if (p.last_online_at) parts.push(`最后在线 ${fmtUnix(p.last_online_at)}`);
+  return parts.join(' · ');
+}
+
+/** 地址漂移：离线且对端最近宣告的地址与配置不同 → 返回宣告地址。 */
+function driftAddress(p: FederationPeerInfo): string {
+  if (p.link === 'Online') return '';
+  const adv = (p.last_advertise ?? '').trim();
+  if (!adv || adv === (p.url ?? '').trim()) return '';
+  return adv;
+}
+
+/** 一键改用对端宣告地址（保存 peer；token 空 = Core 保留旧值，权限原样）。 */
+function applyAdvertisedUrl(core: string, p: FederationPeerInfo) {
+  const url = driftAddress(p);
+  if (!url) return;
+  sendTo(core, {
+    SaveFederationPeer: {
+      peer: {
+        name: p.name,
+        url,
+        token: '',
+        token_set: false,
+        allow_tools: p.allow_tools ?? [],
+        allow_subagent: p.allow_subagent,
+        require_confirm: p.require_confirm ?? [],
+        allow_queries: p.allow_queries ?? [],
+        link: 'Offline',
+      },
+    },
+  });
+}
+
 // ── 邀请串解析（与 echo-federation invite.rs 同规则：
 //    echofed://host:port?name=<别名>#<token>）──
 function parseInvite(raw: string): { url: string; token: string; name: string | null } | null {
@@ -1005,6 +1061,23 @@ function migrateSession() {
                 {{ p.url || '（仅接受连入）' }}
                 <template v-if="p.node_id"> · 节点 {{ p.node_id }}</template>
               </div>
+              <div
+                v-if="peerDiagLine(p)"
+                class="fed-peer-diag"
+                :class="{ 'fed-peer-diag--warn': p.link !== 'Online' }"
+              >
+                {{ peerDiagLine(p) }}
+              </div>
+              <div v-if="driftAddress(p)" class="fed-peer-drift">
+                对端最近宣告地址：<code>{{ driftAddress(p) }}</code>
+                <button
+                  class="fed-btn fed-btn--small fed-peer-drift-apply"
+                  title="把该 peer 的 url 更新为对端最近宣告的地址（token/权限保留）"
+                  @click="applyAdvertisedUrl(c.name, p)"
+                >
+                  改用此地址
+                </button>
+              </div>
             </div>
             <div class="fed-peer-meta">
               {{ p.token_set ? '已配置密钥' : '无密钥' }}
@@ -1396,6 +1469,33 @@ function migrateSession() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.fed-peer-diag {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--nm-text-placeholder);
+}
+.fed-peer-diag--warn {
+  color: var(--panel-err, #e5484d);
+}
+.fed-peer-drift {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--panel-warn, #d97706);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fed-peer-drift code {
+  font-family: var(--nm-font-mono, monospace);
+  background: color-mix(in srgb, var(--nm-surface-color) 60%, transparent);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.fed-peer-drift-apply {
+  padding: 0 6px;
+  font-size: 11px;
 }
 .fed-peer-meta {
   font-size: 12px;
