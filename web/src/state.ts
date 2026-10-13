@@ -149,9 +149,7 @@ function managementCoreCurrent(state: AppState, core: string | null): boolean {
 
 /** 切换 activeRegion 时清空"单值管理面"缓存，避免短暂显示上一个 core 的值。 */
 export function resetManagementState(state: AppState): void {
-  state.model = '';
   state.api = null;
-  state.systemPrompt = '';
   state.skills = [];
   state.tools = [];
   state.plugins = [];
@@ -433,9 +431,10 @@ export interface AppState {
   regions: Record<string, RegionInfo>;
   tasks: OrchActivity[];
   adapters: AdapterStatus[];
-  model: string;
   api: ApiConfig | null;
-  systemPrompt: string;
+  // model / systemPrompt 字段已删除（2026-10 巡检：死状态——事件写入后
+  // 零读取方；LlmRequest 的模型名可由 api/会话归属推导，SystemPrompt 的
+  // 回推文本仅面向调试，无消费方）。
   // qqFilter 字段已删除（2026-10 巡检：死状态——读取方早已改用
   // qqByAdapter；类型保留为 QqFilterState 供其引用）。
   /** 最近一次二维码回推（Core 代理登录；按 (core, 实例) 过滤消费）。 */
@@ -574,9 +573,7 @@ export function initialState(): AppState {
     regions: {},
     tasks: [],
     adapters: [],
-    model: '',
     api: null,
-    systemPrompt: '',
   // qqGateMode/qqOwner/qqGroups/qqFriends 已删除（2026-10 巡检：死状态，
   // 读取方早已改用 qqByAdapter[name].{gateMode,owner,groups,friends}）。
     lastQrcode: null,
@@ -756,8 +753,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'LlmRequest': {
-      const e = (event as { LlmRequest: { session_id: string; model: string } }).LlmRequest;
-      state.model = e.model;
+      const e = (event as { LlmRequest: { session_id: string } }).LlmRequest;
       setPhase(state, sessionKey(evtCore(e), e.session_id), 'thinking', null);
       return state;
     }
@@ -1340,12 +1336,6 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         (s) => !(s.session_id === e.session_id && (s.core ?? null) === core),
       );
       delete state.shellTerminals[sessionKey(core, e.session_id)];
-      return state;
-    }
-    case 'SystemPrompt': {
-      if (!managementCoreCurrent(state, payloadCore(event))) return state;
-      const e = (event as { SystemPrompt: { text: string } }).SystemPrompt;
-      state.systemPrompt = e.text;
       return state;
     }
     case 'QqFilterConfig': {

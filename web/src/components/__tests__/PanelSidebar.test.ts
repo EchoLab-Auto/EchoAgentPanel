@@ -44,16 +44,25 @@ function session(over: Partial<SessionInfo>): SessionInfo {
 }
 
 async function mountSidebar(side: 'left' | 'right' = 'right') {
-  // 右栏卡片（连接状态 / 文件浏览器 / Shell 列表）为异步组件
-  // （2026-10 按需加载）：加载链含多层 promise（loader → 渲染 → 子组件），
-  // 需多轮微任务/宏任务推进后才能断言。
+  // 右栏卡片（连接���态 / 文件浏览器 / Shell 列表）为异步组件
+  // （2026-10 按需加载）：加载链含多层 promise（loader → 渲染 → 子组件）。
+  //
+  // 有界轮询等待 `.conn-card` 挂载（2026-10 巡检修 flaky）：固定 6 轮
+  // 微任务在并发全量跑（CPU 忙 → 动态 import 排队）时会不够——实测全量
+  // 跑偶发「连接状态卡缺失」失败、单文件跑必过。改为最多 2s 的完成式
+  // 等待（正常 <50ms 即出现），末尾再推进静默帧保证子组件内部稳定。
   const wrapper = mount(PanelSidebar, {
     props: { activeBranchId: null, teamId: 'alix', side },
   });
-  for (let i = 0; i < 6; i++) {
+  const deadline = Date.now() + 2000;
+  while (!wrapper.find('.conn-card').exists() && Date.now() < deadline) {
     await flushPromises();
     await nextTick();
-    await new Promise((r) => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  for (let i = 0; i < 3; i++) {
+    await flushPromises();
+    await nextTick();
   }
   return wrapper;
 }
