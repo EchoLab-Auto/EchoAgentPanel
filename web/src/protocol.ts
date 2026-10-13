@@ -431,7 +431,17 @@ export type BackendCommand =
       };
     }
   | { DeleteTeam: { id: string } }
-  | { ArchiveHistory: { team_id?: string | null } }
+  | {
+      ArchiveHistory: {
+        team_id?: string | null;
+        /** 归档范围（2026-10）：会话 id —— 仅归档并清空该会话（其他会话
+         *  不受影响；Core 随归档自动重发剩余时间线）。**必填**：Core 对
+         *  缺失/null 直接拒绝（fail-closed）——旧语义的降级执行是"整档
+         *  归档 + 全量清空"，误清不可恢复；面板「归档」此前不带 session_id，
+         *  走的即旧的全量清空（已修复，并加发送前守卫）。 */
+        session_id?: string | null;
+      };
+    }
   | { CompactHistory: { team_id?: string | null; keep_recent?: number } }
   | 'RequestState'
   | { RequestContext: { team_id?: string | null; session_id?: string | null } }

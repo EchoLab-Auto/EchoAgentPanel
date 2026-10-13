@@ -183,22 +183,46 @@ function reloadSkills() {
   refresh();
 }
 
+// 归档**当前会话**（2026-10 修复）：此前不带 session_id，Core 走旧语义
+// （整档归档 + 全量清空），点一次清掉同人格下所有会话——与确认框
+// 「归档当前会话」的承诺不符（「清理历史记忆」同类问题的漏网）。
 async function archiveHistory() {
-  const ok = await confirmDialog('归档当前会话历史？将复制快照到 archives/ 并清空当前历史。', {
-    title: '归档会话历史',
-    danger: true,
-    confirmText: '归档',
-  });
+  const ok = await confirmDialog(
+    '归档当前会话？将复制完整快照到 archives/ 并清空**当前会话**的历史（其他会话不受影响；不可恢复）。',
+    {
+      title: '归档会话历史',
+      danger: true,
+      confirmText: '归档',
+    },
+  );
   if (!ok) return;
-  sendCommand({ ArchiveHistory: { team_id: targetTeamId.value } });
+  // fail-closed：会话未知时不发命令——Core 对缺 session_id 同样拒绝
+  // （fail-closed：旧语义的降级执行曾是整档归档 + 清掉该人格全部会话，
+  // 误触代价不可恢复；同 handleClear 的发送前守卫，2026-10 用户报告教训）。
+  if (!targetSessionId.value) {
+    addToast({
+      message: '当前会话尚未确定，无法执行归档（防止误清其他会话）。请先选择会话。',
+      type: 'warning',
+      duration: 5000,
+    });
+    return;
+  }
+  sendCommand({
+    ArchiveHistory: { team_id: targetTeamId.value, session_id: targetSessionId.value },
+  });
 }
 
+// 压缩是**全人格**操作（Core 按会话独立分组摘要）——文案如实描述，
+// 不再写「压缩当前会话历史」（误导用户以为只影响当前会话）。
 async function compactHistory() {
-  const ok = await confirmDialog('压缩当前会话历史？早期事件将替换为规则摘要，保留最近 40 条。', {
-    title: '压缩会话历史',
-    danger: true,
-    confirmText: '压缩',
-  });
+  const ok = await confirmDialog(
+    '压缩该人格全部会话的历史？各会话的早期事件将替换为摘要（每会话保留最近 40 条；LLM 摘要生成可能需要数分钟）。',
+    {
+      title: '压缩会话历史',
+      danger: true,
+      confirmText: '压缩',
+    },
+  );
   if (!ok) return;
   sendCommand({ CompactHistory: { team_id: targetTeamId.value, keep_recent: 40 } });
 }
