@@ -675,6 +675,11 @@ function ariaOf(item: WorkRunItem): string {
   margin-bottom: 6px;
 }
 .work-run-group__detail-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--panel-accent);
+  flex: 0 0 auto;
+}
 .work-run-group__detail-icon--reasoning {
   color: #a78bfa;
 }
@@ -695,11 +700,6 @@ function ariaOf(item: WorkRunItem): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-  color: var(--nm-text-primary);
-}
-.work-run-group__detail-name--reasoning {
-  font-family: inherit;
 }
 .work-run-group__detail-time {
   font-size: 11px;

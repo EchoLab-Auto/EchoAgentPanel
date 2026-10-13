@@ -4,11 +4,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import WorkRunGroup, {
   type ToolWorkItem,
   type ReasoningWorkItem,
   type SubagentWorkItem,
 } from '../WorkRunGroup.vue';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 function tool(over: Partial<ToolWorkItem> = {}): ToolWorkItem {
   return {
@@ -358,5 +363,30 @@ describe('WorkRunGroup', () => {
     });
     await wrapper.find('.work-run-group__chip').trigger('click');
     expect(wrapper.find('.work-run-group__detail').text()).toContain('（无结果内容）');
+  });
+
+  // ── 样式契约（2026-10 回归）────────────────────────────────────────────
+  it('样式契约：详情图标显式尺寸 + 修饰符为顶层规则（大图标事故回归）', () => {
+    const raw = readFileSync(join(here, '..', 'WorkRunGroup.vue'), 'utf-8');
+    const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+
+    // 1) 详情图标必须有显式尺寸约束。2026-10 事故：`.work-run-group__detail-icon`
+    //    的声明与收口被误删（块内直接跟上修饰符选择器），SVG 失去 14px 约束、
+    //    回退默认替换元素尺寸——展开详情浮现巨图标（思考/工具/子代理同挂）。
+    const iconRule = style.match(/\.work-run-group__detail-icon\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    expect(iconRule, 'icon rule must carry explicit sizing').toMatch(/width:\s*14px/);
+    expect(iconRule).toMatch(/height:\s*14px/);
+    expect(iconRule).toMatch(/flex:\s*0 0 auto/);
+
+    // 2) 修饰符必须是顶层规则。丢失收口时嵌套会被编译成"后代选择器"
+    //    （`.detail-icon .detail-icon--reasoning`）——永不匹配，配色/字体全失效。
+    expect(style).toMatch(/^\.work-run-group__detail-icon--reasoning\s*\{/m);
+    expect(style).toMatch(/^\.work-run-group__detail-icon--subagent\s*\{/m);
+
+    // 3) 同类坏块的结构特征：`}` 后直接跟声明行（孤儿声明）、规则重复。
+    expect(style).not.toMatch(/\}\s*\n\s*(color|font-family|font-size|width|height|flex):/);
+    const reasoningNameRules =
+      style.match(/^\.work-run-group__detail-name--reasoning\s*\{/gm) ?? [];
+    expect(reasoningNameRules.length).toBe(1);
   });
 });
