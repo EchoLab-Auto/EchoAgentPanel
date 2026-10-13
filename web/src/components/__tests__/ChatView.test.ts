@@ -11,7 +11,7 @@ import ChatView from '../ChatView.vue';
 import { state } from '../../store';
 import { displayContentOf } from '../../state_domains/timeline';
 import { resetReasoningAnimForTests } from '../../reasoning-anim';
-// ChatView 自渲染消息行（ToolRunGroup 合并 + MessageItem），容器为库 ChatTray。
+// ChatView 自渲染消息行（WorkRunGroup 合并 + MessageItem），容器为库 ChatTray。
 const ChatTrayStub = defineComponent({
   name: 'ChatTray',
   setup(_, { slots }) {
