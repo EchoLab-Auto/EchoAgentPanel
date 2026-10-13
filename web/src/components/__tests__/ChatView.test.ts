@@ -399,31 +399,32 @@ describe('推理行打字机门槛（2026-10）', () => {
     state.activities = {};
   });
 
-  it('实时 + 会话运行中：首次显示播打字机（--typing + 正在推演提示）', async () => {
+  it('实时 + 会话运行中：首次显示播打字机（chip 自动展开 + 正在推演提示）', async () => {
     state.trunk = [reasoningMessage('r1')];
     state.activities[SESSION] = activity('thinking');
     const wrapper = mountChatView(SESSION);
-    // onMounted 的响应式更新需一次 tick 落盘（与 ReasoningBlock.test 一致）
+    // onMounted 的响应式更新需一次 tick 落盘（与 ReasoningText.test 一致）
     await nextTick();
-    expect(wrapper.find('.reasoning-block').exists()).toBe(true);
-    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(true);
-    expect(wrapper.find('.reasoning-block__hint').text()).toContain('正在推演');
+    // 思考为工作行 chip（与工具同款）；播放中自动展开详情，正文播打字机
+    expect(wrapper.find('.work-run-group__chip--reasoning').exists()).toBe(true);
+    expect(wrapper.find('.reasoning-text--typing').exists()).toBe(true);
+    expect(wrapper.find('.work-run-group__detail-status').text()).toContain('正在推演');
     wrapper.unmount();
   });
 
-  it('重新显示（切走再切回 / 重挂载）：已播放过的思考卡片不再打字', async () => {
+  it('重新显示（切走再切回 / 重挂载）：已播放过的思考卡片不再打字、不自动展开', async () => {
     state.trunk = [reasoningMessage('r1')];
     state.activities[SESSION] = activity('thinking');
     const first = mountChatView(SESSION);
     await nextTick();
-    expect(first.find('.reasoning-block--typing').exists()).toBe(true);
+    expect(first.find('.reasoning-text--typing').exists()).toBe(true);
     first.unmount();
-    // 重新挂载（同一消息、仍在会话运行中）——已完成展示过，直接全量显示
+    // 重新挂载（同一消息、仍在会话运行中）——已完成展示过，关闭为静止 chip
     const second = mountChatView(SESSION);
     await nextTick();
-    expect(second.find('.reasoning-block').exists()).toBe(true);
-    expect(second.find('.reasoning-block--typing').exists()).toBe(false);
-    expect(second.find('.reasoning-block__hint').exists()).toBe(false);
+    expect(second.find('.work-run-group__chip--reasoning').exists()).toBe(true);
+    expect(second.find('.reasoning-text--typing').exists()).toBe(false);
+    expect(second.find('.work-run-group__detail').exists()).toBe(false);
     second.unmount();
   });
 
@@ -431,7 +432,8 @@ describe('推理行打字机门槛（2026-10）', () => {
     state.trunk = [reasoningMessage('r3', { time: Math.floor(Date.now() / 1000) - 120 })];
     state.activities[SESSION] = activity('tool');
     const wrapper = mountChatView(SESSION);
-    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(false);
+    expect(wrapper.find('.work-run-group__chip--reasoning').exists()).toBe(true);
+    expect(wrapper.find('.reasoning-text--typing').exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -439,7 +441,7 @@ describe('推理行打字机门槛（2026-10）', () => {
     state.trunk = [reasoningMessage('r4', { animate: false })];
     state.activities[SESSION] = activity('thinking');
     const wrapper = mountChatView(SESSION);
-    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(false);
+    expect(wrapper.find('.reasoning-text--typing').exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -448,11 +450,45 @@ describe('推理行打字机门槛（2026-10）', () => {
     state.trunk = [reasoningMessage('r5')];
     state.activities[SESSION] = activity('completed');
     const wrapper = mountChatView('local:tui::b');
-    expect(wrapper.find('.reasoning-block').exists()).toBe(false);
-    // 切回 A：会话已结束 → 已完成的思考卡片直接全量显示
+    expect(wrapper.find('.work-run-group').exists()).toBe(false);
+    // 切回 A：会话已结束 → 已完成的思考卡片直接全量显示（静止 chip）
     await wrapper.setProps({ sessionId: SESSION });
-    expect(wrapper.find('.reasoning-block').exists()).toBe(true);
-    expect(wrapper.find('.reasoning-block--typing').exists()).toBe(false);
+    expect(wrapper.find('.work-run-group__chip--reasoning').exists()).toBe(true);
+    expect(wrapper.find('.reasoning-text--typing').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('连续工作条目（工具 + 思考）合并为同一组 chip 行', async () => {
+    // 工具、思考、工具连续出现 → 单条 WorkRunGroup：三个 chip 同排
+    state.trunk = [
+      {
+        key: 't1',
+        role: 'tool',
+        content: '',
+        time: Math.floor(Date.now() / 1000),
+        sessionId: SESSION,
+        tool: { name: 'bash', input: '{"command":"ls"}', output: 'ok', status: 'succeeded' },
+      },
+      reasoningMessage('r6', { animate: false }),
+      {
+        key: 't2',
+        role: 'tool',
+        content: '',
+        time: Math.floor(Date.now() / 1000),
+        sessionId: SESSION,
+        tool: { name: 'read_file', input: '{"path":"a"}', output: 'x', status: 'succeeded' },
+      },
+    ];
+    const wrapper = mountChatView(SESSION);
+    await nextTick();
+    expect(wrapper.findAll('.work-run-group').length).toBe(1);
+    const chips = wrapper.findAll('.work-run-group__chip');
+    expect(chips.length).toBe(3);
+    expect(chips[0].classes()).toContain('work-run-group__chip--tool');
+    expect(chips[1].classes()).toContain('work-run-group__chip--reasoning');
+    expect(chips[2].classes()).toContain('work-run-group__chip--tool');
+    // 全静止（无运行中/播放中/失败）→ 折叠为 chip 行
+    expect(wrapper.find('.work-run-group__detail').exists()).toBe(false);
     wrapper.unmount();
   });
 

@@ -2,9 +2,10 @@
 //! 聊天主视图：消息列表 + 固定底部输入区（flex 布局，输入区占位不遮挡消息）。
 //! 分工（2026-09-30）：机制层来自 ui-frame 元组件——`ChatTray`（吸底滚动、
 //! 回到底部）、`ChatComposer`（IME 组合保护）；**行模型与组合由面板自组**：
-//! 连续工具调用合并（ToolRunGroup）、推理（ReasoningBlock）、子代理
-//! （SubagentEventBlock）、消息行（MessageItem，内部用库 `ChatBubble` +
-//! doc `MarkdownRenderer`）。库的 chat 组合组件已移除（组合权归产品）。
+//! 连续工作条目合并（WorkRunGroup：工具调用 + 思考统一为小圆角矩形 chip
+//! 的通用排布）、子代理（SubagentEventBlock）、消息行（MessageItem，内部用
+//! 库 `ChatBubble` + doc `MarkdownRenderer`）。库的 chat 组合组件已移除
+//! （组合权归产品）。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -26,10 +27,9 @@ import { checklistKey, sessionKey } from '../keys';
 import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
-import ReasoningBlock from './ReasoningBlock.vue';
 import SubagentEventBlock from './SubagentEventBlock.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
-import ToolRunGroup, { type ToolRunItem } from './ToolRunGroup.vue';
+import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
 import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards } from '../rail-cards';
@@ -564,13 +564,14 @@ const messages = computed<ChatMessage[]>(() => {
   });
 });
 
-// ── 连续工具调用合并（2026-09-19）──
-// 多个 tool 连续出现时合成一条 ToolRunGroup：折叠态 = 一排圆角矩形图标
-// （横向扩展、空间不足自动换行），点击图标在下方浮现具体内容卡片；
-// 运行过程中默认折叠，全部完成且有失败时自动展开首个失败项。
+// ── 连续工作条目合并（2026-10 一般化；2026-09-19 起仅合并工具调用）──
+// 工具调用与思考（推理）连续出现时合成一条 WorkRunGroup：折叠态 = 一排
+// 小圆角矩形 chip（同一套通用排布——横向扩展、空间不足自动换行），点击
+// chip 在下方浮现具体内容卡片；工具运行中默认折叠、全部完成且有失败时
+// 自动展开首个失败项；思考播放中自动展开、播完自动收起（见 WorkRunGroup）。
 type ChatRow =
   | { kind: 'single'; message: ChatMessage }
-  | { kind: 'tool-group'; key: string; items: ToolRunItem[] };
+  | { kind: 'work-group'; key: string; items: WorkRunItem[] };
 
 /**
  * spawn_subagent 的参数 → 单行任务摘要（工具行悬停/详情头部展示用）。
@@ -594,11 +595,24 @@ function subagentTaskLabel(input: string): string | undefined {
   const line = task.replace(/\s+/g, ' ').trim();
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
 }
-
-const toolRowOf = (m: ChatMessageWithImages): ToolRunItem | null => {
+const workRowOf = (m: ChatMessageWithImages): WorkRunItem | null => {
+  // 思考（推理）：面板扩展角色（库 ChatRole 无该角色，宽松比较后收窄）
+  // ——与工具同列 chip，点击展开正文。
+  if ((m.role as string) === 'reasoning') {
+    return {
+      kind: 'reasoning',
+      key: String(m.id),
+      text: m.content,
+      // animate 已由 messages 内的打字机准入改写为布尔（命中才 true）。
+      animate: m.animate === true,
+      streaming: m.streaming === true,
+      time: m.time ? formatTime(m.time) : undefined,
+    };
+  }
   const tool = m.tool;
   if (m.role !== 'tool' || !tool) return null;
   return {
+    kind: 'tool',
     key: String(m.id),
     name: tool.name,
     input: tool.input,
@@ -614,25 +628,24 @@ const toolRowOf = (m: ChatMessageWithImages): ToolRunItem | null => {
 const messageRows = computed<ChatRow[]>(() => {
   const rows: ChatRow[] = [];
   for (const m of messages.value) {
-    const item = toolRowOf(m);
+    const item = workRowOf(m);
     if (!item) {
       rows.push({ kind: 'single', message: m });
       continue;
     }
     const last = rows[rows.length - 1];
-    if (last && last.kind === 'tool-group') {
+    if (last && last.kind === 'work-group') {
       last.items.push(item);
     } else {
-      rows.push({ kind: 'tool-group', key: `tools:${item.key}`, items: [item] });
+      rows.push({ kind: 'work-group', key: `work:${item.key}`, items: [item] });
     }
   }
   return rows;
 });
 
 function rowKey(row: ChatRow): string {
-  return row.kind === 'tool-group' ? row.key : String(row.message.id);
+  return row.kind === 'work-group' ? row.key : String(row.message.id);
 }
-
 /** ChatTray 吸底观察源：最后一条消息的尾部内容（托盘内容同源）。 */
 function trayWatchSource(): unknown {
   const last = messages.value[messages.value.length - 1];
@@ -982,8 +995,9 @@ function mediaSrc(img: string): string {
       </div>
     </div>
     <!-- 消息列表：flex:1，内部 ChatTray 独立滚动。
-         行模型由面板自组：连续工具调用合并为一行图标（ToolRunGroup），
-         推理/子代理走各自组件，其余消息逐条 MessageItem。
+         行模型由面板自组：连续工作条目（工具调用 + 思考）合并为一排
+         小圆角矩形 chip（WorkRunGroup），子代理走 SubagentEventBlock，
+         其余消息逐条 MessageItem。
          （库 chat 组合件已移除；滚动/吸底沿用库元组件 ChatTray。） -->
     <ChatTray
       class="chat-view__list"
@@ -1001,22 +1015,15 @@ function mediaSrc(img: string): string {
         <span v-else>{{ emptyText }}</span>
       </div>
       <template v-for="row in messageRows" :key="rowKey(row)">
-        <ToolRunGroup
-          v-if="row.kind === 'tool-group'"
+        <WorkRunGroup
+          v-if="row.kind === 'work-group'"
           :items="row.items"
           class="chat-view__item"
         />
         <template v-else-if="row.kind === 'single'">
-          <!-- 推理：面板扩展角色，由 ReasoningBlock 渲染（打字机动画）；时序穿插 -->
-          <ReasoningBlock
-            v-if="(row.message as { role: string }).role === 'reasoning'"
-            :text="row.message.content"
-            :animate="(row.message as ChatMessageWithImages).animate !== false"
-            :streaming="(row.message as ChatMessageWithImages).streaming === true"
-          />
           <!-- 子代理完成回报：紧凑一行（任务摘要 + 可展开结论），非 JSON 气泡 -->
           <SubagentEventBlock
-            v-else-if="(row.message as { role: string }).role === 'subagent'"
+            v-if="(row.message as { role: string }).role === 'subagent'"
             :event="(row.message as ChatMessageWithImages).subagent ?? { id: '', task: '', success: true, result: '' }"
             :time="row.message.time ? formatTime(row.message.time) : undefined"
             class="chat-view__item"

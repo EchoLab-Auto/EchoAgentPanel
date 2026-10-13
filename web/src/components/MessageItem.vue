@@ -4,9 +4,8 @@
 //! 背景：ui-frame 已移除 chat 组合组件（ChatMessageItem 等）——聊天组合属
 //! 产品语义，由宿主自行组装。本组件用库保留的元组件（`ChatBubble`）+
 //! 延迟加载的 Markdown 渲染（`MarkdownLazy`，2026-10 首屏加载优化：doc
-//! 模块不再静态进入首屏关键路径）实现面板的消息行；工具行 / 推理块 /
-//! 子代理行由 ChatView 分派给 ToolRunGroup / ReasoningBlock /
-//! SubagentEventBlock。
+//! 模块不再静态进入首屏关键路径）实现面板的消息行；工作条目行（工具调用 +
+//! 思考）与子代理行由 ChatView 分派给 WorkRunGroup / SubagentEventBlock。
 //!
 //! 语义与迁移前（库版 ChatMessageItem）一致：
 //! - user 居右主色气泡、agent 居左中性气泡（正文走 Markdown）、system 居中平铺；
