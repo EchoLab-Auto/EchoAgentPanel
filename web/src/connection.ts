@@ -295,7 +295,7 @@ export function requestActiveRegionManagement(options?: { includeCatalogs?: bool
   }
   sendCommand('RequestPluginsList');
   sendCommand({ RequestShellSessions: {} });
-  sendCommand({ RequestFederationStatus: null } as unknown as BackendCommand);
+  sendCommand('RequestFederationStatus');
 }
 
 /**

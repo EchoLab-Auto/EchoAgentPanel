@@ -11,6 +11,10 @@ export type ReasoningEffort = 'low' | 'high' | 'max';
 export interface FederationPeerInfo {
   name: string;
   url: string;
+  /** per-peer 共享密钥**明文**（仅在发送 `SaveFederationPeer` 时携带；
+   *  Core 状态快照回传永不包含明文——用 `token_set` 标记是否已配置，
+   *  故接收侧该字段通常缺失）。 */
+  token?: string;
   token_set: boolean;
   allow_tools: string[];
   allow_subagent: boolean;
@@ -472,7 +476,16 @@ export type BackendCommand =
   | 'RequestSelfUpdateStatus'
   | { MigrateSession: { session_id: string; team_id?: string | null; target_peer: string } }
   | { RequestQqOwner: { adapter?: string | null } }
-  | { SetQqOwner: { owner_qq: number; adapter?: string | null } };
+  | { SetQqOwner: { owner_qq: number; adapter?: string | null } }
+  // ── 联邦管理（federation Phase 4；Frontend-only）──────────────────
+  // 2026-10 补齐：此前 4 条命令靠双重断言绕过类型系统（echo-protocol/
+  // command.rs 已定义，serde 亦兼容 `{X:null}` 形态；但绕过 = 无编译期
+  // 保护）。unit 变体统一用字符串形态（与 `'RequestSystemPrompt'` 等
+  // 既有约定一致）。守护：protocol-sync 测试禁止生产代码再出现该模式。
+  | { SaveFederationPeer: { peer: FederationPeerInfo } }
+  | { DeleteFederationPeer: { name: string } }
+  | 'RequestFederationStatus'
+  | 'RequestFederationInvite';
 
 // ── BackendEvent（外部标签枚举）────────────────────────────────────────────
 

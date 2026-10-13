@@ -12,10 +12,19 @@
 //!
 //! 另一侧（union 有定义但 reduce 不处理）不强制——事件可能由其他模块
 //! （connection/pending）消费，未处理是合法的。
+//!
+//! 2026-10 扩展两条同族守护：
+//!   1. 命令侧：联邦 4 条命令（Save/DeleteFederationPeer、
+//!      RequestFederationStatus/Invite）曾在联合中缺失、靠双重断言绕过
+//!      ——补齐后立「命令名在联合中有定义」快照；
+//!   2. 归零棘轮：生产代码不得再出现 `as unknown as BackendCommand`
+//!      双重断言（类型系统沉默 = Core 改字段零编译期报错）。
+//!      确需绕过时把命令名加进 ALLOWED_BYPASS 并写明理由。
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { serializeCommand } from '../protocol';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const protocolSrc = readFileSync(join(here, '..', 'protocol.ts'), 'utf-8');
@@ -69,5 +78,68 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     const m = seg.match(/ChecklistUpdated:\s*\{([^}]*)\}/);
     expect(m, 'ChecklistUpdated 定义缺失').toBeTruthy();
     expect(m![1]).toContain('team_id');
+  });
+});
+
+describe('命令侧镜像与归零棘轮（2026-10）', () => {
+  /** 提取 `export type BackendCommand = ...;` 段。 */
+  function commandSegment(): string {
+    const start = protocolSrc.indexOf('export type BackendCommand =');
+    expect(start, 'protocol.ts must declare BackendCommand').toBeGreaterThanOrEqual(0);
+    const end = protocolSrc.indexOf('export type ', start + 10);
+    return protocolSrc.slice(start, end > 0 ? end : undefined);
+  }
+
+  it('联邦 4 条命令均在 BackendCommand 联合中定义（防再漂移）', () => {
+    // 这 4 条曾缺失、靠 `as unknown as` 绕过（FederationSettings.vue 8 处
+    // + connection.ts 1 处均依赖它们）。改名/删除前先想清楚绕过方案。
+    const seg = commandSegment();
+    for (const name of [
+      'SaveFederationPeer',
+      'DeleteFederationPeer',
+      'RequestFederationStatus',
+      'RequestFederationInvite',
+    ]) {
+      expect(seg.includes(name), `BackendCommand 缺少联邦命令 ${name}`).toBe(true);
+    }
+  });
+
+  it('unit 命令按字符串形态序列化（与 Core serde 实测兼容）', () => {
+    // Core `BackendCommand` 是默认外部标签 serde：unit 变体的标准线格式
+    // 是纯字符串（`{"payload":"RequestFederationStatus"}`）。Panel 与 Core
+    // 双端各有一条形态测试钉住该契约（Core 侧见 management.rs 测试）。
+    expect(serializeCommand('RequestFederationStatus')).toBe(
+      '{"type":"command","payload":"RequestFederationStatus"}',
+    );
+    expect(serializeCommand({ DeleteFederationPeer: { name: 'x' } })).toBe(
+      '{"type":"command","payload":{"DeleteFederationPeer":{"name":"x"}}}',
+    );
+  });
+
+  it('生产代码无双重断言绕过 BackendCommand（归零棘轮）', () => {
+    // 只降不升：新增绕过必须先把命令类型补进 protocol.ts；确无可能时
+    // 在此登记命令名与理由（目前为空——4 条联邦命令已全部转正）。
+    const ALLOWED_BYPASS: Record<string, string> = {};
+    const PATTERN = 'as unknown as BackendCommand';
+    const hits: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.vue')) {
+          const text = readFileSync(full, 'utf-8');
+          if (text.includes(PATTERN)) hits.push(full.slice(join(here, '..').length + 1));
+        }
+      }
+    };
+    walk(join(here, '..'));
+    const unexpected = hits.filter((f) => !(f in ALLOWED_BYPASS));
+    expect(
+      unexpected,
+      `以下文件以双重断言绕过 BackendCommand 类型系统（禁止）：${unexpected.join(', ')}——` +
+        '请先为所用命令在 protocol.ts 联合中补类型；确需绕过请登记 ALLOWED_BYPASS 并写明理由',
+    ).toEqual([]);
   });
 });

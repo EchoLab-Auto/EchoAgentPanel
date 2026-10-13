@@ -98,7 +98,7 @@ const cards = computed(() =>
 );
 
 function refreshCore(core: string) {
-  sendTo(core, { RequestFederationStatus: null } as unknown as BackendCommand);
+  sendTo(core, 'RequestFederationStatus');
 }
 
 function refreshAll() {
@@ -117,7 +117,7 @@ watch(
 
 // ── 邀请串 ──
 function requestInvite(core: string) {
-  sendTo(core, { RequestFederationInvite: null } as unknown as BackendCommand);
+  sendTo(core, 'RequestFederationInvite');
 }
 
 const copiedCore = ref('');
@@ -393,12 +393,12 @@ async function attemptPair(
         link: 'Offline',
       },
     },
-  } as unknown as BackendCommand);
+  });
   // 3. 等链路（轮询状态；周期性主动刷新兜底）。
   const ok = await waitForPairLink(inviterNode, joinerNode, wizardTimeouts.linkMs);
   if (ok) return { ok: true, reason: '' };
   // 4. 失败清理：移除接入方刚登记的离线条目（防残留；换向重试也依赖干净状态）。
-  sendTo(joiner, { DeleteFederationPeer: { name: peerName } } as unknown as BackendCommand);
+  sendTo(joiner, { DeleteFederationPeer: { name: peerName } });
   return {
     ok: false,
     reason: reversed
@@ -420,8 +420,8 @@ function waitForPairLink(a: TopoNode, b: TopoNode, ms: number): Promise<boolean>
       if (now - lastRefresh > 3000) {
         lastRefresh = now;
         // 主动刷新兜底（链路广播之外的保险）。
-        sendTo(curA.name, { RequestFederationStatus: null } as unknown as BackendCommand);
-        sendTo(curB.name, { RequestFederationStatus: null } as unknown as BackendCommand);
+        sendTo(curA.name, 'RequestFederationStatus');
+        sendTo(curB.name, 'RequestFederationStatus');
       }
       if (now - start >= ms) return resolve(false);
       window.setTimeout(tick, wizardTimeouts.pollMs);
@@ -549,12 +549,12 @@ function savePeer() {
         link: 'Offline',
       },
     },
-  } as unknown as BackendCommand);
+  });
   showAdd.value = false;
 }
 
 function deletePeer(core: string, name: string) {
-  sendTo(core, { DeleteFederationPeer: { name } } as unknown as BackendCommand);
+  sendTo(core, { DeleteFederationPeer: { name } });
 }
 
 // ── 邀请串解析（与 echo-federation invite.rs 同规则：

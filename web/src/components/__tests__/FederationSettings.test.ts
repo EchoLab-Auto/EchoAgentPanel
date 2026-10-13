@@ -155,14 +155,15 @@ describe('FederationSettings Core 视角（2026-10 重构）', () => {
     expect(text).toContain('node-local');
     expect(text).toContain('node-remote');
     // 状态刷新逐 core 定向（不再依赖"运行区域"）
-    expect(sendCommand).toHaveBeenCalledWith({ RequestFederationStatus: null }, 'core');
-    expect(sendCommand).toHaveBeenCalledWith({ RequestFederationStatus: null }, 'ai_station');
+    // unit 命令统一字符串形态（2026-10 类型补齐；Core serde 实测兼容）
+    expect(sendCommand).toHaveBeenCalledWith('RequestFederationStatus', 'core');
+    expect(sendCommand).toHaveBeenCalledWith('RequestFederationStatus', 'ai_station');
   });
 
   it('单上游：无壳直发（命令不带 core 参数）', () => {
     seed();
     mount(FederationSettings);
-    expect(sendCommand).toHaveBeenCalledWith({ RequestFederationStatus: null });
+    expect(sendCommand).toHaveBeenCalledWith('RequestFederationStatus');
     expect(vi.mocked(sendCommand).mock.calls.every((call) => call.length === 1)).toBe(true);
   });
 
@@ -171,7 +172,7 @@ describe('FederationSettings Core 视角（2026-10 重构）', () => {
     const wrapper = mount(FederationSettings);
     const secondCard = wrapper.findAll('.fed-core')[1]; // ai_station
     await secondCard.find('.fed-gen-invite').trigger('click');
-    expect(sendCommand).toHaveBeenCalledWith({ RequestFederationInvite: null }, 'ai_station');
+    expect(sendCommand).toHaveBeenCalledWith('RequestFederationInvite', 'ai_station');
 
     await secondCard.find('.fed-add-peer').trigger('click');
     const nameInput = wrapper.find('.fed-form-grid input');
@@ -227,7 +228,9 @@ describe('FederationSettings 组建向导（2026-10）', () => {
   function callsWith(key: string, target?: string) {
     return vi.mocked(sendCommand).mock.calls.filter(
       ([c, t]) =>
-        typeof c === 'object' && c !== null && key in (c as object) && (!target || t === target),
+        ((typeof c === 'string' && c === key) ||
+          (typeof c === 'object' && c !== null && key in (c as object))) &&
+        (!target || t === target),
     );
   }
 
