@@ -44,7 +44,7 @@ function session(over: Partial<SessionInfo>): SessionInfo {
 }
 
 async function mountSidebar(side: 'left' | 'right' = 'right') {
-  // 右栏卡片（连接���态 / 文件浏览器 / Shell 列表）为异步组件
+  // 右栏卡片（连接状态 / 文件浏览器 / Shell 列表）为异步组件
   // （2026-10 按需加载）：加载链含多层 promise（loader → 渲染 → 子组件）。
   //
   // 有界轮询等待 `.conn-card` 挂载（2026-10 巡检修 flaky）：固定 6 轮

@@ -202,6 +202,10 @@ async function switchCategory(cat: CategoryKey) {
 }
 
 // ── 条目列表：按分类分组（组可折叠）──
+// 排序 locale 约定（2026-10）：全部 `localeCompare` **pin 'en'**——不传
+// locale 时按运行环境（LANG）选 collation：本地 zh_CN 与 CI en_US 下
+// 「QQ 适配器包」与「内置工具集」的顺序相反，测试与行为跨环境分裂
+// （本地 zh 环境稳定失败、CI 过）。pin 后两环境完全一致。
 const collapsedGroups = ref(new Set<string>());
 function toggleGroup(key: string) {
   const next = new Set(collapsedGroups.value);
@@ -338,14 +342,14 @@ const skillWorkbenchGroups = computed(() => {
     key,
     title: v.title,
     hint: v.hint,
-    items: v.items.sort((a, b) => a.name.localeCompare(b.name)),
+    items: v.items.sort((a, b) => a.name.localeCompare(b.name, 'en')),
   }));
   // 平铺不排序；其余按名称排序，但把「独立技能」放最后。
   if (skillGroupBy.value === 'flat') return entries;
   return entries.sort((a, b) => {
     if (a.key === '__standalone__') return 1;
     if (b.key === '__standalone__') return -1;
-    return a.title.localeCompare(b.title);
+    return a.title.localeCompare(b.title, 'en');
   });
 });
 
@@ -587,13 +591,13 @@ const toolWorkbenchGroups = computed(() => {
     key,
     title: v.title,
     hint: v.hint,
-    items: v.items.sort((a, b) => a.name.localeCompare(b.name)),
+    items: v.items.sort((a, b) => a.name.localeCompare(b.name, 'en')),
   }));
   if (toolGroupBy.value === 'flat') return entries;
   return entries.sort((a, b) => {
     if (a.key === '__standalone__') return 1;
     if (b.key === '__standalone__') return -1;
-    return a.title.localeCompare(b.title);
+    return a.title.localeCompare(b.title, 'en');
   });
 });
 
@@ -779,7 +783,7 @@ const pluginWorkbenchGroups = computed(() => {
     key,
     title: v.title,
     hint: v.hint,
-    items: v.items.sort((a, b) => a.id.localeCompare(b.id)),
+    items: v.items.sort((a, b) => a.id.localeCompare(b.id, 'en')),
   }));
   if (pluginGroupBy.value !== 'semantic') return entries;
   return entries.sort(
@@ -875,7 +879,9 @@ const hasWorkbench = computed(
 );
 
 // 智能体平铺列表：一律平等，按 id 排序（去主智能体 2026-09）
-const teamList = computed(() => [...state.teams].sort((a, b) => a.id.localeCompare(b.id)));
+const teamList = computed(() =>
+  [...state.teams].sort((a, b) => a.id.localeCompare(b.id, 'en')),
+);
 
 // ── 条目选中 ──
 async function selectSkillItem(s: SkillInfo) {
@@ -1142,11 +1148,11 @@ const capabilityToolGroups = computed(() => {
     groups.get(cat)!.push({ key: t.name, label: t.name, cat });
   }
   return [...groups.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
+    .sort((a, b) => a[0].localeCompare(b[0], 'en'))
     .map(([cat, items]) => ({
       cat,
       title: CATEGORY_LABEL[cat] ?? cat,
-      items: items.sort((a, b) => a.label.localeCompare(b.label)),
+      items: items.sort((a, b) => a.label.localeCompare(b.label, 'en')),
     }));
 });
 

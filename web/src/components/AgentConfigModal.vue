@@ -154,8 +154,11 @@ function groupBy(items: GroupedItem[]): GroupedTable[] {
     map.get(g)!.push(item);
   }
   return [...map.entries()]
-    .map(([group, list]) => ({ group, items: list.sort((a, b) => a.name.localeCompare(b.name)) }))
-    .sort((a, b) => a.group.localeCompare(b.group));
+    .map(([group, list]) => ({
+      group,
+      items: list.sort((a, b) => a.name.localeCompare(b.name, 'en')),
+    }))
+    .sort((a, b) => a.group.localeCompare(b.group, 'en'));
 }
 const toolGroups = computed(() => groupBy(toolItems.value));
 const skillGroups = computed(() => groupBy(skillItems.value));
