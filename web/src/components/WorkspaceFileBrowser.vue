@@ -1,16 +1,18 @@
 <script setup lang="ts">
 //! 工作区文件浏览器（workspace 插件）：只读浏览选中会话的工作区目录。
 //!
-//! 按需加载：进入目录时向 Core 发 `RequestWorkspaceFiles`，Core 以
+//! 按需加载：展开目录时向 Core 发 `RequestWorkspaceFiles`，Core 以
 //! `WorkspaceFiles` 事件回推条目（目录在前、文件在后，隐藏项跳过）。
 //! 服务端用 canonical 前缀校验限定在会话目录及其子孙内，越界返回错误。
 //!
-//! 导航模型 = 路径栈（`stack`）：index 0 = 活动根目录，每进入一层 push；
-//! 面包屑与「上级」都由它派生——不依赖字符串前缀解析（根目录配置形态
-//! 与 canonical 路径可能不一致）。
+//! 树模型（2026-10，对齐 VS Code 资源管理器）：全部目录根以顶层分区同时
+//! 呈现，目录**原地展开/折叠**（替代原先的路径栈导航 + 面包屑）；子目录
+//! 首次展开时才懒加载，展开等待中在 twistie 位显示加载指示，失败以内联
+//! 错误行展示。行点击即展开/折叠（chevron 随状态旋转）；14px/级缩进 +
+//! 垂直导引线（对齐 VS Code 的 indent guides）。
 //!
-//! 根切换 chip 的悬停速览（2026-09-28）：chip 只显示目录 basename，多根同名
-//! 时（如两个 `source/`）无法区分；悬停显示**绝对路径**。自绘 + Teleport，
+//! 目录根行的悬停速览（绝对路径）：根行只显示目录 basename，多根同名时
+//! （如两个 `source/`）无法区分；悬停显示**绝对路径**。自绘 + Teleport，
 //! 不复用原生 `title`（约 1s 延迟、样式不可控、长路径被系统截断），也不复用
 //! 库 `NeumorphismTooltip`（相对定位不 Teleport，会被 rail 卡体的
 //! `overflow-y: auto` 裁剪）。
@@ -21,7 +23,7 @@ import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpi
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import { scopedKey } from '../keys';
-import type { WorkspaceFileEntry, WorkspaceSessionInfo } from '../protocol';
+import type { WorkspaceSessionInfo } from '../protocol';
 import { directoryToInput, isRemoteDirectoryInput } from '../workspace';
 
 const props = defineProps<{
@@ -29,26 +31,121 @@ const props = defineProps<{
   session: WorkspaceSessionInfo | null;
 }>();
 
-/** 导航栈：index 0 = 活动根目录；每进入一层 push。 */
-const stack = ref<Array<{ label: string; path: string }>>([]);
-
-const currentPath = computed(() => stack.value[stack.value.length - 1]?.path ?? '');
-const listing = computed(() =>
-  currentPath.value
-    ? state.workspaceFiles[scopedKey(state.activeRegion, currentPath.value)]
-    : undefined,
-);
-const entries = computed(() => listing.value?.entries ?? []);
-const error = computed(() => listing.value?.error ?? null);
 /** 目录根（规范化为字符串：本机路径 / 跨机 node:// 串）——Core 线格式
  * 中跨机目录是 `{path,node}` 表，直接当字符串用（basename/startsWith）
  * 会崩，这里统一规范化（2026-10）。 */
 const roots = computed(() => (props.session?.directories ?? []).map(directoryToInput));
 
+/** 展开集合（路径）：目录根与子目录共用。折叠 = 移除，展开 = 加入。 */
+const expanded = ref<Set<string>>(new Set());
+
+/** 某目录的缓存列表（Core 回推的 WorkspaceFiles）。 */
+function listingFor(path: string) {
+  return state.workspaceFiles[scopedKey(state.activeRegion, path)];
+}
+
 function basename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
   return trimmed.split('/').filter(Boolean).pop() ?? path;
 }
+
+// ── 扁平化行模型（树 → 行数组） ──────────────────────────────────────
+//
+// VS Code 的资源管理器是"展平可见节点"的虚拟列表；这里同构但省略虚拟化
+// （侧边栏规模小）：树按「展开集合 + 列表缓存」派生为行数组，每行携带
+// 缩进层级 depth，模板直接 v-for 渲染。
+
+/** 扁平行（v-for 渲染单位）。 */
+interface TreeRow {
+  /** v-for key：真实路径；status 行加前缀避免与路径撞。 */
+  key: string;
+  path: string;
+  label: string;
+  depth: number;
+  kind: 'root' | 'dir' | 'file' | 'error' | 'empty';
+  /** 目录根行的跨机标注（节点名；本机 null）。 */
+  remoteNode: string | null;
+  /** 目录/根：是否展开（chevron 方向）。 */
+  isOpen: boolean;
+  /** 目录/根：已展开且列表尚未回推（twistie 位显示加载指示）。 */
+  loading: boolean;
+  /** 文件体积（目录为 0）。 */
+  size: number;
+}
+
+/** 展开目录的子行；未回推 = 无子行（父行 loading 指示）。 */
+function pushChildren(out: TreeRow[], path: string, depth: number): void {
+  if (depth > 64) return; // 符号链接环兜底
+  const listing = listingFor(path);
+  if (!listing) return;
+  if (listing.error) {
+    out.push({
+      key: `err:${path}`,
+      path,
+      label: listing.error,
+      depth,
+      kind: 'error',
+      remoteNode: null,
+      isOpen: false,
+      loading: false,
+      size: 0,
+    });
+    return;
+  }
+  if (!listing.entries.length) {
+    out.push({
+      key: `empty:${path}`,
+      path,
+      label: '（空目录）',
+      depth,
+      kind: 'empty',
+      remoteNode: null,
+      isOpen: false,
+      loading: false,
+      size: 0,
+    });
+    return;
+  }
+  for (const entry of listing.entries) {
+    const open = entry.is_dir && expanded.value.has(entry.path);
+    out.push({
+      key: entry.path,
+      path: entry.path,
+      label: entry.name,
+      depth,
+      kind: entry.is_dir ? 'dir' : 'file',
+      remoteNode: null,
+      isOpen: open,
+      loading: open && !listingFor(entry.path),
+      size: entry.size,
+    });
+    if (open) pushChildren(out, entry.path, depth + 1);
+  }
+}
+
+const rows = computed<TreeRow[]>(() => {
+  const out: TreeRow[] = [];
+  for (const root of roots.value) {
+    const open = expanded.value.has(root);
+    out.push({
+      key: root,
+      path: root,
+      label: basename(root),
+      depth: 0,
+      kind: 'root',
+      remoteNode: isRemoteDirectoryInput(root)
+        ? root.slice('node://'.length).split('/')[0]
+        : null,
+      isOpen: open,
+      loading: open && !listingFor(root),
+      size: 0,
+    });
+    if (open) pushChildren(out, root, 1);
+  }
+  return out;
+});
+
+// ── 请求与交互 ───────────────────────────────────────────────────────
 
 function requestFiles(path: string) {
   if (!state.connected || !props.teamId || !props.session || !path) return;
@@ -57,34 +154,37 @@ function requestFiles(path: string) {
   });
 }
 
-function openRoot(root: string) {
-  stack.value = [{ label: basename(root), path: root }];
-  requestFiles(root);
+/** 行点击：展开（顺手刷新）/ 折叠。 */
+function toggle(path: string) {
+  if (expanded.value.has(path)) {
+    const next = new Set(expanded.value);
+    next.delete(path);
+    expanded.value = next;
+  } else {
+    expanded.value = new Set([...expanded.value, path]);
+    requestFiles(path);
+  }
 }
 
-function enter(entry: WorkspaceFileEntry) {
-  if (!entry.is_dir) return;
-  stack.value = [...stack.value, { label: entry.name, path: entry.path }];
-  requestFiles(entry.path);
-}
-
-/** 面包屑跳转：截断到第 index 级并重新请求。 */
-function jump(index: number) {
-  if (index < 0 || index >= stack.value.length) return;
-  stack.value = stack.value.slice(0, index + 1);
-  requestFiles(currentPath.value);
-}
-
-function goUp() {
-  if (stack.value.length <= 1) return;
-  jump(stack.value.length - 2);
-}
-
+/** 刷新：重读全部已展开目录；全折叠时回到首个根（重开视图语义）。 */
 function refresh() {
-  requestFiles(currentPath.value);
+  if (expanded.value.size) {
+    for (const path of expanded.value) requestFiles(path);
+    return;
+  }
+  const first = roots.value[0];
+  if (first) {
+    expanded.value = new Set([first]);
+    requestFiles(first);
+  }
 }
 
-// ── 根切换 chip 的悬停速览（绝对路径） ────────────────────────────────
+/** 折叠全部（等价 VS Code 工具栏的 Collapse Folders）。 */
+function collapseAll() {
+  expanded.value = new Set();
+}
+
+// ── 目录根行的悬停速览（绝对路径） ────────────────────────────────────
 //
 // 定位用 `position: fixed` + 视口坐标：Teleport 到 body 后不受卡片滚动容器
 // 裁剪；宽上限与 CSS 的 max-width 保持一致（超长路径换行、不截断）。
@@ -96,26 +196,28 @@ interface RootTip {
   path: string;
   x: number;
   y: number;
-  /** true = 悬于 chip 上方（默认）；顶部空间不足时翻到下方。 */
+  /** true = 悬于根行上方（默认）；顶部空间不足时翻到下方。 */
   above: boolean;
 }
 
 const rootTip = ref<RootTip | null>(null);
 
-function showRootTip(path: string, event: Event) {
+function onRootEnter(row: TreeRow, event: Event) {
+  if (row.kind !== 'root') return;
   const el = event.currentTarget as HTMLElement | null;
   if (!el) return;
   const rect = el.getBoundingClientRect();
-  // 视口内夹取：chip 在窗口右侧栏内，靠右时左移使整条路径可见。
+  // 视口内夹取：根行在窗口右侧栏内，靠右时左移使整条路径可见。
   const x = Math.max(
     8,
     Math.min(rect.left, window.innerWidth - ROOT_TIP_MAX_WIDTH - 8),
   );
   const above = rect.top > 72; // 上方留得下（约两行路径）就悬于上方
-  rootTip.value = { path, x, y: above ? rect.top - 6 : rect.bottom + 6, above };
+  rootTip.value = { path: row.path, x, y: above ? rect.top - 6 : rect.bottom + 6, above };
 }
 
-function hideRootTip() {
+function onRootLeave(row: TreeRow) {
+  if (row.kind !== 'root') return;
   rootTip.value = null;
 }
 
@@ -130,7 +232,11 @@ const rootTipStyle = computed(() => {
   };
 });
 
-// 滚动/缩放时 chip 的视口坐标会漂移：直接收起（重新悬停即可）。
+// 滚动/缩放时根行的视口坐标会漂移：直接收起（重新悬停即可）。
+function hideRootTip() {
+  rootTip.value = null;
+}
+
 onMounted(() => {
   window.addEventListener('scroll', hideRootTip, true);
   window.addEventListener('resize', hideRootTip);
@@ -140,22 +246,22 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', hideRootTip);
 });
 
-// 会话切换（或目录配置变化）→ 回到第一个根目录。
+// 会话切换（或目录配置变化）→ 重置树：只展开第一个根并请求。
 watch(
   () => [props.session?.id ?? '', roots.value.join('\n')].join('|'),
   () => {
     const first = roots.value[0];
-    if (first) openRoot(first);
-    else stack.value = [];
+    expanded.value = first ? new Set([first]) : new Set();
+    if (first) requestFiles(first);
   },
   { immediate: true },
 );
 
-// 重连后缓存已清空：重拉当前目录。
+// 重连后缓存已清空：重拉全部已展开目录。
 watch(
   () => state.connected,
   (connected) => {
-    if (connected && currentPath.value) requestFiles(currentPath.value);
+    if (connected) for (const path of expanded.value) requestFiles(path);
   },
 );
 
@@ -175,43 +281,25 @@ function formatSize(size: number): string {
         <NeumorphismButton
           size="small"
           variant="glass"
-          :disabled="stack.length <= 1"
-          title="返回上一级"
-          @click="goUp"
-        >
-          ↑
-        </NeumorphismButton>
-        <NeumorphismButton
-          size="small"
-          variant="glass"
-          :disabled="!currentPath"
-          title="重新读取当前目录"
+          :disabled="!session || !roots.length"
+          title="重新读取全部已展开目录"
           @click="refresh"
         >
           刷新
         </NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          :disabled="!expanded.size"
+          title="折叠全部目录"
+          @click="collapseAll"
+        >
+          折叠
+        </NeumorphismButton>
       </div>
     </div>
 
-    <!-- 多工作区目录：根切换（单目录时不显示） -->
-    <div v-if="roots.length > 1" class="wfb-roots">
-      <button
-        v-for="root in roots"
-        :key="root"
-        class="wfb-root"
-        :class="{ 'is-active': stack[0]?.path === root }"
-        :aria-label="`切换到 ${root}`"
-        @mouseenter="showRootTip(root, $event)"
-        @mouseleave="hideRootTip"
-        @click="openRoot(root)"
-      >
-        <span v-if="isRemoteDirectoryInput(root)" class="wfb-root__node">
-          {{ root.slice('node://'.length).split('/')[0] }}⛓
-        </span>{{ basename(root) }}
-      </button>
-    </div>
-
-    <!-- 根切换 chip 的悬停速览（绝对路径）：Teleport 到 body + fixed 定位，
+    <!-- 根行悬停速览（绝对路径）：Teleport 到 body + fixed 定位，
          不被卡片滚动容器（overflow: auto）裁剪（见脚本区注释） -->
     <Teleport to="body">
       <div
@@ -224,42 +312,82 @@ function formatSize(size: number): string {
       </div>
     </Teleport>
 
-    <!-- 面包屑（路径栈） -->
-    <div v-if="stack.length" class="wfb-crumbs">
-      <template v-for="(crumb, index) in stack" :key="crumb.path">
-        <span v-if="index" class="wfb-crumb-sep">/</span>
-        <button
-          class="wfb-crumb"
-          :class="{ 'is-current': index === stack.length - 1 }"
-          :title="crumb.path"
-          @click="jump(index)"
-        >
-          {{ crumb.label }}
-        </button>
-      </template>
-    </div>
-
-    <!-- 条目列表 -->
-    <div class="wfb-list">
+    <!-- 树（全部根分区同时呈现；行 = 缩进 + twistie + 图标 + 名称） -->
+    <div class="wfb-tree">
       <div v-if="!session" class="muted wfb-empty">（暂无工作区会话）</div>
-      <div v-else-if="error" class="wfb-error" :title="error">{{ error }}</div>
-      <div v-else-if="!listing" class="muted wfb-empty">
-        <NeumorphismSpinner size="small" /> 读取中…
-      </div>
-      <div v-else-if="!entries.length" class="muted wfb-empty">（空目录）</div>
-      <button
-        v-for="entry in entries"
-        :key="entry.path"
-        class="wfb-row"
-        :class="{ 'is-dir': entry.is_dir }"
-        :title="entry.path"
-        @click="enter(entry)"
-      >
-        <span class="wfb-row__name">
-          <span v-if="entry.is_dir" class="wfb-row__icon">📁</span>{{ entry.name }}
-        </span>
-        <span v-if="!entry.is_dir" class="wfb-row__size">{{ formatSize(entry.size) }}</span>
-      </button>
+      <div v-else-if="!roots.length" class="muted wfb-empty">（未配置目录）</div>
+      <template v-else>
+        <div
+          v-for="row in rows"
+          :key="row.key"
+          class="wfb-trow"
+          :class="[`wfb-trow--${row.kind}`, { 'is-open': row.isOpen }]"
+          :style="{ paddingLeft: `${6 + row.depth * 14}px` }"
+        >
+          <!-- 缩进导引线（每级一条，对齐 VS Code indent guides） -->
+          <span
+            v-for="g in row.depth"
+            :key="g"
+            class="wfb-guide"
+            :style="{ left: `${13 + (g - 1) * 14}px` }"
+            aria-hidden="true"
+          />
+
+          <!-- 目录 / 目录根：整行按钮（点击 = 展开/折叠） -->
+          <button
+            v-if="row.kind === 'root' || row.kind === 'dir'"
+            type="button"
+            class="wfb-tbtn"
+            :title="row.kind === 'dir' ? row.path : undefined"
+            :aria-expanded="row.isOpen"
+            @click="toggle(row.path)"
+            @mouseenter="onRootEnter(row, $event)"
+            @mouseleave="onRootLeave(row)"
+          >
+            <span class="wfb-twistie">
+              <NeumorphismSpinner v-if="row.loading" :size="12" label="读取中" />
+              <svg
+                v-else
+                class="wfb-chevron"
+                viewBox="0 0 16 16"
+                width="10"
+                height="10"
+                aria-hidden="true"
+              >
+                <path
+                  d="M6 3.5 10.5 8 6 12.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span class="wfb-ico">{{ row.isOpen ? '📂' : '📁' }}</span>
+            <span v-if="row.remoteNode" class="wfb-badge">{{ row.remoteNode }}⛓</span>
+            <span class="wfb-name">{{ row.label }}</span>
+          </button>
+
+          <!-- 文件行：只读（无打开动作），右侧显示体积 -->
+          <div v-else-if="row.kind === 'file'" class="wfb-tbtn wfb-tbtn--file" :title="row.path">
+            <span class="wfb-twistie" aria-hidden="true" />
+            <span class="wfb-ico wfb-ico--file">📄</span>
+            <span class="wfb-name">{{ row.label }}</span>
+            <span class="wfb-size">{{ formatSize(row.size) }}</span>
+          </div>
+
+          <!-- 错误 / 空目录占位行（与子级名称对齐） -->
+          <div
+            v-else
+            class="wfb-trow__note"
+            :class="{ 'is-error': row.kind === 'error' }"
+            :title="row.kind === 'error' ? row.label : undefined"
+          >
+            {{ row.label }}
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -280,33 +408,6 @@ function formatSize(size: number): string {
 }
 .wfb-title { font-size: 12px; font-weight: 700; color: var(--nm-text-primary); }
 .wfb-actions { display: flex; gap: 6px; }
-
-.wfb-roots { display: flex; flex-wrap: wrap; gap: 4px; }
-.wfb-root__node {
-  color: var(--panel-accent, #0969da);
-  font-weight: 600;
-  margin-right: 2px;
-}
-.wfb-root {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--nm-border-color);
-  background: var(--panel-hover);
-  color: var(--nm-text-secondary);
-  font-size: 10px;
-  font-family: var(--nm-font-mono, monospace);
-  cursor: pointer;
-}
-.wfb-root:hover { border-color: var(--panel-accent); }
-.wfb-root.is-active {
-  border-color: var(--panel-accent);
-  color: var(--nm-text-primary);
-  background: var(--panel-accent-soft);
-}
 
 /* 悬停速览（绝对路径）。
    注意：本节是 Teleport 到 body 的节点，**不属于 rail 卡片**——scoped 样式
@@ -330,75 +431,102 @@ function formatSize(size: number): string {
   pointer-events: none; /* 不抢 hover，避免闪烁 */
 }
 
-.wfb-crumbs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 1px;
-  font-size: 11px;
-}
-.wfb-crumb {
-  border: none;
-  background: none;
-  padding: 1px 4px;
-  border-radius: 6px;
-  color: var(--nm-text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-}
-.wfb-crumb:hover { color: var(--panel-accent); }
-.wfb-crumb.is-current { color: var(--nm-text-primary); font-weight: 600; }
-.wfb-crumb-sep { color: var(--nm-text-secondary); font-size: 10px; }
-
-.wfb-list {
+/* ── 树 ── */
+.wfb-tree {
   display: flex;
   flex-direction: column;
-  gap: 1px;
   max-height: 48vh;
   overflow-y: auto;
+  overflow-x: hidden;
 }
-.wfb-row {
+
+.wfb-trow { position: relative; min-width: 0; }
+.wfb-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--nm-border-color);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* 行主体：目录 = button（可点击），文件 = 静态 div；两者同构保证名称对齐 */
+.wfb-tbtn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 2px;
   width: 100%;
-  padding: 4px 8px;
+  min-width: 0;
+  padding: 3px 8px 3px 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: none;
   color: var(--nm-text-primary);
+  font-family: inherit;
   font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
-.wfb-row:hover { background: var(--panel-hover); }
-.wfb-row.is-dir { color: var(--panel-accent); }
-.wfb-row.is-dir:hover { background: var(--panel-accent-soft); }
-.wfb-row__name {
-  display: flex;
+.wfb-tbtn:hover { background: var(--panel-hover); }
+.wfb-trow--root .wfb-name { font-weight: 600; }
+.wfb-trow--dir .wfb-tbtn { color: var(--panel-accent); }
+.wfb-trow--dir .wfb-tbtn:hover { background: var(--panel-accent-soft); }
+.wfb-tbtn--file { cursor: default; }
+
+.wfb-twistie {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--nm-text-secondary);
+}
+.wfb-chevron { transition: transform 0.12s ease; }
+.wfb-trow.is-open .wfb-chevron { transform: rotate(90deg); }
+
+.wfb-ico {
+  flex: none;
+  width: 16px;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+}
+.wfb-ico--file { opacity: 0.65; }
+
+.wfb-badge {
+  flex: none;
+  margin-right: 2px;
+  color: var(--panel-accent, #0969da);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.wfb-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wfb-row__icon { font-size: 11px; }
-.wfb-row__size {
+
+.wfb-size {
+  margin-left: auto;
   flex: none;
+  padding-left: 8px;
   font-size: 10px;
   color: var(--nm-text-secondary);
   font-family: var(--nm-font-mono, monospace);
 }
 
-.wfb-empty { font-size: 11px; }
-.wfb-error {
-  padding: 4px 8px;
-  border-radius: 8px;
+/* 错误 / 空目录占位行：与子级名称起点对齐（twistie 14 + gap 2 + 图标 16 + gap 2） */
+.wfb-trow__note {
+  padding: 2px 8px 2px 34px;
   font-size: 11px;
-  color: var(--panel-err);
-  background: color-mix(in srgb, var(--panel-err) 10%, transparent);
+  color: var(--nm-text-secondary);
   overflow-wrap: anywhere;
 }
+.wfb-trow__note.is-error { color: var(--panel-err); }
+
+.wfb-empty { font-size: 11px; }
 </style>
