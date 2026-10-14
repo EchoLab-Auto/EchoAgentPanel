@@ -38,60 +38,82 @@ describe('工作区通道 id 与投影', () => {
 describe('切换器点选意图（双向绑定）', () => {
   it('选通道 = 激活（未激活或未同步都发）', () => {
     const id = workspaceChannelSessionId('docs');
-    expect(workspacePickIntent(id, 'core', true)).toEqual({ kind: 'activate', workspaceId: 'docs' });
-    expect(workspacePickIntent(id, null, true)).toEqual({ kind: 'activate', workspaceId: 'docs' });
-    expect(workspacePickIntent(id, null, false)).toEqual({ kind: 'activate', workspaceId: 'docs' });
+    expect(workspacePickIntent(id, 'core', null, true)).toEqual({
+      kind: 'activate',
+      workspaceId: 'docs',
+      conversation: null,
+    });
+    expect(workspacePickIntent(id, null, null, true)).toEqual({
+      kind: 'activate',
+      workspaceId: 'docs',
+      conversation: null,
+    });
+    expect(workspacePickIntent(id, null, null, false)).toEqual({
+      kind: 'activate',
+      workspaceId: 'docs',
+      conversation: null,
+    });
   });
 
   it('选已激活通道（快照已同步）不重发', () => {
     const id = workspaceChannelSessionId('docs');
-    expect(workspacePickIntent(id, 'docs', true)).toEqual({ kind: 'none' });
+    expect(workspacePickIntent(id, 'docs', null, true)).toEqual({ kind: 'none' });
   });
 
   it('选默认会话 = 取消激活（仅当已知存在激活）', () => {
-    expect(workspacePickIntent(LOCAL_DEFAULT_SESSION, 'docs', true)).toEqual({
+    expect(workspacePickIntent(LOCAL_DEFAULT_SESSION, 'docs', null, true)).toEqual({
       kind: 'deactivate',
     });
     // 未激活 / 快照未知：不猜，不发命令
-    expect(workspacePickIntent(LOCAL_DEFAULT_SESSION, null, true)).toEqual({ kind: 'none' });
-    expect(workspacePickIntent(LOCAL_DEFAULT_SESSION, 'docs', false)).toEqual({ kind: 'none' });
+    expect(workspacePickIntent(LOCAL_DEFAULT_SESSION, null, null, true)).toEqual({ kind: 'none' });
+    expect(workspacePickIntent(LOCAL_DEFAULT_SESSION, 'docs', null, false)).toEqual({
+      kind: 'none',
+    });
   });
 
   it('QQ/global 会话点选不触发激活语义', () => {
-    expect(workspacePickIntent('qq:dm::42', 'docs', true)).toEqual({ kind: 'none' });
-    expect(workspacePickIntent('global', 'docs', true)).toEqual({ kind: 'none' });
+    expect(workspacePickIntent('qq:dm::42', 'docs', null, true)).toEqual({ kind: 'none' });
+    expect(workspacePickIntent('global', 'docs', null, true)).toEqual({ kind: 'none' });
   });
 });
 
 describe('已删除工作区的残留通道（历史保留）', () => {
+  const sessions = [{ id: 'alive-ws', name: 'Alive' }];
+
   it('快照已知且不含该 id → 仅查看（不激活，避免 Core 报错）', () => {
     const stale = 'local:workspace:deleted-ws:local_user';
-    expect(workspacePickIntent(stale, null, true, ['alive-ws'])).toEqual({ kind: 'none' });
+    expect(workspacePickIntent(stale, null, null, true, sessions)).toEqual({ kind: 'none' });
     // 已是激活态（不太可能，但防御）：依然不激活
-    expect(workspacePickIntent(stale, 'deleted-ws', true, ['alive-ws'])).toEqual({ kind: 'none' });
+    expect(workspacePickIntent(stale, 'deleted-ws', null, true, sessions)).toEqual({
+      kind: 'none',
+    });
   });
 
-  it('存在的工作区不受影响（正常激活）', () => {
+  it('存在的工作区不受影响（正常激活；裸通道解析到 legacy 主对话）', () => {
     const alive = 'local:workspace:alive-ws:local_user';
-    expect(workspacePickIntent(alive, null, true, ['alive-ws'])).toEqual({
+    expect(workspacePickIntent(alive, null, null, true, sessions)).toEqual({
       kind: 'activate',
       workspaceId: 'alive-ws',
+      // 快照已知：裸 ws 旧格式通道解析到该工作区的 legacy 对话（隐式主对话）
+      conversation: 'main',
     });
   });
 
   it('快照未同步（synced=false）→ 不校验（保持旧行为）', () => {
     const id = 'local:workspace:some-ws:local_user';
-    expect(workspacePickIntent(id, null, false, [])).toEqual({
+    expect(workspacePickIntent(id, null, null, false, [])).toEqual({
       kind: 'activate',
       workspaceId: 'some-ws',
+      conversation: null,
     });
   });
 
-  it('未提供已知列表 → 不校验', () => {
+  it('未提供快照 → 不校验', () => {
     const id = 'local:workspace:some-ws:local_user';
-    expect(workspacePickIntent(id, null, true)).toEqual({
+    expect(workspacePickIntent(id, null, null, true)).toEqual({
       kind: 'activate',
       workspaceId: 'some-ws',
+      conversation: null,
     });
   });
 });

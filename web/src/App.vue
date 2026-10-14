@@ -216,19 +216,28 @@ function selectSession(id: string) {
 //   active 空 → 默认本地会话；active = W → W 的通道会话。
 // 由 Core 的 `WorkspaceSessions` 回推驱动（所有激活来源共一条广播路径），
 // 面板侧只在本地视图上跟随。
-
 /** 切换团队后的本地落点：已知该团队 active → 通道投影；否则默认本地会话。 */
 function localLanding(teamId: string | null): string {
   const synced = state.workspaceTeamId === teamId;
-  return synced ? localSessionProjection(state.workspaceActive) : LOCAL_DEFAULT_SESSION;
+  return synced
+    ? localSessionProjection(
+        state.workspaceActive,
+        state.workspaceActiveConversation,
+        state.workspaceSessions,
+      )
+    : LOCAL_DEFAULT_SESSION;
 }
 
-function sendWorkspaceActivate(id: string | null) {
+function sendWorkspaceActivate(id: string | null, conversation: string | null = null) {
   sendCommand({
-    ActivateWorkspaceSession: { team_id: activeTeamId.value ?? undefined, id },
+    ActivateWorkspaceSession: {
+      team_id: activeTeamId.value ?? undefined,
+      id,
+      // 取消激活（id = null）时 Core 忽略 conversation；激活时缺省 = 进 last_conversation。
+      conversation: id ? conversation : undefined,
+    },
   });
 }
-
 /** 用户在「会话」切换器点选（用户意图；程序化切换走 selectSession）。 */
 function onSessionPick(id: string) {
   // 会话归属 core 即当前 agent 的归属 core：同名 team 跨 core 时，选中
@@ -249,10 +258,11 @@ function onSessionPick(id: string) {
   const intent = workspacePickIntent(
     id,
     state.workspaceActive,
+    state.workspaceActiveConversation,
     synced,
-    state.workspaceSessions.map((s) => s.id),
+    state.workspaceSessions,
   );
-  if (intent.kind === 'activate') sendWorkspaceActivate(intent.workspaceId);
+  if (intent.kind === 'activate') sendWorkspaceActivate(intent.workspaceId, intent.conversation);
   else if (intent.kind === 'deactivate') sendWorkspaceActivate(null);
   selectSession(id);
 }
@@ -262,15 +272,22 @@ function onSessionPick(id: string) {
 // 时由 localLanding / 本 watcher 落到 active 对应通道）；不在会话视图时
 // 只更新目标会话，不强制拉回聊天视图。
 watch(
-  [() => state.workspaceTeamId, () => state.workspaceActive],
+  [
+    () => state.workspaceTeamId,
+    () => state.workspaceActive,
+    () => state.workspaceActiveConversation,
+  ],
   () => {
     if (state.workspaceTeamId !== activeTeamId.value) return;
     if (!activeSessionId.value.startsWith('local:')) return;
-    const next = localSessionProjection(state.workspaceActive);
+    const next = localSessionProjection(
+      state.workspaceActive,
+      state.workspaceActiveConversation,
+      state.workspaceSessions,
+    );
     if (activeSessionId.value !== next) activeSessionId.value = next;
   },
 );
-
 // 连接/切换 Team 后拉取工作区会话快照（投影与切换器双击绑定依赖它）。
 // 仅对启用 workspace 插件的人格发（未挂载存储的人格会回明确错误提示）。
 let workspaceFetchKey = '';

@@ -1,12 +1,18 @@
-<script setup lang="ts">
-//! 工作区会话面板（workspace 插件）：会话管理（新建/编辑/删除/激活）与
+//! 工作区会话面板（workspace 插件）：会话管理（新建/编辑/删除/激活）、
+//! 会话内**对话管理**（2026-10 多对话：新建/重命名/删除/切换）与
 //! 各目录 git 状态。文件浏览器已迁至会话视图右侧边栏（2026-09-19，
 //! `ChatView` 的 workspace-rail 卡）。
 //!
 //! 数据流：命令带 team_id 路由到对应 persona（去主智能体后必填）；
 //! Core 以 `WorkspaceSessions` / `WorkspaceGitStatus` 事件回推。
 //! 弹层几何由 ChatView 的 `.checklist-pop` 提供。
+//!
+//! 对话 CRUD：Core 无独立协议命令——经 `SaveWorkspaceSession` 全量
+//! upsert 会话（conversations 数组整体替换，面板侧镜像 Core
+//! `upsert_conversation` 的物化/slug/legacy 语义）；删除对话额外按通道
+//! id 发 `ClearHistory` 清空其聊天历史（两步确认，不可恢复）。
 
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import { state } from '../store';
@@ -14,8 +20,15 @@ import { sendCommand, sendPending } from '../connection';
 import { sessionKey } from '../keys';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
-import type { WorkspaceSessionInfo } from '../protocol';
-import { directoryNode, directoryPath, directoryToInput } from '../workspace';
+import type { WorkspaceConversationInfo, WorkspaceSessionInfo } from '../protocol';
+import {
+  conversationsView,
+  conversationIdForName,
+  directoryNode,
+  directoryPath,
+  directoryToInput,
+  workspaceChannelSessionId,
+} from '../workspace';
 import DirectoryPicker from './DirectoryPicker.vue';
 import { confirmDialog } from '../confirm';
 
@@ -29,6 +42,10 @@ const fresh = computed(
 );
 const sessions = computed(() => (fresh.value ? state.workspaceSessions : []));
 const activeId = computed(() => (fresh.value ? state.workspaceActive : null));
+/** 当前激活对话 id（2026-10 多对话；旧 Core 恒 null）。 */
+const activeConversationId = computed(() =>
+  fresh.value ? state.workspaceActiveConversation : null,
+);
 
 const selectedId = ref<string>('');
 const selected = computed(
@@ -156,6 +173,109 @@ async function remove(session: WorkspaceSessionInfo) {
   sendCommand({ DeleteWorkspaceSession: { team_id: props.teamId, id: session.id } });
 }
 
+// ── 对话管理（2026-10 多对话）──
+// Core 无独立对话 CRUD 命令：经 SaveWorkspaceSession 全量 upsert 会话
+//（conversations 整体替换，镜像 Core upsert_conversation 的物化/slug/
+// legacy 语义）；删除对话额外按通道 id 发 ClearHistory 清空其聊天历史。
+
+/** (工作区, 对话) 是否当前激活对。 */
+function isActiveConversation(
+  session: WorkspaceSessionInfo,
+  conv: WorkspaceConversationInfo,
+): boolean {
+  return session.id === activeId.value && conv.id === activeConversationId.value;
+}
+
+/** 全量 upsert 会话（仅替换 conversations / last_conversation，其余字段原样回传）。 */
+function saveConversations(
+  session: WorkspaceSessionInfo,
+  conversations: WorkspaceConversationInfo[],
+  lastConversation?: string | null,
+) {
+  if (!props.teamId) return;
+  sendCommand({
+    SaveWorkspaceSession: {
+      team_id: props.teamId,
+      session: {
+        id: session.id,
+        name: session.name,
+        description: session.description ?? '',
+        directories: session.directories ?? [],
+        conversations,
+        last_conversation:
+          lastConversation === undefined ? (session.last_conversation ?? null) : lastConversation,
+      },
+    },
+  });
+}
+
+/** 点选对话 = 激活 (工作区, 对话)；已是当前对 → 不重发。 */
+function switchConversation(session: WorkspaceSessionInfo, conv: WorkspaceConversationInfo) {
+  if (!props.teamId || isActiveConversation(session, conv)) return;
+  sendCommand({
+    ActivateWorkspaceSession: { team_id: props.teamId, id: session.id, conversation: conv.id },
+  });
+}
+
+/** 对话内联表单：convId = null 新建，否则重命名该对话。 */
+const convForm = ref<null | { wsId: string; convId: string | null }>(null);
+const convFormName = ref('');
+
+function startConvCreate(session: WorkspaceSessionInfo) {
+  convForm.value = { wsId: session.id, convId: null };
+  convFormName.value = '';
+}
+
+function startConvRename(session: WorkspaceSessionInfo, conv: WorkspaceConversationInfo) {
+  convForm.value = { wsId: session.id, convId: conv.id };
+  convFormName.value = conv.name;
+}
+
+function cancelConvForm() {
+  convForm.value = null;
+}
+
+function saveConvForm(session: WorkspaceSessionInfo) {
+  const name = convFormName.value.trim();
+  if (!name || !convForm.value) return;
+  // 物化隐式主对话（旧档 conversations 为空时补位 {id:"main", legacy:true}），
+  // 与 Core 写入路径 materialize_conversations 一致。
+  const convs = conversationsView(session).map((c) => ({ ...c }));
+  if (convForm.value.convId === null) {
+    const id = conversationIdForName(name, convs.map((c) => c.id));
+    // 镜像 Core：存量裸通道（legacy）每工作区至多一条；legacy 对话被删后
+    // 新对话可再次占用裸通道（其历史已在删除时清空）。
+    convs.push({ id, name, legacy: !convs.some((c) => c.legacy) });
+  } else {
+    const target = convs.find((c) => c.id === convForm.value!.convId);
+    if (!target) return;
+    target.name = name;
+  }
+  saveConversations(session, convs);
+  convForm.value = null;
+}
+
+async function removeConversation(session: WorkspaceSessionInfo, conv: WorkspaceConversationInfo) {
+  if (!props.teamId) return;
+  const ok = await confirmDialog(
+    `删除对话「${conv.name}」？该对话的聊天历史将被清空，不可恢复。`,
+    { title: '删除对话', danger: true, confirmText: '删除' },
+  );
+  if (!ok) return;
+  // 先清通道历史（legacy → 裸 ws 通道；其余 → <ws>/<conv> 通道）。
+  sendCommand({
+    ClearHistory: {
+      team_id: props.teamId,
+      session_id: workspaceChannelSessionId(session.id, conv),
+    },
+  });
+  const rest = conversationsView(session).filter((c) => c.id !== conv.id).map((c) => ({ ...c }));
+  // last_conversation 指向被删对话时回退首条（Core set_active 亦有兜底）。
+  const last =
+    session.last_conversation === conv.id ? (rest[0]?.id ?? null) : undefined;
+  saveConversations(session, rest, last);
+}
+
 const { phase: sessionsPhase } = usePending('workspace:sessions');
 
 onMounted(() => {
@@ -268,6 +388,90 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
             </span>{{ directoryPath(dir) }}
           </span>
           <span v-if="!(session.directories ?? []).length" class="muted">（尚未配置目录）</span>
+        </div>
+        <!-- 对话管理（2026-10 多对话）：点选 = 切换激活对话；删除两步确认并清历史 -->
+        <div class="ws-convs" @click.stop>
+          <div class="ws-convs__head">
+            <span class="ws-convs__title">对话</span>
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              :disabled="!state.connected"
+              @click="startConvCreate(session)"
+            >
+              新建对话
+            </NeumorphismButton>
+          </div>
+          <div
+            v-for="conv in conversationsView(session)"
+            :key="conv.id"
+            class="ws-conv"
+            :class="{ 'is-active': isActiveConversation(session, conv) }"
+            :title="workspaceChannelSessionId(session.id, conv)"
+            @click="switchConversation(session, conv)"
+          >
+            <template v-if="convForm && convForm.wsId === session.id && convForm.convId === conv.id">
+              <input
+                v-model="convFormName"
+                class="ws-input ws-conv__input"
+                placeholder="对话名称"
+                @click.stop
+                @keyup.enter="saveConvForm(session)"
+                @keyup.esc="cancelConvForm"
+              />
+              <span class="ws-conv__actions">
+                <NeumorphismButton
+                  size="small"
+                  variant="glass"
+                  :disabled="!convFormName.trim()"
+                  @click="saveConvForm(session)"
+                >
+                  保存
+                </NeumorphismButton>
+                <NeumorphismButton size="small" variant="glass" @click="cancelConvForm">
+                  取消
+                </NeumorphismButton>
+              </span>
+            </template>
+            <template v-else>
+              <span class="ws-conv__name">{{ conv.name }}</span>
+              <span v-if="isActiveConversation(session, conv)" class="ws-badge">当前</span>
+              <span class="ws-conv__actions">
+                <NeumorphismButton size="small" variant="glass" @click.stop="startConvRename(session, conv)">
+                  改名
+                </NeumorphismButton>
+                <NeumorphismButton size="small" variant="glass" @click.stop="removeConversation(session, conv)">
+                  删除
+                </NeumorphismButton>
+              </span>
+            </template>
+          </div>
+          <div
+            v-if="convForm && convForm.wsId === session.id && convForm.convId === null"
+            class="ws-conv ws-conv--form"
+          >
+            <input
+              v-model="convFormName"
+              class="ws-input ws-conv__input"
+              placeholder="新对话名称"
+              @click.stop
+              @keyup.enter="saveConvForm(session)"
+              @keyup.esc="cancelConvForm"
+            />
+            <span class="ws-conv__actions">
+              <NeumorphismButton
+                size="small"
+                variant="glass"
+                :disabled="!convFormName.trim()"
+                @click="saveConvForm(session)"
+              >
+                创建
+              </NeumorphismButton>
+              <NeumorphismButton size="small" variant="glass" @click="cancelConvForm">
+                取消
+              </NeumorphismButton>
+            </span>
+          </div>
         </div>
         <div class="ws-card__actions" @click.stop>
           <NeumorphismButton size="small" variant="glass" @click="toggleActive(session)">
@@ -412,6 +616,51 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
   font-weight: 600;
   margin-right: 2px;
 }
+.ws-card__actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* 对话管理（2026-10 多对话）：卡内嵌列表，风格对齐会话切换器行。 */
+.ws-convs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--nm-border-color);
+}
+.ws-convs__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ws-convs__title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nm-text-secondary);
+}
+.ws-conv {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--nm-text-primary);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.ws-conv:hover { background: var(--panel-hover); }
+.ws-conv.is-active {
+  border-color: var(--panel-accent);
+  background: var(--panel-accent-soft);
+}
+.ws-conv--form { cursor: default; }
+.ws-conv__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-conv__input { flex: 1 1 auto; min-width: 0; }
+.ws-conv__actions { display: flex; gap: 4px; flex: 0 0 auto; }
 .ws-dir-chip {
   max-width: 100%;
   overflow: hidden;

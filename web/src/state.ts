@@ -510,7 +510,8 @@ export interface AppState {
   workspaceSessions: WorkspaceSessionInfo[];
   /** 激活的工作区会话 id（null = 未激活） */
   workspaceActive: string | null;
-  /** 上述列表归属的 team id（用于切换 team 后判定新鲜度） */
+  /** 激活的工作区对话 id（2026-10 多对话；旧 Core 恒 null） */
+  workspaceActiveConversation: string | null;
   workspaceTeamId: string | null;
   /** 上述列表归属的 core（多上游；与 workspaceTeamId 一起判定新鲜度）。 */
   workspaceCore: string | null;
@@ -591,6 +592,7 @@ export function initialState(): AppState {
     teams: [],
     workspaceSessions: [],
     workspaceActive: null,
+    workspaceActiveConversation: null,
     workspaceTeamId: null,
     workspaceCore: null,
     workspaceGitBySession: {},
@@ -639,12 +641,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
             team_id?: string | null;
             sessions: WorkspaceSessionInfo[];
             active?: string | null;
+            active_conversation?: string | null;
             core?: string | null;
           };
         }
       ).WorkspaceSessions;
       state.workspaceSessions = e.sessions ?? [];
       state.workspaceActive = e.active ?? null;
+      state.workspaceActiveConversation = e.active_conversation ?? null;
       state.workspaceTeamId = e.team_id ?? null;
       state.workspaceCore = e.core ?? null;
       return state;

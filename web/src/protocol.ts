@@ -88,6 +88,20 @@ export interface BrowseRoot {
   path: string;
 }
 
+/** 工作区内的一条对话（2026-10 多对话）：名称 + 通道 id 派生标记。
+ *
+ * 每条对话对应一条独立的本地通道会话（独立上下文/预算/压缩清理）：
+ * - `legacy = true`：存量通道 id `local:workspace:<ws>:local_user`（每工作区
+ *   至多一条；旧数据的首条对话——事件日志 append-only，id 不可改写）；
+ * - 其余对话：`local:workspace:<ws>/<conv>:local_user`。 */
+export interface WorkspaceConversationInfo {
+  /** 稳定 id（slug；工作区内唯一，不含 `/`）。 */
+  id: string;
+  name: string;
+  /** 通道 id 是否为存量裸 ws 格式（见类型注释）。 */
+  legacy: boolean;
+}
+
 /** 工作区会话（workspace 插件）：名称 + 多个工作区目录。 */
 export interface WorkspaceSessionInfo {
   /** 稳定 id（空 = 由 Core 依名称生成）。 */
@@ -96,6 +110,11 @@ export interface WorkspaceSessionInfo {
   description?: string;
   /** 工作区目录列表（本机字符串 / 跨机 {path,node} 两种线格式）。 */
   directories?: WorkspaceDirectoryEntry[];
+  /** 工作区内的对话列表（2026-10 多对话）。缺省/空 = 仅存量主对话
+   * （Core 读取期惰性补位 `{id:"main", name:"主对话", legacy:true}`）。 */
+  conversations?: WorkspaceConversationInfo[];
+  /** 最后使用的对话 id（激活工作区不带对话时进入它）。 */
+  last_conversation?: string | null;
 }
 
 /** 一个工作区目录的 git 状态快照（只读采集）。 */
@@ -299,6 +318,8 @@ export interface ApiUsagePoint {
   model: string;
   prompt_tokens: number;
   completion_tokens: number;
+  /** 缓存命中 tokens（prompt 内子集；DeepSeek 口径；旧数据缺省 0）。 */
+  cache_hit_tokens?: number;
   calls: number;
   /** 估算费用（按 Core 定价表；无匹配价格 = null / undefined）。 */
   est_cost?: number | null;
@@ -484,8 +505,16 @@ export type BackendCommand =
   | { RequestWorkspaceSessions: { team_id?: string | null } }
   | { SaveWorkspaceSession: { team_id?: string | null; session: WorkspaceSessionInfo } }
   | { DeleteWorkspaceSession: { team_id?: string | null; id: string } }
-  | { ActivateWorkspaceSession: { team_id?: string | null; id?: string | null } }
   | { RequestWorkspaceGitStatus: { team_id?: string | null; session_id: string } }
+  | {
+      ActivateWorkspaceSession: {
+        team_id?: string | null;
+        id?: string | null;
+        /** 工作区内的对话 id（2026-10 多对话；缺省/null = 进入该工作区的
+         * `last_conversation` / 首条对话）。`id = null`（取消激活）时忽略。 */
+        conversation?: string | null;
+      };
+    }
   | {
       RequestWorkspaceFiles: {
         team_id?: string | null;
@@ -712,6 +741,8 @@ export type BackendEvent =
         team_id?: string | null;
         sessions: WorkspaceSessionInfo[];
         active?: string | null;
+        /** 当前激活对话 id（2026-10 多对话；`active` 仍为工作区 id）。 */
+        active_conversation?: string | null;
       };
     }
   | {

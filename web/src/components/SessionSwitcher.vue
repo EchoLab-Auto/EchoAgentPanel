@@ -5,9 +5,13 @@
 //! 点击切换；当前会话高亮，运行中会话带忙碌点。每个会话拥有独立的
 //! 模型上下文（Core 侧按会话投影，见 TrunkStore::snapshot_for）。
 //!
-//! Local 分组含**工作区通道**（`local:workspace:<id>:local_user`，
-//! 昵称 = 工作区名，标签「工作区」）：点选语义由 App 侧双向绑定
-//! ——选通道 = 激活对应工作区、选默认会话 = 取消激活（2026-09-14）。
+//! Local 分组含**工作区通道**（legacy：`local:workspace:<id>:local_user`，
+//! 多对话（2026-10）：`local:workspace:<ws>/<conv>:local_user`——scope_id
+//! 内嵌 `<ws>/<conv>`，`/` 不与 `:` 段分隔冲突，同一工作区的多条对话
+//! 自然展开为多行）：legacy 昵称 = 工作区名，非 legacy 昵称 =
+//! 「工作区名 · 对话名」（Core 下发），标签均为「工作区」。点选语义由
+//! App 侧双向绑定——选通道 = 激活对应 (工作区, 对话)、选默认会话 =
+//! 取消激活（2026-09-14 / 2026-10 多对话扩展）。
 
 import { computed } from 'vue';
 import { state } from '../store';
@@ -36,7 +40,9 @@ function sessionTag(session: SessionInfo): SessionTag {
   const platform = parts[0] ?? '';
   const scope = parts[1] ?? '';
   if (platform === 'local') {
-    // 工作区通道（激活 = 进入项目对话）：昵称 = 工作区名，独立标签。
+    // 工作区通道（激活 = 进入项目对话）：昵称 = 工作区名 / 「工作区 · 对话」，
+    // 独立标签。多对话通道 scope_id 含 `/`（`<ws>/<conv>`）但不含 `:`，
+    // 按 `:` 分段即可正确识别 scope。
     if (scope === 'workspace') {
       return { group: 'local', label: session.nickname || session.id, tag: '工作区', tagKey: 'workspace' };
     }
