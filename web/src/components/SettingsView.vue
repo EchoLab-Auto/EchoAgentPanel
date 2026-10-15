@@ -4,7 +4,7 @@
 //! 布局：左侧一级菜单（API 设置 + 四类资源 + 日志，带计数徽标），右侧为当前分类的工作区——
 //! API 为整页表单（ApiSettings）；日志为整页查看器（LogView）；
 //! 资源类为 工具条 + 条目列表（分组可折叠）+ 详情/编辑面板。
-//! - API：快速模板 / 表单 / 测试连接 / Profiles（UpdateApiConfig / TestApi / SwitchApi / DeleteApi）
+//! - API：快速模板 / 表单 / 测试连接 / Profiles（UpdateApiConfig / RenameApi / TestApi / SwitchApi / DeleteApi）
 //! - 技能：启停、编辑（SaveSkill）、新建、删除（DeleteSkill）、Git 安装/更新/移除来源
 //! - 工具：启停（ToggleTool）、参数 Schema 浏览
 //! - 插件：启停（TogglePlugin）

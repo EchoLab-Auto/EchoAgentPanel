@@ -3,10 +3,22 @@
 //! - DeepSeek 合并为单一预设（Anthropic 端点），不再有 OpenAI 变体；
 //! - 新增「中转站（OpenAI 兼容）」预设：provider=third-party，base_url/model 留空待填。
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
+
+vi.mock('../../connection', () => {
+  const sendCommand = vi.fn();
+  return {
+    sendCommand,
+    // sendPending = 登记加载跟踪 + 发命令（生产语义）：测试等价转发。
+    sendPending: vi.fn((command: unknown) => sendCommand(command as never)),
+  };
+});
+
 import ApiSettings from '../ApiSettings.vue';
 import { state } from '../../store';
+import { sendCommand } from '../../connection';
 
 function seedApi() {
   state.api = {
@@ -204,5 +216,160 @@ describe('ApiSettings 快捷模板', () => {
     // third-party 占位提示文案
     expect(baseUrlInput.placeholder).toContain('你的网关/v1');
     expect(modelInput.placeholder).toContain('中转站模型名');
+  });
+});
+
+// ── API profile 改名（2026-10）：两步提交（RenameApi → 确认后按新名保存） ──
+
+/** 打开第一张卡（deepseek）的编辑表单。 */
+async function openFirstEdit(wrapper: ReturnType<typeof mount>) {
+  const card = wrapper.findAll('.profile-card')[0];
+  const editBtn = card.findAll('button').find((b) => b.text().includes('编辑'))!;
+  expect(editBtn, 'profile card must expose an edit button').toBeTruthy();
+  await editBtn.trigger('click');
+  await nextTick();
+}
+
+/** 取出「保存到 …」按钮。 */
+function saveButton(wrapper: ReturnType<typeof mount>) {
+  const btn = wrapper.findAll('button').find((b) => b.text().includes('保存到'));
+  expect(btn, 'save button must exist').toBeTruthy();
+  return btn!;
+}
+
+describe('ApiSettings 改名（两步提交）', () => {
+  beforeEach(() => {
+    vi.mocked(sendCommand).mockClear();
+    seedApi();
+    seedProfiles();
+  });
+
+  it('编辑模式名称输入框可编辑：原名预填、不再禁用', async () => {
+    const wrapper = mount(ApiSettings);
+    await openFirstEdit(wrapper);
+    const nameInput = wrapper.findAll('input')[0].element as HTMLInputElement;
+    expect(nameInput.disabled).toBe(false);
+    expect(nameInput.value).toBe('deepseek');
+    wrapper.unmount();
+  });
+
+  it('未改名：单步 UpdateApiConfig（不发 RenameApi）', async () => {
+    const wrapper = mount(ApiSettings);
+    await openFirstEdit(wrapper);
+    await saveButton(wrapper).trigger('click');
+
+    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
+    expect(calls.some((c) => 'RenameApi' in (c as object))).toBe(false);
+    const upd = calls.find((c) => 'UpdateApiConfig' in (c as object)) as {
+      UpdateApiConfig: { name: string };
+    };
+    expect(upd.UpdateApiConfig.name).toBe('deepseek');
+    wrapper.unmount();
+  });
+
+  it('改名保存：先发 RenameApi；确认前不发 UpdateApiConfig 且按钮锁定', async () => {
+    const wrapper = mount(ApiSettings);
+    await openFirstEdit(wrapper);
+    await wrapper.findAll('input')[0].setValue('k3');
+    await saveButton(wrapper).trigger('click');
+
+    let calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
+    const rename = calls.find((c) => 'RenameApi' in (c as object)) as {
+      RenameApi: { from: string; to: string };
+    };
+    expect(rename.RenameApi).toEqual({ from: 'deepseek', to: 'k3' });
+    expect(
+      calls.some((c) => 'UpdateApiConfig' in (c as object)),
+      'must not upsert under the new name before rename confirmation',
+    ).toBe(false);
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('改名确认 + 无字段改动 → 收起表单、不补发 UpdateApiConfig', async () => {
+    const wrapper = mount(ApiSettings);
+    await openFirstEdit(wrapper);
+    await wrapper.findAll('input')[0].setValue('k3');
+    await saveButton(wrapper).trigger('click');
+
+    // Core 确认：profiles 出现新名（引用替换后的数组）。
+    state.api = {
+      ...state.api!,
+      profiles: state.api!.profiles.map((p) =>
+        p.name === 'deepseek' ? { ...p, name: 'k3' } : p,
+      ),
+    };
+    await nextTick();
+    await nextTick();
+
+    expect(wrapper.find('.api-form-section').exists()).toBe(false);
+    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
+    expect(
+      calls.some((c) => 'UpdateApiConfig' in (c as object)),
+      'pure rename must not re-save (would re-activate the profile)',
+    ).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('改名确认 + 有字段改动 → 按新名补发 UpdateApiConfig（一次操作完成改名+保存）', async () => {
+    const wrapper = mount(ApiSettings);
+    await openFirstEdit(wrapper);
+    await wrapper.findAll('input')[1].setValue('ds-v9'); // Model 字段
+    await wrapper.findAll('input')[0].setValue('k3');
+    await saveButton(wrapper).trigger('click');
+
+    state.api = {
+      ...state.api!,
+      profiles: state.api!.profiles.map((p) =>
+        p.name === 'deepseek' ? { ...p, name: 'k3' } : p,
+      ),
+    };
+    await nextTick();
+    await nextTick();
+
+    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
+    const upd = calls.find((c) => 'UpdateApiConfig' in (c as object)) as {
+      UpdateApiConfig: { name: string; model: string };
+    };
+    expect(upd, 'post-rename field save must be sent').toBeTruthy();
+    expect(upd.UpdateApiConfig.name).toBe('k3');
+    expect(upd.UpdateApiConfig.model).toBe('ds-v9');
+    wrapper.unmount();
+  });
+
+  it('改名超时未确认 → 提示错误、表单保留、永不复制 profile', async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(ApiSettings);
+      await openFirstEdit(wrapper);
+      await wrapper.findAll('input')[0].setValue('k3');
+      await saveButton(wrapper).trigger('click');
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await nextTick();
+
+      expect(wrapper.text()).toContain('改名未确认');
+      expect(wrapper.find('.api-form-section').exists()).toBe(true);
+      const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
+      expect(calls.some((c) => 'UpdateApiConfig' in (c as object))).toBe(false);
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('撞名 / 空白名：保存按钮禁用并提示', async () => {
+    const wrapper = mount(ApiSettings);
+    await openFirstEdit(wrapper);
+    const nameInput = wrapper.findAll('input')[0];
+    // 撞名（openai 已存在）
+    await nameInput.setValue('openai');
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('已存在');
+    // 空白名
+    await nameInput.setValue('   ');
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('名称不能为空');
+    wrapper.unmount();
   });
 });

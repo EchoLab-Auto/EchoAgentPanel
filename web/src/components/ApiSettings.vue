@@ -131,8 +131,10 @@ const api = computed(() => state.api);
 
 /** 表单状态：none = 概览（默认）；edit = 编辑已有 profile；add = 新增 API 服务商 */
 const formMode = ref<'none' | 'edit' | 'add'>('none');
-/** 正在编辑的 profile 名（仅 edit 模式） */
+/** 正在编辑的 profile 名（仅 edit 模式；提交用原名） */
 const editingProfile = ref<string | null>(null);
+/** 编辑模式的名称输入（可改名，2026-10：Core RenameApi；提交时两步走） */
+const editName = ref('');
 const provider = ref('');
 const model = ref('');
 const baseUrl = ref('');
@@ -146,15 +148,90 @@ const testing = ref<string | null>(null);
 /** 本次表单展开后是否发起过测试（name → true），防止展示上次展开的旧结果 */
 const formTested = ref<Record<string, boolean>>({});
 
-/** 表单测试的目标：编辑模式 = 该 profile；添加模式 = 默认配置 */
+/** 待确认的改名（已发 RenameApi、等待 profiles 出现新名）；null = 无 */
+const pendingRename = ref<{ from: string; to: string } | null>(null);
+/** 改名时点下的表单字段快照（确认后按新名补发；含 apiKey） */
+let pendingFields: {
+  provider: string;
+  model: string;
+  base_url: string;
+  api_key: string;
+  thinking: 'enabled' | 'disabled';
+  reasoning_effort: 'low' | 'high' | 'max';
+} | null = null;
+/** 改名确认超时计时器（失败/无响应时还原表单，避免卡死） */
+let renameTimer: ReturnType<typeof setTimeout> | null = null;
+/** 改名的本地错误提示（超时等；Core 失败会回 Error 事件自行展示） */
+const renameError = ref('');
+/** 表单打开时的字段基线（判断"有无字段改动"；不含 apiKey——空=保持） */
+let formBaseline = '';
+
+/** 当前表单字段值（提交载荷）。 */
+function currentFormPayload() {
+  return {
+    provider: provider.value,
+    model: model.value,
+    base_url: baseUrl.value,
+    api_key: apiKey.value,
+    thinking: thinking.value,
+    reasoning_effort: reasoning.value,
+  };
+}
+
+/** 基线键：只含会随保存提交的字段（apiKey 另行判定——空 = 保持不变）。 */
+function baselineKey(p: { provider: string; model: string; base_url: string }): string {
+  return JSON.stringify([p.provider, p.model, p.base_url, thinking.value, reasoning.value]);
+}
+
+/** 相对表单打开时是否有字段改动（含填了新 key）。 */
+function fieldsChangedSinceOpen(): boolean {
+  if (apiKey.value.trim() !== '') return true;
+  return baselineKey(currentFormPayload()) !== formBaseline;
+}
+
+function clearRenamePending() {
+  pendingRename.value = null;
+  pendingFields = null;
+  if (renameTimer) {
+    clearTimeout(renameTimer);
+    renameTimer = null;
+  }
+}
+
+/** 编辑中的目标名：改名输入框（trim 后）；空白回退原名（仅展示用）。 */
+const editNameTrimmed = computed(() => editName.value.trim());
+
+/** 名称合法性提示（编辑模式：空白 / 与现有 profile 撞名）。 */
+const editNameError = computed(() => {
+  if (formMode.value !== 'edit') return '';
+  const to = editNameTrimmed.value;
+  if (!to) return '名称不能为空';
+  if (to !== editingProfile.value && (api.value?.profiles ?? []).some((p) => p.name === to)) {
+    return `名称「${to}」已存在，请换一个`;
+  }
+  return '';
+});
+
+/** 保存按钮禁用：改名进行中 / 名称非法 / 添加模式未填名。 */
+const saveDisabled = computed(() => {
+  if (pendingRename.value) return true;
+  if (formMode.value === 'add') return !profileName.value.trim();
+  if (formMode.value === 'edit') return editNameError.value !== '';
+  return true;
+});
+
 const formTarget = computed(() => (formMode.value === 'edit' ? (editingProfile.value ?? '') : ''));
 
 const formTitle = computed(() =>
-  formMode.value === 'edit' ? `编辑 Profile · ${editingProfile.value}` : '新增 API 服务商',
+  formMode.value === 'edit'
+    ? `编辑 Profile · ${editNameTrimmed.value || editingProfile.value}`
+    : '新增 API 服务商',
 );
 
 const saveLabel = computed(() =>
-  formMode.value === 'edit' ? `保存到 ${editingProfile.value}` : '保存',
+  formMode.value === 'edit'
+    ? `保存到 ${editNameTrimmed.value || editingProfile.value}`
+    : '保存',
 );
 
 function fillForm(p: Partial<{
@@ -179,15 +256,20 @@ function resetFormResults() {
 function openEdit(profile: ApiProfile) {
   formMode.value = 'edit';
   editingProfile.value = profile.name;
+  editName.value = profile.name;
   profileName.value = '';
   fillForm(profile);
   apiKey.value = '';
   resetFormResults();
+  formBaseline = baselineKey(currentFormPayload());
+  renameError.value = '';
+  clearRenamePending();
 }
 
 function openAdd() {
   formMode.value = 'add';
   editingProfile.value = null;
+  editName.value = '';
   profileName.value = '';
   // 添加模式：空表单，Provider 默认第三方（OpenAI 兼容），快速模板可一键填充
   provider.value = 'third-party';
@@ -197,13 +279,19 @@ function openAdd() {
   reasoning.value = 'max';
   apiKey.value = '';
   resetFormResults();
+  formBaseline = baselineKey(currentFormPayload());
+  renameError.value = '';
+  clearRenamePending();
 }
 
 function closeForm() {
   formMode.value = 'none';
   editingProfile.value = null;
+  editName.value = '';
   profileName.value = '';
   apiKey.value = '';
+  renameError.value = '';
+  clearRenamePending();
 }
 
 function applyTemplate(t: ApiTemplate) {
@@ -524,41 +612,95 @@ const costSummary = computed(() => {
     : '';
 });
 
-/** 保存：编辑模式存回 profile；添加模式以名称为准新建/覆盖 */
-function saveForm() {
-  const name =
-    formMode.value === 'edit' ? (editingProfile.value ?? '') : profileName.value.trim();
-  if (formMode.value === 'add' && !name) return;
+/** 保存：编辑模式存回 profile（改名则两步提交）；添加模式以名称为准新建/覆盖 */
+function sendUpdate(name: string, fields: ReturnType<typeof currentFormPayload>) {
   sendCommand({
     UpdateApiConfig: {
       name,
-      provider: provider.value,
-      model: model.value,
-      base_url: baseUrl.value,
-      api_key: apiKey.value,
-      thinking: thinking.value,
-      reasoning_effort: reasoning.value,
+      provider: fields.provider,
+      model: fields.model,
+      base_url: fields.base_url,
+      api_key: fields.api_key,
+      thinking: fields.thinking,
+      reasoning_effort: fields.reasoning_effort,
     },
   });
-  apiKey.value = '';
-  // 保存成功（core 回推 ApiConfigUpdated）后由下方 watch 收起表单
 }
 
-// 保存回播（ApiConfigUpdated 重建 state.api 引用）→ 收起表单回到概览
+function saveForm() {
+  if (formMode.value === 'add') {
+    const name = profileName.value.trim();
+    if (!name) return;
+    sendUpdate(name, currentFormPayload());
+    apiKey.value = '';
+    // 保存成功（core 回推 ApiConfigUpdated）后由下方 watch 收起表单
+    return;
+  }
+  if (formMode.value !== 'edit') return;
+
+  const from = editingProfile.value ?? '';
+  const to = editNameTrimmed.value;
+  if (!to) return;
+  if (to === from) {
+    // 未改名：原单步保存语义。
+    sendUpdate(from, currentFormPayload());
+    apiKey.value = '';
+    return;
+  }
+
+  // 改名：两步提交（2026-10）——先 RenameApi，确认成功后才按新名补发
+  // UpdateApiConfig。绝不能一步按新名 upsert：改名失败会复制出一份新
+  // profile（正是旧 UI 禁用名称框要规避的问题）。
+  pendingRename.value = { from, to };
+  pendingFields = currentFormPayload();
+  renameError.value = '';
+  sendCommand({ RenameApi: { from, to } });
+  // 确认到达前锁定保存按钮；失败/无响应由超时兜底还原。
+  if (renameTimer) clearTimeout(renameTimer);
+  renameTimer = setTimeout(() => {
+    if (pendingRename.value) {
+      renameError.value = '改名未确认（超时）——请重试或检查 Core 日志';
+      clearRenamePending();
+    }
+  }, 10000);
+}
+
+// 保存回播（ApiConfigUpdated 重建 state.api 引用）→ 收起表单回到概览。
+// 改名进行中跳过：等待 profiles 侧确认（否则任何回播都会把表单提前收起）。
 watch(api, () => {
-  if (formMode.value !== 'none') closeForm();
+  if (formMode.value === 'none') return;
+  if (pendingRename.value) return;
+  closeForm();
 });
 
-// 编辑中的 profile 被删除（DeleteApi 立即生效）→ 收起表单
+// profiles 列表变化：
+// 1) 改名确认：出现新名 → 视为成功（补发字段保存或收起）；
+// 2) 编辑中的 profile 被删除（DeleteApi 立即生效）→ 收起表单。
 watch(
   () => api.value?.profiles,
   (val) => {
+    if (formMode.value !== 'edit' || !val) return;
+    const pending = pendingRename.value;
+    if (pending && val.some((p) => p.name === pending.to)) {
+      // 改名成功：更新表单目标，必要时按新名补发字段保存。
+      const fields = pendingFields;
+      clearRenamePending();
+      editingProfile.value = pending.to;
+      editName.value = pending.to;
+      if (fieldsChangedSinceOpen() && fields) {
+        sendUpdate(pending.to, fields);
+        apiKey.value = '';
+      } else {
+        closeForm();
+      }
+      return;
+    }
     if (
-      formMode.value === 'edit' &&
       editingProfile.value &&
-      val &&
       !val.some((p) => p.name === editingProfile.value)
     ) {
+      // 改名窗口内旧名消失是正常中间态（等上面的成功判定/超时兜底）。
+      if (pending) return;
       closeForm();
     }
   },
@@ -595,7 +737,11 @@ watch(
 
       <template v-if="formMode === 'edit'">
         <label>Profile 名称</label>
-        <NeumorphismInput :model-value="editingProfile ?? ''" disabled />
+        <NeumorphismInput v-model="editName" placeholder="Profile 名称（可修改，保存时原子改名）" />
+        <div v-if="editNameError" class="muted field-hint">{{ editNameError }}</div>
+        <div v-else-if="pendingRename" class="muted field-hint">
+          正在改名「{{ pendingRename.from }}」→「{{ pendingRename.to }}」…
+        </div>
       </template>
       <template v-else>
         <label>Profile 名称</label>
@@ -656,12 +802,16 @@ watch(
         </NeumorphismButton>
         <NeumorphismButton
           variant="primary"
-          :disabled="formMode === 'add' && !profileName.trim()"
+          :disabled="saveDisabled"
           @click="saveForm"
         >
           {{ saveLabel }}
         </NeumorphismButton>
         <NeumorphismButton variant="glass" @click="closeForm">取消</NeumorphismButton>
+      </div>
+      <div v-if="renameError" class="api-test-result fail">
+        <span class="api-test-badge">✗ 改名失败</span>
+        <span class="api-test-message">{{ renameError }}</span>
       </div>
       <div
         v-if="formResultOf()"

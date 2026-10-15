@@ -436,6 +436,7 @@ export type BackendCommand =
   | 'ReloadSkills'
   | 'RequestToolsList'
   | { DeleteApi: { name: string } }
+  | { RenameApi: { from: string; to: string } }
   | { ToggleSkill: { name: string; enabled: boolean } }
   | { ToggleTool: { name: string; enabled: boolean } }
   | {

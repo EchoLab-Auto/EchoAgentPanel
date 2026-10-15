@@ -116,6 +116,14 @@ describe('命令侧镜像与归零棘轮（2026-10）', () => {
     );
   });
 
+  it('RenameApi 线格式与 Core serde 契约一致（2026-10 改名能力）', () => {
+    // 双端契约：Core 侧 `rename_api_serde_contract`（echo-protocol
+    // command.rs）钉住同一串；字段名 from/to 在两侧必须逐字一致。
+    expect(serializeCommand({ RenameApi: { from: 'kimi', to: 'k3' } })).toBe(
+      '{"type":"command","payload":{"RenameApi":{"from":"kimi","to":"k3"}}}',
+    );
+  });
+
   it('生产代码无双重断言绕过 BackendCommand（归零棘轮）', () => {
     // 只降不升：新增绕过必须先把命令类型补进 protocol.ts；确无可能时
     // 在此登记命令名与理由（目前为空——4 条联邦命令已全部转正）。
