@@ -9,9 +9,18 @@
 //! 视觉连续；不渲染卡体（体量大、且拖动中无需交互）。
 
 import { computed } from 'vue';
-import { GHOST_FADE_MS, GHOST_FLIGHT_MS, ghostTransform, railDrag } from '../rail-drag';
+import {
+  GHOST_FADE_MS,
+  GHOST_FLIGHT_MS,
+  ghostTransform,
+  prefersReducedMotion,
+  railDrag,
+} from '../rail-drag';
 
 const transform = computed(() => ghostTransform());
+
+/** 减少动态效果：拖影不做「飞行」过渡（与 rail-drag 的 motionMs 时长相符）。 */
+const reducedMotion = prefersReducedMotion();
 
 const style = computed(() => {
   const t = transform.value;
@@ -21,9 +30,10 @@ const style = computed(() => {
     width: `${railDrag.ghost.width}px`,
     transform: `translate3d(${t.tx}px, ${t.ty}px, 0) rotate(${t.rotate}deg) scale(${t.scale})`,
     // 拖动中跟手（无过渡）；飞行阶段用过渡吸附到目标位置；收尾淡出。
-    transition: railDrag.landing
-      ? `transform ${GHOST_FLIGHT_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity ${GHOST_FADE_MS}ms ease-out`
-      : 'none',
+    transition:
+      !reducedMotion && railDrag.landing
+        ? `transform ${GHOST_FLIGHT_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity ${GHOST_FADE_MS}ms ease-out`
+        : 'none',
     opacity: railDrag.fading ? 0 : railDrag.landing ? 0.85 : 1,
   };
 });
@@ -60,6 +70,8 @@ const snapshot = computed(() => railDrag.snapshot);
   position: fixed;
   z-index: 200; /* 高于会话区悬浮元素（rail z-index 4 / 输入区 5），低于库模态 */
   pointer-events: none;
+  /* 位移全走 transform：提前提升为合成层，拖动期间不触发布局/重绘 */
+  will-change: transform, opacity;
   border-radius: 20px;
   border: 1px solid color-mix(in srgb, var(--panel-accent) 55%, transparent);
   background: color-mix(in srgb, var(--nm-surface-raised) 88%, transparent);

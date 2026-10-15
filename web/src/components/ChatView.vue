@@ -1110,35 +1110,42 @@ function mediaSrc(img: string): string {
     />
 
     <!-- 双侧边栏（2026-09-24）：左右各一列卡片栈，卡片可在两列之间拖动
-         （机制与动画见 ../rail-drag.ts；列显隐：有卡片或拖动中） -->
-    <aside
-      v-if="leftRailVisible"
-      class="chat-rail chat-rail--left"
-      :class="{ 'chat-rail--dropzone': railDragEngaged }"
-    >
-      <PanelSidebar
-        side="left"
-        :active-branch-id="props.activeBranchId ?? null"
-        :team-id="props.activeTeamId ?? null"
-        @select-branch="(id) => emit('selectBranch', id)"
-        @manage-workspace="toggleWorkspace"
-        @open-shell-detail="(id) => emit('openShellDetail', id)"
-      />
-    </aside>
-    <aside
-      v-if="rightRailVisible"
-      class="chat-rail chat-rail--right"
-      :class="{ 'chat-rail--dropzone': railDragEngaged }"
-    >
-      <PanelSidebar
-        side="right"
-        :active-branch-id="props.activeBranchId ?? null"
-        :team-id="props.activeTeamId ?? null"
-        @select-branch="(id) => emit('selectBranch', id)"
-        @manage-workspace="toggleWorkspace"
-        @open-shell-detail="(id) => emit('openShellDetail', id)"
-      />
-    </aside>
+         （机制与动画见 ../rail-drag.ts；列显隐：有卡片或拖动中）。
+         列的进出走 Transition（opacity + 侧向轻移，仅 transform/opacity）：
+         拖动中出现的投放区**不做入场过渡**（`.chat-rail--dropzone` 覆盖为
+         `transition: none`）——落点命中读的是列矩形，动画位移会让命中飘。 -->
+    <Transition name="chat-rail">
+      <aside
+        v-if="leftRailVisible"
+        class="chat-rail chat-rail--left"
+        :class="{ 'chat-rail--dropzone': railDragEngaged }"
+      >
+        <PanelSidebar
+          side="left"
+          :active-branch-id="props.activeBranchId ?? null"
+          :team-id="props.activeTeamId ?? null"
+          @select-branch="(id) => emit('selectBranch', id)"
+          @manage-workspace="toggleWorkspace"
+          @open-shell-detail="(id) => emit('openShellDetail', id)"
+        />
+      </aside>
+    </Transition>
+    <Transition name="chat-rail">
+      <aside
+        v-if="rightRailVisible"
+        class="chat-rail chat-rail--right"
+        :class="{ 'chat-rail--dropzone': railDragEngaged }"
+      >
+        <PanelSidebar
+          side="right"
+          :active-branch-id="props.activeBranchId ?? null"
+          :team-id="props.activeTeamId ?? null"
+          @select-branch="(id) => emit('selectBranch', id)"
+          @manage-workspace="toggleWorkspace"
+          @open-shell-detail="(id) => emit('openShellDetail', id)"
+        />
+      </aside>
+    </Transition>
 
     <!-- 拖动拖影：跟随指针的卡片缩影（Teleport 到 body，fixed 定位） -->
     <RailDragGhost />
@@ -1157,6 +1164,7 @@ function mediaSrc(img: string): string {
         <PanelSidebar
           v-if="railHasCards('left')"
           side="left"
+          :drag-enabled="false"
           :active-branch-id="props.activeBranchId ?? null"
           :team-id="props.activeTeamId ?? null"
           @select-branch="(id) => emit('selectBranch', id)"
@@ -1166,6 +1174,7 @@ function mediaSrc(img: string): string {
         <PanelSidebar
           v-if="railHasCards('right')"
           side="right"
+          :drag-enabled="false"
           :active-branch-id="props.activeBranchId ?? null"
           :team-id="props.activeTeamId ?? null"
           @select-branch="(id) => emit('selectBranch', id)"
@@ -1325,6 +1334,38 @@ function mediaSrc(img: string): string {
   flex: 1;
   min-height: 0;
 }
+/* 列开合过渡（Transition 注入的类）：只动 opacity/transform（可合成） */
+.chat-rail-enter-active,
+.chat-rail-leave-active {
+  transition:
+    opacity 0.2s ease-out,
+    transform 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.chat-rail-enter-from,
+.chat-rail-leave-to {
+  opacity: 0;
+}
+.chat-rail--left.chat-rail-enter-from,
+.chat-rail--left.chat-rail-leave-to {
+  transform: translateX(-12px);
+}
+.chat-rail--right.chat-rail-enter-from,
+.chat-rail--right.chat-rail-leave-to {
+  transform: translateX(12px);
+}
+/* 拖动中：列是投放区，必须即时出现/消失（不做位移，落点命中才准） */
+.chat-rail--dropzone.chat-rail-enter-active,
+.chat-rail--dropzone.chat-rail-leave-active {
+  transition: none;
+}
+/* 减少动态效果：列进出直接切换 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-rail-enter-active,
+  .chat-rail-leave-active {
+    transition: none;
+  }
+}
+
 /* 拖动中：投放区提示（列内空态另有虚线框，见 RailStack） */
 .chat-rail--dropzone > :deep(.rail-stack) {
   border-radius: 24px;
@@ -1834,7 +1875,7 @@ function mediaSrc(img: string): string {
 
 /* ═══════════════════════════════════════════════════════════════════════
    竖屏移动端（2026-10，断点 768px，与库 useTouchDevice.isMobile 同源）
-   桌面样式即上方默认；本段只做窄屏收敛。参考 document/panel-mobile.md。
+   桌面样式即上方默认；本段只做窄屏收敛。参考 document/panel/panel-mobile.md。
    ═══════════════════════════════════════════════════════════════════════ */
 @media (max-width: 767.98px) {
   /* 入口行：7 按钮 + AgentSwitcher 必然超宽——改横向滚动工具条，
@@ -1909,6 +1950,23 @@ function mediaSrc(img: string): string {
     gap: 10px;
     overflow-y: auto;
     padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  /* 抽屉里的卡片栈 = 一条纵向列表：RailStack 的 `height: 100%` + 槽位
+     `flex: 1 1 0` 是「桌面常驻列」语义——在抽屉里会让每列各占满一屏、
+     要滚动两次才看全，且卡片被拉成整屏高。改为按内容排列，滚动交给抽屉
+     本身（移动端传 drag-enabled=false，无跨列拖动，见 RailStack）。 */
+  .mobile-cards :deep(.rail-stack) {
+    height: auto;
+    min-height: 0;
+  }
+  .mobile-cards :deep(.rail-stack__list) {
+    display: block;
+  }
+  .mobile-cards :deep(.rail-stack__slot) {
+    display: block;
+  }
+  .mobile-cards :deep(.rail-stack__slot + .rail-stack__slot) {
+    margin-top: 12px;
   }
   .mobile-cards__empty {
     margin: 12px 0;

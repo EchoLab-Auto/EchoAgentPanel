@@ -8,6 +8,19 @@
 //!   （其余卡片以 FLIP 过渡补齐）；落点指示线/空列虚线框由拖动状态驱动；
 //! - 卡头右侧另有「移到左/右侧」按钮（键盘可达的等价操作，见 a11y 说明）；
 //! - 相邻卡高亮/分隔条拖动逻辑不变。
+//!
+//! **堆叠规则（本组件是唯一实现：左右两列与移动端卡片抽屉共用）**：
+//! - 顺序与归属：`rail-layout.ts`（用户拖动/按钮的结果，持久化）；本组件按传入
+//!   `cards` 渲染，不自己排序；
+//! - 折叠：按卡片 id 存 `openMap`（默认展开）；折叠态 = 只留卡头横条，
+//!   卡体按需卸载（`v-if`，不预挂载异步内容）；
+//! - 高度：展开的非紧凑卡 `flex: 1 1 0` 并按持久化 flex-grow 比例分配剩余空间，
+//!   最小高度 `--rail-card-min-h`；紧凑卡固定高度、不参与比例分配；
+//! - 溢出：卡内先滚动（卡体 `overflow-y: auto`）；卡多到列内放不下时整列滚动
+//!   （`.rail-stack__list`），底部卡片不会被裁掉、始终可达；
+//! - 窄屏：<768px 列不渲染（ChatView 走卡片抽屉），抽屉里 `drag-enabled=false`
+//!   ——两列合并为一条纵向列表，不提供跨列拖动（卡头恢复 `pan-y`，
+//!   拖动列表不从卡头「死区」开始）。
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
@@ -38,7 +51,24 @@ export interface RailCardDef {
   compact?: boolean;
 }
 
-const props = defineProps<{ cards: RailCardDef[]; side: RailSide }>();
+const props = withDefaults(
+  defineProps<{
+    cards: RailCardDef[];
+    side: RailSide;
+    /**
+     * 是否允许拖动（换列 / 列内调序）。默认 true。
+     * 移动端卡片抽屉把两列合并为一条纵向列表（没有「另一侧」），传 false：
+     * 卡头不吞触摸滚动、不渲染握把与「移到另一侧」按钮、禁用分隔条调比例。
+     */
+    dragEnabled?: boolean;
+  }>(),
+  // Boolean prop 缺省时 Vue 会铸成 false（resolvePropValue 的布尔铸型）
+  // ——「缺省 = 允许拖动」必须显式声明 default，否则不传就变禁用。
+  { dragEnabled: true },
+);
+
+/** 拖动能力（缺省 = 允许；抽屉显式关闭）。 */
+const canDrag = computed(() => props.dragEnabled);
 
 const emit = defineEmits<{
   /** 卡片被移到另一列（按钮路径；拖动路径见 rail-drag 状态机）。 */
@@ -104,6 +134,20 @@ function hasCompactNeighbor(index: number): boolean {
   return !!visibleCards.value[index - 1]?.compact || !!visibleCards.value[index]?.compact;
 }
 
+/**
+ * 分隔条是否可拖动：两侧卡片都展开、都不是紧凑卡，且本列允许拖动。
+ * 模板里三处（类/标题/mousedown）共用同一判据——此前是同一条件写三遍。
+ */
+function dividerDraggable(index: number): boolean {
+  return (
+    canDrag.value &&
+    index > 0 &&
+    isOpen(visibleCards.value[index - 1].id) &&
+    isOpen(visibleCards.value[index].id) &&
+    !hasCompactNeighbor(index)
+  );
+}
+
 function toggle(id: string) {
   openMap.value = { ...openMap.value, [id]: !isOpen(id) };
   save();
@@ -114,11 +158,19 @@ function flexOf(id: string): number {
   return flexMap.value[id] ?? 1;
 }
 
-/** 分隔条拖动：调整上下两张展开卡的 flex-grow 比例。 */
+/** 进行中的分隔条拖动清理函数（卸载时兜底，避免监听泄漏）。 */
+let stopDividerDrag: (() => void) | null = null;
+
+/**
+ * 分隔条拖动：调整上下两张展开卡的 flex-grow 比例。
+ * mousemove 合流到每帧一次（改 flex 会触发布局，逐事件改在 500Hz+ 指针下是浪费）。
+ */
 function onDividerDragStart(event: MouseEvent, aboveId: string, belowId: string) {
+  if (!canDrag.value) return;
   event.preventDefault();
   const rail = (event.target as HTMLElement).closest('.rail-stack') as HTMLElement | null;
   if (!rail) return;
+  stopDividerDrag?.(); // 理论上不会重入；防御性兜底
   const startY = event.clientY;
   const a0 = flexOf(aboveId);
   const b0 = flexOf(belowId);
@@ -129,25 +181,51 @@ function onDividerDragStart(event: MouseEvent, aboveId: string, belowId: string)
     .reduce((acc, c) => acc + flexOf(c.id), 0);
   const pxPerFlex = rail.getBoundingClientRect().height / Math.max(openFlexSum, 1);
 
-  const onMove = (e: MouseEvent) => {
-    const delta = (e.clientY - startY) / Math.max(pxPerFlex, 1);
+  let lastY = startY;
+  let frame: number | null = null;
+  const apply = () => {
+    const delta = (lastY - startY) / Math.max(pxPerFlex, 1);
     const a = Math.max(0.2, Math.min(total - 0.2, a0 + delta));
     flexMap.value = { ...flexMap.value, [aboveId]: a, [belowId]: total - a };
   };
-  const onUp = () => {
+  const onMove = (e: MouseEvent) => {
+    lastY = e.clientY;
+    if (frame === null) {
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        apply();
+      });
+    }
+  };
+  const stop = () => {
+    if (frame !== null) {
+      window.cancelAnimationFrame(frame);
+      frame = null;
+      apply(); // 收尾：把最后一帧的位置也落下去
+    }
     window.removeEventListener('mousemove', onMove);
-    window.removeEventListener('mouseup', onUp);
+    window.removeEventListener('mouseup', stop);
+    window.removeEventListener('keydown', onKey);
+    if (stopDividerDrag === stop) stopDividerDrag = null;
     save();
   };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') stop();
+  };
+  stopDividerDrag = stop;
   window.addEventListener('mousemove', onMove);
-  window.addEventListener('mouseup', onUp);
+  window.addEventListener('mouseup', stop);
+  window.addEventListener('keydown', onKey);
 }
 
 // ── 拖动把手（pointer 事件；阈值与落点由 rail-drag 状态机管理）──
 
+/** 指针捕获的卡头（拖动结束/组件卸载时释放）。 */
+let captured: { el: HTMLElement; pointerId: number } | null = null;
+
 /** 卡头按下：记录起点并「预置」拖动（未过阈值前不显示拖影）。 */
 function onHeadPointerDown(event: PointerEvent, card: RailCardDef) {
-  if (event.button !== 0) return; // 仅主键
+  if (!canDrag.value || event.button !== 0) return; // 仅主键；抽屉里禁用拖动
   const target = event.currentTarget as HTMLElement;
   const slot = target.closest('[data-card-id]') as HTMLElement | null;
   if (!slot) return;
@@ -167,17 +245,53 @@ function onHeadPointerDown(event: PointerEvent, card: RailCardDef) {
     { x: event.clientX, y: event.clientY },
     { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
   );
+  // 指针捕获：指针移出窗口/压到别的元素上时仍能收到 up——否则拖动会卡死
+  // （卡片已被摘出布局、拖影留在半空）。不支持捕获的环境退回 window 监听。
+  if (typeof target.setPointerCapture === 'function') {
+    try {
+      target.setPointerCapture(event.pointerId);
+      captured = { el: target, pointerId: event.pointerId };
+    } catch {
+      captured = null;
+    }
+  }
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerCancel);
   window.addEventListener('keydown', onKeyDown);
+  // 窗口失焦 = 交互被系统打断（切窗/切标签），按取消处理，避免状态卡在拖动中。
+  window.addEventListener('blur', onPointerCancel);
 }
 
+/** 待应用的指针位置（合流用；见 onPointerMove）。 */
+let pendingPointer: { x: number; y: number } | null = null;
+let moveFrame: number | null = null;
+
+/** 应用最后一次指针位置（每帧一次 / pointerup 前强制一次）。 */
+function flushPointerMove() {
+  if (!pendingPointer) return;
+  const pointer = pendingPointer;
+  pendingPointer = null;
+  updateCardDrag(pointer);
+}
+
+/**
+ * 指针移动：合流到每帧一次。
+ * `updateCardDrag` 每次都会读「命中列 + 列内每张卡」的 `getBoundingClientRect`
+ * （强制布局读）；高刷屏 / 高轮询鼠标下 pointermove 可达 500Hz+，逐事件调用会
+ * 产生成百上千次布局读——拖影只需每帧对齐一次。
+ */
 function onPointerMove(event: PointerEvent) {
-  updateCardDrag({ x: event.clientX, y: event.clientY });
+  pendingPointer = { x: event.clientX, y: event.clientY };
+  if (moveFrame !== null) return;
+  moveFrame = window.requestAnimationFrame(() => {
+    moveFrame = null;
+    flushPointerMove();
+  });
 }
 
 function onPointerUp() {
+  flushPointerMove(); // 落点用最新指针位置（最后一次移动可能还没合流完）
   const wasDragging = railDrag.active;
   detachPointerListeners();
   // 点击（未过阈值）交给 @click 处理折叠；拖动结束由状态机落位/回位。
@@ -205,13 +319,30 @@ function onKeyDown(event: KeyboardEvent) {
 }
 
 function detachPointerListeners() {
+  if (moveFrame !== null) {
+    window.cancelAnimationFrame(moveFrame);
+    moveFrame = null;
+  }
+  pendingPointer = null;
+  if (captured) {
+    try {
+      captured.el.releasePointerCapture(captured.pointerId);
+    } catch {
+      // 捕获已被浏览器释放：忽略
+    }
+    captured = null;
+  }
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('pointercancel', onPointerCancel);
   window.removeEventListener('keydown', onKeyDown);
+  window.removeEventListener('blur', onPointerCancel);
 }
 
-onBeforeUnmount(detachPointerListeners);
+onBeforeUnmount(() => {
+  detachPointerListeners();
+  stopDividerDrag?.(); // 拖动分隔条时切视图：window 监听必须回收
+});
 
 /** 拖动刚结束时抑制紧随其后的 click（否则会误触发折叠）。 */
 let suppressClick = false;
@@ -253,17 +384,10 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
         <div
           v-if="index > 0"
           class="rail-stack__divider"
-          :class="{
-            'rail-stack__divider--draggable':
-              isOpen(visibleCards[index - 1].id) && isOpen(card.id) && !hasCompactNeighbor(index),
-          }"
-          :title="
-            isOpen(visibleCards[index - 1].id) && isOpen(card.id) && !hasCompactNeighbor(index)
-              ? '拖动调整上下卡片空间'
-              : undefined
-          "
+          :class="{ 'rail-stack__divider--draggable': dividerDraggable(index) }"
+          :title="dividerDraggable(index) ? '拖动调整上下卡片空间' : undefined"
           @mousedown="
-            isOpen(visibleCards[index - 1].id) && isOpen(card.id) && !hasCompactNeighbor(index)
+            dividerDraggable(index)
               ? onDividerDragStart($event, visibleCards[index - 1].id, card.id)
               : undefined
           "
@@ -282,12 +406,15 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
           <template #header>
             <header
               class="rail-stack__head"
-              :class="{ 'rail-stack__head--dragging': railDrag.active && draggingCardId === card.id }"
-              :title="'拖动调整位置（可拖到左侧栏）'"
+              :class="{
+                'rail-stack__head--dragging': railDrag.active && draggingCardId === card.id,
+                'rail-stack__head--static': !canDrag,
+              }"
+              :title="canDrag ? '拖动调整位置（可拖到左侧栏）' : '点击折叠 / 展开'"
               @pointerdown="onHeadPointerDown($event, card)"
               @click="onHeadClick(card)"
             >
-              <span class="rail-stack__grip" aria-hidden="true">⠿</span>
+              <span v-if="canDrag" class="rail-stack__grip" aria-hidden="true">⠿</span>
               <span class="rail-stack__title">
                 {{ card.title }}
                 <span
@@ -299,6 +426,7 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
                 </span>
               </span>
               <button
+                v-if="canDrag"
                 type="button"
                 class="rail-stack__relocate"
                 :title="side === 'left' ? '移到右侧栏' : '移到左侧栏'"
@@ -334,8 +462,12 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
 <style scoped>
 /* 卡片栈：填满容器高，纵向 flex；展开的卡片按 flex-grow 分配空间，
    折叠的卡片收缩为一条横条（内容高度）。
-   卡片是悬浮圆角矩形（毛玻璃），间距由 gap 提供。 */
+   卡片是悬浮圆角矩形（毛玻璃），间距由 gap 提供。
+   堆叠规则（顺序/折叠/最小高度/溢出的唯一来源）：
+   - 展开卡最小高度 = --rail-card-min-h（可在此调，勿散落到 JS）；
+   - 内边距 12px 与列表 gap 12px 是拖动落点几何的基准（rail-drag 从计算样式读，不再复制常量）。 */
 .rail-stack {
+  --rail-card-min-h: 80px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -345,18 +477,26 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   overflow: hidden;
 }
 /* 内层列表承担 flex 布局：TransitionGroup 直接子元素即「槽位」，
-   FLIP move 过渡才有正确的尺寸/位置参照。 */
+   FLIP move 过渡才有正确的尺寸/位置参照。
+   堆叠溢出：展开卡各有最小高度（见下方 --rail-card-min-h），列内放不下时
+   **列自身滚动**（此前是 overflow: hidden，最后一张卡被静默裁掉、不可达）。 */
 .rail-stack__list {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
   gap: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nm-neutral-300, rgba(128, 128, 128, 0.4)) transparent;
 }
 
 /* 槽位（卡片 + 其上分隔条）：展开态按 flexGrow 分配空间；折叠态收缩为横条；
-   紧凑卡固定高度。 */
+   紧凑卡固定高度。position: relative 是落点指示线的定位参照（slot 顶 = 卡片顶）。 */
 .rail-stack__slot {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
@@ -364,7 +504,7 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
 }
 .rail-stack__slot--open {
   flex: 1 1 0;
-  min-height: 80px;
+  min-height: var(--rail-card-min-h);
 }
 .rail-stack__slot--compact {
   flex: 0 0 auto;
@@ -441,6 +581,12 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
 .rail-stack__head--dragging {
   cursor: grabbing;
 }
+/* 禁用拖动（移动端卡片抽屉）：卡头只是折叠开关——不吞纵向触摸滚动
+   （touch-action: none 会让卡头成为列表滚动死区）。 */
+.rail-stack__head--static {
+  cursor: pointer;
+  touch-action: pan-y;
+}
 /* 握把：与卡头同一拖动把手（悬停可见，视觉提示「可拖」） */
 .rail-stack__grip {
   flex: 0 0 auto;
@@ -497,6 +643,15 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   padding: 4px 14px 12px;
   display: flex;
   flex-direction: column;
+  /* 展开动画只用 transform/opacity（可合成，不触发重排）；
+     折叠不做过渡——卡体按需卸载（v-if），动画会拖延异步内容的卸载语义。 */
+  animation: rail-body-in 0.18s ease-out;
+}
+@keyframes rail-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 /* 分隔条：卡片间隙中的隐形拖动把手（两张都展开时可拖动）。
@@ -532,16 +687,28 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   box-shadow: 0 0 8px color-mix(in srgb, var(--panel-accent) 60%, transparent);
   pointer-events: none;
 }
-/* 槽位是绝对定位线的参照（slot 顶 = 卡片顶） */
-.rail-stack__slot {
-  position: relative;
-}
 /* 末尾线（相对 rail-stack 定位；内容底 = 容器底 - 12px padding） */
 .rail-stack__drop-line--end {
   top: auto;
   bottom: 11px;
   left: 16px;
   right: 16px;
+}
+
+/* 减少动态效果：卡片进出/重排/展开的过渡一律取消（保留即时的状态切换与
+   「拖动中」的静态提示），避免前庭不适。 */
+@media (prefers-reduced-motion: reduce) {
+  .rail-slot-move,
+  .rail-slot-enter-active,
+  .rail-slot-leave-active,
+  .rail-stack__card,
+  .rail-stack__grip,
+  .rail-stack__relocate {
+    transition: none;
+  }
+  .rail-stack__body {
+    animation: none;
+  }
 }
 
 /* 空列投放框：拖动中提示「拖到此处」（虚线圆角，悬停高亮由容器负责） */

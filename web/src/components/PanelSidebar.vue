@@ -29,12 +29,22 @@ const WorkspaceFileBrowser = defineAsyncComponent(
 );
 const ShellList = defineAsyncComponent(() => import('./ShellList.vue'));
 
-const props = defineProps<{
-  activeBranchId: string | null;
-  teamId: string | null;
-  /** 本列所在侧（决定渲染哪些卡片、以及「移到另一侧」的方向）。 */
-  side: RailSide;
-}>();
+const props = withDefaults(
+  defineProps<{
+    activeBranchId: string | null;
+    teamId: string | null;
+    /** 本列所在侧（决定渲染哪些卡片、以及「移到另一侧」的方向）。 */
+    side: RailSide;
+    /**
+     * 是否允许拖动（换列 / 调序）。默认 true。
+     * 移动端卡片抽屉把两列合并为一条纵向列表（无「另一侧」），由 ChatView 传
+     * false——见 RailStack 的同名 prop（Boolean 缺省会被 Vue 铸成 false，
+     * 故此处显式声明 default）。
+     */
+    dragEnabled?: boolean;
+  }>(),
+  { dragEnabled: true },
+);
 
 const emit = defineEmits<{
   selectBranch: [id: string];
@@ -60,6 +70,7 @@ function truncateTask(task: string): string {
   <RailStack
     :cards="cards"
     :side="side"
+    :drag-enabled="dragEnabled"
     @relocate="(id, target) => emit('relocate', id, target)"
   >
     <template #status>

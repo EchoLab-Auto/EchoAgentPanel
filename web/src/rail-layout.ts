@@ -73,28 +73,9 @@ function load(): RailLayout {
   } catch {
     // 隐私模式等：退默认
   }
-  if (!raw) return defaultLayout();
-  let parsed: Partial<RailLayout>;
-  try {
-    parsed = JSON.parse(raw) as Partial<RailLayout>;
-  } catch {
-    return defaultLayout();
-  }
-  const normalized: RailLayout = {
-    left: Array.isArray(parsed.left) ? parsed.left.filter(isKnownCard) : [],
-    right: Array.isArray(parsed.right) ? parsed.right.filter(isKnownCard) : [],
-  };
-  // 去重：同一 id 只保留第一次出现（左优先），防止手改 localStorage 造成重复渲染。
-  const seen = new Set<string>();
-  for (const side of ['left', 'right'] as const) {
-    normalized[side] = normalized[side].filter((id) => {
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  }
-  fillUnplaced(normalized, seen);
-  return normalized;
+  // 解析 → 过滤未知 id → 去重（左优先）→ 补位未登记卡片：全部走 normalize 的
+  // 单一实现（此前 load 与 normalize 是两份逐字重复的代码，改一处漏一处）。
+  return normalize(raw);
 }
 
 function isKnownCard(id: unknown): id is string {

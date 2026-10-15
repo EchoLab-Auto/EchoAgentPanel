@@ -3,7 +3,7 @@
  * 视觉体系由 @echolab-auto/ui-frame 提供（新拟态组件、--nm-* 设计令牌、
  * [data-theme='dark'] 主题机制）；本文件只保留：
  *   1) 主色覆盖（库默认 lime → panel 蓝）与 panel 专用语义色；
- *   2) 应用布局壳（topbar / sidebar / main）；
+ *   2) 应用布局壳（topbar / main；左侧栏已移除，卡片走 ChatView 的 chat-rail）；
  *   3) 库里没有对应物的业务样式（上下文分块、QQ chips、清单浮层等）。
  *
  * 注意：不要写裸元素选择器（button/input/textarea/select）——会污染库组件。
@@ -91,41 +91,6 @@ body {
 
 /* ── layout ── */
 .layout { position: relative; display: flex; flex: 1 1 auto; min-height: 0; }
-
-.sidebar {
-  width: 260px;
-  flex: 0 0 auto;
-  /* 无独立背景：卡片直接悬浮在页面/主区同级的背景上 */
-  background: transparent;
-  border-right: none;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.sidebar-section-title {
-  font-size: 12px;
-  color: var(--nm-text-secondary);
-  margin: 12px 4px 6px;
-  text-transform: uppercase;
-}
-
-/* ── 侧边栏顶部：整栏收起按钮 ── */
-.sidebar-top {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: flex-start;
-}
-
-/* ── 收起态：左上角悬浮展开按钮 ── */
-.sidebar-open-float {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 60;
-}
 
 /* ── ui-frame 凸起卡片的头部与内容辅助样式 ── */
 .sidebar-card { flex: 0 0 auto; }
@@ -684,6 +649,15 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+}
+
+/* 减少动态效果（全局兜底）：边栏卡片的无限脉冲等装饰性动画停用——
+   逐组件过渡的降级写在各组件 scoped 样式内（styles.css 的全局规则
+   会被 scoped 选择器压过），这里只处理全局可见的循环动画。 */
+@media (prefers-reduced-motion: reduce) {
+  .branch-tab-spinner {
+    animation: none;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

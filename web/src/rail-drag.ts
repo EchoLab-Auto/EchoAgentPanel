@@ -1,7 +1,8 @@
 //! 边栏卡片拖动（左右两列之间 / 列内排序）：拖拽状态机与落点计算。
 //!
 //! 机制（2026-09-24）：
-//! - **指针事件**（pointerdown/move/up + setPointerCapture）统一鼠标/触控/笔；
+//! - **指针事件**（pointerdown/move/up，RailStack 侧对卡头做 setPointerCapture）
+//!   统一鼠标/触控/笔——捕获后指针移出窗口也能收到 up，不会卡在拖动中；
 //! - **拖动阈值**：移动超过 6px 才进入拖动（此前只是点击 → 交给卡头折叠）；
 //! - **拖影（ghost）**：从卡片原位置起算，用 `transform: translate()` 跟随指针
 //!   （GPU 合成，不触发布局）；落位/取消时改用 CSS 过渡把拖影飞向目标矩形，
@@ -24,6 +25,26 @@ export const GHOST_FLIGHT_MS = 190;
 
 /** 飞行结束后拖影淡出时长（ms）：与真卡片的淡入交叉，避免交接闪烁。 */
 export const GHOST_FADE_MS = 130;
+
+/**
+ * 是否偏好「减少动态效果」（`prefers-reduced-motion: reduce`）。
+ * 环境不支持 `matchMedia`（老 WebView、部分测试环境）时按 false（照常动画）。
+ */
+export function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 动画时长（ms）：减少动态效果时压缩为 ~1ms——拖影不「飞」，直接出现在落点
+ * （状态机仍走完整流程，只是不给用户看位移；CSS 侧同理，见 RailDragGhost）。
+ */
+export function motionMs(ms: number): number {
+  return prefersReducedMotion() ? 1 : ms;
+}
 
 interface RailRegistration {
   side: RailSide;
@@ -188,13 +209,36 @@ interface DOMRectLike {
   height: number;
 }
 
-/** 卡片间距（与 RailStack 的 `gap` 一致）：落点估算用。 */
-const RAIL_GAP_PX = 12;
+/**
+ * 落点估算的回退值：真实值优先从计算样式读（`paddingOf` / `gapOf`），
+ * 读不到（无样式环境/测试）才用这里——只在 CSS 一处定义列内边距与卡间距。
+ */
+const RAIL_METRIC_FALLBACK_PX = 12;
 
-/** 列容器的内容区左上角（rail-stack 内边距 12px）。 */
+/** 解析计算样式里的 px 值；空串（无样式环境）= 未知 → 回退。 */
+function cssPx(raw: string, fallback: number): number {
+  const text = raw.trim();
+  if (!text) return fallback;
+  const value = Number.parseFloat(text);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+/** 列容器的内边距（`.rail-stack` 的 padding）：落点几何的基准。 */
+function paddingOf(rail: RailRegistration): number {
+  return cssPx(getComputedStyle(rail.el).paddingTop, RAIL_METRIC_FALLBACK_PX);
+}
+
+/** 卡片间距（列内列表的 `row-gap`）：与 CSS 的 gap 同源。 */
+function gapOf(rail: RailRegistration): number {
+  const list = rail.el.querySelector('.rail-stack__list');
+  return cssPx(list ? getComputedStyle(list).rowGap : '', RAIL_METRIC_FALLBACK_PX);
+}
+
+/** 列容器的内容区左上角（= 列矩形 + 其内边距）。 */
 function railContentOrigin(rail: RailRegistration): { x: number; y: number } {
   const rect = rectOf(rail.el);
-  return { x: rect.left + RAIL_GAP_PX, y: rect.top + RAIL_GAP_PX };
+  const pad = paddingOf(rail);
+  return { x: rect.left + pad, y: rect.top + pad };
 }
 
 /**
@@ -220,7 +264,8 @@ function dropTargetRect(
   }
   if (index >= cards.length) {
     const last = rectOf(cards[cards.length - 1]);
-    return { x: last.left, y: last.bottom + RAIL_GAP_PX, ...size };
+    // 追加到列尾：最后一张卡下方一个卡间距（gap 从 CSS 读，见 gapOf）
+    return { x: last.left, y: last.bottom + gapOf(rail), ...size };
   }
   const target = rectOf(cards[index]);
   return { x: target.left, y: target.top, ...size };
@@ -286,8 +331,8 @@ function scheduleFlightEnd(): void {
   window.setTimeout(() => {
     railDrag.arrivingId = null;
     railDrag.fading = true;
-    window.setTimeout(() => resetDragState(), GHOST_FADE_MS);
-  }, GHOST_FLIGHT_MS + 30);
+    window.setTimeout(() => resetDragState(), motionMs(GHOST_FADE_MS));
+  }, motionMs(GHOST_FLIGHT_MS) + 30);
 }
 
 /** 复位全部拖动状态（飞行结束后调用；也用于异常路径兜底）。 */
