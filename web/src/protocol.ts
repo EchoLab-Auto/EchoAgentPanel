@@ -100,6 +100,9 @@ export interface WorkspaceConversationInfo {
   name: string;
   /** 通道 id 是否为存量裸 ws 格式（见类型注释）。 */
   legacy: boolean;
+  /** 会话级 API 覆盖（2026-10）：`Some(name)` = 该对话的 LLM 请求走
+   * 全局供应商池中该 profile 的 provider；`None` = 跟随 persona 级。 */
+  api_profile?: string | null;
 }
 
 /** 工作区会话（workspace 插件）：名称 + 多个工作区目录。 */
@@ -417,6 +420,14 @@ export type BackendCommand =
       };
     }
   | { SwitchApi: { name: string } }
+  | {
+      SetSessionApi: {
+        team_id: string;
+        session_id: string;
+        profile: string;
+      };
+    }
+  | { ClearSessionApi: { team_id: string; session_id: string } }
   | { RequestRemoteApiProfiles: { peer: string } }
   | { TestApi: { name: string } }
   | { QueryApiBalance: { name: string } }

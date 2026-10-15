@@ -222,4 +222,16 @@ function pickGlobal() {
   white-space: nowrap;
 }
 .sw-busy { color: var(--panel-ok, #2ea46e); font-size: 10px; }
+/* 会话级 API 下拉（2026-10）：工作区通道行内配置，宽度自适应内容 */
+.sw-api {
+  flex: 0 0 auto;
+  max-width: 140px;
+}
+.sw-api :deep(.nm-select) {
+  font-size: 10px;
+}
+.sw-api :deep(.nm-select__trigger) {
+  padding: 2px 6px;
+  min-height: 24px;
+}
 </style>

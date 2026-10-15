@@ -519,6 +519,10 @@ export interface AppState {
   workspaceGitBySession: Record<string, WorkspaceGitInfo[]>;
   /** 文件浏览器缓存（目录绝对路径 → 条目/错误；workspace 插件） */
   workspaceFiles: Record<string, { entries: WorkspaceFileEntry[]; error: string | null }>;
+  /** 会话级 API 覆盖（session_id → profile 名；2026-10）。空值 = 跟随
+   * persona 级。Panel 从工作区对话的 api_profile 推导（WorkspaceSessions
+   * 事件回推时同步）。 */
+  sessionApiOverrides: Record<string, string>;
   /** 当前激活 team（null = default/未指定），用于实时事件隔离 */
   activeTeamId: string | null;
   /**
@@ -597,6 +601,7 @@ export function initialState(): AppState {
     workspaceCore: null,
     workspaceGitBySession: {},
     workspaceFiles: {},
+    sessionApiOverrides: {},
     activeTeamId: null,
     activeRegion: null,
     shellSessions: [],
@@ -651,6 +656,18 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       state.workspaceActiveConversation = e.active_conversation ?? null;
       state.workspaceTeamId = e.team_id ?? null;
       state.workspaceCore = e.core ?? null;
+      // 会话级 API 覆盖同步（2026-10）：从工作区对话的 api_profile
+      // 推导 sessionApiOverrides（session_id → profile 名）。
+      const overrides: Record<string, string> = {};
+      for (const ws of state.workspaceSessions) {
+        for (const conv of ws.conversations ?? []) {
+          if (conv.api_profile) {
+            const scope = conv.legacy ? ws.id : `${ws.id}/${conv.id}`;
+            overrides[`local:workspace:${scope}:local_user`] = conv.api_profile;
+          }
+        }
+      }
+      state.sessionApiOverrides = overrides;
       return state;
     }
     case 'WorkspaceGitStatus': {
