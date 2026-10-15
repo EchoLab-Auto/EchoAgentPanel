@@ -291,18 +291,26 @@ watch(
 // 连接/切换 Team 后拉取工作区会话快照（投影与切换器双击绑定依赖它）。
 // 仅对启用 workspace 插件的人格发（未挂载存储的人格会回明确错误提示）。
 let workspaceFetchKey = '';
+// 每次重连都重新拉管理快照；不能只依赖 WorkspacePanel 是否挂载。
+let workspaceConnectionEpoch = 0;
+let workspaceWasConnected = false;
 watch(
   [() => state.connected, () => state.teams, () => activeTeamId.value],
   () => {
     if (!state.connected) {
       workspaceFetchKey = '';
+      workspaceWasConnected = false;
       return;
+    }
+    if (!workspaceWasConnected) {
+      workspaceConnectionEpoch += 1;
+      workspaceWasConnected = true;
     }
     const team = currentTeam(state);
     if (!team || !teamPluginEnabled(team, 'echo-agent.workspace')) return;
     const teamKey = `${team.core ?? ''}:${team.id}`;
-    if (workspaceFetchKey === teamKey) return;
-    workspaceFetchKey = teamKey;
+    if (workspaceFetchKey === `${workspaceConnectionEpoch}:${teamKey}`) return;
+    workspaceFetchKey = `${workspaceConnectionEpoch}:${teamKey}`;
     sendCommand({ RequestWorkspaceSessions: { team_id: team.id } });
   },
   { immediate: true },

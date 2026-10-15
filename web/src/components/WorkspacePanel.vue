@@ -103,6 +103,23 @@ const editing = ref<null | { id: string }>(null);
 const formName = ref('');
 const formDescription = ref('');
 const formDirs = ref('');
+const actionPending = ref<string | null>(null);
+const actionError = ref<string | null>(null);
+let actionTimer: number | undefined;
+function beginAction(key: string): boolean {
+  if (actionPending.value) return false;
+  actionPending.value = key; actionError.value = null;
+  if (actionTimer) window.clearTimeout(actionTimer);
+  actionTimer = window.setTimeout(() => {
+    if (actionPending.value === key) { actionPending.value = null; actionError.value = '操作超时，请检查连接后重试；当前内容已保留。'; }
+  }, 8000);
+  return true;
+}
+function finishAction(): void {
+  actionPending.value = null;
+  if (actionTimer) window.clearTimeout(actionTimer);
+  actionTimer = undefined;
+}
 
 function startCreate() {
   editing.value = { id: '' };
@@ -141,35 +158,37 @@ function onPickDirectory(path: string) {
 }
 
 function save() {
-  if (!props.teamId) return;
+  if (!props.teamId || !editing.value) return;
+  const id = editing.value.id;
+  if (!formName.value.trim() || !beginAction(id ? `save:${id}` : 'save:new')) return;
+  const existing = id ? sessions.value.find((s) => s.id === id) : undefined;
   const session: WorkspaceSessionInfo = {
-    id: editing.value?.id ?? '',
+    ...(existing ?? {}),
+    id,
     name: formName.value.trim(),
     description: formDescription.value.trim(),
-    directories: formDirs.value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0),
+    directories: formDirs.value.split('\n').map((line) => line.trim()).filter(Boolean),
+    // SaveWorkspaceSession is a full replacement: never erase conversations on metadata edit.
+    conversations: existing?.conversations ?? [],
+    last_conversation: existing?.last_conversation ?? null,
   };
-  if (!session.name) return;
   sendCommand({ SaveWorkspaceSession: { team_id: props.teamId, session } });
-  editing.value = null;
 }
 
 // ── 激活 / 删除 ──
 function toggleActive(session: WorkspaceSessionInfo) {
-  if (!props.teamId) return;
+  if (!props.teamId || actionPending.value) return;
   const id = session.id === activeId.value ? null : session.id;
   sendCommand({ ActivateWorkspaceSession: { team_id: props.teamId, id } });
 }
 
 async function remove(session: WorkspaceSessionInfo) {
-  if (!props.teamId) return;
+  if (!props.teamId || !beginAction(`delete:${session.id}`)) return;
   const ok = await confirmDialog(
     `删除工作区会话「${session.name}」？（不影响磁盘目录与对话历史）`,
     { title: '删除工作区会话', danger: true, confirmText: '删除' },
   );
-  if (!ok) return;
+  if (!ok) { finishAction(); return; }
   sendCommand({ DeleteWorkspaceSession: { team_id: props.teamId, id: session.id } });
 }
 
@@ -191,12 +210,15 @@ function saveConversations(
   session: WorkspaceSessionInfo,
   conversations: WorkspaceConversationInfo[],
   lastConversation?: string | null,
+  alreadyPending = false,
 ) {
   if (!props.teamId) return;
+  if (!alreadyPending && (actionPending.value || !beginAction(`conversation:${session.id}`))) return;
   sendCommand({
     SaveWorkspaceSession: {
       team_id: props.teamId,
       session: {
+        ...session,
         id: session.id,
         name: session.name,
         description: session.description ?? '',
@@ -236,6 +258,7 @@ function cancelConvForm() {
 }
 
 function saveConvForm(session: WorkspaceSessionInfo) {
+  if (actionPending.value) return;
   const name = convFormName.value.trim();
   if (!name || !convForm.value) return;
   // 物化隐式主对话（旧档 conversations 为空时补位 {id:"main", legacy:true}），
@@ -256,12 +279,13 @@ function saveConvForm(session: WorkspaceSessionInfo) {
 }
 
 async function removeConversation(session: WorkspaceSessionInfo, conv: WorkspaceConversationInfo) {
-  if (!props.teamId) return;
+  if (!props.teamId || actionPending.value) return;
   const ok = await confirmDialog(
     `删除对话「${conv.name}」？该对话的聊天历史将被清空，不可恢复。`,
     { title: '删除对话', danger: true, confirmText: '删除' },
   );
   if (!ok) return;
+  if (!beginAction(`conversation:${session.id}`)) return;
   // 先清通道历史（legacy → 裸 ws 通道；其余 → <ws>/<conv> 通道）。
   sendCommand({
     ClearHistory: {
@@ -273,10 +297,23 @@ async function removeConversation(session: WorkspaceSessionInfo, conv: Workspace
   // last_conversation 指向被删对话时回退首条（Core set_active 亦有兜底）。
   const last =
     session.last_conversation === conv.id ? (rest[0]?.id ?? null) : undefined;
-  saveConversations(session, rest, last);
+  saveConversations(session, rest, last, true);
 }
 
 const { phase: sessionsPhase } = usePending('workspace:sessions');
+watch(sessions, (list) => {
+  const key = actionPending.value;
+  if (key?.startsWith('save:') || key?.startsWith('delete:') || key?.startsWith('conversation:')) {
+    const id = key.split(':')[1];
+    const confirmed = (key.startsWith('delete:') && !list.some((s) => s.id === id))
+      || (!key.startsWith('delete:') && list.some((s) => s.id === id));
+    if (confirmed) {
+      finishAction();
+      if (key.startsWith('save:')) editing.value = null;
+      if (key.startsWith('conversation:')) convForm.value = null;
+    }
+  }
+}, { deep: true });
 
 onMounted(() => {
   if (!state.connected) return;
@@ -284,7 +321,10 @@ onMounted(() => {
   requestGit();
 });
 
-onUnmounted(() => releasePending('workspace:sessions'));
+onUnmounted(() => {
+  releasePending('workspace:sessions');
+  if (actionTimer) window.clearTimeout(actionTimer);
+});
 
 watch(
   () => state.connected,
@@ -307,6 +347,7 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
 
 <template>
   <div class="ws-panel">
+    <p v-if="actionError" class="ws-error">{{ actionError }}</p>
     <!-- 会话管理与 git 状态 -->
     <section class="ws-pane--main">
       <div class="ws-head">
@@ -355,8 +396,8 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
         />
       </label>
       <div class="ws-form__actions">
-        <NeumorphismButton size="small" variant="glass" :disabled="!formName.trim()" @click="save">
-          保存
+        <NeumorphismButton size="small" variant="glass" :disabled="!formName.trim() || !!actionPending" @click="save">
+          {{ actionPending?.startsWith('save:') ? '保存中…' : '保存' }}
         </NeumorphismButton>
         <NeumorphismButton size="small" variant="glass" @click="cancelEdit">取消</NeumorphismButton>
       </div>
@@ -478,7 +519,7 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
             {{ session.id === activeId ? '取消激活' : '激活' }}
           </NeumorphismButton>
           <NeumorphismButton size="small" variant="glass" @click="startEdit(session)">编辑</NeumorphismButton>
-          <NeumorphismButton size="small" variant="glass" @click="remove(session)">删除</NeumorphismButton>
+          <NeumorphismButton size="small" variant="glass" :disabled="!!actionPending" @click="remove(session)">删除</NeumorphismButton>
         </div>
       </div>
       <LoadHint :phase="sessionsPhase" label="工作区会话" @retry="requestSessions" />
@@ -736,4 +777,5 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
 }
 .ws-git__error { font-size: 11px; color: var(--panel-err, #d9534f); }
 .ws-empty { margin: 0; font-size: 12px; }
+.ws-error { margin: 4px 0; color: var(--panel-err, #d9534f); font-size: 12px; }
 </style>

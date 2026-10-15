@@ -515,6 +515,8 @@ export interface AppState {
   workspaceTeamId: string | null;
   /** 上述列表归属的 core（多上游；与 workspaceTeamId 一起判定新鲜度）。 */
   workspaceCore: string | null;
+  /** 工作区列表请求代数：拒绝切换 team/core 后到达的旧快照。 */
+  workspaceGeneration: number;
   /** 各会话目录 git 状态的缓存（session_id → 目录结果） */
   workspaceGitBySession: Record<string, WorkspaceGitInfo[]>;
   /** 文件浏览器缓存（目录绝对路径 → 条目/错误；workspace 插件） */
@@ -599,6 +601,7 @@ export function initialState(): AppState {
     workspaceActiveConversation: null,
     workspaceTeamId: null,
     workspaceCore: null,
+    workspaceGeneration: 0,
     workspaceGitBySession: {},
     workspaceFiles: {},
     sessionApiOverrides: {},
@@ -651,14 +654,22 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           };
         }
       ).WorkspaceSessions;
+      // 响应必须属于当前运行区域；重连/切换 core 后到达的旧响应不能
+      // 覆盖新鲜列表（单上游/旧 Core 的 core=null 仍兼容放行）。
+      if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) return state;
       state.workspaceSessions = e.sessions ?? [];
       state.workspaceActive = e.active ?? null;
       state.workspaceActiveConversation = e.active_conversation ?? null;
       state.workspaceTeamId = e.team_id ?? null;
       state.workspaceCore = e.core ?? null;
-      // 会话级 API 覆盖同步（2026-10）：从工作区对话的 api_profile
+      state.workspaceGeneration += 1;
       // 推导 sessionApiOverrides（session_id → profile 名）。
+      // 只替换 `local:workspace:` 键：非工作区会话（QQ 等）的乐观覆盖值不在
+      // 本事件的权威范围内，保留不动（此前整体替换会误清它们）。
       const overrides: Record<string, string> = {};
+      for (const [key, value] of Object.entries(state.sessionApiOverrides)) {
+        if (!key.startsWith('local:workspace:')) overrides[key] = value;
+      }
       for (const ws of state.workspaceSessions) {
         for (const conv of ws.conversations ?? []) {
           if (conv.api_profile) {

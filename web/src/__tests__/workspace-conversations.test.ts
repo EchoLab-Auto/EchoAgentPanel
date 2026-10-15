@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { parseEvent, serializeCommand, type WorkspaceSessionInfo } from '../protocol';
+import { parseEvent, serializeCommand, type BackendEvent, type WorkspaceSessionInfo } from '../protocol';
 import {
   LOCAL_DEFAULT_SESSION,
   conversationsView,
@@ -24,6 +24,7 @@ import {
 import SessionSwitcher from '../components/SessionSwitcher.vue';
 import { state } from '../store';
 import type { SessionInfo } from '../protocol';
+import { initialState, reduce } from '../state';
 
 // ── 1. 协议镜像 ──────────────────────────────────────────────────────────
 
@@ -251,5 +252,40 @@ describe('SessionSwitcher 工作区多对话通道分组', () => {
     expect(tags).toEqual(['工作区', '工作区']);
     const labels = wrapper.findAll('.sw-label').map((el) => el.text());
     expect(labels).toEqual(['Proj', 'Proj · 文档线']);
+  });
+});
+
+// ── 5. sessionApiOverrides：WorkspaceSessions 只替换工作区键 ─────────────
+
+describe('sessionApiOverrides：WorkspaceSessions 只替换工作区键', () => {
+  it('非工作区会话（QQ 等）的乐观覆盖值被保留', () => {
+    let s = initialState();
+    // 非工作区键（如 QQ 会话的乐观覆盖）+ 一个旧的工作区键（应被权威数据替换）。
+    s.sessionApiOverrides = {
+      'qq:group:12345:67890': 'qq-profile',
+      'local:workspace:old:local_user': 'stale-profile',
+    };
+    s = reduce(s, {
+      WorkspaceSessions: {
+        team_id: 't1',
+        active: 'proj',
+        sessions: [
+          {
+            id: 'proj',
+            name: 'Proj',
+            conversations: [
+              { id: 'main', name: '主对话', legacy: true, api_profile: 'alpha' },
+              { id: 'docs', name: '文档线', legacy: false },
+            ],
+          },
+        ],
+      },
+    } as unknown as BackendEvent);
+
+    // 非工作区键：保留（此前整体替换会误清）。
+    expect(s.sessionApiOverrides['qq:group:12345:67890']).toBe('qq-profile');
+    // 工作区键：按权威快照重算——旧键消失、新覆盖出现。
+    expect(s.sessionApiOverrides['local:workspace:old:local_user']).toBeUndefined();
+    expect(s.sessionApiOverrides['local:workspace:proj:local_user']).toBe('alpha');
   });
 });
