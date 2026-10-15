@@ -227,10 +227,10 @@ function pickGlobal() {
   flex: 0 0 auto;
   max-width: 140px;
 }
-.sw-api :deep(.nm-select) {
+.sw-api :deep(.nm-select__wrapper) {
   font-size: 10px;
 }
-.sw-api :deep(.nm-select__trigger) {
+.sw-api :deep(.nm-select__face) {
   padding: 2px 6px;
   min-height: 24px;
 }
