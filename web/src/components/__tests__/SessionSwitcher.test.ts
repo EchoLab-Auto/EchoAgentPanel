@@ -116,6 +116,29 @@ describe('SessionSwitcher 会话切换', () => {
     expect(tag!.classes()).toContain('tag-workspace');
   });
 
+  it('会话级 API 下拉：仅工作区通道行渲染（profile 列表为空也显示）', () => {
+    state.api = null;
+    state.sessionApiOverrides = {};
+    state.sessions.push(
+      session({ id: 'local:workspace:echo-agent:local_user', scope: 'workspace', nickname: 'echo-agent', last_active: 99 }),
+    );
+    const wrapper = mountSwitcher();
+    const rows = wrapper.findAll('.sw-item');
+    const ws = rows.find((r) => r.text().includes('echo-agent'))!;
+    expect(ws.find('.sw-api .nm-select__wrapper').exists()).toBe(true);
+    const evence = rows.find((r) => r.text().includes('Evence'))!;
+    expect(evence.find('.sw-api').exists()).toBe(false);
+  });
+
+  it('会话级 API 下拉：点击不触发行选', async () => {
+    state.sessions.push(
+      session({ id: 'local:workspace:echo-agent:local_user', scope: 'workspace', nickname: 'echo-agent', last_active: 99 }),
+    );
+    const wrapper = mountSwitcher();
+    await wrapper.find('.sw-api').trigger('click');
+    expect(wrapper.emitted('select')).toBeUndefined();
+  });
+
   it('运行中会话显示忙碌点', () => {
     state.activities = {
       'qq:dm::1828980067': { phase: 'thinking', detail: null, startedAt: 1, toolsCompleted: 0, subagentsCompleted: 0, promptTokens: 0, completionTokens: 0 },
