@@ -139,6 +139,20 @@ echo-agent-panel
 
 本仓库文档已合并到 EchoAgentCore 仓库的文档群（`document/`，ProDoc 格式）：
 
-- `document/panel.md` — Panel 前端（仓库布局、数据流、视图规范、无状态中继架构）
-- `document/panel-chat.md` — 会话视图（消息时序与入场动画）
-- `document/ops-deploy.md` — Panel 安装 / 更新 / 卸载（与 Core 同篇）
+- `document/panel/panel.md` — Panel 前端（仓库布局、数据流、视图规范、无状态中继架构）
+- `document/panel/panel-chat.md` — 会话视图（消息时序与入场动画）
+- `document/ops/ops-deploy.md` — Panel 安装 / 更新 / 卸载（与 Core 同篇）
+
+## 工作区同步契约（2026-10）
+
+工作区列表 `WorkspaceSessions` 是 Core 的权威快照，按 `(team_id, core)` 归属渲染；
+Panel 在 WebSocket 建立、重连、切换 Agent/Core 时主动重新请求列表（不依赖工作区面板
+是否打开、不依赖组件重新挂载），过期响应不能覆盖当前 Agent。
+
+`SaveWorkspaceSession` 是全量 upsert：编辑工作区元数据时必须原样携带 `conversations`
+与 `last_conversation`，不能把缺省字段当作“清空对话”，否则会话入口会被清空。
+
+管理面当前仍采用事件回推模型；事件必须按 `core + team_id` 判断归属。涉及“删除对话 +
+清理历史”的多步操作应由 UI 防重复提交（操作期间按钮去重并保留表单）、先串行清理对应
+通道历史再提交更新，超时/错误需可见并可重试；未来协议中增加 request id / version，
+以便 Core 原子化确认和乱序恢复。

@@ -3623,7 +3623,7 @@ watch(
    · 一级菜单：168px 竖排 → 顶部横滑 tab 条
    · 工作台：列表+详情并排 → Master-Detail（类由 mobileWorkspaceClass 切换）
    · 详情头部返回按钮：.caps-mobile-back（仅详情态渲染）
-   桌面样式即上方默认；本段只做窄屏收敛。参考 document/panel-mobile.md。
+   桌面样式即上方默认；本段只做窄屏收敛。参考 document/panel/panel-mobile.md。
    ═══════════════════════════════════════════════════════════════════════ */
 @media (max-width: 767.98px) {
   .caps {
