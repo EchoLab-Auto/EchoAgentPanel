@@ -608,7 +608,7 @@ const costSummary = computed(() => {
     }
   }
   return parts.length > 0
-    ? `近 7 天估算费用：${parts.join(' · ')}（按 [agent.pricing] 定价估算，未计缓存优惠）`
+    ? `近 7 天估算费用：${parts.join(' · ')}（按 [agent.pricing] 定价估算；缓存命中按命中价计，未配置命中价的模型按未命中价）`
     : '';
 });
 
