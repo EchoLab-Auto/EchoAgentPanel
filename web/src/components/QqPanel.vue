@@ -1,19 +1,21 @@
 <script setup lang="ts">
 //! 适配器管理面板：连接状态、门控模式、白名单/黑名单（用户与群）。
-//! 名单无本地草稿态——点击即发送更新命令，展示派生自 state.qqFilter。
+//! 名单无本地草稿态——点击即发送更新命令，展示派生自 AdapterState 状态文档
+//! + 读结果覆盖层（qqView，02b）。
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
 import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
 import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { state } from '../store';
-import { defaultQqInstanceState } from '../state';
 import { scopedKey } from '../keys';
-import { sendCommand, sendPending } from '../connection';
+import { sendCommand } from '../connection';
+import { adapterOpKey, invokeAdapterOp, onCoreDropped } from '../adapterOps';
+import { applyRead, docOf, dropReadOverlayOfCore, readOverlay, READS, toQqView } from './qq/qqView';
 import { usePending, type PendingPhase } from '../pending';
-import type { GateMode } from '../protocol';
+import type { AdapterOpMethod, AdapterStatus, GateMode } from '../protocol';
 import LoadHint from './LoadHint.vue';
 import QqLoginSection from './QqLoginSection.vue';
 
@@ -47,14 +49,20 @@ const activeAdapter = computed(
   () =>
     qqAdapters.value.find((a) => a.name === activeInstance.value) ?? qqAdapters.value[0] ?? null,
 );
+
 const qqAdapter = computed(() => activeAdapter.value);
 /** 当前实例的 QQ 管理态（门控/名单/owner/群/好友）。 */
 // 实例名跨 core 可重复（默认都叫 qq）：按 (activeRegion, 实例) 取态。
-const instanceState = computed(
-  () =>
-    state.qqByAdapter[scopedKey(state.activeRegion, activeAdapter.value?.name ?? 'qq')] ??
-    defaultQqInstanceState(),
+// 数据源 = AdapterState 状态文档 + 读结果覆盖层（02b §1.1）。
+const key = computed(() => scopedKey(state.activeRegion, activeAdapter.value?.name ?? 'qq'));
+const instanceState = computed(() =>
+  toQqView(state.adapterUiByKey[key.value] ?? null, readOverlay[key.value]),
 );
+
+/** 实例容器名回退链：状态文档（新通道）→ AdapterStatus 旧字段（deprecated，随协议删字段移除；02b §2.4）。 */
+function containerOf(adapter: AdapterStatus): string | null {
+  return docOf(adapter.name)?.instance?.container ?? adapter.container ?? null;
+}
 const activeName = computed(() => activeAdapter.value?.name ?? '');
 /** 多实例时才显示实例切换（单实例零变化）。 */
 const multiInstance = computed(() => qqAdapters.value.length > 1);
@@ -90,23 +98,28 @@ function refreshLists() {
   // 面板一打开就堆一串错误提示（纯噪音）。有实例时逐个刷新（多实例），
   // 单实例行为与旧版一致。
   if (!instanceNames.value.length) return;
+  const core = state.activeRegion ?? null; // 与读取键同源（02b §1.2）
   for (const adapter of instanceNames.value) {
-    const key = adapter || null;
-    const pk = (name: string) => `qq:${name}:${key ?? '_'}`;
-    // 逐查询登记加载跟踪（按实例分 key；面板只展示 active 实例的阶段）。
-    sendPending({ RequestGroupList: { adapter: key } }, pk('groups'));
-    sendPending({ RequestFriendList: { adapter: key } }, pk('friends'));
-    sendPending({ RequestQqFilterConfig: { adapter: key } }, pk('filter'));
-    sendPending({ RequestQqOwner: { adapter: key } }, pk('owner'));
-    sendPending({ RequestQqLoginStatus: { adapter: key } }, pk('login'));
+    // 逐查询发起统一 op（内部按 (core,adapter,method) 登记加载跟踪）；
+    // 结果写入覆盖层（形状不符静默丢弃；超时/断线由 LoadHint 阶段展示）。
+    for (const [method, apply] of READS) {
+      invokeAdapterOp(core, adapter, method, {})
+        .then(({ result, error }) => {
+          if (!error) applyRead(scopedKey(core, adapter), apply, result);
+        })
+        .catch(() => {});
+    }
   }
 }
 
 // 名单/门控区的组合加载阶段（active 实例的 4 个查询取最高阶段）。
-const { phase: qqFilterPhase } = usePending(() => `qq:filter:${activeName.value || '_'}`);
-const { phase: qqGroupsPhase } = usePending(() => `qq:groups:${activeName.value || '_'}`);
-const { phase: qqFriendsPhase } = usePending(() => `qq:friends:${activeName.value || '_'}`);
-const { phase: qqOwnerPhase } = usePending(() => `qq:owner:${activeName.value || '_'}`);
+// 键与 invokeAdapterOp 内部配对键同构（adapterOpKey；02b §1.3）。
+const opKey = (m: AdapterOpMethod) =>
+  adapterOpKey(state.activeRegion, activeName.value || '_', m);
+const { phase: qqFilterPhase } = usePending(() => opKey('get_filter_config'));
+const { phase: qqGroupsPhase } = usePending(() => opKey('get_groups'));
+const { phase: qqFriendsPhase } = usePending(() => opKey('get_friends'));
+const { phase: qqOwnerPhase } = usePending(() => opKey('get_owner'));
 const qqListsPhase = computed<PendingPhase>(() => {
   const phases = [
     qqFilterPhase.value,
@@ -120,8 +133,15 @@ const qqListsPhase = computed<PendingPhase>(() => {
   return 'idle';
 });
 
+// 读覆盖层随上游 core 离线清理（A3：adapterOps.onCoreDropped；02b §3）。
+let stopCoreDropped: (() => void) | null = null;
 onMounted(() => {
+  stopCoreDropped = onCoreDropped(dropReadOverlayOfCore);
   if (state.connected) refreshLists();
+});
+onUnmounted(() => {
+  stopCoreDropped?.();
+  stopCoreDropped = null;
 });
 watch(
   () => state.connected,
@@ -226,8 +246,8 @@ function toggleDenyGroup(id: number) {
       <NeumorphismStatusDot :status="adapter.running ? 'online' : 'offline'" size="small" />
       <span class="adapter-row__name">{{ adapter.display_name || adapter.name }}</span>
       <span v-if="adapter.self_id" class="adapter-row__id">{{ adapter.self_id }}</span>
-      <span v-if="adapter.container" class="adapter-row__container" :title="`NapCat 容器：${adapter.container}`">
-        {{ adapter.container }}
+      <span v-if="containerOf(adapter)" class="adapter-row__container" :title="`NapCat 容器：${containerOf(adapter)}`">
+        {{ containerOf(adapter) }}
       </span>
       <span class="adapter-row__state" :class="adapter.running ? 'is-run' : 'is-stop'">
         {{ adapter.running ? '运行中' : '已停止' }}

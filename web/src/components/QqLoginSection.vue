@@ -2,15 +2,17 @@
 //! QQ 登录状态区（多实例 / Core 代理，2026-09）。
 //!
 //! 面板**不再**直连 OneBot HTTP 或 docker：登录状态与二维码都由 Core 代理——
-//! 发 `RequestQqLoginStatus` / `RequestQqQrcode`（带实例名），Core 用
-//! `QqLoginStatus` / `QqQrcode` 事件回推（二维码为 PNG base64）。
+//! 经统一适配器 op 通道（InvokeAdapterOp / AdapterOpResult）读取与发起，
+//! 展示取实例状态文档（AdapterState）+ 读结果覆盖层（qqView，02b）。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import type { AdapterStatus } from '../protocol';
 import { state } from '../store';
 import { sendCommand } from '../connection';
+import { invokeAdapterOp } from '../adapterOps';
 import { scopedKey } from '../keys';
+import { applyLoginStatus, applyRead, docOf, readOverlay, toQqView } from './qq/qqView';
 
 const props = defineProps<{
   adapter?: AdapterStatus | null;
@@ -25,20 +27,25 @@ const qrDataUrl = ref<string | null>(null);
 const qrRequested = ref(false);
 
 const instanceName = computed(() => props.adapterName || props.adapter?.name || '');
-/** 该实例的登录态（Core 经 QqLoginStatus 回推）。 */
+/** 该实例的登录态（AdapterState 状态文档 + 读结果覆盖层；02b §2.1）。 */
 // QQ 实例名跨 core 可重复（默认都叫 qq）：按 (activeRegion, 实例) 取态。
-const instanceState = computed(
-  () => state.qqByAdapter[scopedKey(state.activeRegion, instanceName.value)],
+const key = computed(() => scopedKey(state.activeRegion, instanceName.value));
+const view = computed(() =>
+  toQqView(state.adapterUiByKey[key.value] ?? null, readOverlay[key.value]),
 );
-const online = computed(
-  () => instanceState.value?.online ?? props.adapter?.connected ?? false,
-);
-const selfId = computed(() => instanceState.value?.selfId ?? props.adapter?.self_id ?? null);
+const online = computed(() => view.value.online ?? props.adapter?.connected ?? false);
+const selfId = computed(() => view.value.selfId ?? props.adapter?.self_id ?? null);
 
 function requestStatus() {
   // 无实例（QQ 未启用）：不发——带实例名的请求会得到"QQ 实例未找到"。
   if (!instanceName.value) return;
-  sendCommand({ RequestQqLoginStatus: { adapter: instanceName.value } });
+  const core = state.activeRegion ?? null;
+  const name = instanceName.value;
+  invokeAdapterOp(core, name, 'login_status', {})
+    .then(({ result, error: err }) => {
+      if (!err) applyRead(scopedKey(core, name), applyLoginStatus, result);
+    })
+    .catch(() => {});
 }
 
 function loadQr() {
@@ -105,8 +112,12 @@ watch(
   { immediate: true },
 );
 
+/** WebUI 登录地址：状态文档（新通道）→ AdapterStatus 旧字段（deprecated）→ 默认端口（02b §2.4）。 */
 const webuiUrl = computed(
-  () => props.adapter?.webui_url ?? `http://${window.location.hostname}:6099`,
+  () =>
+    docOf(instanceName.value)?.instance?.webui_url ??
+    props.adapter?.webui_url ??
+    `http://${window.location.hostname}:6099`,
 );
 </script>
 

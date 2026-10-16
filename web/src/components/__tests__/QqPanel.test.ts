@@ -6,10 +6,14 @@
 //!
 //! 作用域（2026-09-14）：面板只显示**当前智能体**的实例（persona = team
 //! id）——别的 agent 的适配器状态/登录状况不进面板，也不会成为命令目标。
+//!
+//! 泛化迁移（02b-R2 起）：读取切到统一 op 通道——命令断言查
+//! `invokeAdapterOp` 调用（`ops()` 助手），状态文档投射经
+//! `state.adapterUiByKey` + `readOverlay`（qqView）。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { nextTick } from 'vue';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 vi.mock('../../connection', () => {
   const sendCommand = vi.fn();
@@ -21,9 +25,35 @@ vi.mock('../../connection', () => {
   };
 });
 
+vi.mock('../../adapterOps', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../adapterOps')>();
+  return {
+    ...actual,
+    // 默认挂起（用例按需 mockImplementation 控制）：读请求不自动回写覆盖层。
+    invokeAdapterOp: vi.fn(),
+  };
+});
+
 import QqPanel from '../QqPanel.vue';
 import { state } from '../../store';
 import { sendCommand } from '../../connection';
+import { invokeAdapterOp, type AdapterOpOutcome } from '../../adapterOps';
+import { readOverlay } from '../qq/qqView';
+
+const invokeMock = vi.mocked(invokeAdapterOp);
+
+/** 统一 op 调用的 (adapter, method, payload) 断言助手（02b §4）。 */
+const ops = () =>
+  invokeMock.mock.calls.map(([core, a, m, p]) => ({
+    core,
+    a,
+    m,
+    p: (p ?? {}) as Record<string, unknown>,
+  }));
+
+function clearOverlay() {
+  for (const key of Object.keys(readOverlay)) delete readOverlay[key];
+}
 
 function seedInstances(count: number) {
   state.adapters = Array.from({ length: count }, (_, i) => ({
@@ -39,12 +69,15 @@ function seedInstances(count: number) {
     webui_url: `http://localhost:${6100 + i}`,
     onebot_url: `http://localhost:${3010 + i}`,
   })) as typeof state.adapters;
-  state.qqByAdapter = {};
+  state.adapterUiByKey = {};
 }
 
 describe('QqPanel 多实例', () => {
   beforeEach(() => {
     vi.mocked(sendCommand).mockClear();
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(() => new Promise<AdapterOpOutcome>(() => {}));
+    clearOverlay();
   });
 
   it('单实例：不显示实例选择器（与旧版一致）', () => {
@@ -65,11 +98,12 @@ describe('QqPanel 多实例', () => {
     // （adapter 回退字面量 "qq"）必被 Core 拒绝的请求，堆一串
     // "QQ 适配器未找到 / QQ 实例 qq 未找到"错误提示。
     state.adapters = [];
-    state.qqByAdapter = {};
+    state.adapterUiByKey = {};
     state.connected = true; // 触发 onMounted → refreshLists 路径
     const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
     await nextTick();
     expect(vi.mocked(sendCommand)).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalled();
     state.connected = false;
     wrapper.unmount();
   });
@@ -99,7 +133,7 @@ describe('QqPanel 多实例', () => {
         container: 'echo-napcat-self-coding',
       },
     ] as typeof state.adapters;
-    state.qqByAdapter = {};
+    state.adapterUiByKey = {};
     state.connected = true;
     const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
     await nextTick();
@@ -124,12 +158,96 @@ describe('QqPanel 多实例', () => {
         container: 'echo-napcat-self-coding',
       },
     ] as typeof state.adapters;
-    state.qqByAdapter = {};
+    state.adapterUiByKey = {};
     state.connected = true;
     const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
     await nextTick();
     expect(wrapper.text()).toContain('当前智能体没有 QQ 实例');
     expect(vi.mocked(sendCommand)).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalled();
+    state.connected = false;
+    wrapper.unmount();
+  });
+
+  it('状态文档投影：gate/online/self_id/owner 进面板（AdapterState 新通道）', async () => {
+    seedInstances(1);
+    state.adapterUiByKey['qq'] = {
+      instance: { persona: 'alix' },
+      running: true,
+      online: true,
+      self_id: '1',
+      gate: {
+        mode: 'allowlist',
+        allowlist_users: ['7'],
+        allowlist_groups: [],
+        denylist_users: [],
+        denylist_groups: [],
+      },
+      owner: 9,
+    };
+    state.connected = true;
+    const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
+    await nextTick();
+    expect(wrapper.text()).toContain('7'); // 白名单 chip（string[] → number[] 投影）
+    expect(wrapper.text()).toContain('QQ 已连接：1'); // 登录区自文档取 online/self_id
+    expect(wrapper.text()).toContain('QQ 管理员：9'); // owner prop 自文档
+    expect(wrapper.findAll('.qq-count')[0].text()).toContain('1'); // 白名单徽标 = 1
+    state.connected = false;
+    wrapper.unmount();
+  });
+
+  it('读结果落覆盖层：get_friends/get_filter_config → 视图；新 AdapterState 引用后 filter 回落文档', async () => {
+    seedInstances(1);
+    state.connected = true;
+    state.adapterUiByKey['qq'] = {
+      gate: {
+        mode: 'none',
+        allowlist_users: [],
+        allowlist_groups: [],
+        denylist_users: [],
+        denylist_groups: [],
+      },
+      owner: 0,
+      online: false,
+      self_id: null,
+    };
+    invokeMock.mockImplementation((_core, _adapter, method) => {
+      if (method === 'get_friends') {
+        return Promise.resolve({ result: { friends: [{ id: '5', name: '好友甲乙' }] }, error: null });
+      }
+      if (method === 'get_filter_config') {
+        return Promise.resolve({
+          result: {
+            allowlist_users: ['42'],
+            allowlist_groups: [],
+            denylist_users: [],
+            denylist_groups: [],
+          },
+          error: null,
+        });
+      }
+      return new Promise<AdapterOpOutcome>(() => {});
+    });
+    const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('好友甲乙'); // 好友 chip（覆盖层）
+    expect(wrapper.text()).toContain('42'); // 白名单（覆盖层 filter）
+    // 新 AdapterState（整文档替换 ⇒ 引用变化）⇒ 覆盖层失效 ⇒ filter 回到文档值
+    state.adapterUiByKey['qq'] = {
+      gate: {
+        mode: 'none',
+        allowlist_users: ['77'],
+        allowlist_groups: [],
+        denylist_users: [],
+        denylist_groups: [],
+      },
+      owner: 0,
+      online: false,
+      self_id: null,
+    };
+    await nextTick();
+    expect(wrapper.text()).toContain('77');
+    expect(wrapper.text()).not.toContain('42');
     state.connected = false;
     wrapper.unmount();
   });
@@ -151,7 +269,7 @@ describe('QqPanel 多实例', () => {
         container: 'napcat',
       },
     ] as typeof state.adapters;
-    state.qqByAdapter = {};
+    state.adapterUiByKey = {};
     state.connected = true;
     const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
     await nextTick();
@@ -189,21 +307,18 @@ describe('QqPanel 多实例', () => {
         container: 'echo-napcat-self-coding',
       },
     ] as typeof state.adapters;
-    state.qqByAdapter = {};
+    state.adapterUiByKey = {};
     state.connected = true;
     const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
     await nextTick();
-    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as Record<string, { adapter?: string | null }>);
-    const queried = calls.filter((c) => 'RequestGroupList' in c || 'RequestFriendList' in c);
+    const queried = ops().filter((o) => o.m === 'get_groups' || o.m === 'get_friends');
     expect(queried.length).toBeGreaterThan(0);
     for (const call of queried) {
-      const payload = Object.values(call)[0];
-      expect(payload.adapter).toBe('qq'); // 只寻址 alix 的实例
+      expect(call.a).toBe('qq'); // 只寻址 alix 的实例
     }
     expect(
-      calls.some(
-        (c) => Object.values(c)[0] && String((Object.values(c)[0] as { adapter?: string }).adapter) === 'sc-qq',
-      ),
+      ops().some((o) => o.a === 'sc-qq'),
+      `ops: ${JSON.stringify(ops())}`,
     ).toBe(false);
     state.connected = false;
     wrapper.unmount();
