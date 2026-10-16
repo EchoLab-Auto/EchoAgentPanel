@@ -37,7 +37,7 @@ import { claimReasoningAnimation } from '../reasoning-anim';
 // 打开时才加载对应 chunk（此前全部静态进首包——不打开也付加载成本）。
 const AgentConfigModal = defineAsyncComponent(() => import('./AgentConfigModal.vue'));
 const ContextView = defineAsyncComponent(() => import('./ContextView.vue'));
-const QqPanel = defineAsyncComponent(() => import('./QqPanel.vue'));
+const AdapterPanel = defineAsyncComponent(() => import('./AdapterPanel.vue'));
 const WorkspacePanel = defineAsyncComponent(() => import('./WorkspacePanel.vue'));
 const SessionSwitcher = defineAsyncComponent(() => import('./SessionSwitcher.vue'));
 const TasksPanel = defineAsyncComponent(() => import('./TasksPanel.vue'));
@@ -863,7 +863,7 @@ function mediaSrc(img: string): string {
       <WorkspacePanel :team-id="props.activeTeamId ?? null" />
     </PanelPopover>
     <PanelPopover v-model="showAdapter" :anchor="btnElement(adapterBtnRef)">
-      <QqPanel :team-id="props.activeTeamId ?? null" />
+      <AdapterPanel :team-id="props.activeTeamId ?? null" :core="state.activeRegion ?? null" />
     </PanelPopover>
     <PanelPopover v-model="showTasks" :anchor="btnElement(tasksBtnRef)">
       <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />
