@@ -1,7 +1,7 @@
 <script setup lang="ts">
 //! 会话切换面板（入口行「会话」按钮弹出，多会话 2026-09）。
 //!
-//! 列出当前智能体名下的全部会话（本地 / QQ 私聊 / QQ 群 / 其他），
+//! 列出当前智能体名下的全部会话（本地 / 各平台私聊、群聊 / 其他），
 //! 点击切换；当前会话高亮，运行中会话带忙碌点。每个会话拥有独立的
 //! 模型上下文（Core 侧按会话投影，见 TrunkStore::snapshot_for）。
 //!
@@ -12,12 +12,19 @@
 //! 「工作区名 · 对话名」（Core 下发），标签均为「工作区」。点选语义由
 //! App 侧双向绑定——选通道 = 激活对应 (工作区, 对话)、选默认会话 =
 //! 取消激活（2026-09-14 / 2026-10 多对话扩展）。
+//!
+//! 通用化（03b §1.3 / §4.3）：非 local 会话按 `platform` 字符串分组
+//! （组键 `<platform>-dm / <platform>-group`，行内标签配色类 `.tag-dm /
+//! .tag-group`）；分组标题取 `state.adapters` 中 platform 匹配条目的
+//! `session_labels`——无 labels 回退 `<display_name> 私聊/群聊`、整个
+//! platform 无匹配适配器回退「私聊/群聊」（session-labels.ts）。
 
 import { computed } from 'vue';
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
 import { state } from '../store';
 import { sessionKey } from '../keys';
 import { sendCommand } from '../connection';
+import { sessionLabelsFor } from '../session-labels';
 import { loopModeOf, type SessionInfo } from '../protocol';
 
 const props = defineProps<{
@@ -35,6 +42,9 @@ interface SessionTag {
   tag: string;
   /** 标签配色键（默认同分组；工作区通道独立配色）。 */
   tagKey: string;
+  /** 平台分组元信息（local / other 为 null）——分组标题文案与排序用。 */
+  platform: string | null;
+  kind: 'dm' | 'group' | null;
 }
 
 function sessionTag(session: SessionInfo): SessionTag {
@@ -46,45 +56,88 @@ function sessionTag(session: SessionInfo): SessionTag {
     // 独立标签。多对话通道 scope_id 含 `/`（`<ws>/<conv>`）但不含 `:`，
     // 按 `:` 分段即可正确识别 scope。
     if (scope === 'workspace') {
-      return { group: 'local', label: session.nickname || session.id, tag: '工作区', tagKey: 'workspace' };
+      return { group: 'local', label: session.nickname || session.id, tag: '工作区', tagKey: 'workspace', platform: null, kind: null };
     }
-    return { group: 'local', label: session.nickname || session.id, tag: 'Local', tagKey: 'local' };
+    return { group: 'local', label: session.nickname || session.id, tag: 'Local', tagKey: 'local', platform: null, kind: null };
   }
-  if (platform === 'qq') {
-    if (scope === 'group') {
-      return { group: 'qq-group', label: session.group_name || session.id, tag: '群', tagKey: 'qq-group' };
-    }
-    return { group: 'qq-dm', label: session.nickname || session.id, tag: '私聊', tagKey: 'qq-dm' };
+  if (!platform) {
+    return { group: 'other', label: session.nickname || session.id, tag: '其他', tagKey: 'other', platform: null, kind: null };
   }
-  return { group: 'other', label: session.nickname || session.id, tag: platform, tagKey: 'other' };
+  // 通用平台分组（03b §1.3）：组键 `<platform>-dm / <platform>-group`；
+  // 行内标签只区分私聊/群，平台上下文由分组标题承载。
+  if (scope === 'group') {
+    return {
+      group: `${platform}-group`,
+      label: session.group_name || session.id,
+      tag: '群',
+      tagKey: 'group',
+      platform,
+      kind: 'group',
+    };
+  }
+  return {
+    group: `${platform}-dm`,
+    label: session.nickname || session.id,
+    tag: '私聊',
+    tagKey: 'dm',
+    platform,
+    kind: 'dm',
+  };
 }
 
-const GROUP_LABEL: Record<string, string> = {
-  local: 'Local',
-  'qq-dm': 'QQ 私聊',
-  'qq-group': 'QQ 群',
-  other: '其他',
-};
+interface GroupBucket {
+  key: string;
+  platform: string | null;
+  kind: 'dm' | 'group' | null;
+  sessions: SessionInfo[];
+}
 
-/** 当前智能体的会话（按最近活跃倒序，分组展示）。 */
+/** 分组排序位次：local 恒最前，other 殿后，平台组居中。 */
+function groupRank(bucket: GroupBucket): number {
+  if (bucket.key === 'local') return 0;
+  if (bucket.key === 'other') return 2;
+  return 1;
+}
+
+/** 分组标题：内置组固定文案；平台组取 session_labels（03b §4.3，带回退）。 */
+function groupLabel(bucket: GroupBucket): string {
+  if (bucket.key === 'local') return 'Local';
+  if (bucket.key === 'other' || !bucket.platform) return '其他';
+  const labels = sessionLabelsFor(bucket.platform);
+  return bucket.kind === 'group' ? labels.group : labels.dm;
+}
+
+/** 当前智能体的会话（按最近活跃倒序，分组展示）。
+ *
+ *  分组顺序（03b §4.3 S3，保持稳定）：local 固定最前 → 平台组（qq 优先，
+ *  其余按 platform 字典序；同平台 dm 先于 group）→ other 殿后。 */
 const groups = computed(() => {
   const active = props.activeTeamId ?? state.teams[0]?.id ?? null;
   const visible = state.sessions.filter((s) => (s.team_id ?? null) === active);
-  const order = ['local', 'qq-dm', 'qq-group', 'other'];
-  const buckets = new Map<string, SessionInfo[]>();
+  const buckets = new Map<string, GroupBucket>();
   for (const session of visible) {
     const tag = sessionTag(session);
-    if (!buckets.has(tag.group)) buckets.set(tag.group, []);
-    buckets.get(tag.group)!.push(session);
+    let bucket = buckets.get(tag.group);
+    if (!bucket) {
+      bucket = { key: tag.group, platform: tag.platform, kind: tag.kind, sessions: [] };
+      buckets.set(tag.group, bucket);
+    }
+    bucket.sessions.push(session);
   }
-  return order
-    .filter((key) => buckets.has(key))
-    .map((key) => ({
-      key,
-      label: GROUP_LABEL[key] ?? key,
-      sessions: buckets
-        .get(key)!
-        .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0)),
+  return [...buckets.values()]
+    .sort((a, b) => {
+      if (groupRank(a) !== groupRank(b)) return groupRank(a) - groupRank(b);
+      if (a.platform !== b.platform) {
+        if (a.platform === 'qq') return -1;
+        if (b.platform === 'qq') return 1;
+        return (a.platform ?? '').localeCompare(b.platform ?? '');
+      }
+      return (a.kind === 'group' ? 1 : 0) - (b.kind === 'group' ? 1 : 0);
+    })
+    .map((bucket) => ({
+      key: bucket.key,
+      label: groupLabel(bucket),
+      sessions: bucket.sessions.sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0)),
     }));
 });
 
@@ -265,8 +318,8 @@ function onApiChange(session: SessionInfo & { core?: string | null }, value: unk
 .sw-tag.tag-global { color: #8b5cf6; }
 .sw-tag.tag-local { color: #0ea5e9; }
 .sw-tag.tag-workspace { color: #14b8a6; }
-.sw-tag.tag-qq-dm { color: #2ea46e; }
-.sw-tag.tag-qq-group { color: #f59e0b; }
+.sw-tag.tag-dm { color: #2ea46e; }
+.sw-tag.tag-group { color: #f59e0b; }
 .sw-label {
   flex: 1 1 auto;
   min-width: 0;

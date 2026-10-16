@@ -2,12 +2,17 @@
 //!
 //! 背景：单会话模式下每个群/私聊拥有独立上下文；入口行「会话」按钮
 //! （ChatView 提供，>1 个会话时显示）弹出本面板用于切换。
+//!
+//! 通用化（03b S4 / §4.3）：非 local 会话按 platform 分组（组键
+//! `<platform>-dm / <platform>-group`），分组标题取 `session_labels`
+//! （无 labels 走 display_name / 平台缺省回退）；标签配色类 `.tag-dm /
+//! .tag-group`。
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import SessionSwitcher from '../SessionSwitcher.vue';
 import { state } from '../../store';
-import type { SessionInfo } from '../../protocol';
+import type { AdapterStatus, SessionInfo } from '../../protocol';
 
 function session(over: Partial<SessionInfo>): SessionInfo {
   return {
@@ -24,6 +29,23 @@ function session(over: Partial<SessionInfo>): SessionInfo {
   } as SessionInfo;
 }
 
+/** 平台适配器 fixture（默认 qq）：session_labels 注入后分组标题 = 「QQ 私聊 / QQ 群」。 */
+function adapter(over: Partial<AdapterStatus> = {}): AdapterStatus {
+  return {
+    name: 'qq',
+    display_name: 'QQ（alix）',
+    connected: true,
+    running: true,
+    self_id: '10001',
+    bind_address: '0.0.0.0:3131',
+    started_at: null,
+    persona: 'alix',
+    platform: 'qq',
+    session_labels: { dm: 'QQ 私聊', group: 'QQ 群' },
+    ...over,
+  };
+}
+
 function mountSwitcher(activeSessionId = 'local:tui::local_user') {
   return mount(SessionSwitcher, {
     props: { activeTeamId: 'alix', activeSessionId },
@@ -33,6 +55,8 @@ function mountSwitcher(activeSessionId = 'local:tui::local_user') {
 describe('SessionSwitcher 会话切换', () => {
   beforeEach(() => {
     state.teams = [{ id: 'alix', name: 'Alix', enabled: true, sessions: 0 } as never];
+    // 03b S4：分组标题取自 state.adapters 的 session_labels（注入后 = 「QQ 私聊 / QQ 群」）。
+    state.adapters = [adapter()];
     state.sessions = [
       session({}),
       session({
@@ -146,5 +170,59 @@ describe('SessionSwitcher 会话切换', () => {
     const wrapper = mountSwitcher();
     const evence = wrapper.findAll('.sw-item').find((b) => b.text().includes('Evence'));
     expect(evence!.find('.sw-busy').exists()).toBe(true);
+  });
+
+  // ── 03b S4：platform + session_labels 通用化 ──
+
+  it('无 session_labels：回退 <display_name> 私聊 / 群聊', () => {
+    state.adapters = [adapter({ session_labels: null })];
+    const wrapper = mountSwitcher();
+    expect(wrapper.text()).toContain('QQ（alix） 私聊');
+    expect(wrapper.text()).toContain('QQ（alix） 群聊');
+  });
+
+  it('整个 platform 无匹配适配器：回退「私聊 / 群聊」', () => {
+    state.adapters = [];
+    const wrapper = mountSwitcher();
+    expect(wrapper.text()).toContain('私聊');
+    expect(wrapper.text()).toContain('群聊');
+    expect(wrapper.text()).not.toContain('QQ 私聊');
+  });
+
+  it('第二平台独立分组：组键/标题独立，顺序 local → qq → 其他平台', () => {
+    state.sessions.push(
+      session({
+        id: 'telegram:dm::777',
+        platform: 'telegram',
+        scope: 'dm',
+        nickname: 'TG 用户',
+        last_active: 5,
+      }),
+    );
+    state.adapters = [
+      adapter(),
+      adapter({
+        name: 'tg',
+        display_name: 'TG（alix）',
+        platform: 'telegram',
+        session_labels: { dm: 'TG 私聊', group: 'TG 群' },
+      }),
+    ];
+    const wrapper = mountSwitcher();
+    // 分组顺序稳定：local → qq（外置平台之前）→ telegram；同平台 dm 先于 group
+    const titles = wrapper.findAll('.sw-group__title').map((t) => t.text());
+    expect(titles).toEqual(['Local', 'QQ 私聊', 'QQ 群', 'TG 私聊']);
+    // 会话归属各自平台分组
+    const tgGroup = wrapper.findAll('.sw-group').find((g) => g.text().includes('TG 私聊'))!;
+    expect(tgGroup.text()).toContain('TG 用户');
+    expect(tgGroup.text()).not.toContain('Evence');
+  });
+
+  it('标签配色类泛化：私聊 = .tag-dm，群 = .tag-group（旧 .tag-qq-* 退役）', () => {
+    const wrapper = mountSwitcher();
+    const dm = wrapper.findAll('.sw-tag').find((t) => t.text() === '私聊');
+    const group = wrapper.findAll('.sw-tag').find((t) => t.text() === '群');
+    expect(dm!.classes()).toContain('tag-dm');
+    expect(group!.classes()).toContain('tag-group');
   });
 });
