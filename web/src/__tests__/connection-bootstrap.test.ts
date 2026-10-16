@@ -134,9 +134,31 @@ describe('重连引导命令（去主智能体）', () => {
   it('连接不存在时仍给出明确提示（命令确实没发出去）', async () => {
     const { sendCommand } = await import('../connection');
     const { state } = await import('../store');
-    sendCommand({ RequestShellSessions: {} });
+    // 02a S3：返回值 = false（拒发）。
+    expect(sendCommand({ RequestShellSessions: {} })).toBe(false);
     expect(state.toasts.length).toBe(1);
     expect(state.toasts[0].text).toContain('未连接到 Core');
+  });
+
+  it('sendCommand 返回值（02a S3）：握手期排队 / 已连接发送 = true', async () => {
+    const { startConnection, sendCommand } = await import('../connection');
+    startConnection();
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    expect(sendCommand({ RequestShellSessions: {} })).toBe(true); // 握手期已排队
+    ws.triggerOpen();
+    expect(sendCommand('RequestState')).toBe(true); // 已连接已发送
+  });
+
+  it('sendCommand 返回值（02a S3）：多上游解析不出目标 = false（拒发）', async () => {
+    const { sendCommand } = await import('../connection');
+    const { state } = await import('../store');
+    state.knownCores = new Set(['core-a', 'core-b']);
+    state.activeRegion = null;
+    state.activeTeamId = null;
+    state.sessions = [];
+    state.teams = [];
+    expect(sendCommand('RequestTeamsList')).toBe(false);
+    expect(state.toasts[state.toasts.length - 1]?.text).toContain('尚未选择 agent');
   });
 
   it('重连引导：区域已知时管理面命令定向补发', async () => {

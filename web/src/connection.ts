@@ -221,13 +221,14 @@ function broadcastEnvelope(command: BackendCommand): string {
  * 发送一次「有响应等待」的请求：登记加载跟踪 + 发命令（见 pending.ts）。
  *
  * `key` 是视图本地命名（如 `'context'`、`'settings:teams'`），同一 key
- * 重复发送即覆盖（重试/切换重拉语义）。
+ * 重复发送即覆盖（重试/切换重拉语义）。`targetCore` 显式指定路由目标
+ * （02a S3：适配器 op 通道恒显式传 core）；缺省沿用命令自身解析。
  */
-export function sendPending(command: BackendCommand, key: string): void {
+export function sendPending(command: BackendCommand, key: string, targetCore?: string): void {
   // 登记时带上解析出的目标 core：多上游下广播/竞态响应不会误销账别的 core
   // 的等待（见 pending.ts::resolvePendingEvent）。
-  trackRequest(key, command, resolveTargetCore(command) ?? null);
-  sendCommand(command);
+  trackRequest(key, command, resolveTargetCore(command, targetCore) ?? null);
+  sendCommand(command, targetCore);
 }
 
 /** 解一帧下行消息：多上游信封拆壳（core 名 + 内层事件），无壳 = 单上游。 */
@@ -330,20 +331,26 @@ export function resolveTargetCore(
   return core;
 }
 
-export function sendCommand(command: BackendCommand, targetCore?: string): void {
+/**
+ * 发送命令。返回是否已发/已排队（02a S3）：`true` = 已发送或握手期已
+ * 发送命令。返回是否已发/已排队（02a S3）：`true` = 已发送或握手期已
+ * 排队；`false` = 拒发（多上游解析不出目标 / 未连接 / 握手队列已满）。
+ * 返回值加宽是兼容变更，既有调用点可忽略（拒发路径仍弹 toast）。
+ */
+export function sendCommand(command: BackendCommand, targetCore?: string): boolean {
   const core = resolveTargetCore(command, targetCore);
   // 多上游下解析不出目标 = 没有可路由的 agent/区域：明确提示并拒发，
   // 绝不落到某个隐式的"默认 core"。
   if (core == null && state.knownCores.size > 1) {
     pushToast(state, '尚未选择 agent（无法确定运行区域），命令未发送', 'error');
-    return;
+    return false;
   }
   const payload = core
     ? JSON.stringify({ core, frame: { type: 'command', payload: command } })
     : serializeCommand(command);
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(payload);
-    return;
+    return true;
   }
   if (socket && socket.readyState === WebSocket.CONNECTING) {
     // 握手期（页面刚加载/重连窗口）：静默排队，连接建立后补发。
@@ -352,10 +359,12 @@ export function sendCommand(command: BackendCommand, targetCore?: string): void 
     // 否则 TeamsList 校正后的归属救不回来（跨 core 误投，2026-10 修复）。
     if (pendingCommands.length < PENDING_LIMIT) {
       pendingCommands.push(command);
+      return true;
     }
-    return;
+    return false; // 队列封顶：未排队成功（防御性上限，正常不可达）
   }
   pushToast(state, '未连接到 Core，命令未发送', 'error');
+  return false;
 }
 
 /** 面板访问令牌：URL ?token= 播种一次后存 localStorage；fetch 经

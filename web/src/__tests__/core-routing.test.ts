@@ -3,6 +3,7 @@
 // 显式 targetCore > 会话归属 > activeRegion 兜底。
 import { describe, expect, it, beforeEach } from 'vitest';
 import { state } from '../store';
+import { resolveTargetCore, sendCommand } from '../connection';
 import type { SessionInfo } from '../protocol';
 
 function makeSession(id: string, core: string | null): SessionInfo & { core?: string | null } {
@@ -44,11 +45,27 @@ describe('P1 会话归属自动路由', () => {
     // 兜底即 activeRegion（core-b）。
     expect(state.activeRegion).toBe('core-b');
   });
-
   it('会话无 core 标注（单上游）时回退兜底', () => {
     state.sessions = [makeSession('sess-local', null)];
     const session = state.sessions.find(s => s.id === 'sess-local') as { core?: string | null };
     expect(session?.core ?? null).toBeNull();
     expect(state.activeRegion).toBe('core-b'); // 兜底接管
+  });
+
+  // ── 02a S3：sendCommand 返回 boolean（拒发 = false）────────────────────
+  it('sendCommand：显式 targetCore 优先（无连接 = false，拒发后仍提示）', () => {
+    expect(resolveTargetCore('RequestAdapterStatus', 'core-a')).toBe('core-a');
+    expect(sendCommand('RequestAdapterStatus', 'core-a')).toBe(false); // 无 WS 连接
+    expect(state.toasts[state.toasts.length - 1]?.text).toContain('未连接到 Core');
+  });
+
+  it('sendCommand：多上游解析不出目标 = false（绝不猜，防误投）', () => {
+    state.knownCores = new Set(['core-a', 'core-b']);
+    state.activeRegion = null;
+    state.activeTeamId = null;
+    state.sessions = [];
+    state.teams = [];
+    expect(sendCommand('RequestAdapterStatus')).toBe(false);
+    expect(state.toasts[state.toasts.length - 1]?.text).toContain('尚未选择 agent');
   });
 });
