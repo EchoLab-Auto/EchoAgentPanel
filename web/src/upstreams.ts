@@ -6,7 +6,18 @@
 
 import { state } from './store';
 import { panelFetch } from './connection';
+import { dropCoreAdapterChannel } from './adapterOps';
 import type { UpstreamStatus } from './state';
+
+/**
+ * 上一帧上游快照：`name → connectivity`（diff 基准）。
+ *
+ * 离线/移除检测（02a §5.4-1）：条目从上游列表**消失** 或 `connectivity`
+ * `online → offline` ⇒ `dropCoreAdapterChannel(name)` 清理该 core 的适配器
+ * 通道（UI 文档 + pending + 在途 Promise + onCoreDropped 通知）。
+ * 清理延迟 ≤ 一个轮询窗（8s）；删除路径另有 removeSessionsOfCore 即时兜底。
+ */
+let lastUpstreams: Map<string, string> | null = null;
 
 /** 拉取一次上游状态并写入共享 state（失败保留上次结果，不弹错）。 */
 export async function refreshUpstreams(): Promise<void> {
@@ -14,10 +25,20 @@ export async function refreshUpstreams(): Promise<void> {
     const res = await panelFetch('/api/upstreams');
     if (!res.ok) return;
     const list = (await res.json()) as UpstreamStatus[];
-    state.upstreams = Array.isArray(list) ? list : [];
+    const next = Array.isArray(list) ? list : [];
+    if (lastUpstreams) {
+      for (const [name, connectivity] of lastUpstreams) {
+        const now = next.find(u => u.name === name)?.connectivity;
+        if (now === undefined || (connectivity === 'online' && now === 'offline')) {
+          dropCoreAdapterChannel(name);
+        }
+      }
+    }
+    lastUpstreams = new Map(next.map(u => [u.name, u.connectivity]));
+    state.upstreams = next;
     // 已配置上游即"已知运行区域"：区域集合不依赖是否已收到事件，
     // 多区域判定（命令必须显式落到某个区域）从配置起就成立。
-    for (const u of state.upstreams) state.knownCores.add(u.name);
+    for (const u of next) state.knownCores.add(u.name);
   } catch {
     // Panel 后端不可达：保留上次快照。
   }

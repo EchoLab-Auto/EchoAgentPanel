@@ -9,11 +9,13 @@ import {
 } from './state_domains/orchestration';
 import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
+import { adapterOpKey, settleAdapterOp } from './adapterOps';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
 //! 事件流从 `/ws` 进来，reducer 把它映射成 React 可渲染的状态。
 
 import type {
+  AdapterOpMethod,
   AdapterStatus,
   ApiMetricsEntry,
   ApiProfileInfo,
@@ -454,6 +456,16 @@ export interface AppState {
   >;
 
   /**
+   * 通用适配器状态文档（02a §3.1）：`scopedKey(core, adapter)` → `AdapterState`
+   * 事件的 `state` 原始文档（**整文档替换**，不做字段 merge）。
+   *
+   * 值类型 `unknown`：Panel 不校验形状——core 的适配器状态文档 schema v1
+   * （00 §三）是唯一引用标准；bind 取值容错由渲染器（03a §2.0）负责。
+   * 与 `qqByAdapter`（旧 QQ 事件键）是独立键空间，过渡期双轨并存。
+   */
+  adapterUiByKey: Record<string, unknown>;
+
+  /**
    * 各会话的清单快照（复合键 `(core, session_id)` → 清单列表，2026-10 多上游修复）。
    *
    * ⚠️ 曾是全局单值槽：多 core 下 A/B core 的 `ChecklistUpdated` 互相覆盖
@@ -585,6 +597,7 @@ export function initialState(): AppState {
   // 读取方早已改用 qqByAdapter[name].{gateMode,owner,groups,friends}）。
     lastQrcode: null,
     qqByAdapter: {},
+    adapterUiByKey: {},
     checklists: {},
     toasts: [],
     browseDirectories: {},
@@ -1370,6 +1383,36 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       delete state.shellTerminals[sessionKey(core, e.session_id)];
       return state;
     }
+    // ── 适配器泛化（02a §6.2）：统一 op 结果配对与状态文档写入 ────────────
+    // 二者都**不**经 managementCoreCurrent 过滤：op 可发往非活跃 core，
+    // 且多 core 聚合靠 scopedKey 隔离（过滤会让非活跃 core 的文档永远进不来）。
+    // 顺序：两臂互不依赖、各自幂等（结果与状态到达顺序无保证，03a §4.2）。
+    case 'AdapterOpResult': {
+      const e = (event as {
+        AdapterOpResult: {
+          adapter: string;
+          method: string;
+          result?: unknown;
+          error?: string | null;
+          core?: string | null;
+        };
+      }).AdapterOpResult;
+      // 键配对（无线协议无请求 id，02a §1-D1）：resolve 在途 Promise 并放行
+      // 同键 FIFO 的下一个；无命中的迟到结果由服务层静默丢弃。
+      settleAdapterOp(adapterOpKey(evtCore(e), e.adapter, e.method as AdapterOpMethod), {
+        result: e.result ?? null,
+        error: e.error ?? null,
+      });
+      return state;
+    }
+    case 'AdapterState': {
+      const e = (event as {
+        AdapterState: { adapter: string; state: unknown; core?: string | null };
+      }).AdapterState;
+      // 整文档替换，不做字段 merge（02a §3.1）。
+      state.adapterUiByKey[scopedKey(evtCore(e), e.adapter)] = e.state;
+      return state;
+    }
     case 'QqFilterConfig': {
       const e = (event as {
         QqFilterConfig: QqFilterState & { adapter?: string | null; core?: string | null };
@@ -1608,6 +1651,11 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
     if (key.startsWith(prefix)) delete state.teamTimelines[key];
   }
   if (state.trunkTeamId?.startsWith(prefix)) state.trunkTeamId = null;
+  // 适配器状态文档（02a §5.4-2）：该 core 前缀清理——删除路径不等轮询窗，
+  // 立即生效（离线路径的清理钩子在 upstreams.ts，见 adapterOps）。
+  for (const key of Object.keys(state.adapterUiByKey)) {
+    if (key.startsWith(prefix)) delete state.adapterUiByKey[key];
+  }
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {

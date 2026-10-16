@@ -202,12 +202,9 @@ export function settleAdapterOp(
 
 /** 清 `state.adapterUiByKey` 中该 core 前缀的文档（断线清理第 ① 步）。 */
 function clearAdapterUiOfCore(core: string): void {
-  // 字段在 02a S5 加入 AppState；此处窄断言兼容（字段就位后改直连访问）。
-  const ui = (state as { adapterUiByKey?: Record<string, unknown> }).adapterUiByKey;
-  if (!ui) return;
   const prefix = `${core}\u0000`;
-  for (const key of Object.keys(ui)) {
-    if (key.startsWith(prefix)) delete ui[key];
+  for (const key of Object.keys(state.adapterUiByKey)) {
+    if (key.startsWith(prefix)) delete state.adapterUiByKey[key];
   }
 }
 
