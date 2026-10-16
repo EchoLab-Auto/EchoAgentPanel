@@ -126,7 +126,8 @@ describe('parseDescriptor：字段校验（03a §3.2 / §3.3）', () => {
       expect(parsed.warnings.map((w) => w.code)).toContain('unknown_action');
       const node = parsed.panels[0].nodes[0];
       expect(node.type).toBe('select');
-      expect(node.action).toBeUndefined();
+      // TS 窄化（UiNode 联合）：非 select 时给 null，让断言如实失败。
+      expect(node.type === 'select' ? node.action : null).toBeUndefined();
     }
   });
 
@@ -174,7 +175,8 @@ describe('parseDescriptor：字段校验（03a §3.2 / §3.3）', () => {
     });
     const node = parsed.panels[0].nodes[0];
     expect(node.type).toBe('select');
-    expect(node.options).toEqual([
+    // TS 窄化（UiNode 联合）：非 select 时给 null，让断言如实失败。
+    expect(node.type === 'select' ? node.options : null).toEqual([
       { value: 'none' },
       { value: 'allowlist', label: '白名单', hint: '仅名单内' },
     ]);
