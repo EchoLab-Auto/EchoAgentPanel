@@ -17,9 +17,10 @@ import { computed } from 'vue';
 import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
 import { state } from '../store';
 import { regionLabel } from '../state';
+import { adapterStatusView, type AdapterDotStatus } from '../composables/useAdapterStatusView';
 
 /** 状态点语义：connected（绿）/ running 未连（呼吸）/ stopped（灰）。 */
-type DotStatus = 'online' | 'connecting' | 'offline';
+type DotStatus = AdapterDotStatus;
 
 interface AdapterRow {
   key: string;
@@ -65,15 +66,18 @@ const coreRows = computed<CoreRow[]>(() =>
     };
   }),
 );
-
+// 状态文案 / 状态点：与通用 AdapterPanel 共用计算（03b S1）。
 const adapters = computed<AdapterRow[]>(() =>
-  state.adapters.map((a) => ({
-    key: a.name,
-    label: a.display_name || a.name,
-    selfId: a.self_id,
-    stateText: !a.running ? '已停止' : a.connected ? '已连接' : '等待连接',
-    dot: !a.running ? 'offline' : a.connected ? 'online' : 'connecting',
-  })),
+  state.adapters.map((a) => {
+    const view = adapterStatusView(a);
+    return {
+      key: a.name,
+      label: a.display_name || a.name,
+      selfId: a.self_id,
+      stateText: view.stateText,
+      dot: view.dot,
+    };
+  }),
 );
 </script>
 
