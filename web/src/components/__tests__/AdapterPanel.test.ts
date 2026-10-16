@@ -1,17 +1,22 @@
-//! 通用 AdapterPanel 契约（2026-10，03b S2，自 QqPanel.test.ts 迁移）。
+//! 通用 AdapterPanel 契约（2026-10；03b S2 面板 + S3 渲染器接线）。
 //!
-//! 背景：通用适配器面板列 `state.adapters` 全部平台，persona 过滤保留
-//! （别的 agent 的实例既不显示状态也不作为命令目标）；无可见实例打开面板
-//! 零命令（QqPanel.test.ts:63/113 语义）。启停重启的 pending 键为通用形式
+//! S2 语义：列 `state.adapters` 全部平台，persona 过滤保留（别的 agent 的
+//! 实例既不显示状态也不作为命令目标）；无可见实例打开面板零命令
+//!（QqPanel.test.ts:63/113 语义）；启停重启 pending 键为通用形式
 //! `adapter:<op>:<core>:<adapter>`（03b §2.2）。
+//!
+//! S3 接线（03b §3.2）：`ui` 存在 → 内嵌 AdapterUiRenderer（真实 QQ 描述符
+//! fixture 集成：select/list_editor 动作经真实 adapterOps 发 `InvokeAdapterOp`，
+//! core/adapter 寻址正确）；无 `ui` → 占位文案且不渲染渲染器。节点内部语义
+//! 已在 adapter-ui/__tests__/ 覆盖，本文件只做面板层接线断言。
 //!
 //! 迁入用例对照（03b §4.2）：:50 → 单实例不显示选择器；:56 → 多实例显示
 //! 选择器与 persona 标签；:63 → 无实例打开面板零命令；:77 → persona 过滤；
 //! :113 → 当前智能体无实例空态零命令。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { nextTick, h } from 'vue';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { nextTick } from 'vue';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
 vi.mock('../../connection', () => {
   const sendCommand = vi.fn();
@@ -25,7 +30,11 @@ vi.mock('../../connection', () => {
   };
 });
 
+import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
+import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
 import AdapterPanel from '../AdapterPanel.vue';
+import { adapterOpKey, settleAdapterOp } from '../../adapterOps';
+import { scopedKey } from '../../keys';
 import { state } from '../../store';
 import { sendCommand, sendPending } from '../../connection';
 import type { AdapterStatus } from '../../protocol';
@@ -45,6 +54,102 @@ function adapter(over: Partial<AdapterStatus> = {}): AdapterStatus {
     persona: 'alix',
     platform: 'qq',
     ...over,
+  };
+}
+
+/** 与 echo-adapter-qq `ui.rs::ui_descriptor()` 等价的真实 QQ 描述符
+ *  （3 panel / 7 类节点；同 03a renderer.test.ts §5.5 fixture）。 */
+const QQ_DESCRIPTOR = {
+  version: 1,
+  panels: [
+    {
+      id: 'login',
+      title: '登录',
+      nodes: [
+        { type: 'status', bind: 'online', label: 'QQ 连接' },
+        { type: 'text', bind: 'self_id', label: '账号' },
+        {
+          type: 'image',
+          label: '登录二维码',
+          clear_when: 'online',
+          fetch: { method: 'login_qrcode', result_key: 'png_base64' },
+        },
+        { type: 'link', bind: 'instance.webui_url', label: '打开 NapCat WebUI' },
+      ],
+    },
+    {
+      id: 'gate',
+      title: '消息门控',
+      nodes: [
+        {
+          type: 'select',
+          bind: 'gate.mode',
+          label: '门控模式',
+          options: [
+            { value: 'none', label: '不限制', hint: '所有消息均响应' },
+            { value: 'allowlist', label: '白名单', hint: '仅响应名单内用户/群' },
+            { value: 'denylist', label: '黑名单', hint: '忽略名单内用户/群' },
+          ],
+          action: { method: 'set_gate_mode', arg: { mode: '$value' } },
+        },
+        {
+          type: 'list_editor',
+          bind: 'gate.allowlist_users',
+          label: '白名单用户',
+          action: { method: 'update_allowlist', arg: { user_ids: '$value' } },
+        },
+        {
+          type: 'list_editor',
+          bind: 'gate.allowlist_groups',
+          label: '白名单群',
+          action: { method: 'update_allowlist', arg: { group_ids: '$value' } },
+        },
+        {
+          type: 'list_editor',
+          bind: 'gate.denylist_users',
+          label: '黑名单用户',
+          action: { method: 'update_denylist', arg: { user_ids: '$value' } },
+        },
+        {
+          type: 'list_editor',
+          bind: 'gate.denylist_groups',
+          label: '黑名单群',
+          action: { method: 'update_denylist', arg: { group_ids: '$value' } },
+        },
+      ],
+    },
+    {
+      id: 'owner',
+      title: '主人',
+      nodes: [
+        {
+          type: 'text',
+          bind: 'owner',
+          label: '主人 QQ',
+          editable: true,
+          action: { method: 'set_owner', arg: { owner_qq: '$value' } },
+        },
+        { type: 'button', label: '刷新状态', action: { method: 'get_state' } },
+      ],
+    },
+  ],
+};
+
+/** QQ 状态文档（00 §三 cached_state 形状；id 一律字符串）。 */
+function qqState(mode: string, allowlistUsers: string[]): Record<string, unknown> {
+  return {
+    instance: { webui_url: 'http://127.0.0.1:6099', bind_address: '0.0.0.0:3131' },
+    running: true,
+    online: true,
+    self_id: '123456789',
+    gate: {
+      mode,
+      allowlist_users: allowlistUsers,
+      allowlist_groups: [],
+      denylist_users: [],
+      denylist_groups: [],
+    },
+    owner: 10001,
   };
 }
 
@@ -83,6 +188,7 @@ describe('AdapterPanel 通用实例面板（03b S2）', () => {
   beforeEach(() => {
     state.connected = false;
     state.adapters = [];
+    state.adapterUiByKey = {};
     sendMock.mockClear();
     pendingMock.mockClear();
   });
@@ -217,29 +323,150 @@ describe('AdapterPanel 通用实例面板（03b S2）', () => {
     );
   });
 
-  it('渲染器插槽：默认占位；提供插槽时收到 core / adapter / adapter-status', () => {
-    state.adapters = [adapter()];
-    const plain = mountPanel();
-    expect(plain.text()).toContain('该适配器未提供管理界面');
-
-    const w = mount(AdapterPanel, {
-      props: { teamId: 'alix', core: 'core-a' },
-      slots: {
-        renderer: (sp: Record<string, unknown>) => {
-          const status = sp.adapterStatus as AdapterStatus;
-          return h('div', { class: 'ap-probe' }, `${sp.core}|${sp.adapter}|${status.self_id}`);
-        },
-      },
-    }) as VueWrapper;
-    wrapper = w;
-    expect(w.find('.ap-probe').text()).toBe('core-a|qq|10001');
-  });
-
   it('可见实例存在时挂载即请求适配器列表', async () => {
     state.adapters = [adapter()];
     state.connected = true;
     mountPanel();
     await nextTick();
     expect(sendMock).toHaveBeenCalledWith('RequestAdapterStatus', undefined);
+  });
+});
+
+describe('AdapterPanel × 渲染器接线（03b S3）', () => {
+  beforeEach(() => {
+    // 渲染器控制项在断线时被外层禁用（`:disabled="!state.connected"`）。
+    state.connected = true;
+    state.adapters = [];
+    state.adapterUiByKey = {};
+    sendMock.mockClear();
+    // 真实 adapterOps 发送路径：命令发出成功（否则拒发 reject）。
+    sendMock.mockReturnValue(true);
+    pendingMock.mockClear();
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+    state.connected = false;
+    state.adapters = [];
+    state.adapterUiByKey = {};
+    sendMock.mockReset(); // 恢复默认返回值（undefined），清调用记录
+  });
+
+  it('有 ui：内嵌渲染器渲染真实 QQ 描述符（登录/消息门控/主人 3 panel）', () => {
+    state.adapters = [adapter({ ui: QQ_DESCRIPTOR })];
+    const w = mountPanel();
+    expect(w.find('.adapter-ui').exists()).toBe(true);
+    expect(w.findAll('.adapter-ui-panel')).toHaveLength(3);
+    expect(w.findAll('.adapter-ui-panel__head h3').map((h) => h.text())).toEqual([
+      '登录',
+      '消息门控',
+      '主人',
+    ]);
+    expect(w.text()).not.toContain('该适配器未提供管理界面');
+  });
+
+  it('无 ui：显示「未提供管理界面」占位且不渲染渲染器', () => {
+    state.adapters = [adapter()]; // 未提供 ui
+    const w = mountPanel();
+    expect(w.text()).toContain('该适配器未提供管理界面');
+    expect(w.find('.adapter-ui').exists()).toBe(false);
+    expect(w.findAll('.adapter-ui-panel')).toHaveLength(0);
+  });
+
+  it('fixture：门控 select 读 gate.mode，点选发 InvokeAdapterOp 且 core/adapter 寻址正确', async () => {
+    const key = scopedKey('core-a', 'qq');
+    state.adapters = [adapter({ ui: QQ_DESCRIPTOR })];
+    state.adapterUiByKey[key] = qqState('allowlist', ['10001']);
+    const w = mountPanel({ teamId: 'alix', core: 'core-a' });
+    sendMock.mockClear(); // 丢弃挂载刷新（RequestAdapterStatus）
+
+    // 显示值 = 状态文档 gate.mode（allowlist → 白名单）
+    const select = w.findComponent(NeumorphismSelect);
+    expect(select.props('modelValue')).toBe('allowlist');
+    expect(w.text()).toContain('仅响应名单内用户/群'); // options.hint 随选中项
+
+    select.vm.$emit('change', 'denylist');
+    await flushPromises();
+    expect(sendMock).toHaveBeenCalledWith(
+      { InvokeAdapterOp: { adapter: 'qq', method: 'set_gate_mode', payload: { mode: 'denylist' } } },
+      'core-a',
+    );
+    // 渲染器 op 旁路通知经面板透传（03a §1.3；命令本身由渲染器直发）
+    expect(w.emitted('op')?.[0]?.[0]).toMatchObject({
+      method: 'set_gate_mode',
+      payload: { mode: 'denylist' },
+      nodeKey: 'gate/0/select',
+    });
+
+    // 模拟 AdapterOpResult 回推 → op-result 透传
+    settleAdapterOp(adapterOpKey('core-a', 'qq', 'set_gate_mode'), { result: null, error: null });
+    await flushPromises();
+    expect(w.emitted('op-result')?.[0]?.[0]).toMatchObject({ method: 'set_gate_mode', ok: true });
+  });
+
+  it('多实例：切换实例后 select 跟随该实例状态文档，动作寻址选中实例', async () => {
+    state.adapters = [
+      adapter({ ui: QQ_DESCRIPTOR }),
+      adapter({ name: 'qq-2', display_name: 'QQ（alix-2）', self_id: '10002', ui: QQ_DESCRIPTOR }),
+    ];
+    state.adapterUiByKey[scopedKey('core-a', 'qq')] = qqState('allowlist', ['10001']);
+    state.adapterUiByKey[scopedKey('core-a', 'qq-2')] = qqState('none', ['20002']);
+    const w = mountPanel({ teamId: 'alix', core: 'core-a' });
+    sendMock.mockClear();
+
+    expect(w.findComponent(NeumorphismSelect).props('modelValue')).toBe('allowlist');
+
+    w.findComponent(NeumorphismSegmented).vm.$emit('change', 'qq-2');
+    await nextTick();
+    // :key = scopedKey(core, adapter) 重挂后读 qq-2 的状态文档（原 :212 语义）
+    expect(w.findComponent(NeumorphismSelect).props('modelValue')).toBe('none');
+
+    w.findComponent(NeumorphismSelect).vm.$emit('change', 'denylist');
+    await flushPromises();
+    expect(sendMock).toHaveBeenCalledWith(
+      { InvokeAdapterOp: { adapter: 'qq-2', method: 'set_gate_mode', payload: { mode: 'denylist' } } },
+      'core-a',
+    );
+    settleAdapterOp(adapterOpKey('core-a', 'qq-2', 'set_gate_mode'), { result: null, error: null });
+    await flushPromises();
+  });
+
+  it('fixture：list_editor 增删发 update_allowlist 整表/单字段载荷', async () => {
+    const key = scopedKey('core-a', 'qq');
+    state.adapters = [adapter({ ui: QQ_DESCRIPTOR })];
+    state.adapterUiByKey[key] = qqState('allowlist', ['10001']);
+    const w = mountPanel({ teamId: 'alix', core: 'core-a' });
+    sendMock.mockClear();
+
+    const card = w.findAll('.list-editor-node')[0]; // gate 面板第一张 = 白名单用户
+    expect(card.text()).toContain('白名单用户');
+    await card.find('input').setValue('10002');
+    await card
+      .findAll('button')
+      .find((b) => b.text().trim() === '添加')!
+      .trigger('click');
+    await flushPromises();
+    expect(sendMock).toHaveBeenCalledWith(
+      { InvokeAdapterOp: { adapter: 'qq', method: 'update_allowlist', payload: { user_ids: ['10001', '10002'] } } },
+      'core-a',
+    );
+
+    // 模拟 AdapterState 回推（整文档替换）后移除一项：仍发整表
+    settleAdapterOp(adapterOpKey('core-a', 'qq', 'update_allowlist'), { result: null, error: null });
+    await flushPromises();
+    state.adapterUiByKey[key] = qqState('allowlist', ['10001', '10002']);
+    await nextTick();
+
+    const row = card.findAll('.list-editor-node__row').find((r) => r.text().includes('10002'));
+    expect(row).toBeTruthy();
+    await row!.find('button').trigger('click'); // 移除 10002
+    await flushPromises();
+    expect(sendMock).toHaveBeenCalledWith(
+      { InvokeAdapterOp: { adapter: 'qq', method: 'update_allowlist', payload: { user_ids: ['10001'] } } },
+      'core-a',
+    );
+    settleAdapterOp(adapterOpKey('core-a', 'qq', 'update_allowlist'), { result: null, error: null });
+    await flushPromises();
   });
 });

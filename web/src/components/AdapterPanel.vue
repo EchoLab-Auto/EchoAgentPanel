@@ -1,7 +1,9 @@
 <script setup lang="ts">
 //! 通用适配器管理面板（03b §2）：头部 + 实例切换 + 状态行 + 启停重启 +
-//! 渲染器插槽。本轮不挂载（S5 才切 ChatView 挂载点）；渲染器由 S3 经
-//! `#renderer` 插槽接入（未接入时显示占位）。
+//! 内嵌适配器 UI 渲染器（S3 接入）。渲染器直接消费 `AdapterStatus.ui` 与
+//! `adapterUiByKey[scopedKey(core, adapter)]`，无 `ui` 的适配器显示占位；
+//! 实例切换以 `:key` 重挂渲染器、隔离节点局部态（03a §4.3）。本轮仍不挂载
+//! （S5 才切 ChatView 挂载点）。
 //!
 //! 实例范围（03b §2.3-1）：列 `state.adapters` 全部平台；`persona` 非空且
 //! ≠ 当前 teamId 的条目不显示（别的 agent 的实例既不显示状态也不作为命令
@@ -10,14 +12,19 @@
 //!
 //! 命令路由：`core` 显式寻址（多上游）；缺省 null = 单上游，沿用
 //! `resolveTargetCore` 的默认解析。启停重启的 pending 键为通用形式
-//! `adapter:<op>:<core>:<adapter>`（03b §2.2）。
+//! `adapter:<op>:<core>:<adapter>`（03b §2.2）；渲染器动作由渲染器内部直发
+//! `invokeAdapterOp`，本组件只透传其 op / op-result / warning 旁路通知。
 
 import { computed, onMounted, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
 import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
+import AdapterUiRenderer from './adapter-ui/AdapterUiRenderer.vue';
+import type { AdapterUiMeta, UiWarning } from './adapter-ui/types';
+import type { OpEmitPayload, OpResultEmitPayload } from './adapter-ui/useAdapterOp';
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
+import { scopedKey } from '../keys';
 import { adapterStatusView } from '../composables/useAdapterStatusView';
 
 const props = defineProps<{
@@ -25,6 +32,14 @@ const props = defineProps<{
   teamId?: string | null;
   /** 目标 core（多上游显式寻址；null/缺省 = 单上游，走 resolveTargetCore）。 */
   core?: string | null;
+}>();
+
+/** 渲染器旁路通知透传（03a §1.3）：命令由渲染器内部直发，本组件只转发
+ *  观测事件（S5 挂载方无需订阅即可工作）。 */
+const emit = defineEmits<{
+  op: [payload: OpEmitPayload];
+  'op-result': [payload: OpResultEmitPayload];
+  warning: [payload: UiWarning];
 }>();
 
 // ── 实例列表与选中（QqPanel :46-70 逻辑上移 + 泛化）──
@@ -70,6 +85,33 @@ const instanceOptions = computed(() =>
 const rows = computed(() =>
   visibleAdapters.value.map((adapter) => ({ adapter, view: adapterStatusView(adapter) })),
 );
+
+// ── 管理界面渲染器接线（S3；03a §4.1/§4.4）──
+
+/** 能力门控（03b §2.3-4）：`ui` 存在才挂渲染器；否则显示占位文案。 */
+const hasUi = computed(() => activeAdapter.value?.ui != null);
+
+/** 状态文档 = `adapterUiByKey[scopedKey(core, adapter)]`；null/非对象 =
+ *  尚未收到 AdapterState（渲染器按 null 态显示 skeleton，03a §2.0）。 */
+const activeUiState = computed<Record<string, unknown> | null>(() => {
+  const adapter = activeAdapter.value;
+  if (!adapter) return null;
+  const doc = state.adapterUiByKey[scopedKey(props.core, adapter.name)];
+  return typeof doc === 'object' && doc !== null ? (doc as Record<string, unknown>) : null;
+});
+
+/** 渲染器元信息（03a §1.2；来自 AdapterStatus）：core/adapter 决定命令
+ *  路由与 pending 键（03a §4.2）。 */
+const rendererMeta = computed<AdapterUiMeta>(() => {
+  const adapter = activeAdapter.value;
+  return {
+    core: props.core ?? null,
+    adapter: adapter?.name ?? '',
+    displayName: adapter?.display_name,
+    running: adapter?.running ?? false,
+    connected: adapter?.connected ?? false,
+  };
+});
 
 // ── 命令 ──
 
@@ -176,16 +218,21 @@ function runAdapterOp(op: AdapterOpKind, name: string): void {
       </span>
     </div>
 
-    <!-- 管理界面：渲染器插槽（S3 接入 AdapterUiRenderer；未接入时显示占位） -->
+    <!-- 管理界面（S3）：有 ui → 内嵌渲染器（key = scopedKey(core, adapter)，
+         切换实例强制重挂、隔离节点局部态 03a §4.3）；无 ui → 占位（03b §2.3-3） -->
     <div v-if="activeAdapter" class="ap-renderer">
-      <slot
-        name="renderer"
-        :core="props.core ?? null"
-        :adapter="activeAdapter.name"
-        :adapter-status="activeAdapter"
-      >
-        <p class="muted ap-renderer__placeholder">该适配器未提供管理界面</p>
-      </slot>
+      <AdapterUiRenderer
+        v-if="hasUi"
+        :key="scopedKey(props.core, activeAdapter.name)"
+        :descriptor="activeAdapter.ui"
+        :state="activeUiState"
+        :meta="rendererMeta"
+        :disabled="!state.connected"
+        @op="(p) => emit('op', p)"
+        @op-result="(p) => emit('op-result', p)"
+        @warning="(p) => emit('warning', p)"
+      />
+      <p v-else class="muted ap-renderer__placeholder">该适配器未提供管理界面</p>
     </div>
   </div>
 </template>
@@ -281,7 +328,7 @@ function runAdapterOp(op: AdapterOpKind, name: string): void {
 }
 .adapter-row__actions { display: flex; gap: 6px; }
 
-/* ── 渲染器插槽（S3） ── */
+/* ── 管理界面渲染器（S3） ── */
 .ap-renderer { display: flex; flex-direction: column; gap: 8px; }
 .ap-renderer__placeholder { margin: 0; font-size: 12px; }
 </style>
