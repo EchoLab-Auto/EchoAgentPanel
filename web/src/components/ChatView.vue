@@ -108,48 +108,16 @@ function btnElement(instance: unknown): HTMLElement | null {
 
 const showAdapter = ref(false);
 const adapterBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-const adapterTop = ref(0);
-const adapterLeft = ref(0);
 
 function toggleAdapter() {
-  if (showAdapter.value) {
-    showAdapter.value = false;
-    return;
-  }
-  const btn = btnElement(adapterBtnRef.value);
-  if (btn) {
-    const r = btn.getBoundingClientRect();
-    adapterTop.value = Math.round(window.innerHeight - r.top + 8);
-    const composer = composerFloatRef.value;
-    const cr = composer ? composer.getBoundingClientRect() : null;
-    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
-    adapterLeft.value = Math.round(centerX - 260);
-  }
-  showAdapter.value = true;
+  showAdapter.value = !showAdapter.value;
 }
 const showChecklist = ref(false);
 const checklistBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
 const showContext = ref(false);
-const checklistBottom = ref(0);
-const checklistLeft = ref(0);
 
 function toggleChecklist() {
-  if (showChecklist.value) {
-    showChecklist.value = false;
-    return;
-  }
-  const btn = btnElement(checklistBtnRef.value);
-  if (btn) {
-    const r = btn.getBoundingClientRect();
-    // 弹窗底边 = 按钮顶边 - 8px（位于按钮上方，与按钮贴 8px）
-    checklistBottom.value = Math.round(window.innerHeight - r.top + 8);
-    // 水平居中于输入框：left = composer 中心 - 弹窗半宽
-    const composer = composerFloatRef.value;
-    const cr = composer ? composer.getBoundingClientRect() : null;
-    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
-    checklistLeft.value = Math.round(centerX - 260);
-  }
-  showChecklist.value = true;
+  showChecklist.value = !showChecklist.value;
 }
 // 入口按钮固定与输入框间距 12px：观察输入框高度变化（auto-resize），
 // bottom = composerHeight + 12(margin) + 12(gap)。
@@ -244,6 +212,17 @@ const checklistAvailable = computed(() =>
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
+// 插件/Team 更新回推后，若清单工具变为不可用，关闭残留弹层并清空徽标数据。
+watch(checklistAvailable, (available) => {
+  if (!available) {
+    showChecklist.value = false;
+    // 清单已不可用：丢弃当前会话的本地快照（其他会话/core 的不动）。
+    // 两种键形态都清（新键带 team 维度、旧键退化形态）。
+    delete state.checklists[checklistKey(state.activeRegion, state.activeTeamId, props.sessionId)];
+    delete state.checklists[sessionKey(state.activeRegion, props.sessionId)];
+  }
+});
+
 /** 当前会话的清单快照（复合键 (core, session_id)；global 视图聚合当前区域全部）。 */
 const sessionChecklists = computed(() => {
   if (props.sessionId !== 'global') {
@@ -282,24 +261,9 @@ const tasksAvailable = computed(
 
 const showTasks = ref(false);
 const tasksBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-const tasksBottom = ref(0);
-const tasksLeft = ref(0);
 
 function toggleTasks() {
-  if (showTasks.value) {
-    showTasks.value = false;
-    return;
-  }
-  const btn = btnElement(tasksBtnRef.value);
-  if (btn) {
-    const r = btn.getBoundingClientRect();
-    tasksBottom.value = Math.round(window.innerHeight - r.top + 8);
-    const composer = composerFloatRef.value;
-    const cr = composer ? composer.getBoundingClientRect() : null;
-    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
-    tasksLeft.value = Math.round(centerX - 260);
-  }
-  showTasks.value = true;
+  showTasks.value = !showTasks.value;
 }
 
 // 插件/Team 更新回推后，若任务入口变为不可用，关闭残留弹层。
@@ -322,24 +286,9 @@ const sessionSwitcherAvailable = computed(() => {
 
 const showSessions = ref(false);
 const sessionsBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-const sessionsBottom = ref(0);
-const sessionsLeft = ref(0);
 
 function toggleSessions() {
-  if (showSessions.value) {
-    showSessions.value = false;
-    return;
-  }
-  const btn = btnElement(sessionsBtnRef.value);
-  if (btn) {
-    const r = btn.getBoundingClientRect();
-    sessionsBottom.value = Math.round(window.innerHeight - r.top + 8);
-    const composer = composerFloatRef.value;
-    const cr = composer ? composer.getBoundingClientRect() : null;
-    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
-    sessionsLeft.value = Math.round(centerX - 150);
-  }
-  showSessions.value = true;
+  showSessions.value = !showSessions.value;
 }
 
 function pickSession(id: string) {
@@ -355,25 +304,26 @@ const workspaceAvailable = computed(() =>
 
 const showWorkspace = ref(false);
 const workspaceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-const workspaceBottom = ref(0);
-const workspaceLeft = ref(0);
 
 function toggleWorkspace() {
-  if (showWorkspace.value) {
-    showWorkspace.value = false;
-    return;
-  }
-  const btn = btnElement(workspaceBtnRef.value);
-  if (btn) {
-    const r = btn.getBoundingClientRect();
-    workspaceBottom.value = Math.round(window.innerHeight - r.top + 8);
-    const composer = composerFloatRef.value;
-    const cr = composer ? composer.getBoundingClientRect() : null;
-    const centerX = cr ? cr.left + cr.width / 2 : r.left + r.width / 2;
-    workspaceLeft.value = Math.round(centerX - 260);
-  }
-  showWorkspace.value = true;
+  showWorkspace.value = !showWorkspace.value;
 }
+
+// 插件/Team 更新回推后，若 workspace 插件变为不可用，关闭残留弹层。
+watch(workspaceAvailable, (available) => {
+  if (!available) showWorkspace.value = false;
+});
+
+// 切换 Agent 时若适配器/工作区/会话/任务面板打开则关闭，避免残留禁用 agent 的面板
+watch(
+  () => props.activeTeamId,
+  () => {
+    showAdapter.value = false;
+    showWorkspace.value = false;
+    showSessions.value = false;
+    showTasks.value = false;
+  },
+);
 
 // ── 双侧边栏（2026-09-24）：左右两列卡片容器，卡片可互相拖动 ──
 // 卡片（连接状态 / 文件浏览器 / Shell / 临时分支）归属哪一列由
@@ -422,57 +372,11 @@ const trayPadRight = computed(() =>
 );
 
 /**
- * 弹出层（.checklist-pop）定位样式（2026-10 移动端适配）。
- *
- * 桌面：跟随按钮 `left = centerX - 260`（面板半宽），`bottom` 锚在入口行上方。
- * 移动端：锚点法在窄屏会把面板推出屏外（left 常为负）——改为全宽贴底：
- * 左右各 8px + 解析安全区，`bottom` 仍锚入口行以保持与触发按钮的关联。
- */
-function popoverStyle(bottom: number, left: number): Record<string, string> {
-  if (isMobile.value) {
-    return {
-      bottom: `${bottom}px`,
-      left: '8px',
-      right: '8px',
-      width: 'auto',
-    };
-  }
-  return { bottom: `${bottom}px`, left: `${left}px` };
-}
-
-// 插件/Team 更新回推后，若清单插件变为不可用，关闭残留弹层并清空徽标数据。
-watch(checklistAvailable, (available) => {
-  if (!available) {
-    showChecklist.value = false;
-    // 清单已不可用：丢弃当前会话的本地快照（其他会话/core 的不动）。
-    // 两种键形态都清（新键带 team 维度、旧键退化形态）。
-    delete state.checklists[checklistKey(state.activeRegion, state.activeTeamId, props.sessionId)];
-    delete state.checklists[sessionKey(state.activeRegion, props.sessionId)];
-  }
-});
-
-// 插件/Team 更新回推后，若 workspace 插件变为不可用，关闭残留弹层。
-watch(workspaceAvailable, (available) => {
-  if (!available) showWorkspace.value = false;
-});
-
-// 切换 Agent 时若适配器/工作区面板打开则关闭，避免残留禁用 agent 的面板
-watch(
-  () => props.activeTeamId,
-  () => {
-    showAdapter.value = false;
-    showWorkspace.value = false;
-    showSessions.value = false;
-    showTasks.value = false;
-  },
-);
-
-/**
  * 是否有会话区内的浮层/弹层打开（入口行弹出层、Agent 配置、上下文弹层…）。
  *
  * 用途：「回到底部」悬浮按钮在这些浮层打开时**隐藏**（2026-09-28）——该
  * 按钮浮在消息区下沿，而各弹出层恰好都从入口行向上展开（520px 宽、最高
- * 68vh），实测在窄视口下会盖住按钮（elementFromPoint 命中 checklist-pop）。
+ * 68vh），实测在窄视口下会盖住按钮（elementFromPoint 命中入口弹层）。
  * 与其用更高 z-index 把按钮压在浮层之上（视觉更糟），不如在浮层期间隐藏。
  */
 const anyOverlayOpen = computed(() => {
@@ -947,60 +851,29 @@ function mediaSrc(img: string): string {
       </NeumorphismBadge>
     </div>
 
-    <!-- 会话切换：跟随入口按钮上方 8px 的毛玻璃面板 -->
-    <div
-      v-if="showSessions"
-      class="checklist-pop"
-      :style="popoverStyle(sessionsBottom, sessionsLeft)"
-      @click.self="showSessions = false"
-    >
+    <!-- 入口行面板统一由 PanelPopover 提供：定位、尺寸、外部点击和 Escape。 -->
+    <PanelPopover v-model="showSessions" :anchor="btnElement(sessionsBtnRef)">
       <SessionSwitcher
         :active-team-id="props.activeTeamId ?? null"
         :active-session-id="props.sessionId"
         @select="pickSession"
       />
-    </div>
-
-    <!-- 工作区会话管理：跟随入口按钮上方 8px 的毛玻璃面板
-         （文件浏览器已迁至会话视图右侧边栏） -->
-    <div
-      v-if="showWorkspace"
-      class="checklist-pop"
-      :style="popoverStyle(workspaceBottom, workspaceLeft)"
-      @click.self="showWorkspace = false"
-    >
+    </PanelPopover>
+    <PanelPopover v-model="showWorkspace" :anchor="btnElement(workspaceBtnRef)">
       <WorkspacePanel :team-id="props.activeTeamId ?? null" />
-    </div>
-
-    <!-- 适配器：跟随适配器按钮上方 8px 的毛玻璃面板 -->
-    <div
-      v-if="showAdapter"
-      class="checklist-pop"
-      :style="popoverStyle(adapterTop, adapterLeft)"
-      @click.self="showAdapter = false"
-    >
+    </PanelPopover>
+    <PanelPopover v-model="showAdapter" :anchor="btnElement(adapterBtnRef)">
       <QqPanel :team-id="props.activeTeamId ?? null" />
-    </div>
-
-    <!-- 任务：跟随任务按钮上方 8px 的毛玻璃面板（仅当前 agent 的当前会话） -->
-    <div
-      v-if="showTasks"
-      class="checklist-pop"
-      :style="popoverStyle(tasksBottom, tasksLeft)"
-      @click.self="showTasks = false"
-    >
+    </PanelPopover>
+    <PanelPopover v-model="showTasks" :anchor="btnElement(tasksBtnRef)">
       <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />
-    </div>
-
-    <!-- 清单：跟随清单按钮下方 8px 的毛玻璃面板（无内层卡片） -->
-    <div
-      v-if="showChecklist"
-      class="checklist-pop"
-      :style="popoverStyle(checklistBottom, checklistLeft)"
-      @click.self="showChecklist = false"
-    >
-      <ChecklistSidebar :session-id="sessionId === 'global' ? undefined : sessionId" :lists="sessionId === 'global' ? sessionChecklists : undefined" />
-    </div>
+    </PanelPopover>
+    <PanelPopover v-model="showChecklist" :anchor="btnElement(checklistBtnRef)">
+      <ChecklistSidebar
+        :session-id="sessionId === 'global' ? undefined : sessionId"
+        :lists="sessionId === 'global' ? sessionChecklists : undefined"
+      />
+    </PanelPopover>
 
     <!-- 上下文弹层：与 Agent 配置同几何（上/左/右 12px，底距入口行 12px）；
          点击弹层外背景关闭（@click.self），无独立返回按钮 -->
@@ -1814,21 +1687,6 @@ function mediaSrc(img: string): string {
 }
 
 
-/* 清单面板：跟随按钮下方 8px，磨砂玻璃本体（无内层卡片） */
-.checklist-pop {
-  position: fixed;
-  z-index: 25;
-  width: min(520px, 82vw);
-  max-height: 68vh;
-  overflow-y: auto;
-  padding: 18px;
-  border-radius: 24px;
-  background: color-mix(in srgb, var(--nm-surface-raised) 52%, transparent);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid var(--panel-glass-border);
-  box-shadow: var(--panel-glass-shadow-lg);
-}
 
 /* ── 实时消息入场动画（历史回放不播） ── */
 .chat-view__item--enter {
@@ -1934,16 +1792,6 @@ function mediaSrc(img: string): string {
   .ctx-overlay__panel {
     border-radius: 16px;
   }
-
-  /* 弹出层（.checklist-pop）：定位由 popoverStyle() 切换为全宽；
-     高度收紧防顶到入口行。 */
-  .checklist-pop {
-    max-height: 56vh;
-    padding: 14px;
-    border-radius: 20px;
-  }
-
-  /* 卡片抽屉内容：列内滚动 + 底部安全区 */
   .mobile-cards {
     display: flex;
     flex-direction: column;

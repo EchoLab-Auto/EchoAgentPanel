@@ -5,7 +5,7 @@
 //!
 //! 数据流：命令带 team_id 路由到对应 persona（去主智能体后必填）；
 //! Core 以 `WorkspaceSessions` / `WorkspaceGitStatus` 事件回推。
-//! 弹层几何由 ChatView 的 `.checklist-pop` 提供。
+//! 弹层几何由 ChatView 的 `PanelPopover` 提供。
 //!
 //! 对话 CRUD：Core 无独立协议命令——经 `SaveWorkspaceSession` 全量
 //! upsert 会话（conversations 数组整体替换，面板侧镜像 Core
@@ -574,7 +574,7 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
 </template>
 
 <style scoped>
-/* 外层几何由 ChatView 的 .checklist-pop 提供：这里只负责内部排版。 */
+/* 外层几何由 ChatView 的 PanelPopover 提供：这里只负责内部排版。 */
 .ws-panel {
   display: flex;
   flex-direction: column;
