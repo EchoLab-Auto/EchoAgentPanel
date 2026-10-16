@@ -364,7 +364,35 @@ function formatSize(size: number): string {
                 />
               </svg>
             </span>
-            <span class="wfb-ico">{{ row.isOpen ? '📂' : '📁' }}</span>
+            <span class="wfb-ico" aria-hidden="true">
+              <svg v-if="row.isOpen" viewBox="0 0 16 16" class="wfb-svg wfb-svg--open">
+                <path
+                  d="M1.5 3.2a1 1 0 0 1 1-1h3l1.4 1.6h6.6a1 1 0 0 1 1 1v1H3.1L1.7 9.4V3.2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M3.1 6.5h11l-1.3 5.4a1 1 0 0 1-1 .8H2.6a1 1 0 0 1-1-1.2L3.1 6.5z"
+                  fill="currentColor"
+                  opacity="0.16"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <svg v-else viewBox="0 0 16 16" class="wfb-svg">
+                <path
+                  d="M1.8 3.2a1 1 0 0 1 1-1h3l1.4 1.6h6a1 1 0 0 1 1 1v7.4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1V3.2z"
+                  fill="currentColor"
+                  opacity="0.16"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
             <span v-if="row.remoteNode" class="wfb-badge">{{ row.remoteNode }}⛓</span>
             <span class="wfb-name">{{ row.label }}</span>
           </button>
@@ -372,7 +400,24 @@ function formatSize(size: number): string {
           <!-- 文件行：只读（无打开动作），右侧显示体积 -->
           <div v-else-if="row.kind === 'file'" class="wfb-tbtn wfb-tbtn--file" :title="row.path">
             <span class="wfb-twistie" aria-hidden="true" />
-            <span class="wfb-ico wfb-ico--file">📄</span>
+            <span class="wfb-ico wfb-ico--file" aria-hidden="true">
+              <svg viewBox="0 0 16 16" class="wfb-svg">
+                <path
+                  d="M4 1.8h4.6L12.2 5.4v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.8a1 1 0 0 1 1-1z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M8.4 1.8v3.8h3.8"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
             <span class="wfb-name">{{ row.label }}</span>
             <span class="wfb-size">{{ formatSize(row.size) }}</span>
           </div>
@@ -472,30 +517,29 @@ function formatSize(size: number): string {
 .wfb-trow--root .wfb-name { font-weight: 600; }
 .wfb-trow--dir .wfb-tbtn { color: var(--panel-accent); }
 .wfb-trow--dir .wfb-tbtn:hover { background: var(--panel-accent-soft); }
-.wfb-tbtn--file { cursor: default; }
-
-.wfb-twistie {
+.wfb-ico {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--nm-text-secondary);
 }
+.wfb-svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+.wfb-ico--file { opacity: 0.6; }
+/* 目录图标跟随目录行的主色（accent），文件图标保持次级灰 */
+.wfb-trow--dir .wfb-ico,
+.wfb-trow--root .wfb-ico { color: var(--panel-accent); }
 .wfb-chevron { transition: transform 0.12s ease; }
 .wfb-trow.is-open .wfb-chevron { transform: rotate(90deg); }
 
-.wfb-ico {
-  flex: none;
-  width: 16px;
-  font-size: 11px;
-  line-height: 1;
-  text-align: center;
-}
-.wfb-ico--file { opacity: 0.65; }
-
 .wfb-badge {
+  flex: none;
   flex: none;
   margin-right: 2px;
   color: var(--panel-accent, #0969da);

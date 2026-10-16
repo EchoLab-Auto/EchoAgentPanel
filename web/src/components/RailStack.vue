@@ -640,7 +640,7 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 14px 12px;
+  padding: 8px 14px;
   display: flex;
   flex-direction: column;
   /* 展开动画只用 transform/opacity（可合成，不触发重排）；
