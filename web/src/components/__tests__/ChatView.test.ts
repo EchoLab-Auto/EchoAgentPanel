@@ -223,14 +223,18 @@ describe('ChatView 布局契约', () => {
     await btn!.trigger('click');
     // 弹层组件为按需加载（defineAsyncComponent，2026-10 首屏瘦身）：
     // 异步 chunk 的解析落在宏任务，`vi.waitFor` 等到弹层渲染完成。
+    // PanelPopover Teleport 到 body：弹层内容不在 wrapper 内，从 document.body 查询。
     await vi.waitFor(() => {
-      expect(wrapper.findAll('.sw-item').length).toBeGreaterThan(0);
+      expect(document.body.querySelectorAll('.panel-popover .sw-item').length).toBeGreaterThan(0);
     });
     // 弹层内可选 QQ 私聊项
-    const item = wrapper.findAll('.sw-item').find((b) => b.text().includes('Evence'));
+    const item = Array.from(document.body.querySelectorAll<HTMLElement>('.panel-popover .sw-item'))
+      .find((b) => (b.textContent ?? '').includes('Evence'));
     expect(item).toBeTruthy();
-    await item!.trigger('click');
+    item!.click();
+    await nextTick();
     expect(wrapper.emitted('selectSession')?.[0]).toEqual(['qq:dm::1828980067']);
+    wrapper.unmount();
   });
 
   it('入口行「会话」按钮：仅单一本地会话时隐藏', () => {
@@ -302,9 +306,11 @@ describe('ChatView 布局契约', () => {
     expect(btn, 'tasks entry visible').toBeTruthy();
     await btn!.trigger('click');
     // 弹层按当前会话过滤：只传当前 sessionId 给 TasksPanel
-    const panel = wrapper.find('.stub-tasks');
-    expect(panel.exists()).toBe(true);
-    expect(panel.text()).toBe('local:tui::local_user');
+    // （PanelPopover Teleport 到 body，从 document.body 查询）
+    const panel = document.body.querySelector('.panel-popover .stub-tasks');
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toBe('local:tui::local_user');
+    wrapper.unmount();
     state.tasks = [];
   });
 
