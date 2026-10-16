@@ -151,55 +151,56 @@ watch(
 );
 
 function setGateMode(value: string | number) {
-  sendCommand({ SetQqGateMode: { mode: value as GateMode, adapter: activeName.value } });
+  // fire-and-forget（不 await）：成功后 Core 广播 + emit_adapter_state_events
+  // → AdapterState 回推 gate.mode（02b §1.4）；超时/断线无界面消费。
+  invokeAdapterOp(state.activeRegion ?? null, activeName.value, 'set_gate_mode', {
+    mode: value as GateMode,
+  }).catch(() => {});
 }
 
 function toggleAllowUser(id: number) {
-  const list = instanceState.value.filter.allowlist_users;
-  const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-  sendCommand({
-    UpdateQqAllowlist: {
-      user_ids: next,
-      group_ids: instanceState.value.filter.allowlist_groups,
-      adapter: activeName.value,
-    },
-  });
+  const f = instanceState.value.filter;
+  const next = f.allowlist_users.includes(id)
+    ? f.allowlist_users.filter((x) => x !== id)
+    : [...f.allowlist_users, id];
+  // 全量名单、两键必带（插件 parse_ids 缺键 = 清空该表；02b §1.5）。
+  invokeAdapterOp(state.activeRegion ?? null, activeName.value, 'update_allowlist', {
+    user_ids: next,
+    group_ids: f.allowlist_groups,
+  }).catch(() => {});
 }
 
 function toggleDenyUser(id: number) {
-  const list = instanceState.value.filter.denylist_users;
-  const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-  sendCommand({
-    UpdateQqDenylist: {
-      user_ids: next,
-      group_ids: instanceState.value.filter.denylist_groups,
-      adapter: activeName.value,
-    },
-  });
+  const f = instanceState.value.filter;
+  const next = f.denylist_users.includes(id)
+    ? f.denylist_users.filter((x) => x !== id)
+    : [...f.denylist_users, id];
+  invokeAdapterOp(state.activeRegion ?? null, activeName.value, 'update_denylist', {
+    user_ids: next,
+    group_ids: f.denylist_groups,
+  }).catch(() => {});
 }
 
 function toggleAllowGroup(id: number) {
-  const list = instanceState.value.filter.allowlist_groups;
-  const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-  sendCommand({
-    UpdateQqAllowlist: {
-      user_ids: instanceState.value.filter.allowlist_users,
-      group_ids: next,
-      adapter: activeName.value,
-    },
-  });
+  const f = instanceState.value.filter;
+  const next = f.allowlist_groups.includes(id)
+    ? f.allowlist_groups.filter((x) => x !== id)
+    : [...f.allowlist_groups, id];
+  invokeAdapterOp(state.activeRegion ?? null, activeName.value, 'update_allowlist', {
+    user_ids: f.allowlist_users,
+    group_ids: next,
+  }).catch(() => {});
 }
 
 function toggleDenyGroup(id: number) {
-  const list = instanceState.value.filter.denylist_groups;
-  const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-  sendCommand({
-    UpdateQqDenylist: {
-      user_ids: instanceState.value.filter.denylist_users,
-      group_ids: next,
-      adapter: activeName.value,
-    },
-  });
+  const f = instanceState.value.filter;
+  const next = f.denylist_groups.includes(id)
+    ? f.denylist_groups.filter((x) => x !== id)
+    : [...f.denylist_groups, id];
+  invokeAdapterOp(state.activeRegion ?? null, activeName.value, 'update_denylist', {
+    user_ids: f.denylist_users,
+    group_ids: next,
+  }).catch(() => {});
 }
 </script>
 

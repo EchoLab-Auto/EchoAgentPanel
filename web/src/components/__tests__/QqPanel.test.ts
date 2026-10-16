@@ -324,7 +324,7 @@ describe('QqPanel 多实例', () => {
     wrapper.unmount();
   });
 
-  it('多实例：门控切换命令带 adapter（实例寻址）', async () => {
+  it('多实例：门控切换走统一 op（实例寻址）', async () => {
     seedInstances(2);
     const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
     // 触发门控分段（实例选择器也是分段；取最后一个 = 门控模式）
@@ -333,9 +333,36 @@ describe('QqPanel 多实例', () => {
     const gateSegmented = segmenteds[segmenteds.length - 1];
     const option = gateSegmented.findAll('button')[1];
     await option.trigger('click');
-    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0]);
-    const gate = calls.find((c) => typeof c === 'object' && 'SetQqGateMode' in (c as object));
-    expect(gate, `calls: ${JSON.stringify(calls)}`).toBeTruthy();
-    expect((gate as { SetQqGateMode: { adapter?: string } }).SetQqGateMode.adapter).toBeTruthy();
+    const op = ops().find((o) => o.m === 'set_gate_mode');
+    expect(op, `ops: ${JSON.stringify(ops())}`).toBeTruthy();
+    expect(op?.a).toBe('qq');
+    expect(op?.p.mode).toBe('allowlist'); // 第 2 个选项
+  });
+
+  it('白名单好友 toggle：update_allowlist 全量载荷（user_ids 与 group_ids 必带）', async () => {
+    seedInstances(1);
+    state.adapterUiByKey['qq'] = {
+      gate: {
+        mode: 'none',
+        allowlist_users: [],
+        allowlist_groups: ['88'],
+        denylist_users: [],
+        denylist_groups: [],
+      },
+      owner: 0,
+    };
+    readOverlay['qq'] = { docRef: null, friends: [{ id: '5', name: '好友甲乙' }] };
+    const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
+    await nextTick();
+    const chip = wrapper.find('.qq-select .pick-chip');
+    expect(chip.exists()).toBe(true);
+    await chip.trigger('click');
+    const op = ops().find((o) => o.m === 'update_allowlist');
+    expect(op, `ops: ${JSON.stringify(ops())}`).toBeTruthy();
+    expect(op?.a).toBe('qq');
+    // 全量载荷：两键同时给（插件 parse_ids 对缺省键返回空表 = 清空该表）。
+    expect(Object.keys(op?.p ?? {}).sort()).toEqual(['group_ids', 'user_ids']);
+    expect(op?.p.user_ids).toEqual([5]);
+    expect(op?.p.group_ids).toEqual([88]);
   });
 });
