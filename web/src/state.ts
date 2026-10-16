@@ -23,7 +23,6 @@ import type {
   BackendEvent,
   ContextBlockInfo,
   ContextMessageInfo,
-  GateMode,
   SessionInfo,
   SkillInfo,
   ThinkingMode,
@@ -255,32 +254,6 @@ export type AgentPhase = 'thinking' | 'tool' | 'subagent' | 'completed' | 'faile
 export type { FederationPeerInfo, FederationStatus } from './protocol';
 import type { FederationStatus } from './protocol';
 
-/** QQ 名单四表（QqFilterConfig 事件载荷；qqByAdapter.filter 的元素类型）。 */
-export interface QqFilterState {
-  allowlist_users: number[];
-  allowlist_groups: number[];
-  denylist_users: number[];
-  denylist_groups: number[];
-}
-
-/// QQ 实例管理态的空白初值（多实例面板按实例填充）。
-export function defaultQqInstanceState() {
-  return {
-    filter: {
-      allowlist_users: [] as number[],
-      allowlist_groups: [] as number[],
-      denylist_users: [] as number[],
-      denylist_groups: [] as number[],
-    },
-    gateMode: 'none' as GateMode,
-    owner: 0,
-    groups: [] as Array<[number, string]>,
-    friends: [] as Array<[number, string]>,
-    online: false,
-    selfId: null as string | null,
-  };
-}
-
 export interface AgentActivity {
   phase: AgentPhase;
   detail: string | null;
@@ -438,23 +411,6 @@ export interface AppState {
   // model / systemPrompt 字段已删除（2026-10 巡检：死状态——事件写入后
   // 零读取方；LlmRequest 的模型名可由 api/会话归属推导，SystemPrompt 的
   // 回推文本仅面向调试，无消费方）。
-  // qqFilter 字段已删除（2026-10 巡检：死状态——读取方早已改用
-  // qqByAdapter；类型保留为 QqFilterState 供其引用）。
-  /** 最近一次二维码回推（Core 代理登录；按 (core, 实例) 过滤消费）。 */
-  lastQrcode: { adapter: string; png_base64: string; error?: string | null; core?: string | null } | null;
-  /** 多实例（2026-09）：按 QQ 实例名存放的 QQ 管理态；单实例时键为 "qq"。 */
-  qqByAdapter: Record<
-    string,
-    {
-      filter: QqFilterState;
-      gateMode: GateMode;
-      owner: number;
-      groups: Array<[number, string]>;
-      friends: Array<[number, string]>;
-      online: boolean;
-      selfId: string | null;
-    }
-  >;
 
   /**
    * 通用适配器状态文档（02a §3.1）：`scopedKey(core, adapter)` → `AdapterState`
@@ -462,7 +418,6 @@ export interface AppState {
    *
    * 值类型 `unknown`：Panel 不校验形状——core 的适配器状态文档 schema v1
    * （00 §三）是唯一引用标准；bind 取值容错由渲染器（03a §2.0）负责。
-   * 与 `qqByAdapter`（旧 QQ 事件键）是独立键空间，过渡期双轨并存。
    */
   adapterUiByKey: Record<string, unknown>;
 
@@ -594,10 +549,6 @@ export function initialState(): AppState {
     tasks: [],
     adapters: [],
     api: null,
-  // qqGateMode/qqOwner/qqGroups/qqFriends 已删除（2026-10 巡检：死状态，
-  // 读取方早已改用 qqByAdapter[name].{gateMode,owner,groups,friends}）。
-    lastQrcode: null,
-    qqByAdapter: {},
     adapterUiByKey: {},
     checklists: {},
     toasts: [],
@@ -1416,90 +1367,6 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       }).AdapterState;
       // 整文档替换，不做字段 merge（02a §3.1）。
       state.adapterUiByKey[scopedKey(evtCore(e), e.adapter)] = e.state;
-      return state;
-    }
-    case 'QqFilterConfig': {
-      const e = (event as {
-        QqFilterConfig: QqFilterState & { adapter?: string | null; core?: string | null };
-      }).QqFilterConfig;
-      const { adapter: _a, core: _c, ...filter } = e;
-      // 多上游：QQ 实例名跨 core 可重复（默认都叫 qq），按 (core, adapter) 键。
-      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
-      state.qqByAdapter[key] = {
-        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
-        filter,
-      };
-      return state;
-    }
-    case 'QqGateMode': {
-      const e = (event as { QqGateMode: { mode: GateMode; adapter?: string | null; core?: string | null } }).QqGateMode;
-      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
-      state.qqByAdapter[key] = {
-        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
-        gateMode: e.mode,
-      };
-      return state;
-    }
-    case 'QqOwner': {
-      const e = (event as { QqOwner: { owner_qq: number; adapter?: string | null; core?: string | null } }).QqOwner;
-      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
-      state.qqByAdapter[key] = {
-        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
-        owner: e.owner_qq,
-      };
-      return state;
-    }
-    case 'QqQrcode': {
-      const e = (event as {
-        QqQrcode: { adapter: string; png_base64: string; error?: string | null; core?: string | null };
-      }).QqQrcode;
-      state.lastQrcode = { ...e, core: evtCore(e) };
-      return state;
-    }
-    case 'QqLoginStatus': {
-      const e = (event as {
-        QqLoginStatus: { adapter: string; online: boolean; user_id?: string | null; core?: string | null };
-      }).QqLoginStatus;
-      const key = scopedKey(evtCore(e), e.adapter);
-      state.qqByAdapter[key] = {
-        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
-        online: e.online,
-        selfId: e.user_id ?? null,
-      };
-      return state;
-    }
-    case 'GroupList': {
-      const e = (event as {
-        GroupList: {
-          groups: Array<{ group_id: number; group_name: string }>;
-          adapter?: string | null;
-          core?: string | null;
-        };
-      }).GroupList;
-      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
-      state.qqByAdapter[key] = {
-        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
-        groups: e.groups.map((g) => [g.group_id, g.group_name]),
-      };
-      return state;
-    }
-    case 'FriendList': {
-      // 2026-10 修复：此前只写已废弃的全局 qqFriends 字段（读取方早已
-      // 改用 qqByAdapter）——好友列表在实例槽位永远为空；且丢失多实例
-      // 维度（Core 事件带 adapter）。现与 GroupList 同模式按
-      // (core, adapter) 键写入。
-      const e = (event as {
-        FriendList: {
-          friends: Array<{ user_id: number; nickname: string }>;
-          adapter?: string | null;
-          core?: string | null;
-        };
-      }).FriendList;
-      const key = scopedKey(evtCore(e), e.adapter ?? 'qq');
-      state.qqByAdapter[key] = {
-        ...(state.qqByAdapter[key] ?? defaultQqInstanceState()),
-        friends: e.friends.map((f) => [f.user_id, f.nickname]),
-      };
       return state;
     }
     case 'SessionMigrated': {

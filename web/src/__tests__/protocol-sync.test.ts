@@ -69,9 +69,12 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // 此断言是"提醒器"：Core 加事件/自己补定义后，这里失败提醒你确认
     // 变体集合是有意变更，而不是漏同步。数字随协议演进更新。
     // 54 → 56（2026-10 流式输出：+AgentContentDelta / AgentReasoningDelta）
-    // → 58（2026-10 适配器泛化 02a：+AdapterOpResult / AdapterState）。
+    // → 58（2026-10 适配器泛化 02a：+AdapterOpResult / AdapterState）
+    // → 51（2026-10 泛化阶段 2：Panel 删除 7 个迁移期 QQ 变体——GroupList /
+    //   QqFilterConfig / QqGateMode / QqOwner / QqLoginStatus / QqQrcode /
+    //   FriendList；Core 侧变体保留至 N+2，Panel 镜像不再收录）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(58);
+    expect(variants.size).toBe(51);
   });
 
   it('适配器泛化事件在联合类型中定义（02a §4.1）', () => {

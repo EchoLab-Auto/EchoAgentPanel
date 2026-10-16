@@ -78,9 +78,10 @@ describe('重连引导命令（去主智能体）', () => {
     }
   });
 
-  it('不预取 QQ 过滤配置（无 QQ 部署下必被拒）', async () => {
+  it('不预取适配器管理数据（连接建立不动适配器通道）', async () => {
     const sent = await bootstrapCommands();
-    expect(sent.some((c) => c.includes('RequestQqFilterConfig'))).toBe(false);
+    // 旧 QQ 命令已随泛化删除；新通道（InvokeAdapterOp）同样不在握手期预取。
+    expect(sent.some((c) => c.includes('InvokeAdapterOp'))).toBe(false);
   });
 
   it('保存过 Agent 时按其 id 请求时间线', async () => {
