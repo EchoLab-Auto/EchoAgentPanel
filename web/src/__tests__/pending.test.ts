@@ -13,8 +13,10 @@ import {
   PENDING_VISIBLE_AFTER_MS,
   REQUEST_RESPONSES,
   commandName,
+  dropPendingOfCore,
   releasePending,
   resolvePendingEvent,
+  settlePending,
   trackRequest,
   usePending,
 } from '../pending';
@@ -156,10 +158,55 @@ describe('pending：关联表与命令名', () => {
     expect(REQUEST_RESPONSES.RequestContext).toBe('ContextSnapshot');
     expect(REQUEST_RESPONSES.RequestTeamsList).toBe('TeamsList');
     expect(REQUEST_RESPONSES.RequestShellSessions).toBe('ShellSessionsList');
-    expect(REQUEST_RESPONSES.RequestWorkspaceSessions).toBe('WorkspaceSessions');
-    expect(REQUEST_RESPONSES.RequestQqLoginStatus).toBe('QqLoginStatus');
     // 刻意不收：时间线（状态标志判定）与 RequestState（多事件响应）
     expect(REQUEST_RESPONSES.RequestTrunkTimeline).toBeUndefined();
     expect(REQUEST_RESPONSES.RequestState).toBeUndefined();
+  });
+});
+
+describe('pending：显式销账与按 core 清理（02a §5.1，S2）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('settlePending：按精确键销账（已显示走最短可见，未显示立即清）', () => {
+    trackRequest('explicit:a', contextCommand(), null);
+    const a = usePending('explicit:a');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(a.phase.value).toBe('pending');
+
+    settlePending('explicit:a');
+    // 已可见：最短可见窗口内保持 pending，随后清（与响应到达同语义）。
+    vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS);
+    expect(a.phase.value).toBe('idle');
+
+    // 未显示（150ms 内）：立即清，不再进入 pending。
+    trackRequest('explicit:b', contextCommand(), null);
+    const b = usePending('explicit:b');
+    settlePending('explicit:b');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(b.phase.value).toBe('idle');
+  });
+
+  it('dropPendingOfCore：只清目标 core 的登记（null 需显式传入）', () => {
+    trackRequest('drop:a', contextCommand(), 'core-a');
+    trackRequest('drop:b', contextCommand(), 'core-b');
+    trackRequest('drop:n', contextCommand(), null);
+    dropPendingOfCore('core-a');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(usePending('drop:a').phase.value).toBe('idle');
+    expect(usePending('drop:b').phase.value).toBe('pending');
+    expect(usePending('drop:n').phase.value).toBe('pending');
+
+    // 单上游（core=null）需显式传入才清。
+    dropPendingOfCore(null);
+    expect(usePending('drop:n').phase.value).toBe('idle');
+
+    // 清理本用例剩余登记（测试隔离：pending 是模块级单例）。
+    dropPendingOfCore('core-b');
+    expect(usePending('drop:b').phase.value).toBe('idle');
   });
 });

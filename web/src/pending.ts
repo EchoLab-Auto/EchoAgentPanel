@@ -16,6 +16,9 @@
 //! - **防闪烁**：加载态一旦可见，保证至少 400ms 的最短可见时长（响应
 //!   到达即准备内容，到点替换）——避免骨架闪一下。
 //!
+//! 显式销账（02a §5.1）：不在 `REQUEST_RESPONSES` 的请求（如适配器统一
+//! op 通道）由服务层按精确键 `settlePending(key)` 销账；上游 core 离线/
+//! 移除时 `dropPendingOfCore(core)` 清理其全部登记。
 //! UI 契约（各模块交互文档同步）：`phase==='idle'` 的「（暂无…）」空态
 //! **只在确认无数据时展示**；断连（最高优先态）由视图自行判断
 //! `state.connected`，优先于本模块阶段。
@@ -144,8 +147,13 @@ export function trackRequest(
   );
 }
 
-/** 销账（响应到达）：立即清未显示的；已显示则等到最短可见时长后清。 */
-function finish(key: string): void {
+/**
+ * 销账（响应到达）：立即清未显示的；已显示则等到最短可见时长后清。
+ *
+ * 导出供服务层按**精确键**销账（有响应事件但不在 `REQUEST_RESPONSES` 的
+ * 路径，如适配器统一 op 通道；02a §5.1）。语义与内部完成路径一致。
+ */
+export function settlePending(key: string): void {
   const entry = entries[key];
   if (!entry) return;
   clearTimers(entry);
@@ -166,6 +174,18 @@ function finish(key: string): void {
 }
 
 /**
+ * 按 core 清理登记（上游 core 离线/移除；02a §5.4）。
+ *
+ * 精确匹配 `entry.core`；单上游登记（core=null）不会被误清——需要清
+ * 裸 core 时由调用方显式传入 null。
+ */
+export function dropPendingOfCore(core: string | null): void {
+  for (const key of Object.keys(entries)) {
+    if (entries[key].core === core) drop(key);
+  }
+}
+
+/**
  * dispatch 挂钩：事件到达时销掉等待该响应的事件（`store.ts::dispatch` 调用）。
  * 误销窗口：同一响应事件也被其他操作触发时（如 SaveTeam 后的 TeamsList），
  * 会把正在等待的登记一并销账——低频且无害（数据确实是最新的）。
@@ -180,7 +200,7 @@ export function resolvePendingEvent(event: object, core: string | null = null): 
     if (!commands.includes(entry.command)) continue;
     // 多上游：只销"目标 core 相同"的登记（任一侧未知时宽容放行，避免挂死）。
     if (entry.core != null && core != null && entry.core !== core) continue;
-    finish(key);
+    settlePending(key);
   }
 }
 
