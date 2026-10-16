@@ -72,7 +72,7 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // → 58（2026-10 适配器泛化 02a：+AdapterOpResult / AdapterState）
     // → 51（2026-10 泛化阶段 2：Panel 删除 7 个迁移期 QQ 变体——GroupList /
     //   QqFilterConfig / QqGateMode / QqOwner / QqLoginStatus / QqQrcode /
-    //   FriendList；Core 侧变体保留至 N+2，Panel 镜像不再收录）。
+    //   FriendList；Core 侧同批直接删除，两端镜像一致）。
     const variants = eventVariantNames();
     expect(variants.size).toBe(51);
   });
