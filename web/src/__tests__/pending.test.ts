@@ -117,18 +117,18 @@ describe('pending：阶段推进', () => {
   });
 
   it('动态 key（getter）：切换后自动追踪新 key 的登记', () => {
-    // getter 内读响应式源（真实场景：QqPanel 的 activeName ref）——
+    // getter 内读响应式源（真实场景：适配器面板的选中实例 ref）——
     // ref 变化使 computed 失效并改追踪新 key。
     const name = ref('a');
-    const { phase } = usePending(() => `qq:filter:${name.value}`);
-    trackRequest('qq:filter:a', contextCommand());
+    const { phase } = usePending(() => `adapter-op:core:/${name.value}:get_state`);
+    trackRequest('adapter-op:core:/a:get_state', contextCommand());
     vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
     expect(phase.value).toBe('pending');
 
     // 切到实例 b：b 未登记 → idle；登记后可见。
     name.value = 'b';
     expect(phase.value).toBe('idle');
-    trackRequest('qq:filter:b', contextCommand());
+    trackRequest('adapter-op:core:/b:get_state', contextCommand());
     expect(phase.value).toBe('idle');
     vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
     expect(phase.value).toBe('pending');

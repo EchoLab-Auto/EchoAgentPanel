@@ -462,7 +462,7 @@ onUnmounted(() => {
 });
 
 // 连接建立（含断线重连）时刷新一次：首挂载的握手期请求走全局暂存队列，
-// 重连恢复走这里（与 QqPanel/ShellList 同一模式）。
+// 重连恢复走这里（与 ShellList 等面板同一模式）。
 watch(
   () => state.connected,
   (connected) => {

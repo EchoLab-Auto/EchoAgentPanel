@@ -4,7 +4,7 @@
 //! 引导阶段发送的命令必须"必成功"——否则面板每次打开都会弹出无意义提示：
 //! - 不发送 team_id 为空的 RequestTrunkTimeline（等 TeamsList 到达后由
 //!   App 的 watcher 用列表首个发起）；
-//! - 不预取 QQ 过滤配置（QqPanel/QqLoginSection 打开时按实例自行刷新）。
+//! - 不预取适配器管理数据（打开通用适配器面板时按实例自行刷新）。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 

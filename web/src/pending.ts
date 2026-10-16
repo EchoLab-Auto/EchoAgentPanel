@@ -223,7 +223,7 @@ export function releasePending(key: string): void {
 }
 
 /** 视图侧读取阶段：`usePending('context')` 等；key 也可传 getter（动态 key，
- *  如 QQ 多实例 `() => `qq:filter:${activeName}``），切换时自动追踪新 key。 */
+ *  如适配器面板 `() => adapterOpKey(core, activeName, method)`），切换时自动追踪新 key。 */
 export function usePending(key: string | (() => string)): {
   phase: ComputedRef<PendingPhase>;
   loading: ComputedRef<boolean>;

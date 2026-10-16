@@ -1,7 +1,7 @@
 <script setup lang="ts">
 //! image 节点（03a §2.6 / §4.3）：不自动拉取；点击「获取/刷新」经
-//! `fetch:{method,result_key}` 拉 base64 PNG；结果只存组件局部（修复
-//! 现网 lastQrcode 单槽串号）；`clear_when` 为真或 running → false 时清图。
+//! `fetch:{method,result_key}` 拉 base64 PNG；结果只存组件局部（替代
+//! 已删除的旧全局单槽方案，避免多实例串号）；`clear_when` 为真或 running → false 时清图。
 
 import { computed, inject, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';

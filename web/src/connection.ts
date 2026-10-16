@@ -90,9 +90,9 @@ export function startConnection(): void {
       const broadcastBootstrap: BackendCommand[] = [
         // 只读且需要"发现全部上游"：裸广播给所有在线 core（中继白名单放行）。
         'RequestState',
-        // QQ 过滤配置不在这里预取：面板打开时 QqPanel/QqLoginSection 会按实例
-        // 自行刷新；无 QQ（或多实例未指定实例）时预取必被 Core 拒绝，平白
-        // 弹出"QQ 适配器未找到"提示。
+        // 适配器管理数据不在这里预取：打开通用适配器面板时按实例经
+        // InvokeAdapterOp 自行刷新；无实例（或多实例未指定实例）时预取
+        // 必被 Core 拒绝，平白弹出"适配器实例未找到"提示。
         'RequestTeamsList',
       ];
       for (const command of broadcastBootstrap) {

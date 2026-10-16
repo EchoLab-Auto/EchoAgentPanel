@@ -8,7 +8,7 @@
 //! 实例范围（03b §2.3-1）：列 `state.adapters` 全部平台；`persona` 非空且
 //! ≠ 当前 teamId 的条目不显示（别的 agent 的实例既不显示状态也不作为命令
 //! 目标）；`persona` 为空 = 全局实例，始终显示。零噪音：无可见实例时打开
-//! 面板不发任何命令（QqPanel.test.ts:63/113 语义）。
+//! 面板不发任何命令（原「打开面板即发 QQ 专属请求」的零噪音语义）。
 //!
 //! 命令路由：`core` 显式寻址（多上游）；缺省 null = 单上游，沿用
 //! `resolveTargetCore` 的默认解析。启停重启的 pending 键为通用形式
@@ -42,7 +42,7 @@ const emit = defineEmits<{
   warning: [payload: UiWarning];
 }>();
 
-// ── 实例列表与选中（QqPanel :46-70 逻辑上移 + 泛化）──
+// ── 实例列表与选中（自旧 QQ 面板上移 + 泛化）──
 
 /** 可见实例：persona 为空 = 全局实例；persona 非空只认当前 teamId。 */
 const visibleAdapters = computed(() =>
@@ -123,7 +123,7 @@ function refresh(): void {
 }
 
 // 挂载/重连即拉一次列表——但**无可见实例时不发**（零噪音：不因打开面板
-// 触发必被 Core 拒绝的请求；QqPanel.test.ts:63/113 语义）。
+// 触发必被 Core 拒绝的请求；原「零噪音」语义保留）。
 onMounted(() => {
   if (visibleAdapters.value.length) refresh();
 });

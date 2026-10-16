@@ -2,7 +2,7 @@
 //!
 //! S2 语义：列 `state.adapters` 全部平台，persona 过滤保留（别的 agent 的
 //! 实例既不显示状态也不作为命令目标）；无可见实例打开面板零命令
-//!（QqPanel.test.ts:63/113 语义）；启停重启 pending 键为通用形式
+//!（原「零噪音」语义保留）；启停重启 pending 键为通用形式
 //! `adapter:<op>:<core>:<adapter>`（03b §2.2）。
 //!
 //! S3 接线（03b §3.2）：`ui` 存在 → 内嵌 AdapterUiRenderer（真实 QQ 描述符
