@@ -491,6 +491,16 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--nm-neutral-300, rgba(128, 128, 128, 0.4)) transparent;
+  /* 阴影完整环绕（2026-10-16，用户报告「直角阴影」）：滚动视口（本元素的
+     矩形边界）会把卡片的 box-shadow 沿边界硬裁——卡片左右边缘、首卡顶部
+     与视口齐平时，阴影只剩「下侧一条被直线切断的残带」。负 margin + 等量
+     padding 把滚动视口外扩到列容器 padding 边界（= .rail-stack 的 12px）：
+     阴影四边重新获得显示空间，而内容盒（卡片 / 分隔条 / FLIP 几何）零位移
+     （两者在排版上冲抵），滚动范围与拖拽落点几何不变。
+     ⚠️ 本值与 .rail-stack 的 padding 成对——后者调整时须同步；外扩超出其
+     padding 的部分仍会被 .rail-stack 的 overflow: hidden 裁掉。 */
+  margin: -12px;
+  padding: 12px;
 }
 
 /* 槽位（卡片 + 其上分隔条）：展开态按 flexGrow 分配空间；折叠态收缩为横条；

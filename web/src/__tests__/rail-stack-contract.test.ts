@@ -1,10 +1,12 @@
 //! 边栏卡片栈的堆叠/动画契约（2026-10 布局审查补充）。
 //!
-//! 锁定三条不变量（此前只存在于注释里，回归无声）：
+//! 锁定四条不变量（此前只存在于注释里，回归无声）：
 //! 1. 列内放不下时**列自身滚动**（不能再用 overflow: hidden 裁掉底部卡片）；
 //! 2. 移动端卡片抽屉传 `dragEnabled: false`：不渲染握把/「移到另一侧」，
 //!    卡头恢复 `touch-action: pan-y`（否则卡头是列表滚动死区）；
-//! 3. 动画只用 transform/opacity，且提供 `prefers-reduced-motion` 降级。
+//! 3. 动画只用 transform/opacity，且提供 `prefers-reduced-motion` 降级；
+//! 4. 卡片阴影环绕可见：列表视口经负 margin 外扩与 `.rail-stack` padding
+//!    对齐（2026-10-16「直角阴影」修复——滚动视口曾把阴影切成直线残带）。
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -37,6 +39,21 @@ describe('RailStack 堆叠与动画契约', () => {
     expect(listRule).toMatch(/overflow-y:\s*auto/);
     expect(style).toMatch(/--rail-card-min-h:\s*80px/);
     expect(style).toMatch(/min-height:\s*var\(--rail-card-min-h\)/);
+  });
+
+  it('卡片阴影环绕可见：列表视口外扩与列 padding 对齐（负 margin + 等量 padding）', () => {
+    const listRule = style.match(/\.rail-stack__list\s*\{([^}]*)\}/)?.[1] ?? '';
+    const margin = Number(listRule.match(/margin:\s*(-?\d+)px/)?.[1]);
+    const padding = Number(listRule.match(/padding:\s*(\d+)px/)?.[1]);
+    // 成对出现：外扩（负 margin）与内容归位（等量 padding）必须等值反向
+    expect(Number.isFinite(margin)).toBe(true);
+    expect(Number.isFinite(padding)).toBe(true);
+    expect(-margin).toBe(padding);
+    // 外扩量不得超过列容器 padding——超出部分会被 .rail-stack 的 overflow: hidden 裁掉
+    const stackRule = style.match(/\.rail-stack\s*\{([^}]*)\}/)?.[1] ?? '';
+    const stackPad = Number(stackRule.match(/padding:\s*(\d+)px/)?.[1]);
+    expect(Number.isFinite(stackPad)).toBe(true);
+    expect(padding).toBeLessThanOrEqual(stackPad);
   });
 
   it('动画只用 transform/opacity，且有 prefers-reduced-motion 降级', () => {
