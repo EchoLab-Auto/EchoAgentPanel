@@ -28,6 +28,7 @@ import MessageItem from './MessageItem.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
+import PanelPopover from './PanelPopover.vue';
 import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
