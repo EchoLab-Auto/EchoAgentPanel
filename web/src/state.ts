@@ -189,6 +189,9 @@ export interface DisplayMessage {
   animate?: boolean;
   /** 归属会话 key（空 = 全局/未知） */
   sessionId?: string;
+  /** 显示时间线条目序号；会话历史合并水位线用（`SessionHistory` 快照与窗口
+   * 增量对账：seq > baseSeq 的窗口条目才是快照未覆盖的新条目）。 */
+  seq?: number;
   reasoning?: string[];
   tool?: ToolMsg;
   /** 多模态附件（图片 URL / data URI） */
@@ -303,6 +306,23 @@ export interface ChecklistEntry {
  * 不互相覆盖。写入侧见 reduce 的 ChecklistUpdated 分支。 */
 export function checklistsForSession(state: AppState, sessionId: string): ChecklistEntry[] {
   return state.checklists[checklistKey(state.activeRegion, state.activeTeamId, sessionId)] ?? [];
+}
+
+/** 会话消息 = 派生历史快照 ⊕ 窗口增量（工具条目按 tool_call_id 就地补丁）。
+ * 无历史快照时退回窗口过滤（现行为）。共享显示窗口（每人格 1024 条 FIFO）
+ * 淘汰旧会话条目后，快照让无近期活动的会话仍能显示完整历史（2026-10）。 */
+export function sessionMessagesFor(state: AppState, sessionId: string, teamId: string | null): DisplayMessage[] {
+  const key = checklistKey(state.activeRegion, teamId, sessionId);
+  const hist = state.sessionHistory[key];
+  const windowMsgs = state.trunk.filter((m) => m.sessionId === sessionId);
+  if (!hist) return windowMsgs;
+  const out = hist.messages.map((m) => ({ ...m })); // 浅拷贝：补丁不得污染快照
+  for (const w of windowMsgs) {
+    const seq = w.seq ?? 0;
+    if (seq > 0 && seq <= hist.baseSeq) continue; // 已被快照覆盖
+    if (!patchToolMessage(out, w)) out.push(w);
+  }
+  return out;
 }
 
 export interface ApiConfig {
@@ -429,6 +449,9 @@ export interface AppState {
    * 正确语义。读取方按当前选中会话的复合键取值（见 ChecklistSidebar）。
    */
   checklists: Record<string, ChecklistEntry[]>;
+  /** 按会话派生的显示历史（`SessionHistory` 事件；key = checklistKey(core, team, session)）。
+   * 合并策略：历史快照 + 窗口增量（seq > baseSeq 的窗口条目；工具按 tool_call_id 就地补丁）。 */
+  sessionHistory: Record<string, { messages: DisplayMessage[]; total: number; truncated: boolean; baseSeq: number }>;
   toasts: Toast[];
   /** 目录选择器浏览结果（RequestBrowseDirectories 响应，2026-10）：
    * 键 = 复合 (activeRegion, 请求 path \u0000 '' 表示根列表) → 结果。
@@ -551,6 +574,7 @@ export function initialState(): AppState {
     api: null,
     adapterUiByKey: {},
     checklists: {},
+    sessionHistory: {},
     toasts: [],
     browseDirectories: {},
     remoteApiProfiles: {},
@@ -1022,6 +1046,23 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         state.trunkTeamId = key;
         state.trunk = [...converted];
       }
+      return state;
+    }
+    case 'SessionHistory': {
+      const e = (event as { SessionHistory: { team_id?: string | null; session_id: string; messages: TimelineMessage[]; total: number; truncated?: boolean; max_seq?: number; core?: string | null } }).SessionHistory;
+      if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) return state;
+      const key = checklistKey(evtCore(e), e.team_id ?? null, e.session_id);
+      // baseSeq（合并水位线）：优先取服务端下发的 max_seq（派生时快照水位，
+      // 避免「派生后~到达前」的新条目被误跳过）；缺失时回退按当前窗口计算。
+      const fallbackBase = state.trunk.reduce((max, m) => (m.sessionId === e.session_id && (m.seq ?? 0) > max ? (m.seq ?? 0) : max), 0);
+      state.sessionHistory[key] = {
+        messages: toDisplayMessages(e.messages),
+        total: e.total,
+        truncated: !!e.truncated,
+        baseSeq: e.max_seq ?? fallbackBase,
+      };
+      const keys = Object.keys(state.sessionHistory);
+      if (keys.length > 64) delete state.sessionHistory[keys[0]];
       return state;
     }
     case 'AgentOutput': {

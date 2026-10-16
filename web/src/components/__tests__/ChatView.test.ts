@@ -4,13 +4,22 @@
 //! 修复方案：输入区改为 flex 子项占位（flex: 0 0 auto），消息列表 flex:1 独立滚动。
 //! 本测试锁定该契约，防止回归为 absolute/padding hack。
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { defineComponent, h, nextTick } from 'vue';
 import ChatView from '../ChatView.vue';
-import { state } from '../../store';
+import { state, dispatch } from '../../store';
 import { displayContentOf } from '../../state_domains/timeline';
 import { resetReasoningAnimForTests } from '../../reasoning-anim';
+
+// 会话历史补拉（RequestSessionHistory）断言用：拦截命令发送。importOriginal
+// 保证其余导出（startConnection 等）保持真实；本文件其余用例不触网。
+vi.mock('../../connection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../connection')>();
+  return { ...actual, sendCommand: vi.fn(() => true) };
+});
+
+import { sendCommand } from '../../connection';
 // ChatView 自渲染消息行（WorkRunGroup 合并 + MessageItem）；滚动区自组
 // （2026-10-13 起直用 useChatScroll，无 ChatTray 组件——头部 stub 已移除）。
 const MessageItemStub = defineComponent({
@@ -520,5 +529,109 @@ describe('displayContentOf（hook 输入展示剥离）', () => {
     expect(displayContentOf('普通文本 {"a":1}')).toBe('普通文本 {"a":1}');
     // 非法 JSON 兜底原样
     expect(displayContentOf('<qq_message_hook>{bad}</qq_message_hook>')).toContain('{bad}');
+  });
+});
+
+describe('会话历史补拉（RequestSessionHistory，2026-10）', () => {
+  const sendMock = vi.mocked(sendCommand);
+  const stubs = {
+    MessageItem: MessageItemStub,
+    ChatComposer: ChatComposerStub,
+  };
+
+  beforeEach(() => {
+    sendMock.mockClear();
+    state.connected = true;
+    state.trunk = [];
+    state.sessionHistory = {};
+    state.teams = [];
+    state.sessions = [];
+    state.activities = {};
+    state.activeRegion = null;
+    state.activeTeamId = null;
+    state.knownCores = new Set();
+  });
+
+  afterEach(() => {
+    state.connected = false;
+  });
+
+  /** 指定会话的补拉调用。⚠️ 本文件前面的用例有部分未 unmount 的遗留组件，
+   *  其 watcher 也会随连接/区域变化补拉各自的会话——断言只按会话 id 过滤
+   *  自己关心的调用（用例用专属会话 id，与遗留组件天然隔离）。 */
+  function historyCallsFor(sessionId: string) {
+    return sendMock.mock.calls.filter(([command]) => {
+      const payload = command as { RequestSessionHistory?: { session_id?: string } };
+      return payload?.RequestSessionHistory?.session_id === sessionId;
+    });
+  }
+
+  it('挂载非 global 会话：发 RequestSessionHistory（team_id/session_id/limit 正确）', () => {
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'sess-open', activeTeamId: 'alix' },
+      global: { stubs },
+    });
+    const calls = historyCallsFor('sess-open');
+    expect(calls.length, '未发出（或重复发出）会话历史补拉').toBe(1);
+    expect(calls[0][0]).toEqual({
+      RequestSessionHistory: { team_id: 'alix', session_id: 'sess-open', limit: 1000 },
+    });
+    wrapper.unmount();
+  });
+
+  it('global 视图不发补拉（聚合视图没有单一会话归属）', () => {
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'global' },
+      global: { stubs },
+    });
+    const globalCalls = sendMock.mock.calls.filter(([command]) => {
+      const payload = command as { RequestSessionHistory?: { session_id?: string } };
+      return payload?.RequestSessionHistory?.session_id === 'global';
+    });
+    expect(globalCalls).toEqual([]);
+    wrapper.unmount();
+  });
+
+  it('未连接时不发；连接恢复（重连）后补发', async () => {
+    state.connected = false;
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'sess-reconnect' },
+      global: { stubs },
+    });
+    expect(historyCallsFor('sess-reconnect')).toEqual([]);
+    state.connected = true;
+    await nextTick();
+    const calls = historyCallsFor('sess-reconnect');
+    expect(calls.length).toBe(1);
+    expect(calls[0][0]).toEqual({
+      RequestSessionHistory: { team_id: null, session_id: 'sess-reconnect', limit: 1000 },
+    });
+    wrapper.unmount();
+  });
+
+  it('无窗口条目但有会话历史快照：消息照常渲染（修复「暂无消息」）', () => {
+    state.activeRegion = 'core-a';
+    dispatch(
+      {
+        SessionHistory: {
+          team_id: 'alix',
+          session_id: 'sess-h',
+          messages: [{ kind: 'user', content: '历史消息', session_id: 'sess-h', time: 5, seq: 1 }],
+          total: 1,
+          truncated: false,
+          max_seq: 3,
+        },
+      },
+      'core-a',
+    );
+    expect(state.trunk).toEqual([]); // 共享窗口里没有该会话条目（已被 FIFO 淘汰）
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'sess-h', activeTeamId: 'alix' },
+      global: { stubs },
+    });
+    const items = wrapper.findAll('.stub-item');
+    expect(items.length).toBe(1);
+    expect(items[0].text()).toContain('历史消息');
+    wrapper.unmount();
   });
 });

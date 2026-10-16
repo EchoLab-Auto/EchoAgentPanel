@@ -276,6 +276,8 @@ export function toDisplayMessage(message: TimelineMessage): DisplayMessage {
     sessionId: message.session_id || undefined,
     // 历史回放：不播放入场/打字机动画，避免整屏滚动特效。
     animate: false,
+    // 条目级序号：会话历史（SessionHistory 快照 ⊕ 窗口增量）合并水位线用。
+    seq: message.seq,
   };
   if (message.kind === 'user') {
     // 子代理完成回报（合并钩子）：不作为用户气泡，走专用紧凑行。
@@ -331,6 +333,7 @@ export function toDisplayMessages(messages: TimelineMessage[]): DisplayMessage[]
         time: message.time,
         sessionId: message.session_id || undefined,
         animate: false,
+        seq: message.seq,
       };
       for (const reasoning of message.reasoning) {
         out.push({ ...base, role: 'reasoning' as const, content: reasoning });

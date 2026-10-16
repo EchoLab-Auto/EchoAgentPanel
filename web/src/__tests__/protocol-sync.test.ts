@@ -73,8 +73,10 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // → 51（2026-10 泛化阶段 2：Panel 删除 7 个迁移期 QQ 变体——GroupList /
     //   QqFilterConfig / QqGateMode / QqOwner / QqLoginStatus / QqQrcode /
     //   FriendList；Core 侧同批直接删除，两端镜像一致）。
+    // → 52（2026-10 会话历史通道：+SessionHistory——共享显示窗口 FIFO 淘汰
+    //   后按会话派生完整历史，`RequestSessionHistory` → `SessionHistory`）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(51);
+    expect(variants.size).toBe(52);
   });
 
   it('适配器泛化事件在联合类型中定义（02a §4.1）', () => {
@@ -88,6 +90,10 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     const m = seg.match(/ChecklistUpdated:\s*\{([^}]*)\}/);
     expect(m, 'ChecklistUpdated 定义缺失').toBeTruthy();
     expect(m![1]).toContain('team_id');
+  });
+
+  it('会话历史事件在联合类型中定义（2026-10 会话历史通道）', () => {
+    expect(backendEventSegment()).toContain('SessionHistory');
   });
 });
 

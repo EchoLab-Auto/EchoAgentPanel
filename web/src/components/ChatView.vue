@@ -18,7 +18,8 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import { useChatScroll } from '@echolab-auto/ui-frame/composables/useChatScroll';
 import { ChatComposer, type ChatMessage } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
-import { checklistsForSession } from '../state';
+import { checklistsForSession, sessionMessagesFor } from '../state';
+import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
 import { checklistKey, sessionKey } from '../keys';
@@ -448,7 +449,7 @@ const messages = computed<ChatMessage[]>(() => {
   const list =
     props.sessionId === 'global'
       ? state.trunk
-      : state.trunk.filter((m) => m.sessionId === props.sessionId);
+      : sessionMessagesFor(state, props.sessionId, props.activeTeamId ?? null);
   return list.map((m) => {
     const cm = toChatMessage(m);
     // 推理行打字机准入（2026-10）：实时到达 + 消息新鲜 + 会话仍在输出，
@@ -465,6 +466,18 @@ const messages = computed<ChatMessage[]>(() => {
     return cm;
   });
 });
+
+// 会话历史补拉（2026-10）：共享显示窗口 FIFO 淘汰后旧会话条目不可见——
+// 激活会话时从事件日志派生（Core `RequestSessionHistory`）。
+watch(
+  [() => props.sessionId, () => props.activeTeamId, () => state.connected, () => state.activeRegion],
+  () => {
+    const sid = props.sessionId;
+    if (!state.connected || !sid || sid === 'global') return;
+    sendCommand({ RequestSessionHistory: { team_id: props.activeTeamId ?? null, session_id: sid, limit: 1000 } });
+  },
+  { immediate: true },
+);
 
 // ── 连续工作条目合并（2026-10 一般化；2026-09-19 起仅合并工具调用）──
 // 工具调用与思考（推理）连续出现时合成一条 WorkRunGroup：折叠态 = 一排

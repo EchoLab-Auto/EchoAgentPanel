@@ -497,6 +497,10 @@ export type BackendCommand =
   | 'RequestState'
   | { RequestContext: { team_id?: string | null; session_id?: string | null } }
   | { RequestTrunkTimeline: { team_id?: string | null; since_seq?: number } }
+  // 按会话派生显示历史（2026-10）：共享显示窗口（每人格 1024 条 FIFO）会淘汰
+  // 无近期活动的会话条目——面板激活会话时改从事件日志派生完整历史（Core 响应
+  // `SessionHistory`）。limit 缺省/null = Core 默认上限。
+  | { RequestSessionHistory: { team_id?: string | null; session_id: string; limit?: number | null } }
   | { InstallSkillFromGit: { url: string; name?: string | null; branch?: string | null } }
   | { UpdateSkillFromGit: { name: string } }
   | { RemoveSkillSource: { name: string } }
@@ -653,6 +657,10 @@ export type BackendEvent =
       };
     }
   | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }
+  // 按会话派生的显示历史（`RequestSessionHistory` 响应；2026-10）：
+  // messages = 事件日志派生的完整历史；total = 总条目数；truncated = limit 截断；
+  // max_seq = 派生时快照水位（合并窗口增量用，见 state.ts::sessionMessagesFor）。
+  | { SessionHistory: { team_id?: string | null; session_id: string; messages: TimelineMessage[]; total: number; truncated: boolean; max_seq?: number } }
   | { ShellSessionsList: { sessions: ShellSessionInfo[]; team_id?: string | null } }
   | { ShellSessionStarted: { session: ShellSessionInfo } }
   | { ShellExecStarted: { session_id: string; seq: number; command: string } }
