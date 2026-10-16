@@ -10,6 +10,7 @@ import {
 import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 import { adapterOpKey, settleAdapterOp } from './adapterOps';
+import { settleAdapterOpsOfCore } from './pending';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
 //! 事件流从 `/ws` 进来，reducer 把它映射成 React 可渲染的状态。
@@ -651,6 +652,10 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     }
     case 'AdapterList': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
+      // 启停/重启销账（03b §2.2 收尾）：Core 完成 Start/Stop/RestartAdapter
+      // 后必重发本事件 → 事件到达即结算该 core 的 `adapter:<op>:<core>:<name>`
+      // 登记（core 段精确匹配，见 pending.ts::settleAdapterOpsOfCore）。
+      settleAdapterOpsOfCore(payloadCore(event));
       const e = (event as { AdapterList: { adapters: AdapterStatus[] } }).AdapterList;
       state.adapters = e.adapters;
       return state;

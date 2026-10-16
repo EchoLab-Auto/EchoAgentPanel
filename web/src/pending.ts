@@ -186,6 +186,25 @@ export function dropPendingOfCore(core: string | null): void {
 }
 
 /**
+ * 适配器启停/重启的成批销账（03b §2.2 收尾）：Core 执行完 Start/Stop/
+ * RestartAdapter 后必重发 `AdapterList` 事件（三臂各含 emit_adapter_list），
+ * 故「收到某 core 的 AdapterList」= 该 core 启停类操作已完成，可结算。
+ * 按 core 段精确匹配键 `adapter:<op>:<core段>:<name>`（core=null → 空段）。
+ *
+ * 只认 4 段 `adapter:` 前缀键；`adapter-op:` 前缀键（adapterOps.ts 的 op
+ * 通道，各自按精确键 `settlePending`）不受影响。
+ */
+export function settleAdapterOpsOfCore(core: string | null): void {
+  const coreSegment = core ?? '';
+  for (const key of Object.keys(entries)) {
+    const parts = key.split(':');
+    if (parts.length !== 4 || parts[0] !== 'adapter') continue;
+    if (parts[2] !== coreSegment) continue;
+    settlePending(key);
+  }
+}
+
+/**
  * dispatch 挂钩：事件到达时销掉等待该响应的事件（`store.ts::dispatch` 调用）。
  * 误销窗口：同一响应事件也被其他操作触发时（如 SaveTeam 后的 TeamsList），
  * 会把正在等待的登记一并销账——低频且无害（数据确实是最新的）。

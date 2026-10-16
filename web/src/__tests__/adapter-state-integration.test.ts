@@ -4,7 +4,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { state, dispatch } from '../store';
-import { usePending } from '../pending';
+import {
+  PENDING_MIN_VISIBLE_MS,
+  PENDING_VISIBLE_AFTER_MS,
+  trackRequest,
+  usePending,
+} from '../pending';
 import { adapterOpKey, invokeAdapterOp, onCoreDropped } from '../adapterOps';
 import { removeSessionsOfCore } from '../state';
 import { refreshUpstreams } from '../upstreams';
@@ -109,5 +114,21 @@ describe('02a S5 集成：新臂 / 清理钩子', () => {
     expect(dropSpy).toHaveBeenCalledWith('core-a');
     expect(state.adapterUiByKey['core-a\u0000qq']).toBeUndefined();
     off();
+  });
+
+  it('AdapterList 到达：该 core 的启停 pending 键即结算（03b §2.2 收尾）', () => {
+    vi.useFakeTimers();
+    try {
+      const key = 'adapter:start:core-a:qq';
+      trackRequest(key, 'StartAdapter', 'core-a');
+      vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+      expect(usePending(key).phase.value).toBe('pending');
+
+      dispatch({ AdapterList: { adapters: [] } } as unknown as BackendEvent, 'core-a');
+      vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS);
+      expect(usePending(key).phase.value).toBe('idle');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

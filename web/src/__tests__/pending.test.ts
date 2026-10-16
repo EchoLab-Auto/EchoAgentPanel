@@ -16,6 +16,7 @@ import {
   dropPendingOfCore,
   releasePending,
   resolvePendingEvent,
+  settleAdapterOpsOfCore,
   settlePending,
   trackRequest,
   usePending,
@@ -208,5 +209,36 @@ describe('pending：显式销账与按 core 清理（02a §5.1，S2）', () => {
     // 清理本用例剩余登记（测试隔离：pending 是模块级单例）。
     dropPendingOfCore('core-b');
     expect(usePending('drop:b').phase.value).toBe('idle');
+  });
+
+  it('settleAdapterOpsOfCore：按 core 段结算启停键（adapter-op: 与异 core 不受影响）', () => {
+    trackRequest('adapter:start::qq', contextCommand(), null);
+    trackRequest('adapter:restart:core-a:qq-2', contextCommand(), 'core-a');
+    trackRequest('adapter-op:core-a\u0000qq:get_state', contextCommand(), 'core-a');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(usePending('adapter:start::qq').phase.value).toBe('pending');
+    expect(usePending('adapter:restart:core-a:qq-2').phase.value).toBe('pending');
+    expect(usePending('adapter-op:core-a\u0000qq:get_state').phase.value).toBe('pending');
+
+    // 只结算 core 段 === 'core-a' 的登记：空 core 段与 `adapter-op:` 前缀不动。
+    settleAdapterOpsOfCore('core-a');
+    vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS); // 已可见：走最短可见后清
+    expect(usePending('adapter:restart:core-a:qq-2').phase.value).toBe('idle');
+    expect(usePending('adapter:start::qq').phase.value).toBe('pending');
+    expect(usePending('adapter-op:core-a\u0000qq:get_state').phase.value).toBe('pending');
+
+    // core=null 只结算空 core 段（单上游）；可见窗口已走完 → 立即清。
+    settleAdapterOpsOfCore(null);
+    expect(usePending('adapter:start::qq').phase.value).toBe('idle');
+
+    // 测试隔离：清理剩余登记（pending 为模块级单例）。
+    releasePending('adapter-op:core-a\u0000qq:get_state');
+  });
+
+  it('settleAdapterOpsOfCore：未显示（150ms 内）立即清', () => {
+    trackRequest('adapter:stop:core-b:qq', contextCommand(), 'core-b');
+    settleAdapterOpsOfCore('core-b');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(usePending('adapter:stop:core-b:qq').phase.value).toBe('idle');
   });
 });
