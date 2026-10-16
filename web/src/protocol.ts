@@ -58,13 +58,38 @@ export interface AdapterStatus {
   started_at: number | null;
   /** QQ 实例：归属人格 id（多实例；其他平台为空） */
   persona?: string | null;
-  /** QQ 实例：NapCat 容器名 */
+  /** @deprecated 适配器泛化迁移期保留（02a §4.2）；使用点见 03b S6 删除清单；删除归 §1-D3 阶段 3。（QQ 实例：NapCat 容器名） */
   container?: string | null;
-  /** QQ 实例：NapCat WebUI 地址 */
+  /** @deprecated 同上（QQ 实例：NapCat WebUI 地址）。 */
   webui_url?: string | null;
-  /** QQ 实例：OneBot HTTP API 地址 */
+  /** @deprecated 同上（QQ 实例：OneBot HTTP API 地址）。 */
   onebot_url?: string | null;
+  /** 通用 KV 元数据（02a §4.2 / 01a §1.1；旧 core 缺失时 undefined）。 */
+  metadata?: Array<{ key: string; label: string; value: string }>;
+  /** 平台标识（02a §4.2；旧 core 缺失 = undefined）。 */
+  platform?: string | null;
+  /** 描述符 v1（02a §4.2 / 00 §二；无 ui ⇒ descriptor 为 null，渲染器区域不显示）。 */
+  ui?: unknown;
+  /** 会话标签映射（02a §4.2；platform/session → 展示标签）。 */
+  session_labels?: Record<string, string> | null;
 }
+
+/** 适配器管理方法名（02a §4.1；Panel 侧防拼写便利类型，不要求 core 同步）。
+ *  与 00 §四 的 12 个 custom method + `get_state`（D2 首屏路径）对齐。 */
+export type AdapterOpMethod =
+  | 'set_gate_mode'
+  | 'get_gate_mode'
+  | 'update_allowlist'
+  | 'update_denylist'
+  | 'get_filter_config'
+  | 'set_owner'
+  | 'get_owner'
+  | 'login_status'
+  | 'login_qrcode'
+  | 'get_groups'
+  | 'get_friends'
+  | 'instance_info'
+  | 'get_state';
 
 /** 文件浏览器条目（文件或子目录；workspace 插件）。 */
 export interface WorkspaceFileEntry {
@@ -510,9 +535,16 @@ export type BackendCommand =
   | { StopAdapter: { name: string } }
   | { RestartAdapter: { name: string } }
   | 'RequestAdapterStatus'
+  // ── 适配器泛化（02a · 2026-10）：统一 custom op 命令（core echo-protocol）──
+  // 旧命令的可选 `adapter` 字段升级为必填顶层 `adapter`；method 见 AdapterOpMethod。
+  | { InvokeAdapterOp: { adapter: string; method: string; payload: Record<string, unknown> } }
+  /** @deprecated 适配器泛化迁移期保留（02a §4.3）；使用点见 03b S6 删除清单；类型删除归 §1-D3 阶段 3。 */
   | { RequestGroupList: { adapter?: string | null } }
+  /** @deprecated 同上（新路径 method `get_friends`）。 */
   | { RequestFriendList: { adapter?: string | null } }
+  /** @deprecated 同上（新路径 method `login_status`）。 */
   | { RequestQqLoginStatus: { adapter?: string | null } }
+  /** @deprecated 同上（新路径 method `login_qrcode`）。 */
   | { RequestQqQrcode: { adapter?: string | null } }
   | { RequestWorkspaceSessions: { team_id?: string | null } }
   | { SaveWorkspaceSession: { team_id?: string | null; session: WorkspaceSessionInfo } }
@@ -537,14 +569,20 @@ export type BackendCommand =
   | { RequestBrowseDirectories: { path?: string | null } }
   | 'StartAllAdapters'
   | 'StopAllAdapters'
+  /** @deprecated 适配器泛化迁移期保留（02a §4.3）；使用点见 03b S6 删除清单；类型删除归 §1-D3 阶段 3。 */
   | { UpdateQqAllowlist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
+  /** @deprecated 同上（新路径 method `update_denylist`，整对象发送见 02a §2）。 */
   | { UpdateQqDenylist: { user_ids: number[]; group_ids: number[]; adapter?: string | null } }
+  /** @deprecated 同上（新路径 method `get_filter_config`）。 */
   | { RequestQqFilterConfig: { adapter?: string | null } }
+  /** @deprecated 同上（新路径 method `set_gate_mode`）。 */
   | { SetQqGateMode: { mode: GateMode; adapter?: string | null } }
   | 'RequestSelfUpdate'
   | 'RequestSelfUpdateStatus'
   | { MigrateSession: { session_id: string; team_id?: string | null; target_peer: string } }
+  /** @deprecated 同上（新路径 method `get_owner`）。 */
   | { RequestQqOwner: { adapter?: string | null } }
+  /** @deprecated 同上（新路径 method `set_owner`）。 */
   | { SetQqOwner: { owner_qq: number; adapter?: string | null } }
   // ── 联邦管理（federation Phase 4；Frontend-only）──────────────────
   // 2026-10 补齐：此前 4 条命令靠双重断言绕过类型系统（echo-protocol/
@@ -727,7 +765,14 @@ export type BackendEvent =
       };
     }
   | { AdapterList: { adapters: AdapterStatus[] } }
+  // ── 适配器泛化（02a · 2026-10）：统一 custom op 事件（core echo-protocol）──
+  // `AdapterOpResult.result` 线上 null 时省略（故可选）；`error` 缺省不存在，
+  // 消费侧统一读 `error ?? null`。`AdapterState.state` = 适配器状态文档整文档。
+  | { AdapterOpResult: { adapter: string; method: string; result?: unknown; error?: string | null } }
+  | { AdapterState: { adapter: string; state: unknown } }
+  /** @deprecated 适配器泛化迁移期保留（02a §4.3）；使用点见 03b S6 删除清单；类型删除归 §1-D3 阶段 3。 */
   | { GroupList: { groups: GroupInfo[]; adapter?: string | null } }
+  /** @deprecated 同上（旧 QQ 过滤配置事件；新状态文档路径见 AdapterState）。 */
   | {
       QqFilterConfig: {
         allowlist_users: number[];
@@ -737,8 +782,11 @@ export type BackendEvent =
         adapter?: string | null;
       };
     }
+  /** @deprecated 同上（旧 QQ 门禁模式事件）。 */
   | { QqGateMode: { mode: GateMode; adapter?: string | null } }
+  /** @deprecated 同上（旧 QQ owner 事件）。 */
   | { QqOwner: { owner_qq: number; adapter?: string | null } }
+  /** @deprecated 同上（旧 QQ 登录状态事件）。 */
   | {
       QqLoginStatus: {
         adapter: string;
@@ -747,6 +795,7 @@ export type BackendEvent =
         nickname?: string | null;
       };
     }
+  /** @deprecated 同上（旧 QQ 二维码事件；新路径只进 image 节点局部，02a §2）。 */
   | { QqQrcode: { adapter: string; png_base64: string; error?: string | null } }
   | {
       WorkspaceSessions: {
@@ -773,6 +822,7 @@ export type BackendEvent =
         error?: string | null;
       };
     }
+  /** @deprecated 适配器泛化迁移期保留（02a §4.3）；使用点见 03b S6 删除清单；类型删除归 §1-D3 阶段 3。 */
   | { FriendList: { friends: FriendInfo[]; adapter?: string | null } };
 
 // ── WsMessage 信封 ─────────────────────────────────────────────────────────

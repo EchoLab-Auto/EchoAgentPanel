@@ -68,9 +68,16 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
   it('union 变体数量为基线快照（新增事件时必须同步更新此数字）', () => {
     // 此断言是"提醒器"：Core 加事件/自己补定义后，这里失败提醒你确认
     // 变体集合是有意变更，而不是漏同步。数字随协议演进更新。
+    // 54 → 56（2026-10 流式输出：+AgentContentDelta / AgentReasoningDelta）
+    // → 58（2026-10 适配器泛化 02a：+AdapterOpResult / AdapterState）。
     const variants = eventVariantNames();
-    // 54 → 56（2026-10 流式输出：+AgentContentDelta / AgentReasoningDelta）。
-    expect(variants.size).toBe(56);
+    expect(variants.size).toBe(58);
+  });
+
+  it('适配器泛化事件在联合类型中定义（02a §4.1）', () => {
+    const seg = backendEventSegment();
+    expect(seg).toContain('AdapterOpResult');
+    expect(seg).toContain('AdapterState');
   });
 
   it('ChecklistUpdated 携带 team_id（同一 core 多 persona 隔离，2026-10）', () => {
@@ -116,11 +123,24 @@ describe('命令侧镜像与归零棘轮（2026-10）', () => {
     );
   });
 
+  it('适配器泛化命令在联合类型中定义（02a §4.1）', () => {
+    expect(commandSegment()).toContain('InvokeAdapterOp');
+  });
+
   it('RenameApi 线格式与 Core serde 契约一致（2026-10 改名能力）', () => {
     // 双端契约：Core 侧 `rename_api_serde_contract`（echo-protocol
     // command.rs）钉住同一串；字段名 from/to 在两侧必须逐字一致。
     expect(serializeCommand({ RenameApi: { from: 'kimi', to: 'k3' } })).toBe(
       '{"type":"command","payload":{"RenameApi":{"from":"kimi","to":"k3"}}}',
+    );
+  });
+
+  it('InvokeAdapterOp 线格式与 Core serde 契约一致（02a §4.1）', () => {
+    // 双端契约：`{ adapter, method, payload }` 逐字一致（core command.rs）。
+    expect(
+      serializeCommand({ InvokeAdapterOp: { adapter: 'qq', method: 'get_state', payload: {} } }),
+    ).toBe(
+      '{"type":"command","payload":{"InvokeAdapterOp":{"adapter":"qq","method":"get_state","payload":{}}}}',
     );
   });
 
