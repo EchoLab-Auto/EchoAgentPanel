@@ -9,7 +9,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import type { AdapterStatus } from '../protocol';
 import { state } from '../store';
-import { sendCommand } from '../connection';
 import { invokeAdapterOp } from '../adapterOps';
 import { scopedKey } from '../keys';
 import { applyLoginStatus, applyRead, docOf, readOverlay, toQqView } from './qq/qqView';
@@ -53,8 +52,27 @@ function loadQr() {
   loading.value = true;
   error.value = null;
   qrRequested.value = true;
-  sendCommand({ RequestQqQrcode: { adapter: instanceName.value || null } });
-  // Core 以事件回推，超时由事件缺失自然体现（无加载态挂死）。
+  // 结果局部归属（02b §2.3）：发起时捕获 (core, name)，回包校验仍是当前
+  // 实例且组件未卸载，否则丢弃——替代旧全局单槽的串号路径。
+  const core = state.activeRegion ?? null;
+  const name = instanceName.value;
+  invokeAdapterOp(core, name, 'login_qrcode', {})
+    .then(({ result, error: err }) => {
+      if (disposed || name !== instanceName.value || core !== (state.activeRegion ?? null)) return;
+      loading.value = false;
+      error.value = err ?? null;
+      const b64 = (result as { png_base64?: string } | null)?.png_base64;
+      qrDataUrl.value = !err && b64 ? `data:image/png;base64,${b64}` : null;
+    })
+    .catch((e) => {
+      // 超时/断线：内联错误文案（业务失败改发 AdapterOpResult{error} 后
+      // err 分支即恢复内联原文，组件无需再改；02b §2.3）。
+      if (!disposed) {
+        loading.value = false;
+        error.value = String((e as Error)?.message ?? '获取二维码超时');
+      }
+    });
+  // 按钮加载态时长与现状一致：8 秒后自动复位（结果到达时也会复位）。
   // 计时器句柄保存并随卸载清理（2026-10 审计：此前泄漏到组件销毁后）。
   if (qrcodeTimeout != null) window.clearTimeout(qrcodeTimeout);
   qrcodeTimeout = window.setTimeout(() => {
@@ -64,28 +82,14 @@ function loadQr() {
 }
 
 let qrcodeTimeout: number | null = null;
+let disposed = false;
 onUnmounted(() => {
+  disposed = true;
   if (qrcodeTimeout != null) {
     window.clearTimeout(qrcodeTimeout);
     qrcodeTimeout = null;
   }
 });
-
-// QqQrcode 事件 → data URL（Core 回推 base64 PNG）。
-watch(
-  () => (state as unknown as { lastQrcode?: { adapter: string; png_base64: string; error?: string | null; core?: string | null } }).lastQrcode,
-  (qr) => {
-    if (!qr || qr.adapter !== instanceName.value) return;
-    if ((qr.core ?? null) !== (state.activeRegion ?? null)) return;
-    loading.value = false;
-    if (qr.error) {
-      error.value = qr.error;
-      qrDataUrl.value = null;
-      return;
-    }
-    qrDataUrl.value = qr.png_base64 ? `data:image/png;base64,${qr.png_base64}` : null;
-  },
-);
 
 onMounted(requestStatus);
 watch(() => props.adapterName, requestStatus);

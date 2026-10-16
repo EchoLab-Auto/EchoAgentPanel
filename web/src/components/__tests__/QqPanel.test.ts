@@ -273,10 +273,9 @@ describe('QqPanel 多实例', () => {
     state.connected = true;
     const wrapper = mount(QqPanel, { props: { teamId: 'alix' } });
     await nextTick();
-    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0]);
     expect(
-      calls.some((c) => typeof c === 'object' && 'RequestQqQrcode' in (c as object)),
-      `calls: ${JSON.stringify(calls)}`,
+      ops().some((o) => o.m === 'login_qrcode' && o.a === 'qq'),
+      `ops: ${JSON.stringify(ops())}`,
     ).toBe(true);
     state.connected = false;
     wrapper.unmount();
