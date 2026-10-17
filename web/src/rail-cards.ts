@@ -77,7 +77,32 @@ export function railCardsFor(side: RailSide, teamId: string | null): RailCardDef
     .filter((card): card is RailCardDef => !!card);
 }
 
-/** 某列是否有可见卡片（列显隐与消息区留白的判据）。 */
+/**
+ * 某列是否**登记**过卡片（桌面两列的显隐与消息区留白的唯一判据，2026-10）。
+ *
+ * 与 [`railHasVisibleCards`]（「当前可见」）的区别是本函数的全部意义：门控
+ * 依赖异步到达的 Core 状态（workspace 激活态 / loopMode / teams 列表 / 插件
+ * 能力），切 agent、工作区会话结束、断连重连的瞬时窗口都会让门控短暂失败。
+ * 此前列显隐用「可见卡片数」——左列一旦只放了条件性卡片（文件浏览器 /
+ * 临时分支），这些瞬时失败会让**整列**消失再重现，观感就是用户反馈的
+ * 「左侧栏莫名隐藏」（正文行宽跟着在 324px 与 0 之间闪）。
+ *
+ * 登记列表（`railLayout[side]`）只在用户拖动落位时变化，是稳定信号：
+ * 列的存在性不再随业务状态闪烁，卡片进出改为列内部增删（空列由 RailStack
+ * 渲染占位提示）。登记为空 = 用户从未往这列放过卡片，或把最后一张卡拖走了
+ * ——列该消失（显式意图，不算闪烁）。
+ */
+export function railRegistered(side: RailSide): boolean {
+  return railLayout[side].length > 0;
+}
+
+/**
+ * 某列是否有**可见**卡片（门控 × 用户排序）。
+ *
+ * 桌面两列的显隐**不再**用它（见 [`railRegistered`]）；目前只有移动端
+ * 「卡片」抽屉用它——抽屉里没有「列占位」概念，门控不满足的列整块不渲染，
+ * 空态由抽屉自己的「（当前无可见卡片）」承担。
+ */
 export function railHasVisibleCards(side: RailSide, teamId: string | null): boolean {
   return railCardsFor(side, teamId).length > 0;
 }

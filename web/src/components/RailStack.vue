@@ -464,6 +464,14 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
     <div v-if="railDrag.active && isEmpty" class="rail-stack__empty-drop">
       拖到此处放置卡片
     </div>
+    <!-- 空列且未拖动：空态占位（2026-10）。列的存在性由「登记卡片」决定
+         （见 ChatView 的 leftRailVisible / rail-cards 的 railRegistered），
+         卡片门控因异步状态（workspace / loopMode / teams）暂时藏起全部卡片
+         时**列仍在**——这里给出可见空态，避免一片空白让人以为边栏坏了。 -->
+    <div v-else-if="isEmpty" class="rail-stack__empty-hint">
+      <span class="rail-stack__empty-hint-title">当前无可用卡片</span>
+      <span class="rail-stack__empty-hint-sub">切换 agent、激活工作区或重连后会自动恢复</span>
+    </div>
   </div>
 </template>
 
@@ -744,5 +752,32 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   color: var(--nm-text-secondary);
   font-size: 12px;
   pointer-events: none;
+}
+
+/* 空列空态（未拖动）：列由「登记卡片」保活，卡片全被门控藏起时的占位。
+   与投放框同几何（inset 12px 对齐卡片边界），虚线更淡——是「说明」而不是
+   「操作提示」；文字分行排布，窄列里也不折成一行挤爆。 */
+.rail-stack__empty-hint {
+  position: absolute;
+  inset: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, var(--nm-text-secondary) 22%, transparent);
+  border-radius: 20px;
+  color: var(--nm-text-secondary);
+  text-align: center;
+  pointer-events: none;
+}
+.rail-stack__empty-hint-title {
+  font-size: 12px;
+}
+.rail-stack__empty-hint-sub {
+  font-size: 11px;
+  opacity: 0.72;
+  line-height: 1.5;
 }
 </style>

@@ -33,7 +33,7 @@ import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
 import PanelPopover from './PanelPopover.vue';
 import RailDragGhost from './RailDragGhost.vue';
-import { railHasVisibleCards } from '../rail-cards';
+import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
 import { railDragEngaged } from '../rail-drag';
 import { claimReasoningAnimation } from '../reasoning-anim';
@@ -332,8 +332,9 @@ watch(
 // ── 双侧边栏（2026-09-24）：左右两列卡片容器，卡片可互相拖动 ──
 // 卡片（连接状态 / 文件浏览器 / Shell / 临时分支）归属哪一列由
 // `rail-layout.ts` 持有（可拖动、可持久化）；本组件只负责：
-// 1. 两列的显隐——有卡片（门控可见）或正在拖动时渲染，空列不占位；
-// 2. 消息区留白——某列有卡片时给滚动区加同宽内边距，正文不被卡片压住
+// 1. 两列的显隐——该列**登记**过卡片（`railLayout` 里有 id）或正在拖动时
+//    渲染；登记列表为空（从未拖过 / 最后一张卡被拖走）才不占位；
+// 2. 消息区留白——某列登记过卡片时给滚动区加同宽内边距，正文不被卡片压住
 //    （此前只有右列：消息被限宽 640px 且左对齐，恰好躲开；加了左列后
 //    正文会撞上卡片，故改为按列留白）。
 // 「工作区」入口按钮仍只负责会话管理/git 弹层（与列无关）。
@@ -344,35 +345,56 @@ const RAIL_WIDTH = 324;
 // 底部弹层改全宽形态。isMobile 变化是响应式的（库 composable 监听 resize）。
 const { isMobile } = useTouchDevice();
 
-/** 某列是否有可见卡片（门控 × 用户排序，判据来自共享注册表）。 */
+/**
+ * 某列是否有**可见**卡片（门控 × 用户排序）。
+ *
+ * 只给移动端「卡片」抽屉用：抽屉里没有「列占位」概念，门控不满足的列整块
+ * 不渲染（空态由抽屉自己的「（当前无可见卡片）」文案承担）。
+ * 桌面两列的存在性走 `railRegistered`（见下方 leftRailVisible），两者语义
+ * 不同、不可合并。
+ */
 function railHasCards(side: 'left' | 'right'): boolean {
   return railHasVisibleCards(side, props.activeTeamId ?? null);
 }
 
-/** 列的显隐：有卡片，或拖动进行中（拖动时需要两列都作为投放区）。
- *  移动端恒不渲染——卡片经顶栏「卡片」抽屉（PanelSidebar 复用）访问。 */
+/**
+ * 列的显隐：该列**登记**过卡片，或拖动进行中（拖动时需要两列都作为投放区）。
+ * 移动端恒不渲染——卡片经顶栏「卡片」抽屉（PanelSidebar 复用）访问。
+ *
+ * 判据是「登记」而不是「当前可见」（2026-10 用户反馈「左侧栏莫名隐藏」）：
+ * 卡片门控依赖**异步到达**的 Core 状态（workspace 激活态 / loopMode / teams
+ * 列表 / 插件能力）——切 agent、工作区会话结束、断连重连的瞬时窗口都会让
+ * 门控短暂失败。用「可见卡片数」当判据时整列跟着消失再重现（正文行宽也
+ * 跟着抖）；左列若只放了条件性卡片（文件浏览器 / 临时分支），抖动最明显。
+ * 登记列表只在用户**拖动落位**时变化，是稳定信号——列不再随业务状态闪烁，
+ * 卡片进出改为列内部增删（空列在 RailStack 内显示占位提示）。
+ * 用户把最后一张卡拖走时登记变空，列照常消失（显式意图，不算闪烁）。
+ */
 const leftRailVisible = computed(
-  () => !isMobile.value && (railHasCards('left') || railDragEngaged.value),
+  () => !isMobile.value && (railRegistered('left') || railDragEngaged.value),
 );
 const rightRailVisible = computed(
-  () => !isMobile.value && (railHasCards('right') || railDragEngaged.value),
+  () => !isMobile.value && (railRegistered('right') || railDragEngaged.value),
 );
 
 /**
- * 消息滚动区的左右留白（有**可见卡片**的列 = 列宽）。
+ * 消息滚动区的左右留白（**登记**过卡片的列 = 列宽）。
  *
- * 拖动期间不改留白：被拖卡片已从源列摘除、尚未落入目标列，此时若让留白
- * 跟随「列是否渲染」（拖动会使空列临时出现）会让正文行宽反复跳变；按
- * 「有可见卡片」判断则拖动全程稳定，落位后再一次性过渡（0.24s）。
+ * 与列显隐同判据，因此两处永不打架（否则会出现「列没了但留白还在」或
+ * 「列在但正文压到卡片底下」）。相对旧实现（按「可见卡片」）的好处：
+ * - 门控抖动时留白不跳——此前卡片瞬时门控失败会让正文行宽在 324px 与
+ *   0 之间反复闪（用户观感：边栏莫名隐藏）；
+ * - 拖动期间也不跳——被拖卡片只是从**所见列表**摘除，登记归属要到落位
+ *   才变，正文行宽全程稳定，落位后一次性过渡（0.24s）。
  *
  * 注意返回**带单位的字符串**：`v-bind()` 注入 CSS 变量时数字无单位会被
  * 浏览器丢弃（padding-left: 324 非法）。
  */
 const trayPadLeft = computed(() =>
-  !isMobile.value && railHasCards('left') ? `${RAIL_WIDTH}px` : '0px',
+  !isMobile.value && railRegistered('left') ? `${RAIL_WIDTH}px` : '0px',
 );
 const trayPadRight = computed(() =>
-  !isMobile.value && railHasCards('right') ? `${RAIL_WIDTH}px` : '0px',
+  !isMobile.value && railRegistered('right') ? `${RAIL_WIDTH}px` : '0px',
 );
 
 /**
@@ -999,7 +1021,8 @@ function mediaSrc(img: string): string {
     />
 
     <!-- 双侧边栏（2026-09-24）：左右各一列卡片栈，卡片可在两列之间拖动
-         （机制与动画见 ../rail-drag.ts；列显隐：有卡片或拖动中）。
+         （机制与动画见 ../rail-drag.ts；列显隐：该列**登记**过卡片或拖动中
+         ——判据是登记而非「可见」，见上方 leftRailVisible 的注释）。
          列的进出走 Transition（opacity + 侧向轻移，仅 transform/opacity）：
          拖动中出现的投放区**不做入场过渡**（`.chat-rail--dropzone` 覆盖为
          `transition: none`）——落点命中读的是列矩形，动画位移会让命中飘。 -->
