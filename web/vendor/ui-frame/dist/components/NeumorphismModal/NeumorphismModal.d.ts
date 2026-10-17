@@ -43,8 +43,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     "onUpdate:modelValue"?: ((value: boolean) => any) | undefined;
     onConfirm?: (() => any) | undefined;
 }>, {
-    closable: boolean;
     footer: boolean;
+    closable: boolean;
     modelValue: boolean;
     maskClosable: boolean;
     showClose: boolean;

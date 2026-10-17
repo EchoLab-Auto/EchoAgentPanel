@@ -53,9 +53,9 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     "onUpdate:modelValue"?: ((value: number | undefined) => any) | undefined;
 }>, {
     step: number;
+    label: string;
     disabled: boolean;
     max: number;
-    label: string;
     placeholder: string;
     modelValue: number;
     min: number;

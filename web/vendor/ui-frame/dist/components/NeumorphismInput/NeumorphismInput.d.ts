@@ -54,8 +54,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     onEnter?: ((value: string) => any) | undefined;
 }>, {
     type: string;
-    disabled: boolean;
     required: boolean;
+    disabled: boolean;
     modelValue: string;
     readonly: boolean;
     autocomplete: string;

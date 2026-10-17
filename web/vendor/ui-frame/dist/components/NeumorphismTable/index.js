@@ -1,4 +1,4 @@
-import { N as f } from "../../chunks/NeumorphismTable-BO1mMCOy.js";
+import { N as f } from "../../chunks/NeumorphismTable-BvKlRkmr.js";
 export {
   f as default
 };

@@ -186,6 +186,45 @@ const h = {
   },
   spinner: { paths: ["M12 21a9 9 0 1 0-9-9"] },
   star: { paths: ["m12 3.6 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9z"] },
+  // ── 补充语义（2026-10 内部组件迁用过程中新增）────────────────────
+  "chevrons-left": { paths: ["M16 18l-6-6 6-6", "M8 18l6-6-6-6"] },
+  "chevrons-right": { paths: ["M8 6l6 6-6 6", "M16 6l6 6-6 6"] },
+  "circle-close": { paths: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M15 9l-6 6M9 9l6 6"] },
+  "circle-info": { paths: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 16v-4", "M12 8h.01"] },
+  "zoom-in": {
+    paths: [
+      "M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0z",
+      "M10.5 7.5v6",
+      "M7.5 10.5h6",
+      "m20 20-4.6-4.6"
+    ]
+  },
+  "zoom-out": {
+    paths: ["M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0z", "M7.5 10.5h6", "m20 20-4.6-4.6"]
+  },
+  "arrows-out": { paths: ["M15 3h6v6", "M9 21H3v-6", "M21 3l-7 7", "M3 21l7-7"] },
+  inbox: {
+    paths: [
+      "M22 12h-6l-2 3h-4l-2-3H2",
+      "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+    ]
+  },
+  maximize: {
+    paths: [
+      "M8 3H5a2 2 0 0 0-2 2v3",
+      "M21 8V5a2 2 0 0 0-2-2h-3",
+      "M3 16v3a2 2 0 0 0 2 2h3",
+      "M16 21h3a2 2 0 0 0 2-2v-3"
+    ]
+  },
+  minimize: {
+    paths: [
+      "M8 3v3a2 2 0 0 1-2 2H3",
+      "M21 8h-3a2 2 0 0 1-2-2V3",
+      "M3 16h3a2 2 0 0 1 2 2v3",
+      "M16 21v-3a2 2 0 0 1 2-2h3"
+    ]
+  },
   // ── 消息与智能（通用语义，2026-10 由 Panel 侧收敛进来）────────────
   message: { paths: ["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"] },
   network: {
@@ -209,8 +248,8 @@ const h = {
   xl: 20,
   "2xl": 24,
   "3xl": 32
-}, s = new Set(Object.values(M)), p = /* @__PURE__ */ new Set([0.5, 1, 1.5, 2, 2.5, 3]);
-function l(a) {
+}, s = new Set(Object.values(M)), l = /* @__PURE__ */ new Set([0.5, 1, 1.5, 2, 2.5, 3]);
+function p(a) {
   return a <= 12 ? 2.5 : a >= 24 ? 1.5 : 2;
 }
 export {
@@ -218,6 +257,6 @@ export {
   h as ICON_REGISTRY,
   s as ICON_SIZE_ALLOWED,
   M as ICON_SIZE_PX,
-  p as ICON_STROKE_ALLOWED,
-  l as defaultStrokeWidth
+  l as ICON_STROKE_ALLOWED,
+  p as defaultStrokeWidth
 };

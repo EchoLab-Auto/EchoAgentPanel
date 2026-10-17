@@ -36,8 +36,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
 }>>> & Readonly<{
     onClose?: (() => any) | undefined;
 }>, {
-    title: string;
     message: string;
+    title: string;
     closable: boolean;
     icon: boolean;
     bordered: boolean;

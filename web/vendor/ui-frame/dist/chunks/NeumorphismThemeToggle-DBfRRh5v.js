@@ -17,17 +17,17 @@ import '../NeumorphismThemeToggle.css';const w = ["aria-label"], F = ["aria-pres
   },
   emits: ["update:modelValue", "change"],
   setup(a, { emit: b }) {
-    const t = a, { config: r, resolveProp: c } = D(), i = o(
+    const t = a, { config: r, resolveProp: d } = D(), i = o(
       () => {
         var e;
-        return c(t.size, (e = r.value.themeToggle) == null ? void 0 : e.size, "medium");
+        return d(t.size, (e = r.value.themeToggle) == null ? void 0 : e.size, "medium");
       }
     ), f = o(
       () => {
         var e;
-        return c(t.disableAuto, (e = r.value.themeToggle) == null ? void 0 : e.disableAuto, !1);
+        return d(t.disableAuto, (e = r.value.themeToggle) == null ? void 0 : e.disableAuto, !1);
       }
-    ), d = b, { t: s } = S(), p = o(() => {
+    ), c = b, { t: s } = S(), p = o(() => {
       const e = [
         { value: "light", label: s("themeToggleLight") },
         { value: "auto", label: s("themeToggleAuto") },
@@ -50,7 +50,7 @@ import '../NeumorphismThemeToggle.css';const w = ["aria-label"], F = ["aria-pres
       }
     ]);
     function _(e) {
-      t.disabled || e !== t.modelValue && (u.setTheme(e), d("update:modelValue", e), d("change", e));
+      t.disabled || e !== t.modelValue && (u.setTheme(e), c("update:modelValue", e), c("change", e));
     }
     const T = o(() => i.value === "small" ? "sm" : "lg"), N = {
       light: "sun",
@@ -84,7 +84,7 @@ import '../NeumorphismThemeToggle.css';const w = ["aria-label"], F = ["aria-pres
       ], 10, F))), 128))
     ], 10, w));
   }
-}), Q = /* @__PURE__ */ $(M, [["__scopeId", "data-v-d7cc7e81"]]);
+}), Q = /* @__PURE__ */ $(M, [["__scopeId", "data-v-2d587345"]]);
 export {
   Q as N
 };

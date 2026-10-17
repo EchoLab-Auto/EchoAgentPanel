@@ -49,8 +49,8 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     "onUpdate:modelValue"?: ((value: string) => any) | undefined;
     onEnter?: ((value: string) => any) | undefined;
 }>, {
-    disabled: boolean;
     required: boolean;
+    disabled: boolean;
     modelValue: string;
     readonly: boolean;
     rows: number | string;
