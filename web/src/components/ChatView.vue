@@ -37,6 +37,11 @@ import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
 import { railDragEngaged } from '../rail-drag';
 import { claimReasoningAnimation } from '../reasoning-anim';
+import {
+  rememberChatMessage,
+  retainChatMessages,
+  reuseChatMessage,
+} from '../chat-message-cache';
 // 弹层按需加载（2026-10 审计修复）：入口行弹层与配置/上下文覆盖层首次
 // 打开时才加载对应 chunk（此前全部静态进首包——不打开也付加载成本）。
 const AgentConfigModal = lazy(() => import('./AgentConfigModal.vue'), 'AgentConfigModal');
@@ -469,26 +474,51 @@ function reasoningSessionRunning(sessionId: string | undefined): boolean {
 }
 
 // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
+//
+// **渲染对象复用**（2026-10 性能修复，见 chat-message-cache.ts）：数据链
+// （sessionMessagesFor 的浅拷贝 + toChatMessage）每次都产出全新对象，若直接
+// 用它做 v-for 的 :message，任意一条变化都会让 1000+ 个 MessageItem 全部
+// re-render。实测 1024 条消息下每次 delta 白花 143.8 ms（FPS 11.7 @4× CPU）。
+// 现在按 key 缓存：渲染相关字段未变的条目沿用上次的对象引用，子组件 props
+// 恒等 → Vue 跳过；只有真正变化的那一条重建。
 const messages = computed<ChatMessage[]>(() => {
   const list =
     props.sessionId === 'global'
       ? state.trunk
       : sessionMessagesFor(state, props.sessionId, props.activeTeamId ?? null);
-  return list.map((m) => {
-    const cm = toChatMessage(m);
-    // 推理行打字机准入（2026-10）：实时到达 + 消息新鲜 + 会话仍在输出，
-    // 且从未播放过——重新显示已完成卡片（切会话/重挂载）直接全量显示，
-    // 只有正在输出的思考才用打字动画（见 reasoning-anim.ts）。
+  const out: ChatMessage[] = new Array(list.length);
+  const alive = new Set<string>();
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i];
+    alive.add(m.key);
+    // 推理行走原路径：animate 由 claimReasoningAnimation 有状态地决定，
+    // 缓存首次结果会改变它的语义（见 chat-message-cache.ts 模块注释）。
     if (m.role === 'reasoning') {
+      const cm = toChatMessage(m);
+      // 推理行打字机准入（2026-10）：实时到达 + 消息新鲜 + 会话仍在输出，
+      // 且从未播放过——重新显示已完成卡片（切会话/重挂载）直接全量显示，
+      // 只有正在输出的思考才用打字动画（见 reasoning-anim.ts）。
       cm.animate = claimReasoningAnimation({
         animate: m.animate,
         key: m.key,
         time: m.time,
         sessionRunning: reasoningSessionRunning(m.sessionId),
       });
+      out[i] = cm;
+      continue;
     }
-    return cm;
-  });
+    const cached = reuseChatMessage(m);
+    if (cached) {
+      out[i] = cached;
+      continue;
+    }
+    const cm = toChatMessage(m);
+    rememberChatMessage(m, cm);
+    out[i] = cm;
+  }
+  // 丢弃已不在列表里的 key（会话切换 / FIFO 淘汰），防无界增长。
+  retainChatMessages(alive);
+  return out;
 });
 
 // 会话历史补拉（2026-10）：共享显示窗口 FIFO 淘汰后旧会话条目不可见——
