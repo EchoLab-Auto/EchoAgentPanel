@@ -13,7 +13,8 @@
 //! 数据来自后端 SkillsList / ToolsList / PluginsList / TeamsList 事件，打开时主动拉取；
 //! API 配置随 state.api 事件更新。
 
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { lazy } from '../lazy';
 
 const props = defineProps<{
   activeSessionId?: string | null;
@@ -56,11 +57,11 @@ import { MarkdownRenderer } from '@echolab-auto/ui-frame/doc';
 // 子设置页按需加载（2026-10 审计修复）：五个子页约 2300 行（含 LogView
 // 挂载即开始的 5s 轮询），此前全随设置视图进首包；改为首次切入对应
 // 分类时才加载（vite 对每个 import() 自动分包）。
-const ApiSettings = defineAsyncComponent(() => import('./ApiSettings.vue'));
-const LogView = defineAsyncComponent(() => import('./LogView.vue'));
-const FederationSettings = defineAsyncComponent(() => import('./FederationSettings.vue'));
-const UpstreamsSettings = defineAsyncComponent(() => import('./UpstreamsSettings.vue'));
-const SelfUpdateSettings = defineAsyncComponent(() => import('./SelfUpdateSettings.vue'));
+const ApiSettings = lazy(() => import('./ApiSettings.vue'), 'ApiSettings');
+const LogView = lazy(() => import('./LogView.vue'), 'LogView');
+const FederationSettings = lazy(() => import('./FederationSettings.vue'), 'FederationSettings');
+const UpstreamsSettings = lazy(() => import('./UpstreamsSettings.vue'), 'UpstreamsSettings');
+const SelfUpdateSettings = lazy(() => import('./SelfUpdateSettings.vue'), 'SelfUpdateSettings');
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';

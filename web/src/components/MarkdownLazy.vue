@@ -15,6 +15,7 @@
 //! 同一模块的多次加载由 ESM 缓存共享（全页仅一次网络请求）。
 
 import { defineAsyncComponent, defineComponent, h } from 'vue';
+import { isChunkLoadError, tryAutoReload } from '../lazy';
 
 const props = defineProps<{
   content: string;
@@ -37,6 +38,13 @@ const LazyMarkdown = defineAsyncComponent({
   // 立即显示回退（慢网络下消息文本先行）；不设 delay，避免回退出现前
   // 的空白帧。
   delay: 0,
+  // 加载失败（部署后旧 chunk 缺失等）：保持纯文本回退而不是空白；
+  // chunk 类失败按 lazy.ts 的一次性自动重载策略处理（10s 防循环）。
+  errorComponent: PlainFallback,
+  onError(error, _retry, fail) {
+    if (isChunkLoadError(error) && tryAutoReload()) return;
+    fail();
+  },
 });
 </script>
 

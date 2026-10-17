@@ -1,7 +1,8 @@
 <script setup lang="ts">
 //! 应用壳：NeumorphismLayout（库 sider 槽位，覆盖样式去背景/边框）+ 主视图 + 弹窗 + toast 桥。
 
-import { defineAsyncComponent, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
+import { lazy } from './lazy';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismLayout from '@echolab-auto/ui-frame/components/NeumorphismLayout';
 import NeumorphismToastProvider from '@echolab-auto/ui-frame/components/NeumorphismToast';
@@ -23,9 +24,9 @@ import ChatView from './components/ChatView.vue';
 // 首屏瘦身（2026-10 审计修复）：设置视图（3400+ 行，含 5 个子设置页）、
 // Shell 详情与分支弹窗改为按需加载——不进聊天首屏的代码不进首包，
 // vite 自动按 import() 边界分包。
-const SettingsView = defineAsyncComponent(() => import('./components/SettingsView.vue'));
-const ShellPanel = defineAsyncComponent(() => import('./components/ShellPanel.vue'));
-const BranchModal = defineAsyncComponent(() => import('./components/BranchModal.vue'));
+const SettingsView = lazy(() => import('./components/SettingsView.vue'), 'SettingsView');
+const ShellPanel = lazy(() => import('./components/ShellPanel.vue'), 'ShellPanel');
+const BranchModal = lazy(() => import('./components/BranchModal.vue'), 'BranchModal');
 import FullscreenToggleButton from './components/FullscreenToggleButton.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';

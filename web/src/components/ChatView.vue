@@ -9,7 +9,8 @@
 //! 打包"被解散，组合权归产品）。
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { lazy } from '../lazy';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismDrawer from '@echolab-auto/ui-frame/components/NeumorphismDrawer';
@@ -38,12 +39,12 @@ import { railDragEngaged } from '../rail-drag';
 import { claimReasoningAnimation } from '../reasoning-anim';
 // 弹层按需加载（2026-10 审计修复）：入口行弹层与配置/上下文覆盖层首次
 // 打开时才加载对应 chunk（此前全部静态进首包——不打开也付加载成本）。
-const AgentConfigModal = defineAsyncComponent(() => import('./AgentConfigModal.vue'));
-const ContextView = defineAsyncComponent(() => import('./ContextView.vue'));
-const AdapterPanel = defineAsyncComponent(() => import('./AdapterPanel.vue'));
-const WorkspacePanel = defineAsyncComponent(() => import('./WorkspacePanel.vue'));
-const SessionSwitcher = defineAsyncComponent(() => import('./SessionSwitcher.vue'));
-const TasksPanel = defineAsyncComponent(() => import('./TasksPanel.vue'));
+const AgentConfigModal = lazy(() => import('./AgentConfigModal.vue'), 'AgentConfigModal');
+const ContextView = lazy(() => import('./ContextView.vue'), 'ContextView');
+const AdapterPanel = lazy(() => import('./AdapterPanel.vue'), 'AdapterPanel');
+const WorkspacePanel = lazy(() => import('./WorkspacePanel.vue'), 'WorkspacePanel');
+const SessionSwitcher = lazy(() => import('./SessionSwitcher.vue'), 'SessionSwitcher');
+const TasksPanel = lazy(() => import('./TasksPanel.vue'), 'TasksPanel');
 
 const props = defineProps<{
   sessionId: string;

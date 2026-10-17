@@ -799,3 +799,26 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
     box-sizing: border-box;
   }
 }
+
+/* 懒加载失败兜底（lazy.ts 的内联错误组件）：部署后旧 chunk 缺失时提示刷新。 */
+.lazy-load-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  color: var(--panel-err);
+  font-size: 13px;
+}
+.lazy-load-error__btn {
+  padding: 4px 12px;
+  border: 1px solid var(--nm-border-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nm-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.lazy-load-error__btn:hover { background: var(--panel-hover); }
+.lazy-load-error__btn:focus-visible { outline: 2px solid var(--nm-primary-color); outline-offset: 2px; }
+.lazy-load-error__btn:disabled { opacity: 0.6; cursor: default; }
