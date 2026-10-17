@@ -2,7 +2,7 @@
 //! 面板图标载体（2026-10）：**薄封装**在 ui-frame 的 `NeumorphismIcon` 之上，
 //! 只补两件产品侧关注的事——语义色调（`tone` → `--panel-*` 令牌）与
 //! 尺寸档的中文别名。图标几何全部来自 ui-frame 注册表
-//! （`@echolab-auto/ui-frame/icons`，55 个语义），Panel 不再自持 path 数据。
+//! （`@echolab-auto/ui-frame/icons`，79 个语义），Panel 不再自持 path 数据。
 //!
 //! 为什么保留这一层（而不是组件里直接用 ui-frame）：
 //! - **语义色**：`reasoning` / `subagent` 是 Panel 特有的产品语义，映射到

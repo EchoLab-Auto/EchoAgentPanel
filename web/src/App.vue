@@ -1,5 +1,6 @@
 <script setup lang="ts">
-//! 应用壳：NeumorphismLayout（库 sider 槽位，覆盖样式去背景/边框）+ 主视图 + 弹窗 + toast 桥。
+//! 应用壳：NeumorphismLayout（`show-header` + `height="100%"`；**不使用库的 sider 槽位**——
+//! 原左侧边栏已移除，卡片改由会话视图内的 chat-rail 双列承载）+ 主视图 + 弹窗 + toast 桥。
 
 import { ref, watch } from 'vue';
 import { lazy } from './lazy';

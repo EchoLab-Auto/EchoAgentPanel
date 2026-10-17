@@ -696,7 +696,7 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
    ——≥768px 桌面样式即上方默认值，零回归。
    分段：① 全局壳（高度/安全区/顶栏）② 触控目标 ③ 各视图自有规则就近写在
    组件 <style> 内（本文件只放跨组件的壳层规则）。
-   参考设计：document/panel-mobile.md。
+   参考设计：document/panel/panel-mobile.md（Core 仓库文档群）。
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ① 触控目标（与视口宽度无关：平板触摸同样受益） */
