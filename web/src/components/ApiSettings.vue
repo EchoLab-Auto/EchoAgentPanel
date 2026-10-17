@@ -859,11 +859,11 @@ watch(
             <div class="api-metrics__chart-title">余额</div>
             <NeumorphismChartLine
               :series="overviewBalance"
-              :height="170"
+              :height="220"
               curve="smooth"
               :area="true"
-              :show-axis="false"
-              :show-grid="false"
+              :show-axis="true"
+              :show-grid="true"
               :show-points="false"
               :show-legend="true"
               :animate="false"
@@ -874,11 +874,11 @@ watch(
             <div class="api-metrics__chart-title">用量（tokens / 小时）</div>
             <NeumorphismChartLine
               :series="overviewUsage"
-              :height="170"
+              :height="220"
               curve="smooth"
               :area="true"
-              :show-axis="false"
-              :show-grid="false"
+              :show-axis="true"
+              :show-grid="true"
               :show-points="false"
               :show-legend="true"
               :animate="false"
@@ -1095,8 +1095,14 @@ watch(
 </template>
 
 <style scoped>
+/* 页面宽度（2026-10 布局优化）：此前硬限 720px——1920 视口下详情面板可用
+   1714px，闲置 58%。现跟随容器满宽，仅对超宽屏设 1600px 上限（避免 4K 下
+   单行拉得过长反而难读）。 */
 .api-settings-page {
-  max-width: 720px;
+  width: 100%;
+  /* 上限 1920：≤1920 视口时基本满宽（详情面板内容宽 ≈1682，仅留边距）；
+     更宽的屏（2560/4K）停在 1920，避免单行文本过长反而难读。 */
+  max-width: 1920px;
 }
 /* 编辑表单（展开态） */
 .api-form-section {
@@ -1124,10 +1130,29 @@ watch(
 }
 /* Profiles 卡片网格（卡片本体 = ui-frame NeumorphismCard，槽位结构） */
 .profile-grid {
+  /* 卡片最小宽 240 → 340：1920 视口（内容宽 1682）自动 4 列 × 413px——
+     实测 5 列（330px）会把 key 行与 sparkline 挤成多行，卡高 363 > 4 列的 284，
+     整页反而更长。340 是「列数 × 单卡高度」的最优点；2560 宽屏自动升到 5 列。
+     grid-auto-rows: 1fr 让同一行的卡片等高。 */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-auto-rows: 1fr;
   gap: 14px;
   margin-top: 10px;
+}
+/* 等高卡片（2026-10）：grid-auto-rows: 1fr 只保证同行等高，卡内需 flex 撑满，
+   否则内容少的卡（无余额查询）下方留白不均。 */
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+.profile-card > :deep(.nm-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 /* 编辑中：主色高亮（保留 nm-card 自身阴影） */
 .profile-card--editing {
@@ -1178,10 +1203,20 @@ watch(
 }
 /* footer 槽：余额行 + 操作行（统一纵向节奏） */
 .profile-card__foot {
+  /* 宽卡时「余额行 | 操作行」并排（各占一半），窄卡自动堆叠；
+     操作行与余额行最小宽 200/180px，低于此值折行。 */
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 8px;
   padding: 10px 14px 12px;
+}
+.profile-card__foot > .profile-card__balance,
+.profile-card__foot > .profile-card__actions {
+  /* 220px 断点：多列布局（卡宽 ≈390 → 内容 362）时仍上下堆叠，
+     单列宽卡（≥约 500px）才并排——避免小屏把两段挤在一起。 */
+  flex: 1 1 220px;
+  min-width: 0;
 }
 /* 余额行：金额列左（占满余宽、超长省略），按钮右固定 */
 .profile-card__balance {
@@ -1232,9 +1267,11 @@ watch(
 }
 /* 卡片小图区：余额 / 用量 sparkline（近 7 天） */
 .profile-card__charts {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  /* 宽卡时两张 sparkline 并排（自动按 150px 下限折行）——320px 卡单列、
+     宽屏 5 列卡内也能横向铺满，不再空着右半边。 */
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 10px;
   padding-top: 2px;
 }
 .profile-card__chart {
@@ -1330,9 +1367,10 @@ watch(
   font-size: 12px;
 }
 .api-metrics__charts {
+  /* 宽屏两张并排（各约占一半），窄屏自动堆叠；最小 420px 保证折线可读 */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 14px;
 }
 .api-metrics__chart {
   display: flex;

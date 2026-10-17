@@ -1,57 +1,62 @@
-import { computed as c } from "vue";
-import { useChart as V } from "./useChart.js";
-import { buildSmoothPath as Z } from "./chartPath.js";
+import { computed as u } from "vue";
+import { useChart as N } from "./useChart.js";
+import { buildSmoothPath as V } from "./chartPath.js";
 function U(t) {
   const {
     containerRef: s,
     series: a,
     margin: d,
     curve: x,
-    area: y,
+    area: m,
     areaOpacity: I = 0.1,
-    showPoints: S,
-    pointSize: A = 6,
-    lineWidth: w,
-    yMin: z,
+    showPoints: A,
+    pointSize: w = 6,
+    lineWidth: z,
+    yMin: E,
     yMax: O
-  } = t, o = V({
+  } = t, o = N({
     containerRef: s,
     series: a,
     margin: d
-  }), m = c(
+  }), y = u(
     () => {
       var e, n;
       return o.resolveProp(x, (n = (e = o.config.value.chart) == null ? void 0 : e.line) == null ? void 0 : n.curve, "smooth");
     }
-  ), W = c(
+  ), W = u(
     () => {
       var e, n;
-      return o.resolveProp(S, (n = (e = o.config.value.chart) == null ? void 0 : e.line) == null ? void 0 : n.showPoints, !0);
+      return o.resolveProp(A, (n = (e = o.config.value.chart) == null ? void 0 : e.line) == null ? void 0 : n.showPoints, !0);
     }
-  ), C = c(
+  ), C = u(
     () => {
       var e, n;
-      return o.resolveProp(w, (n = (e = o.config.value.chart) == null ? void 0 : e.line) == null ? void 0 : n.lineWidth, 2.5);
+      return o.resolveProp(z, (n = (e = o.config.value.chart) == null ? void 0 : e.line) == null ? void 0 : n.lineWidth, 2.5);
     }
-  ), P = c(
+  ), g = u(
     () => {
       var e, n;
-      return o.resolveProp(y, (n = (e = o.config.value.chart) == null ? void 0 : e.line) == null ? void 0 : n.area, !1);
+      return o.resolveProp(m, (n = (e = o.config.value.chart) == null ? void 0 : e.line) == null ? void 0 : n.area, !1);
     }
-  ), D = c(() => {
+  ), D = u(() => {
     let e = 0;
     for (const n of a.value)
-      for (const u of n.data)
-        e = Math.min(e, u.value);
+      for (const l of n.data)
+        e = Math.min(e, l.value);
     return e;
-  }), E = c(() => {
+  }), _ = u(() => {
     let e = 0;
     for (const n of a.value)
-      for (const u of n.data)
-        e = Math.max(e, u.value);
+      for (const l of n.data)
+        e = Math.max(e, l.value);
     return e;
-  }), $ = c(() => z ?? D.value), p = c(() => O ?? E.value), k = c(() => a.value.length === 0 ? [] : a.value[0].data.map((e) => e.label ?? "")), g = c(() => o.niceTicks($.value, p.value)), R = c(() => g.value.map((e) => o.formatValue(e))), T = c(() => g.value), M = c(() => {
-    const e = [], n = o.plotSize.value.width, u = o.plotSize.value.height, l = p.value - $.value || 1;
+  }), $ = u(() => E ?? D.value), P = u(() => O ?? _.value), L = u(() => a.value.length === 0 ? [] : a.value[0].data.map((e) => e.label ?? "")), k = 72, B = u(() => {
+    const e = L.value.length;
+    if (e <= 1) return 1;
+    const n = o.plotSize.value.width || 0, l = Math.max(2, Math.floor(n / k));
+    return Math.max(1, Math.ceil(e / l));
+  }), M = u(() => o.niceTicks($.value, P.value)), R = u(() => M.value.map((e) => o.formatValue(e))), T = u(() => M.value), p = u(() => {
+    const e = [], n = o.plotSize.value.width, l = o.plotSize.value.height, c = P.value - $.value || 1;
     for (const h of a.value) {
       const i = [], r = h.data.length;
       if (r === 0) {
@@ -60,57 +65,57 @@ function U(t) {
       }
       const v = r > 1 ? n / (r - 1) : n / 2;
       for (let f = 0; f < r; f++) {
-        const F = r > 1 ? f * v : n / 2, H = u - (h.data[f].value - $.value) / l * u;
+        const F = r > 1 ? f * v : n / 2, H = l - (h.data[f].value - $.value) / c * l;
         i.push({ x: F, y: H });
       }
       e.push(i);
     }
     return e;
-  }), q = c(() => {
+  }), X = u(() => {
     const e = [], n = o.plotSize.value.height;
-    return M.value.forEach((u, l) => {
-      if (u.length === 0) return;
-      const h = a.value[l], i = h.color ?? o.palette.value[l % o.palette.value.length], r = b(u, m.value), v = P.value ? J(u, n, m.value) : void 0;
+    return p.value.forEach((l, c) => {
+      if (l.length === 0) return;
+      const h = a.value[c], i = h.color ?? o.palette.value[c % o.palette.value.length], r = S(l, y.value), v = g.value ? G(l, n, y.value) : void 0;
       e.push({
         path: r,
         areaPath: v,
         color: i,
         name: h.name,
-        seriesIndex: l
+        seriesIndex: c
       });
     }), e;
-  }), L = c(() => {
+  }), b = u(() => {
     const e = [];
-    return M.value.forEach((n, u) => {
-      const l = a.value[u];
-      if (!l) return;
-      const h = l.color ?? o.palette.value[u % o.palette.value.length];
+    return p.value.forEach((n, l) => {
+      const c = a.value[l];
+      if (!c) return;
+      const h = c.color ?? o.palette.value[l % o.palette.value.length];
       n.forEach((i, r) => {
         var v;
         e.push({
           cx: i.x,
           cy: i.y,
           color: h,
-          value: ((v = l.data[r]) == null ? void 0 : v.value) ?? 0,
+          value: ((v = c.data[r]) == null ? void 0 : v.value) ?? 0,
           dataIndex: r,
-          seriesIndex: u,
+          seriesIndex: l,
           isFocused: o.focusedIndex.value === r
         });
       });
     }), e;
   });
-  function B(e, n) {
-    for (const l of L.value) {
-      const h = l.cx - e, i = l.cy - n;
+  function q(e, n) {
+    for (const c of b.value) {
+      const h = c.cx - e, i = c.cy - n;
       if (Math.sqrt(h * h + i * i) < 12) {
-        const r = a.value[l.seriesIndex], v = r == null ? void 0 : r.data[l.dataIndex];
+        const r = a.value[c.seriesIndex], v = r == null ? void 0 : r.data[c.dataIndex];
         return {
           visible: !0,
           x: e,
           y: n,
-          content: `${(r == null ? void 0 : r.name) ?? ""}: ${(v == null ? void 0 : v.label) ?? ""} ${l.value}`,
-          dataIndex: l.dataIndex,
-          seriesIndex: l.seriesIndex
+          content: `${(r == null ? void 0 : r.name) ?? ""}: ${(v == null ? void 0 : v.label) ?? ""} ${c.value}`,
+          dataIndex: c.dataIndex,
+          seriesIndex: c.seriesIndex
         };
       }
     }
@@ -118,41 +123,42 @@ function U(t) {
   }
   return {
     ...o,
-    lines: q,
-    points: L,
-    xAxisLabels: k,
+    lines: X,
+    points: b,
+    xAxisLabels: L,
+    xLabelStride: B,
     yAxisLabels: R,
-    yAxisTicks: g,
+    yAxisTicks: M,
     gridLines: T,
-    findDataAtPosition: B,
-    resolvedCurve: m,
+    findDataAtPosition: q,
+    resolvedCurve: y,
     resolvedShowPoints: W,
     resolvedLineWidth: C,
-    resolvedArea: P,
+    resolvedArea: g,
     resolvedAreaOpacity: I,
-    resolvedPointSize: A
+    resolvedPointSize: w
   };
 }
-function b(t, s) {
+function S(t, s) {
   if (t.length === 0) return "";
   if (t.length === 1) return `M${t[0].x},${t[0].y}`;
   switch (s) {
     case "linear":
-      return j(t);
+      return Z(t);
     case "step":
-      return G(t);
+      return j(t);
     case "smooth":
     default:
-      return Z(t);
+      return V(t);
   }
 }
-function j(t) {
+function Z(t) {
   let s = `M${t[0].x},${t[0].y}`;
   for (let a = 1; a < t.length; a++)
     s += ` L${t[a].x},${t[a].y}`;
   return s;
 }
-function G(t) {
+function j(t) {
   let s = `M${t[0].x},${t[0].y}`;
   for (let a = 1; a < t.length; a++) {
     const d = (t[a - 1].x + t[a].x) / 2;
@@ -160,10 +166,10 @@ function G(t) {
   }
   return s;
 }
-function J(t, s, a) {
+function G(t, s, a) {
   if (t.length === 0) return "";
-  const d = b(t, a), x = t[t.length - 1], y = t[0];
-  return `${d} L${x.x},${s} L${y.x},${s} Z`;
+  const d = S(t, a), x = t[t.length - 1], m = t[0];
+  return `${d} L${x.x},${s} L${m.x},${s} Z`;
 }
 export {
   U as useLineChart

@@ -35,6 +35,7 @@ export declare function useLineChart(options: UseLineChartOptions): {
     lines: ComputedRef<LineSeries[]>;
     points: ComputedRef<ChartPoint[]>;
     xAxisLabels: ComputedRef<string[]>;
+    xLabelStride: ComputedRef<number>;
     yAxisLabels: ComputedRef<string[]>;
     yAxisTicks: ComputedRef<number[]>;
     gridLines: ComputedRef<number[]>;

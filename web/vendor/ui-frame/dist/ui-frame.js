@@ -59,7 +59,7 @@ import { N as y } from "./chunks/NeumorphismStatusDot-DVKfRlP8.js";
 import { N as A } from "./chunks/NeumorphismSpinner-CecIG42-.js";
 import { N as w } from "./chunks/NeumorphismChartCandlestick-CkCTva9p.js";
 import { N as P } from "./chunks/NeumorphismChartPie-9GSJM5aN.js";
-import { N as F } from "./chunks/NeumorphismChartLine-CpQfVJga.js";
+import { N as F } from "./chunks/NeumorphismChartLine-Btk61PgZ.js";
 import { N as R } from "./chunks/NeumorphismChartBar-DhKQR0v6.js";
 import { N as I } from "./chunks/NeumorphismAutoComplete-cCD5epLm.js";
 import { N as E } from "./chunks/NeumorphismUpload-DiwjI4tx.js";
