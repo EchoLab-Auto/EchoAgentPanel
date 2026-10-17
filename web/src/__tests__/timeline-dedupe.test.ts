@@ -159,7 +159,9 @@ describe('TrunkTimeline 增量：认领实时孪生而非追加', () => {
     const reasoning = state.trunk.filter((m) => m.role === 'reasoning');
     expect(reasoning).toHaveLength(1);
     expect(reasoning[0]!.content).toBe('思考');
-    expect(reasoning[0]!.seq).toBe(50);
+    // seq 刻意保持 0：历史派生不含推理，带 seq 会被 `seq <= baseSeq` 判成
+    // "已被快照覆盖"而整条消失（见 __tests__/reasoning-visibility.test.ts）。
+    expect(reasoning[0]!.seq ?? 0).toBe(0);
     // 保留原 key（Vue keyed v-for 的稳定身份）
     expect(reasoning[0]!.key).toBe(liveKey);
   });

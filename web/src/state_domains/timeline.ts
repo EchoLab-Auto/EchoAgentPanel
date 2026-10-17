@@ -372,7 +372,14 @@ export function mergeTimelineEntry(list: DisplayMessage[], incoming: DisplayMess
     // 就地升级为权威版本：保留 key（Vue keyed v-for 的稳定身份与入场动画），
     // 其余渲染相关字段以 incoming 为准。
     live.content = incoming.content;
-    live.seq = incoming.seq;
+    // ⚠️ **不**复制 incoming.seq：条目级 seq 只表示"来自时间线权威序列"，
+    // 而 `sessionMessagesFor` 用 `seq > 0 && seq <= hist.baseSeq` 判定"已被
+    // 历史快照覆盖"。可历史派生**不含推理**（history.rs 模块注释的已知差异：
+    // 推理不单独落事件日志），但它在算 baseSeq 时又统计了推理条目的 seq ——
+    // 一旦这里给实时推理补上 seq，它就会被判为"快照已有"而整条消失
+    // （2026-10 实测：trunk 里 190 条推理全被过滤，用户看到「看不到思考的
+    // chip」）。保持 0 表示"实时副本，快照未覆盖"，去重由
+    // `coveredBySnapshot` 按内容判定。
     live.tool = incoming.tool;
     live.reasoning = incoming.reasoning;
     live.images = incoming.images;
