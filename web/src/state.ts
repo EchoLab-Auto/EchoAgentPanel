@@ -536,8 +536,10 @@ export interface AppState {
   skills: SkillInfo[];
   /** 已注册的工具定义列表 */
   tools: ToolInfo[];
-  /** 已挂载插件列表 */
+  /** 已挂载插件列表（当前 activeRegion 的兼容视图）。 */
   plugins: PluginInfo[];
+  /** 各 Core 节点的插件列表。 */
+  pluginsByCore: Record<string, PluginInfo[]>;
   /** Team 成员列表（多 agent） */
   teams: TeamInfo[];
   /** 工作区会话列表（workspace 插件；当前加载归属的 team 见 workspaceTeamId） */
@@ -627,6 +629,7 @@ export function initialState(): AppState {
     skills: [],
     tools: [],
     plugins: [],
+    pluginsByCore: {},
     teams: [],
     workspaceSessions: [],
     workspaceActive: null,
@@ -1369,9 +1372,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       return state;
     }
     case 'PluginsList': {
-      if (!managementCoreCurrent(state, payloadCore(event))) return state;
-      const e = (event as { PluginsList: { plugins: PluginInfo[] } }).PluginsList;
-      state.plugins = e.plugins;
+      const e = (event as { PluginsList: { plugins: PluginInfo[]; core?: string | null } }).PluginsList;
+      const core = payloadCore(event) ?? e.core ?? '';
+      const plugins = (e.plugins ?? []).map((p) => ({ ...p, builtin: p.builtin ?? true, core }));
+      state.pluginsByCore[core] = plugins;
+      if (managementCoreCurrent(state, core || null)) state.plugins = plugins;
       return state;
     }
     case 'TeamsList': {

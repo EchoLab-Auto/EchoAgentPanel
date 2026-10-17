@@ -29,6 +29,7 @@ import NeumorphismEmpty from '@echolab-auto/ui-frame/components/NeumorphismEmpty
 import { NeumorphismForm, NeumorphismFormItem } from '@echolab-auto/ui-frame/components/NeumorphismForm';
 import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
 import NeumorphismModal from '@echolab-auto/ui-frame/components/NeumorphismModal';
+import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
 import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
 import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwitch';
 import NeumorphismTable from '@echolab-auto/ui-frame/components/NeumorphismTable';
@@ -169,11 +170,22 @@ const toolbarSubtitle = computed(() => {
   }
   if (activeCategory.value === 'plugin') {
     const c = pluginFilterCounts.value;
-    const gated = state.plugins.filter((p) => pluginSemantic(p) === 'gated').length;
-    const modes = state.plugins.filter((p) => pluginSemantic(p) === 'mode').length;
+    // 统计必须与**列表同源**（pluginCatalog = 当前选定节点的插件）：
+    // 用 state.plugins 时选了一个非 activeRegion 的节点会出现"共 5 项"
+    // 但列表只显示 2 行（2026-10 多 Core 插件管理）。
+    const catalog = pluginCatalog.value;
+    const gated = catalog.filter((p) => pluginSemantic(p) === 'gated').length;
+    const modes = catalog.filter((p) => pluginSemantic(p) === 'mode').length;
+    const external = catalog.filter((p) => pluginSource(p) === 'external').length;
     const parts = [`共 ${c.all} 项`];
-    if (gated) parts.push(`${gated} 包维度门控`);
-    if (modes) parts.push(`${modes} 模式插件`);
+    // 当前分组维度决定哪个维度更值得说：按来源分组时先说内部/外部。
+    if (pluginGroupBy.value === 'source') {
+      if (external) parts.push(`${external} 外部插件`);
+      if (c.all - external) parts.push(`${c.all - external} 内部插件`);
+    } else {
+      if (gated) parts.push(`${gated} 包维度门控`);
+      if (modes) parts.push(`${modes} 模式插件`);
+    }
     if (c.disabled) parts.push(`${c.disabled} 已禁用`);
     return parts.join(' · ');
   }
@@ -690,7 +702,57 @@ async function copyToolParams() {
 type PluginFilter = 'all' | 'enabled' | 'disabled';
 const pluginSearch = ref('');
 const pluginFilter = ref<PluginFilter>('all');
-const pluginGroupBy = ref<'semantic' | 'kind' | 'flat'>('semantic');
+const pluginGroupBy = ref<'source' | 'semantic' | 'kind' | 'flat'>('source');
+const pluginCore = ref<string | null>(state.activeRegion);
+/** 可选的管理节点：上游名 ∪ 人格归属 core ∪ 已知的 pluginsByCore 键。 */
+const pluginCoreOptions = computed(() => {
+  const ids = new Set<string>();
+  for (const u of state.upstreams) ids.add(u.name);
+  for (const t of state.teams) if (t.core) ids.add(t.core);
+  for (const k of Object.keys(state.pluginsByCore)) if (k) ids.add(k);
+  if (state.activeRegion) ids.add(state.activeRegion);
+  return [...ids].sort((a, b) => a.localeCompare(b, 'en'));
+});
+/**
+ * 实际生效的管理节点（选择器显示值）。
+ *
+ * 未显式选择时回退 activeRegion；再回退"唯一来源"——单上游配置下中继不加
+ * 信封，事件里没有 core 名（`pluginsByCore` 的键是空串），而选择器的选项
+ * 来自上游名，两者永远对不上。此时显示唯一来源，才不会出现"选了个节点却
+ * 一片空白"。
+ */
+const pluginCoreEffective = computed<string | null>(() => {
+  if (pluginCore.value) return pluginCore.value;
+  if (state.activeRegion) return state.activeRegion;
+  const known = Object.keys(state.pluginsByCore);
+  return known.length === 1 ? known[0] : null;
+});
+/**
+ * 当前节点的插件列表。
+ *
+ * 取数顺位：显式选定 / activeRegion 的归档 → **唯一来源**（单上游无壳场景，
+ * 键为空串）→ `state.plugins`（Core 只在"本节点是管理目标"时才更新它，
+ * 等价于当前节点的兼容视图）。
+ *
+ * ⚠️ 不要用 `state.plugins` 直接当列表：多 Core 下它是"最后推送的那份"，
+ * 选了别的节点会串显。
+ */
+const pluginCatalog = computed(() => {
+  const known = Object.keys(state.pluginsByCore);
+  const key = pluginCoreEffective.value;
+  if (key == null) {
+    // 尚未选定节点：只有一个来源就用它，否则用 Core 维护的兼容视图
+    // （`state.plugins` 只在"本节点是管理目标"时被更新）。
+    return known.length === 1 ? (state.pluginsByCore[known[0]] ?? []) : state.plugins;
+  }
+  const exact = state.pluginsByCore[key];
+  if (exact) return exact;
+  // 单来源但键对不上（单上游无信封时键是空串，或选择器里是上游名）：
+  // 只有一份数据就直接用它，避免"选了个节点却一片空白"。
+  if (known.length === 1) return state.pluginsByCore[known[0]] ?? [];
+  // 多来源且该节点还没推数据 → 空列表（绝不回退，否则串显别个节点）。
+  return [];
+});
 
 const PLUGIN_FILTERS: { key: PluginFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -699,6 +761,7 @@ const PLUGIN_FILTERS: { key: PluginFilter; label: string }[] = [
 ];
 
 const PLUGIN_GROUP_OPTIONS = [
+  { label: '内部 / 外部', value: 'source' },
   { label: '按门控语义', value: 'semantic' },
   { label: '按 kind', value: 'kind' },
   { label: '平铺', value: 'flat' },
@@ -719,6 +782,9 @@ function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
   return 'other';
 }
 
+function pluginSource(p: PluginInfo): 'builtin' | 'external' { return p.builtin === false ? 'external' : 'builtin'; }
+const PLUGIN_SOURCE_LABELS = { builtin: '内部插件', external: '外部插件' } as const;
+
 function pluginMatchesFilter(p: PluginInfo, filter: PluginFilter): boolean {
   switch (filter) {
     case 'all':
@@ -732,11 +798,11 @@ function pluginMatchesFilter(p: PluginInfo, filter: PluginFilter): boolean {
 
 const pluginFilterCounts = computed(() => {
   const counts: Record<PluginFilter, number> = {
-    all: state.plugins.length,
+    all: pluginCatalog.value.length,
     enabled: 0,
     disabled: 0,
   };
-  for (const p of state.plugins) {
+  for (const p of pluginCatalog.value) {
     if (p.enabled) counts.enabled += 1;
     else counts.disabled += 1;
   }
@@ -745,7 +811,7 @@ const pluginFilterCounts = computed(() => {
 
 const filteredPlugins = computed(() => {
   const needle = pluginSearch.value.trim().toLowerCase();
-  return state.plugins.filter((p) => {
+  return pluginCatalog.value.filter((p) => {
     if (!pluginMatchesFilter(p, pluginFilter.value)) return false;
     if (!needle) return true;
     return (
@@ -773,6 +839,9 @@ const pluginWorkbenchGroups = computed(() => {
   for (const p of filteredPlugins.value) {
     if (pluginGroupBy.value === 'flat') {
       push('__all__', '全部插件', undefined, p);
+    } else if (pluginGroupBy.value === 'source') {
+      const source = pluginSource(p);
+      push(`source:${source}`, PLUGIN_SOURCE_LABELS[source], source === 'external' ? '运行期插件；仅影响当前节点' : '随 Core 发布；仅影响当前节点', p);
     } else if (pluginGroupBy.value === 'semantic') {
       const sem = pluginSemantic(p);
       push(`sem:${sem}`, PLUGIN_SEMANTIC_LABELS[sem], SEMANTIC_HINT[sem], p);
@@ -802,7 +871,7 @@ function pluginProtected(p: PluginInfo): boolean {
 /** 插件行内快速开关（受保护的不给开关）。 */
 function quickTogglePlugin(p: PluginInfo, enabled: boolean) {
   if (pluginProtected(p)) return;
-  togglePlugin(p, enabled);
+  togglePlugin(p, enabled, pluginCoreEffective.value ?? undefined);
 }
 
 /** 插件「带来什么」：包内工具/技能（供列表徽标与详情 chip 展示）。 */
@@ -1333,7 +1402,7 @@ function toggleSkill(skill: SkillInfo, enabled: boolean) {
 // 禁用它（防自锁），这里在 UI 侧提前明示，避免误以为操作生效。
 const MANAGEMENT_PANEL_PLUGIN_ID = 'echo-agent.management.panel';
 
-function togglePlugin(plugin: PluginInfo, enabled: boolean) {
+function togglePlugin(plugin: PluginInfo, enabled: boolean, targetCore?: string) {
   if (!enabled && plugin.id === MANAGEMENT_PANEL_PLUGIN_ID) {
     addToast({
       message:
@@ -1343,7 +1412,7 @@ function togglePlugin(plugin: PluginInfo, enabled: boolean) {
     });
     return;
   }
-  sendCommand({ TogglePlugin: { id: plugin.id, enabled } });
+  sendCommand({ TogglePlugin: { id: plugin.id, enabled } }, targetCore);
 }
 
 // ── 工具启停 ──
@@ -1660,6 +1729,7 @@ watch(
       </div>
 
       <div v-else-if="activeCategory === 'plugin'" class="caps-filters">
+        <NeumorphismSelect :model-value="pluginCoreEffective ?? ''" :options="pluginCoreOptions.map(core => ({ label: regionLabel(state, core), value: core }))" size="small" aria-label="管理节点" @update:model-value="pluginCore = String($event ?? '') || null; selectedPlugin = null; sendPending('RequestPluginsList', 'settings:plugins', pluginCoreEffective ?? undefined)" />
         <NeumorphismInput
           v-model="pluginSearch"
           placeholder="搜索名称 / ID / 描述"

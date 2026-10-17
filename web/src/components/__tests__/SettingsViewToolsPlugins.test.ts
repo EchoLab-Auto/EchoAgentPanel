@@ -3,7 +3,8 @@
 //! 锁定的交互契约：
 //! - 工具：默认按包分组、双行行卡 + hover 快速启停、搜索/状态 chips、
 //!   详情分区（能力说明 / 被谁使用 / 所属包 / 参数表）；
-//! - 插件：默认按门控语义分组（门控 / 通道 / 模式 / 其它）、包规模徽标、
+//! - 插件：默认按来源分组（内部 / 外部），可切到门控语义 / kind / 平铺；
+//!   多 Core 下按选定节点取列表（pluginCatalog），包规模徽标、
 //!   受保护插件不给开关、详情四分区（带来什么 / 被谁使用 / 启停影响 / 技术信息）；
 //! - 交叉跳转：插件成员 chip → 工具/技能分类并选中；工具「所属包」→ 插件分类。
 
@@ -22,7 +23,7 @@ vi.mock('../../connection', () => {
 
 import SettingsView from '../SettingsView.vue';
 import { state } from '../../store';
-import { sendCommand } from '../../connection';
+import { sendCommand, sendPending } from '../../connection';
 
 function seed() {
   state.tools = [
@@ -233,16 +234,57 @@ describe('SettingsView 插件工作台', () => {
     vi.mocked(sendCommand).mockClear();
   });
 
-  it('默认按门控语义分组（门控 → 通道 → 模式 → 其它）+ 副标题统计', async () => {
+  it('默认按来源分组（内部 / 外部）+ 副标题统计跟随分组维度', async () => {
     const wrapper = await openCategory('插件');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['包维度门控', '平台通道', '模式插件（互斥）', '其它']);
+    // seed 里 5 个插件都是 builtin=true（旧 Core 缺省也按 true 兼容）
+    expect(groups).toEqual(['内部插件']);
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('共 5 项');
-    expect(subtitle).toContain('1 包维度门控');
-    expect(subtitle).toContain('1 模式插件');
+    expect(subtitle).toContain('5 内部插件');
+    // 按来源分组：内部插件一组，附来源提示（"随 Core 发布…"）
+    const hints = wrapper.findAll('.caps-list-group__hint').map((h) => h.text());
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toContain('随 Core 发布');
+  });
+
+  it('外部插件分组：builtin=false 归到「外部插件」', async () => {
+    state.plugins = [
+      ...state.plugins,
+      {
+        id: 'example.external',
+        name: '外部插件',
+        version: '1',
+        kind: 'tool',
+        description: '运行期挂载',
+        entry: '',
+        author: '',
+        enabled: true,
+        builtin: false,
+        package: 'example.external',
+      },
+    ];
+    const wrapper = await openCategory('插件');
+    const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
+    expect(groups).toEqual(['内部插件', '外部插件']);
+    const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
+    expect(subtitle).toContain('6 项');
+    expect(subtitle).toContain('1 外部插件');
+    expect(subtitle).toContain('5 内部插件');
+  });
+
+  it('切到门控语义分组：恢复门控 → 通道 → 模式 → 其它 + 语义提示', async () => {
+    const wrapper = await openCategory('插件');
+    // 分组维度选择器：PLUGIN_GROUP_OPTIONS 的第二项（按门控语义）
+    const segmented = wrapper.findComponent({ name: 'NeumorphismSegmented' });
+    await segmented.vm.$emit('update:modelValue', 'semantic');
+    const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
+    expect(groups).toEqual(['包维度门控', '平台通道', '模式插件（互斥）', '其它']);
     // 语义提示行（门控/通道/模式各一条）
     expect(wrapper.findAll('.caps-list-group__hint').length).toBe(3);
+    const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
+    expect(subtitle).toContain('1 包维度门控');
+    expect(subtitle).toContain('1 模式插件');
   });
 
   it('行内：包规模徽标 / 受保护锁 / 模式标记；受保护项无开关', async () => {
@@ -321,5 +363,66 @@ describe('SettingsView 插件工作台', () => {
     await wrapper.find('.plugin-info__head').trigger('click');
     expect(wrapper.find('.skill-source').text()).toContain('echo-agent.adapter.qq');
     expect(wrapper.find('.skill-source').text()).toContain('adapter');
+  });
+});
+
+describe('多 Core 插件归档（pluginsByCore）', () => {
+  beforeEach(() => {
+    seed();
+    vi.mocked(sendCommand).mockClear();
+    // 清掉其它用例可能残留的归档
+    state.pluginsByCore = {};
+    state.upstreams = [];
+  });
+
+  it('按 core 归档取数：选定节点后列表只显示该节点的插件', async () => {
+    state.pluginsByCore = {
+      core: [...state.plugins],
+      'node-b': [
+        {
+          id: 'node-b.plugin',
+          name: 'B 节点插件',
+          version: '1',
+          kind: 'tool',
+          description: '',
+          entry: '',
+          author: '',
+          enabled: true,
+          builtin: true,
+          package: 'node-b.plugin',
+          core: 'node-b',
+        },
+      ],
+    };
+    state.upstreams = [
+      { name: 'core', url: 'ws://a', connectivity: 'online' },
+      { name: 'node-b', url: 'ws://b', connectivity: 'online' },
+    ] as never;
+
+    const wrapper = await openCategory('插件');
+    // 默认（无 activeRegion）→ 唯一/首个来源不确定，但列表必须是归档里的某一份
+    const names = rowNames(wrapper);
+    expect(names.length).toBeGreaterThan(0);
+
+    // 显式切到 node-b → 只剩 B 的插件
+    const select = wrapper.findComponent({ name: 'NeumorphismSelect' });
+    await select.vm.$emit('update:modelValue', 'node-b');
+    expect(rowNames(wrapper)).toEqual(['B 节点插件']);
+    // 统计跟随列表（不串显）
+    const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
+    expect(subtitle).toContain('共 1 项');
+    // 切换节点会**定向**请求该 core 的插件列表（targetCore = 选定节点）
+    expect(vi.mocked(sendPending)).toHaveBeenCalledWith(
+      'RequestPluginsList',
+      'settings:plugins',
+      'node-b',
+    );
+  });
+
+  it('未选节点且只有一个来源：回退到该来源（单上游无壳场景）', async () => {
+    // 单上游不加信封 → 事件 core 为 null → 归档键是空串
+    state.pluginsByCore = { '': [...state.plugins] };
+    const wrapper = await openCategory('插件');
+    expect(rowNames(wrapper).length).toBe(5);
   });
 });

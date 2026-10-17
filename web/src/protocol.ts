@@ -283,7 +283,10 @@ export interface PluginInfo {
   entry: string;
   author: string;
   enabled: boolean;
-  builtin: boolean;
+  /** true = Core 编译内置；false = 外部插件。旧 Core 缺失时按 true 兼容。 */
+  builtin?: boolean;
+  /** 插件所属 Core，由 Panel 多节点中继注入。 */
+  core?: string | null;
   /** 所属包 id（横跨 plugin+tool+skill 的组合标签；未声明 = 插件 id） */
   package?: string;
 }
