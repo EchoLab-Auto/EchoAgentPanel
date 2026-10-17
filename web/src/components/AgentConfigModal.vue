@@ -19,6 +19,7 @@ import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSele
 import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwitch';
 import NeumorphismTable from '@echolab-auto/ui-frame/components/NeumorphismTable';
 import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTextarea';
+import PanelIcon from './PanelIcon.vue';
 import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';
@@ -287,7 +288,14 @@ function save() {
           <h3>配置 Agent：{{ props.team.name }}</h3>
           <span class="agent-config__id">{{ props.team.id }}</span>
         </div>
-        <NeumorphismButton size="small" variant="glass" @click="emit('close')">✕</NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          aria-label="关闭"
+          @click="emit('close')"
+        >
+          <PanelIcon name="close" size="sm" />
+        </NeumorphismButton>
       </div>
 
       <div class="agent-config__body">

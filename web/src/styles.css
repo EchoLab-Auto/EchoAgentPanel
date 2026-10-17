@@ -389,7 +389,10 @@ body {
 }
 .checklist-item__icon { margin-top: 1px; }
 .checklist-item__text { min-width: 0; }
-.checklist-item.done { color: var(--nm-text-secondary); text-decoration: line-through; }
+/* 完成态：color 由父级传播，删除线必须落在**文本**元素上——
+   text-decoration 不会穿透 flex 子项的块级格式化上下文（图标不该被划掉）。 */
+.checklist-item.done { color: var(--nm-text-secondary); }
+.checklist-item.done .checklist-item__text { text-decoration: line-through; }
 
 /* ── 设置表单 ── */
 .settings-form label {
@@ -631,6 +634,9 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
   border-color: color-mix(in srgb, var(--panel-err) 40%, transparent);
 }
 .api-test-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-weight: 700;
 }
 .api-test-message {

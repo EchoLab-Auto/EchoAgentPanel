@@ -811,7 +811,10 @@ watch(
         <NeumorphismButton variant="glass" @click="closeForm">取消</NeumorphismButton>
       </div>
       <div v-if="renameError" class="api-test-result fail">
-        <span class="api-test-badge">✗ 改名失败</span>
+        <span class="api-test-badge">
+          <PanelIcon name="close" size="xs" tone="err" />
+          改名失败
+        </span>
         <span class="api-test-message">{{ renameError }}</span>
       </div>
       <div
@@ -819,7 +822,14 @@ watch(
         class="api-test-result"
         :class="formResultOf()!.ok ? 'ok' : 'fail'"
       >
-        <span class="api-test-badge">{{ formResultOf()!.ok ? '✓ 连通' : '✗ 失败' }}</span>
+        <span class="api-test-badge">
+          <PanelIcon
+            :name="formResultOf()!.ok ? 'check' : 'close'"
+            size="xs"
+            :tone="formResultOf()!.ok ? 'ok' : 'err'"
+          />
+          {{ formResultOf()!.ok ? '连通' : '失败' }}
+        </span>
         <span class="api-test-message">{{ formResultOf()!.message }}</span>
         <span class="api-test-latency">{{ formResultOf()!.latencyMs }}ms</span>
       </div>
@@ -912,7 +922,9 @@ watch(
           </div>
           <div class="profile-card__url" :title="profile.base_url">{{ profile.base_url }}</div>
           <div class="profile-card__key">
-            {{ profile.api_key_set ? 'key ✓' : '无 key' }}
+            key
+            <PanelIcon v-if="profile.api_key_set" name="check" size="xs" tone="ok" />
+            <span v-else>（未设置）</span>
             · 思考 {{ profile.thinking === 'enabled' ? '启用' : '禁用' }}
             · 推理 {{ profile.reasoning_effort }}
           </div>
@@ -1010,7 +1022,11 @@ watch(
               class="profile-test"
               :class="testResultOf(profile.name)!.ok ? 'ok' : 'fail'"
             >
-              {{ testResultOf(profile.name)!.ok ? '✓' : '✗' }}
+              <PanelIcon
+                :name="testResultOf(profile.name)!.ok ? 'check' : 'close'"
+                size="xs"
+                :tone="testResultOf(profile.name)!.ok ? 'ok' : 'err'"
+              />
               {{ testResultOf(profile.name)!.latencyMs }}ms
               <span class="profile-test-msg" :title="testResultOf(profile.name)!.message">
                 {{ testResultOf(profile.name)!.message }}

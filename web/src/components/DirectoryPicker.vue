@@ -160,7 +160,14 @@ watch(
           :options="locationOptions"
           @update:model-value="(v) => pickLocation(String(v ?? 'local'))"
         />
-        <NeumorphismButton size="small" variant="glass" @click="emit('close')">✕</NeumorphismButton>
+        <NeumorphismButton
+          size="small"
+          variant="glass"
+          aria-label="关闭"
+          @click="emit('close')"
+        >
+          <PanelIcon name="close" size="sm" />
+        </NeumorphismButton>
       </div>
 
       <!-- 面包屑：位置 > 各级目录；栈空显示根视图 -->
