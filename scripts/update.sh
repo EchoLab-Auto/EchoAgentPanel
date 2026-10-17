@@ -20,6 +20,11 @@ BINARY=""
 STATUS_FILE=""
 STATIC_DIR=""
 UPDATE_MODE=local
+# 安装目录里保留多少个历史备份（`<binary>.bak-*` / `<binary>.rollback*` /
+# `<static-dir>*.bak-*` 目录）。每次安装/更新都会留下一版旧的二进制与静态
+# 目录，无人修剪时会持续堆积（实测 Core 侧一天内堆到 12 个 / 308 MiB）。
+# 默认保留最近 4 个；可用 ECHO_KEEP_BACKUPS 覆盖（0 = 只留本次的 rollback）。
+KEEP_BACKUPS=${ECHO_KEEP_BACKUPS:-4}
 
 usage() {
     cat <<'EOF'
@@ -129,6 +134,49 @@ write_status() {
 
 # Restore the previous binary / updater / static dir / revision and restart the
 # Panel service if it was active before this update. Best-effort.
+# Keep only the N most recent backups in the install directory.
+#
+# Covers both kinds that accumulate next to the installed binary:
+#   <binary>.bak-*          ← 手工部署/历史安装留下的二进制副本
+#   <binary>.rollback*      ← 失败运行留下的回滚副本
+#   <static-dir>.bak-*      ← 静态前端目录的历史副本（目录，按 du 计入）
+# Retention default = 4 (env ECHO_KEEP_BACKUPS)。本次运行仍在使用的回滚副本
+# （$ROLLBACK_BINARY / $ROLLBACK_STATIC）一律不动——失败时要靠它还原。
+prune_backups() {
+    local keep=$KEEP_BACKUPS
+    if ! [[ "$keep" =~ ^[0-9]+$ ]]; then
+        keep=4
+    fi
+    local dir
+    dir=$(dirname -- "$BINARY")
+    [[ -d "$dir" ]] || return 0
+    local -a candidates=()
+    local f
+    shopt -s nullglob
+    for f in "$BINARY".bak-* "$BINARY".rollback* "$STATIC_DIR".bak-*; do
+        if [[ -n "${ROLLBACK_BINARY:-}" && "$f" == "$ROLLBACK_BINARY" ]]; then
+            continue
+        fi
+        if [[ -n "${ROLLBACK_STATIC:-}" && "$f" == "$ROLLBACK_STATIC" ]]; then
+            continue
+        fi
+        candidates+=("$f")
+    done
+    shopt -u nullglob
+    (( ${#candidates[@]} > keep )) || return 0
+    local -a sorted=()
+    # `ls -1t` 按 mtime 新→旧（时间戳后缀保证同秒内可比）。
+    mapfile -t sorted < <(ls -1dt -- "${candidates[@]}" 2>/dev/null || true)
+    local removed=0
+    local i
+    for (( i = keep; i < ${#sorted[@]}; i++ )); do
+        rm -rf -- "${sorted[$i]}" && removed=$((removed + 1))
+    done
+    if (( removed > 0 )); then
+        echo "pruned $removed old backup(s); kept $keep (ECHO_KEEP_BACKUPS)"
+    fi
+}
+
 rollback_installation() {
     if [[ -n "$ROLLBACK_BINARY" && -x "$ROLLBACK_BINARY" ]]; then
         mv -f "$ROLLBACK_BINARY" "$BINARY" || true
@@ -313,6 +361,8 @@ fi
 rm -rf "$STATIC_DIR"
 cp -a "$SOURCE_DIR/web/dist" "$STATIC_DIR"
 STATIC_REPLACED=1
+# 替换完成后立即修剪历史备份（保留最近 N 个，见 prune_backups）。
+prune_backups || true
 
 if ((panel_was_active)); then
     PHASE=restarting
@@ -371,3 +421,8 @@ rm -f "$rollback" "$ROLLBACK_UPDATER" || true
 if [[ -n "$ROLLBACK_STATIC" ]]; then
     rm -rf "$ROLLBACK_STATIC" || true
 fi
+# 本次回滚副本已清理，再修剪一次让名额回滚给更早的备份。
+ROLLBACK_BINARY=""
+ROLLBACK_UPDATER=""
+ROLLBACK_STATIC=""
+prune_backups || true
