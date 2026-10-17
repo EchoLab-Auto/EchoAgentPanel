@@ -153,7 +153,16 @@ prune_backups() {
     local -a candidates=()
     local f
     shopt -s nullglob
-    for f in "$BINARY".bak-* "$BINARY".rollback* "$STATIC_DIR".bak-*; do
+    # 覆盖五类残留（都实测过会堆积）：
+    #   <binary>.bak-*        手工部署/历史安装留下的二进制副本
+    #   <binary>.rollback*    失败运行留下的回滚副本
+    #   <binary>.old          更早期的命名习惯（不在 bak/rollback 之列，
+    #                         2026-10 实测残留 4.8 MiB 未被任何规则覆盖）
+    #   <static-dir>.bak-*    静态前端目录的历史副本
+    #   <static-dir>.rollback* 被中断的更新留下的回滚目录
+    #                         （`mktemp -d web.rollback.XXXXXX`，实测两份残留 2.2 MiB）
+    for f in "$BINARY".bak-* "$BINARY".rollback* "$BINARY".old \
+             "$STATIC_DIR".bak-* "$STATIC_DIR".rollback*; do
         if [[ -n "${ROLLBACK_BINARY:-}" && "$f" == "$ROLLBACK_BINARY" ]]; then
             continue
         fi
