@@ -1,4 +1,4 @@
-import { defineComponent as de, ref as he, computed as d, openBlock as a, createElementBlock as n, normalizeStyle as g, normalizeClass as $, toDisplayString as f, createCommentVNode as p, renderSlot as ue, createElementVNode as c, unref as e, Fragment as m, renderList as v, withDirectives as P, vShow as T, createVNode as me, Transition as ve, withCtx as ye, createTextVNode as _e } from "vue";
+import { defineComponent as de, ref as he, computed as d, openBlock as a, createElementBlock as n, normalizeStyle as k, normalizeClass as $, toDisplayString as f, createCommentVNode as p, renderSlot as ue, createElementVNode as c, unref as e, Fragment as m, renderList as v, withDirectives as P, vShow as T, createVNode as me, Transition as ve, withCtx as ye, createTextVNode as _e } from "vue";
 import { useLineChart as pe } from "../composables/useLineChart.js";
 import fe from "../composables/useChartInteraction.js";
 import { useLocale as xe } from "../composables/useLocale.js";
@@ -11,7 +11,7 @@ import '../NeumorphismChartLine.css';const be = {
 }, Le = {
   key: 0,
   class: "nm-chart__title"
-}, $e = ["aria-label"], Se = ["viewBox"], Ie = ["id"], Me = ["x", "y", "width", "height"], Ce = ["id"], Be = ["stop-color"], Ae = ["stop-color"], Pe = ["clip-path"], Te = ["x1", "y1", "x2", "y2"], ze = { key: 1 }, Ne = ["x1", "y1", "x2", "y2"], We = ["x", "y"], De = { key: 2 }, Fe = ["x1", "y1", "x2", "y2"], Ge = ["x", "y"], Ve = ["transform"], Oe = ["d", "fill"], Re = ["d", "stroke", "stroke-width"], je = ["x1", "y1", "x2", "y2"], Ee = ["cx", "cy", "fill"], He = ["cx", "cy", "r", "fill", "stroke", "stroke-width", "opacity", "aria-label", "onClick"], Ke = { class: "nm-chart__tooltip-header" }, Xe = ["aria-label"], Ye = { class: "nm-chart__legend-label" }, qe = /* @__PURE__ */ de({
+}, $e = ["aria-label"], Se = ["viewBox"], Ie = ["id"], Me = ["x", "y", "width", "height"], Ce = ["id"], Be = ["stop-color"], Ae = ["stop-color"], Pe = ["clip-path"], Te = ["x1", "y1", "x2", "y2"], ze = { key: 1 }, Ne = ["x1", "y1", "x2", "y2"], We = ["x", "y"], De = { key: 2 }, Fe = ["x1", "y1", "x2", "y2"], Ge = ["x", "y", "text-anchor"], Ve = ["transform"], Oe = ["d", "fill"], Re = ["d", "stroke", "stroke-width"], je = ["x1", "y1", "x2", "y2"], Ee = ["cx", "cy", "fill"], He = ["cx", "cy", "r", "fill", "stroke", "stroke-width", "opacity", "aria-label", "onClick"], Ke = { class: "nm-chart__tooltip-header" }, Xe = ["aria-label"], Ye = { class: "nm-chart__legend-label" }, qe = /* @__PURE__ */ de({
   __name: "NeumorphismChartLine",
   props: {
     series: { default: () => [] },
@@ -38,7 +38,7 @@ import '../NeumorphismChartLine.css';const be = {
     const i = x, R = O, { t: j } = xe(), I = he(null), S = ke("nm-line"), {
       lines: M,
       points: C,
-      xAxisLabels: k,
+      xAxisLabels: g,
       xLabelStride: E,
       yAxisLabels: H,
       yAxisTicks: u,
@@ -110,7 +110,7 @@ import '../NeumorphismChartLine.css';const be = {
       marginLeft: d(() => o.value.left),
       plotWidth: d(() => s.value.width),
       dataPointXs: ne,
-      xAxisLabels: k,
+      xAxisLabels: g,
       series: d(() => i.series),
       palette: w,
       tooltip: z,
@@ -136,7 +136,7 @@ import '../NeumorphismChartLine.css';const be = {
     }
     return (r, h) => (a(), n("div", {
       class: $(["nm-chart", "nm-chart--line"]),
-      style: g(ee.value)
+      style: k(ee.value)
     }, [
       x.title || r.$slots.title ? (a(), n("div", be, [
         x.title ? (a(), n("span", Le, f(x.title), 1)) : p("", !0),
@@ -238,15 +238,15 @@ import '../NeumorphismChartLine.css';const be = {
               "stroke-width": "1",
               "vector-effect": "non-scaling-stroke"
             }, null, 8, Fe),
-            (a(!0), n(m, null, v(e(k), (t, l) => P((a(), n("text", {
+            (a(!0), n(m, null, v(e(g), (t, l) => P((a(), n("text", {
               key: "x" + l,
-              x: e(o).left + (e(k).length > 1 ? l * (e(s).width / (e(k).length - 1)) : e(s).width / 2),
+              x: e(o).left + (e(g).length > 1 ? l * (e(s).width / (e(g).length - 1)) : e(s).width / 2),
               y: e(o).top + e(s).height + 20,
-              "text-anchor": "middle",
+              "text-anchor": l === 0 ? "start" : l === e(g).length - 1 ? "end" : "middle",
               fill: "var(--nm-chart-label-color)",
               class: "nm-chart__tick-label"
             }, f(t), 9, Ge)), [
-              [T, l % e(E) === 0 || l === e(k).length - 1]
+              [T, l % e(E) === 0 || l === e(g).length - 1]
             ])), 128))
           ])) : p("", !0),
           c("g", {
@@ -269,7 +269,7 @@ import '../NeumorphismChartLine.css';const be = {
               "stroke-linecap": "round",
               "stroke-linejoin": "round",
               class: $(["nm-chart__line", { "nm-chart__line--animate": L.value }]),
-              style: g(L.value ? { animationDelay: `${l * 200}ms` } : {})
+              style: k(L.value ? { animationDelay: `${l * 200}ms` } : {})
             }, null, 14, Re))), 128))
           ], 8, Ve),
           e(y) !== null ? (a(), n(m, { key: 3 }, [
@@ -313,7 +313,7 @@ import '../NeumorphismChartLine.css';const be = {
                   "nm-chart__point--animate": L.value
                 }
               ]),
-              style: g(L.value ? { animationDelay: `${l * 60}ms` } : {}),
+              style: k(L.value ? { animationDelay: `${l * 60}ms` } : {}),
               role: "img",
               "aria-label": `${t.value}`,
               onClick: (A) => ce(t)
@@ -327,7 +327,7 @@ import '../NeumorphismChartLine.css';const be = {
             e(z).visible && D.value && e(B) ? (a(), n("div", {
               key: 0,
               class: "nm-chart__tooltip",
-              style: g(e(ie))
+              style: k(e(ie))
             }, [
               c("div", Ke, f(e(B).header), 1),
               (a(!0), n(m, null, v(e(B).rows, (t, l) => (a(), n("div", {
@@ -336,7 +336,7 @@ import '../NeumorphismChartLine.css';const be = {
               }, [
                 c("span", {
                   class: "nm-chart__tooltip-dot",
-                  style: g({ background: t.color })
+                  style: k({ background: t.color })
                 }, null, 4),
                 c("span", null, [
                   _e(f(t.name) + ": ", 1),
@@ -361,14 +361,14 @@ import '../NeumorphismChartLine.css';const be = {
         }, [
           c("span", {
             class: "nm-chart__legend-marker",
-            style: g({ backgroundColor: t.color ?? e(w)[l % e(w).length] })
+            style: k({ backgroundColor: t.color ?? e(w)[l % e(w).length] })
           }, null, 4),
           c("span", Ye, f(t.name), 1)
         ]))), 128))
       ], 8, Xe)) : p("", !0)
     ], 4));
   }
-}), lt = /* @__PURE__ */ we(qe, [["__scopeId", "data-v-4ad0fd02"]]);
+}), lt = /* @__PURE__ */ we(qe, [["__scopeId", "data-v-2d919e9a"]]);
 export {
   lt as N
 };
