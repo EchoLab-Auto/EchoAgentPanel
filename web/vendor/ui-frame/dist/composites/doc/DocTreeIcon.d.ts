@@ -1,21 +1,21 @@
 export interface DocTreeIconProps {
-    /** 语义图标名（tree-utils.getNodeIcon 的返回值） */
+    /** 文档域语义名（`tree-utils.getNodeIcon` / `nodeToTreeData` 的返回值） */
     name?: string;
-    /** 显示尺寸（px） */
+    /** 显示尺寸（px；缺省 14，与库内行内图标一致） */
     size?: number;
 }
 declare const _default: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<{
-    /** 语义图标名（tree-utils.getNodeIcon 的返回值） */
+    /** 文档域语义名（`tree-utils.getNodeIcon` / `nodeToTreeData` 的返回值） */
     name?: string;
-    /** 显示尺寸（px） */
+    /** 显示尺寸（px；缺省 14，与库内行内图标一致） */
     size?: number;
 }>, {
     name: string;
     size: number;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {}, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<{
-    /** 语义图标名（tree-utils.getNodeIcon 的返回值） */
+    /** 文档域语义名（`tree-utils.getNodeIcon` / `nodeToTreeData` 的返回值） */
     name?: string;
-    /** 显示尺寸（px） */
+    /** 显示尺寸（px；缺省 14，与库内行内图标一致） */
     size?: number;
 }>, {
     name: string;

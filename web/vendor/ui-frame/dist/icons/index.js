@@ -1,4 +1,4 @@
-const h = {
+const M = {
   // ── 方向与导航 ────────────────────────────────────────────────
   "chevron-down": { paths: ["M6 9l6 6 6-6"] },
   "chevron-up": { paths: ["M6 15l6-6 6 6"] },
@@ -225,6 +225,88 @@ const h = {
       "M16 21v-3a2 2 0 0 1 2-2h3"
     ]
   },
+  // ── 文档语义（2026-10 由 composites/doc 的 DocTreeIcon 收敛进来）────
+  guide: {
+    paths: [
+      "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z",
+      "M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"
+    ]
+  },
+  changelog: {
+    paths: [
+      "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z",
+      "M14 3v5h5",
+      "M16 13H8",
+      "M16 17H8"
+    ]
+  },
+  faq: {
+    paths: [
+      "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z",
+      "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3",
+      "M12 17h.01"
+    ]
+  },
+  example: {
+    paths: [
+      "M9 18h6",
+      "M10 21.5h4",
+      "M12 2.5a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2.5z"
+    ]
+  },
+  install: {
+    paths: [
+      "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z",
+      "M3.27 6.96 12 12.01l8.73-5.05",
+      "M12 22.08V12"
+    ]
+  },
+  config: {
+    paths: [
+      "M4 21v-7",
+      "M4 10V3",
+      "M12 21v-9",
+      "M12 8V3",
+      "M20 21v-5",
+      "M20 12V3",
+      "M1 14h6",
+      "M9 8h6",
+      "M17 16h6"
+    ]
+  },
+  plug: { paths: ["M12 22v-5", "M9 8V2", "M15 8V2", "M18 8v3a6 6 0 0 1-12 0V8z"] },
+  // ── 编辑与文档操作（2026-10 由 composites/doc 收敛进来）──────────
+  pencil: { paths: ["M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z", "M15 5l4 4"] },
+  save: {
+    paths: [
+      "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z",
+      "M17 21v-8H7v8",
+      "M7 3v5h8"
+    ]
+  },
+  book: { paths: ["M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"] },
+  "file-text": {
+    paths: [
+      "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z",
+      "M14 3v5h5",
+      "M16 13H8",
+      "M16 17H8",
+      "M10 9H8"
+    ]
+  },
+  map: { paths: ["M1 6v16l7-4 8 4 7-4V2l-7 4-8-4z", "M8 2v16", "M16 6v16"] },
+  clipboard: {
+    paths: [
+      "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2",
+      "M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"
+    ]
+  },
+  split: {
+    paths: [
+      "M4.5 3.5h15a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z",
+      "M12 3.5v17"
+    ]
+  },
   // ── 消息与智能（通用语义，2026-10 由 Panel 侧收敛进来）────────────
   message: { paths: ["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"] },
   network: {
@@ -240,7 +322,7 @@ const h = {
       "M17.8 3.5 18.6 6 21 6.8 18.6 7.6 17.8 10 17 7.6 14.6 6.8 17 6z"
     ]
   }
-}, t = Object.keys(h), M = {
+}, t = Object.keys(M), h = {
   xs: 12,
   sm: 14,
   md: 16,
@@ -248,15 +330,15 @@ const h = {
   xl: 20,
   "2xl": 24,
   "3xl": 32
-}, s = new Set(Object.values(M)), l = /* @__PURE__ */ new Set([0.5, 1, 1.5, 2, 2.5, 3]);
+}, s = new Set(Object.values(h)), l = /* @__PURE__ */ new Set([0.5, 1, 1.5, 2, 2.5, 3]);
 function p(a) {
   return a <= 12 ? 2.5 : a >= 24 ? 1.5 : 2;
 }
 export {
   t as ICON_NAMES,
-  h as ICON_REGISTRY,
+  M as ICON_REGISTRY,
   s as ICON_SIZE_ALLOWED,
-  M as ICON_SIZE_PX,
+  h as ICON_SIZE_PX,
   l as ICON_STROKE_ALLOWED,
   p as defaultStrokeWidth
 };

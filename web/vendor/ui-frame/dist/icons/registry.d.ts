@@ -212,6 +212,48 @@ export declare const ICON_REGISTRY: {
     minimize: {
         paths: string[];
     };
+    guide: {
+        paths: string[];
+    };
+    changelog: {
+        paths: string[];
+    };
+    faq: {
+        paths: string[];
+    };
+    example: {
+        paths: string[];
+    };
+    install: {
+        paths: string[];
+    };
+    config: {
+        paths: string[];
+    };
+    plug: {
+        paths: string[];
+    };
+    pencil: {
+        paths: string[];
+    };
+    save: {
+        paths: string[];
+    };
+    book: {
+        paths: string[];
+    };
+    'file-text': {
+        paths: string[];
+    };
+    map: {
+        paths: string[];
+    };
+    clipboard: {
+        paths: string[];
+    };
+    split: {
+        paths: string[];
+    };
     message: {
         paths: string[];
     };

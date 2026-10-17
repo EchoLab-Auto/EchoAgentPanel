@@ -16,8 +16,8 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
 }, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<DocEditorProps>, {
     className: string;
 }>>> & Readonly<{
-    onDocLink?: ((path: string) => any) | undefined;
     onSave?: ((path: string, content: string) => any) | undefined;
+    onDocLink?: ((path: string) => any) | undefined;
 }>, {
     className: string;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
