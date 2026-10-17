@@ -7,7 +7,7 @@ import {
   startReplyBranch,
   completeReplyBranch,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessage, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
+import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessage, findToolEntryIndex, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 import { adapterOpKey, settleAdapterOp } from './adapterOps';
 import { settleAdapterOpsOfCore } from './pending';
@@ -320,20 +320,41 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   const windowMsgs = state.trunk.filter((m) => m.sessionId === sessionId);
   if (!hist) return windowMsgs;
   const out = hist.messages.map((m) => ({ ...m })); // 浅拷贝：补丁不得污染快照
+  // 插入游标（2026-10）：`state.trunk` 的顺序就是真实时序（实时投影按到达
+  // 顺序 push，Core 的 timeline 也是同一顺序），所以合并必须**按它落位**，
+  // 不能把"没匹配到快照的条目"一律追加到末尾。
+  //
+  // 为什么这条是必需的：历史派生**不含推理**（`history.rs` 模块注释的已知
+  // 差异——活链路的 `AssistantMessage.reasoning_content` 恒为 `None`，推理
+  // 只存在于实时 timeline）。推理在快照里永远找不到对应条目，一律 append
+  // 的结果就是"历史回合的思考全堆到正文后面"，刷新才消失。
+  let cursor = 0;
   for (const w of windowMsgs) {
     const seq = w.seq ?? 0;
-    // 推理**永不**按 seq 过滤：历史派生不含推理（Core `history.rs` 模块注释
-    // 的已知差异——活链路的 AssistantMessage 恒为 reasoning_content: None，
-    // 推理只存在于实时 timeline）。对旧版 Core（水位线仍含推理 seq）来说，
-    // 这一条就是"看不到思考 chip"的唯一防线；新版 Core 已把推理排除出
-    // 水位线，这里是双保险（2026-10）。
-    if (seq > 0 && seq <= hist.baseSeq && w.role !== 'reasoning') continue; // 已被快照覆盖
-    if (patchToolMessage(out, w)) continue; // 工具行按 id 就地修补
-    // 无条目级 seq 的实时副本：`baseSeq` 对它们完全失效（`seq ?? 0` 恒 0），
-    // 于是历史上被一律 append 到末尾 —— 表现为「思考/工具小方块重复出现在
-    // 主回复后面」，刷新（重建 hist 与 trunk）才消失（2026-10 修复）。
-    if (seq === 0 && coveredBySnapshot(out, w)) continue;
-    out.push(w);
+    const withinWatermark = seq > 0 && seq <= hist.baseSeq;
+    // 1) 工具行：就��修补（同一行，不新增），游标移到它之后。
+    const toolIndex = findToolEntryIndex(out, w);
+    if (toolIndex >= 0) {
+      patchToolMessage(out, w);
+      cursor = Math.max(cursor, toolIndex + 1);
+      continue;
+    }
+    // 2) 快照里已有对应条目 → 只前移游标。
+    //    水位线内的条目要求**完全相等**：它们自带权威身份，用前缀兼容判据
+    //    会把内容更全的新条目误判成重复而吞掉（漏显示回答）。
+    const coveredIndex = indexCoveredBySnapshot(out, w, withinWatermark);
+    if (coveredIndex >= 0) {
+      cursor = Math.max(cursor, coveredIndex + 1);
+      continue;
+    }
+    // 3) 水位线内（非推理）但内容判据没命中 → 视为已覆盖（快照被瘦身/截断）。
+    //    推理**永不**走这条：快照根本不含推理。
+    if (withinWatermark && w.role !== 'reasoning') continue;
+    // 4) 新条目：插到游标处。游标还没建立（trunk 缺少前驱条目，例如已滚出
+    //    窗口）时用时间兜底；时间也缺失则退回追加。
+    if (cursor === 0) cursor = timeInsertIndex(out, w);
+    out.splice(cursor, 0, w);
+    cursor += 1;
   }
   return out;
 }
@@ -351,21 +372,53 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
  * 判据刻意保守：必须**同角色 + 同时间 + 内容兼容**才判为重复。宁可重复显示
  * 也不丢内容——漏显示一条回答远比多显示一节严重。
  */
-function coveredBySnapshot(snapshot: DisplayMessage[], live: DisplayMessage): boolean {
-  for (let i = snapshot.length - 1; i >= 0; i--) {
-    const h = snapshot[i];
+function indexCoveredBySnapshot(
+  snapshot: DisplayMessage[],
+  live: DisplayMessage,
+  strict = false,
+): number {
+  for (let i = 0; i < snapshot.length; i++) {
+    const h = snapshot[i]!;
     if (h.role !== live.role || h.time !== live.time) continue;
-    if (h.content === live.content) return true;
+    if (h.content === live.content) return i;
+    if (strict) continue; // 水位线内的条目只认完全相等（见调用处注释）
     // 流式副本可能只是终值的前缀（快照是终值、实时行还在增长），或反过来。
-    if ((live.role === 'reasoning' || live.role === 'backend') && (h.content.startsWith(live.content) || live.content.startsWith(h.content))) {
-      return true;
+    if (
+      (live.role === 'reasoning' || live.role === 'backend') &&
+      (h.content.startsWith(live.content) || live.content.startsWith(h.content))
+    ) {
+      return i;
     }
     // 工具行：同名的快照条目已给出完成态（output 非空）→ 实时副本是重复的。
-    if (live.role === 'tool' && h.tool && live.tool && h.tool.name === live.tool.name && h.tool.output != null) {
-      return true;
+    if (
+      live.role === 'tool' &&
+      h.tool &&
+      live.tool &&
+      h.tool.name === live.tool.name &&
+      h.tool.output != null
+    ) {
+      return i;
     }
   }
-  return false;
+  return -1;
+}
+
+/**
+ * 按时间找插入位置：第一个 `time` 比它大的条目之前。
+ *
+ * 只在"trunk 缺少前驱条目"时兜底用（例如前一条已被 FIFO 窗口挤出）。
+ * 时间缺失（0）时返回末尾——宁可追加，也不把无时间戳的条目插到开头。
+ *
+ * 注意 hist 里的 backend 条目时间来自 Core 的 carry-forward（沿用最近一条
+ * 带时间事件），可能比真实产出时间**偏早**；所以时间只作兜底，主路径是
+ * trunk 顺序（见 `sessionMessagesFor` 的 cursor）。
+ */
+function timeInsertIndex(list: DisplayMessage[], w: DisplayMessage): number {
+  if (!(w.time > 0)) return list.length;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i]!.time > w.time) return i;
+  }
+  return list.length;
 }
 
 export interface ApiConfig {

@@ -475,33 +475,42 @@ export function toDisplayMessages(messages: TimelineMessage[]): DisplayMessage[]
 /** 增量投递的就地修补：core 对运行中的工具条目做就地更新后会带新 seq
  * 重新投递完成态；若条目已存在于列表中（按 tool_call_id 匹配），原地更新
  * 而不是追加，避免重复行。返回 true 表示已修补。 */
-export function patchToolMessage(list: DisplayMessage[], incoming: DisplayMessage): boolean {
+/** 工具行在列表中的索引（-1 = 没有可修补的对应条目）。
+ *
+ * 与 [`patchToolMessage`] 同一套配对判据，只是不落修改——调用方需要
+ * **知道位置**时用它（例如合并会话历史时移动插入游标，见
+ * `state.ts::sessionMessagesFor`：推理要插在时序位置上，不能堆到末尾）。 */
+export function findToolEntryIndex(list: DisplayMessage[], incoming: DisplayMessage): number {
   const tool = incoming.tool;
-  if (!tool) return false;
+  if (!tool) return -1;
   if (tool.toolCallId) {
     for (let i = list.length - 1; i >= 0; i--) {
       const existing = list[i];
-      if (existing.role === 'tool' && existing.tool?.toolCallId === tool.toolCallId) {
-        existing.tool = { ...tool };
-        existing.content = incoming.content;
-        return true;
-      }
+      if (existing.role === 'tool' && existing.tool?.toolCallId === tool.toolCallId) return i;
     }
-    return false;
+    return -1;
   }
   // 无 id 的条目（旧 core / 供应商未回 id）：只有「完成态增量」才按名字
   // 就地修补——按名字把运行中条目替换成另一条运行中条目毫无意义，还会
   // 抹掉 startedAtMs 让计时跳变。
-  if (tool.output == null) return false;
+  if (tool.output == null) return -1;
   for (let i = list.length - 1; i >= 0; i--) {
     const existing = list[i];
     if (existing.role !== 'tool' || existing.tool?.name !== tool.name) continue;
     if (existing.tool.status !== 'running') continue;
-    existing.tool = { ...tool, toolCallId: existing.tool.toolCallId };
-    existing.content = incoming.content;
-    return true;
+    return i;
   }
-  return false;
+  return -1;
+}
+
+export function patchToolMessage(list: DisplayMessage[], incoming: DisplayMessage): boolean {
+  const index = findToolEntryIndex(list, incoming);
+  if (index < 0) return false;
+  const existing = list[index]!;
+  const tool = incoming.tool!;
+  existing.tool = tool.toolCallId ? { ...tool } : { ...tool, toolCallId: existing.tool?.toolCallId };
+  existing.content = incoming.content;
+  return true;
 }
 
 export function loadTimeline(state: AppState, messages: TimelineMessage[]) {
