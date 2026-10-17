@@ -221,3 +221,53 @@ async fn cache_policy_follows_path() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn missing_assets_are_404_not_spa_shell() {
+    // 部署后旧标签页请求旧哈希 chunk：必须 404（非 html），否则动态
+    // import 拿到 index.html → MIME 错误 → 异步组件永久空白。
+    let dir = temp_static_dir("missing");
+    std::fs::write(dir.join("index.html"), "<html>shell</html>").unwrap();
+    let base = spawn_panel(dir.to_string_lossy().into_owned()).await;
+    let client = reqwest::Client::new();
+
+    for path in [
+        "assets/missing-abc.js",
+        "assets/x-old.css",
+        "favicon-old.png",
+    ] {
+        let resp = client.get(format!("{base}/{path}")).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{path}");
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(!ct.contains("html"), "{path} content-type: {ct}");
+        let cc = resp
+            .headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(cc.contains("no-store"), "{path} cache-control: {cc}");
+        assert!(!resp.text().await.unwrap().contains("shell"));
+    }
+
+    // 路由式路径（无扩展名 / .html）仍走 SPA 兜底。
+    for path in ["some/unknown/route", "settings", "foo/page.html"] {
+        let resp = client.get(format!("{base}/{path}")).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{path}");
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(ct.contains("text/html"), "{path} content-type: {ct}");
+        assert!(resp.text().await.unwrap().contains("shell"));
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

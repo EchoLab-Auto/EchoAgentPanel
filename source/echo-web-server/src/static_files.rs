@@ -62,10 +62,16 @@ pub async fn static_handler(
     if !file.starts_with(&root) || file.is_dir() {
         return not_found();
     }
-    // 读不到（不存在）→ SPA 兜底：未知路由一律给 app shell。
+    // 读不到（不存在）→ SPA 兜底：未知**路由**给 app shell；但看起来是
+    // 静态资源的路径（`assets/` 前缀或带非 html 扩展名）必须 404——
+    // 否则部署后旧标签页请求旧哈希 chunk 会拿到 200 text/html，动态
+    // import 失败、异步组件永久空白（2026-10 弹层空白故障根因）。
     let served = if tokio::fs::metadata(&file).await.is_ok() {
         file
     } else {
+        if looks_like_asset(relative) {
+            return missing_asset();
+        }
         let shell = root.join("index.html");
         if !shell.starts_with(&root) {
             return not_found();
@@ -242,6 +248,29 @@ fn content_type(file: &Path) -> HeaderValue {
     HeaderValue::from_static(mime)
 }
 
+/// 请求路径是否「看起来是静态资源」：`assets/` 前缀，或最后一段带
+/// 扩展名且不是 html。路由式路径（`/`、`/settings`）返回 false。
+fn looks_like_asset(relative: &str) -> bool {
+    if relative.starts_with("assets/") || relative == "assets" {
+        return true;
+    }
+    let last = relative.rsplit('/').next().unwrap_or("");
+    match Path::new(last).extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => !ext.eq_ignore_ascii_case("html"),
+        None => false,
+    }
+}
+
+/// 缺失静态资源的 404：`no-store` 防止 404 被强缓存（新部署后同名
+/// 资源出现时可立即生效）。
+fn missing_asset() -> Response {
+    let mut response = not_found();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 fn not_found() -> Response {
     (
         StatusCode::NOT_FOUND,
@@ -286,5 +315,17 @@ mod tests {
         );
         assert!(compressible_ext(Path::new("assets/app.css")));
         assert!(!compressible_ext(Path::new("icons/icon-192.png")));
+    }
+
+    #[test]
+    fn asset_like_paths_are_detected() {
+        assert!(looks_like_asset("assets/missing-abc.js"));
+        assert!(looks_like_asset("assets/sub/dir"));
+        assert!(looks_like_asset("icons/icon-old.png"));
+        assert!(looks_like_asset("manifest.webmanifest"));
+        assert!(!looks_like_asset("some/unknown/route"));
+        assert!(!looks_like_asset("settings"));
+        assert!(!looks_like_asset("page.html"));
+        assert!(!looks_like_asset("assetsfoo/route"));
     }
 }
