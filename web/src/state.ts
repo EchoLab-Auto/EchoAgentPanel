@@ -324,10 +324,14 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   // 顺序 push，Core 的 timeline 也是同一顺序），所以合并必须**按它落位**，
   // 不能把"没匹配到快照的条目"一律追加到末尾。
   //
-  // 为什么这条是必需的：历史派生**不含推理**（`history.rs` 模块注释的已知
-  // 差异——活链路的 `AssistantMessage.reasoning_content` 恒为 `None`，推理
-  // 只存在于实时 timeline）。推理在快照里永远找不到对应条目，一律 append
-  // 的结果就是"历史回合的思考全堆到正文后面"，刷新才消失。
+  // 为什么这条是必需的：**旧版 Core** 的历史派生不含推理（`history.rs`：
+  // 活链路的 `AssistantMessage.reasoning_content` 恒为 `None`，推理只存在于
+  // 实时 timeline）。推理在快照里找不到对应条目，一律 append 的结果就是
+  // "历史回合的思考全堆到正文后面"，刷新才消失。
+  //
+  // 新版 Core（2026-10 根治）把每段推理落成 `SessionEvent::Reasoning`，
+  // 派生结果**包含**推理且顺序正确；此时匹配分支会命中并只前移游标。
+  // 两条路径共用同一套落位逻辑，不需要按 Core 版本分支。
   let cursor = 0;
   for (const w of windowMsgs) {
     const seq = w.seq ?? 0;
@@ -342,13 +346,20 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
     // 2) 快照里已有对应条目 → 只前移游标。
     //    水位线内的条目要求**完全相等**：它们自带权威身份，用前缀兼容判据
     //    会把内容更全的新条目误判成重复而吞掉（漏显示回答）。
-    const coveredIndex = indexCoveredBySnapshot(out, w, withinWatermark);
+    // 推理不参与 strict：线上瘦身（elide_reasoning_for_wire）会让历史里的
+    // 全文与 timeline 里的截断文本无法"完全相等"，strict 会把同一条判成
+    // 两条 → 重复显示。
+    const strict = withinWatermark && w.role !== 'reasoning';
+    const coveredIndex = indexCoveredBySnapshot(out, w, strict);
     if (coveredIndex >= 0) {
       cursor = Math.max(cursor, coveredIndex + 1);
       continue;
     }
     // 3) 水位线内（非推理）但内容判据没命中 → 视为已覆盖（快照被瘦身/截断）。
-    //    推理**永不**走这条：快照根本不含推理。
+    //    推理**永不**走这条：旧版 Core 的快照不含推理；新版虽含，但推理在
+    //    线上会被 `elide_reasoning_for_wire` 截断（前 40 条保留全文，更早的
+    //    只留 240 字 + 标记），内容判据仍可能落空——宁可多显示一条，也不能
+    //    把推理整条丢掉。
     if (withinWatermark && w.role !== 'reasoning') continue;
     // 4) 新条目：插到游标处。游标还没建立（trunk 缺少前驱条目，例如已滚出
     //    窗口）时用时间兜底；时间也缺失则退回追加。
@@ -357,6 +368,31 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
     cursor += 1;
   }
   return out;
+}
+
+/** Core `elide_reasoning_for_wire` 写入的截断标记（`{head}…\n（较早的推理已截断：原文 N 字）`）。 */
+const WIRE_ELISION_MARK = '…\n（较早的推理已截断：原文 ';
+
+/**
+ * 推理内容是否指向"同一段思考"。
+ *
+ * 两侧都可能被瘦身：`TrunkTimeline` 的推理条目在**线上**会被
+ * `elide_reasoning_for_wire` 截成 240 字 + 标记，而 `SessionHistory` 派生
+ * 给的是全文。先剥掉标记再比前缀，避免"全文 vs 截断"被判成两条而重复。
+ *
+ * 放开前缀判等在这里是安全的：模型不会两次输出几乎相同的思考（不像短回答
+ * 那样容易撞前缀），而漏判的代价是重复一行。
+ */
+function reasoningCompatible(a: string, b: string): boolean {
+  const x = stripWireElision(a);
+  const y = stripWireElision(b);
+  if (!x || !y) return false;
+  return x.startsWith(y) || y.startsWith(x);
+}
+
+function stripWireElision(text: string): string {
+  const index = text.indexOf(WIRE_ELISION_MARK);
+  return index >= 0 ? text.slice(0, index) : text;
 }
 
 /**
@@ -382,9 +418,12 @@ function indexCoveredBySnapshot(
     if (h.role !== live.role || h.time !== live.time) continue;
     if (h.content === live.content) return i;
     if (strict) continue; // 水位线内的条目只认完全相等（见调用处注释）
+    // 推理：线上会被瘦身（前 40 条保留全文，更早的截成 240 字 + 标记），
+    // 所以两侧可能是"全文 vs 截断"——剥掉标记后按前缀判等。
+    if (live.role === 'reasoning' && reasoningCompatible(h.content, live.content)) return i;
     // 流式副本可能只是终值的前缀（快照是终值、实时行还在增长），或反过来。
     if (
-      (live.role === 'reasoning' || live.role === 'backend') &&
+      live.role === 'backend' &&
       (h.content.startsWith(live.content) || live.content.startsWith(h.content))
     ) {
       return i;

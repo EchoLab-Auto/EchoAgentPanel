@@ -5,9 +5,10 @@
 //! 合并会话历史与实时窗口时，代码是「先铺 hist，再把实时窗口里没覆盖到的
 //! 条目**追加到末尾**」。对"新条目"这是对的，但对**推理**完全错：
 //!
-//! - 历史派生**不含推理**（`history.rs` 模块注释的已知差异——活链路的
+//! - **旧版 Core** 的历史派生不含推理（`history.rs`：活链路的
 //!   `AssistantMessage.reasoning_content` 恒为 `None`，推理只在实时 timeline）；
-//! - 所以推理在 hist 里**永远找不到对应条目** → 每次都被当"新条目"追加；
+//!   新版 Core（2026-10 根治）把推理落成 `SessionEvent::Reasoning`，派生已含；
+//! - 旧 Core 下推理在 hist 里**永远找不到对应条目** → 每次都被当"新条目"追加；
 //! - 于是历史回合的思考全部堆到正文后面，刷新（重建 hist/trunk）才消失。
 //!
 //! 上一轮修「看不到思考 chip」时让推理绕过 seq 水位线，恰好把这条路径暴露
@@ -168,4 +169,39 @@ describe('推理的时序位置', () => {
     const out = sessionMessagesFor(state, SID, TEAM);
     expect(roles(out)).toEqual(['user', 'backend', 'reasoning']);
   });
+
+describe('新版 Core：历史已含推理', () => {
+  it('hist 与实时窗口都有同一段推理 → 只显示一条，位置不变', () => {
+    seedHist([
+      msg({ key: 'h1', role: 'user', content: '问题', time: 100 }),
+      msg({ key: 'h2', role: 'reasoning', content: '思考', time: 105 }),
+      msg({ key: 'h3', role: 'backend', content: '回答', time: 110 }),
+    ]);
+    state.trunk = [
+      msg({ key: 'r1', role: 'reasoning', content: '思考', time: 105 }),
+      msg({ key: 'r2', role: 'backend', content: '回答', time: 110 }),
+    ];
+
+    const out = sessionMessagesFor(state, SID, TEAM);
+    expect(roles(out)).toEqual(['user', 'reasoning', 'backend']);
+  });
+
+  it('线上瘦身（240 字 + 标记）与历史全文视为同一条', () => {
+    const full = 'A'.repeat(400);
+    seedHist([
+      msg({ key: 'h1', role: 'user', content: '问题', time: 100 }),
+      msg({ key: 'h2', role: 'reasoning', content: full, time: 105 }),
+      msg({ key: 'h3', role: 'backend', content: '回答', time: 110 }),
+    ]);
+    // 线上条目被 elide_reasoning_for_wire 截断
+    const elided = `${'A'.repeat(240)}…\n（较早的推理已截断：原文 400 字）`;
+    state.trunk = [msg({ key: 'r1', role: 'reasoning', content: elided, time: 105 })];
+
+    const out = sessionMessagesFor(state, SID, TEAM);
+    expect(roles(out)).toEqual(['user', 'reasoning', 'backend']);
+    // 保留历史里的全文（不被截断版覆盖）
+    expect(out.find((m) => m.role === 'reasoning')?.content).toBe(full);
+  });
+});
+
 });
