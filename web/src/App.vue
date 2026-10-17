@@ -236,7 +236,7 @@ function localLanding(teamId: string | null): string {
 function sendWorkspaceActivate(id: string | null, conversation: string | null = null) {
   // 先登记本窗口意图再发命令：回推到达时据此判断「这次是自己在切」，
   // 而不是另一窗口/模型工具改的（见 workspace.ts 的多窗口一节）。
-  noteLocalActivateIntent(id);
+  noteLocalActivateIntent(id, conversation);
   sendCommand({
     ActivateWorkspaceSession: {
       team_id: activeTeamId.value ?? undefined,
@@ -275,6 +275,38 @@ function onSessionPick(id: string) {
   selectSession(id);
 }
 
+/**
+ * 排障用：把最近 20 次 workspace 广播决策留在 `window.__echoPanelWorkspaceLog`。
+ *
+ * 多窗口串台类问题无法靠现象区分「他端广播 / 本能意图残留 / 通道失效回退」，
+ * 只有把每次决策的输入与结论记下来才能定位。纯内存环形缓冲，无 IO、无副作用，
+ * 用户复现后一条命令即可导出：
+ *
+ * ```js
+ * copy(JSON.stringify(window.__echoPanelWorkspaceLog, null, 2))
+ * ```
+ */
+function recordWorkspaceDecision(entry: {
+  active: string | null;
+  activeConversation: string | null;
+  current: string;
+  mine: boolean;
+  decision: { kind: string; next?: string };
+}): void {
+  const w = window as unknown as { __echoPanelWorkspaceLog?: unknown[] };
+  const log = (w.__echoPanelWorkspaceLog ??= []);
+  log.push({
+    t: new Date().toISOString(),
+    active: entry.active,
+    activeConversation: entry.activeConversation,
+    current: entry.current,
+    mine: entry.mine,
+    decision: entry.decision.kind,
+    next: entry.decision.next ?? null,
+  });
+  if (log.length > 20) log.shift();
+}
+
 // active 回推 → 本窗口视图是否跟随（多窗口互不干扰，2026-10）。
 //
 // Core 的 workspace `active` 是全局单例，`WorkspaceSessions` 会广播给所有
@@ -293,14 +325,23 @@ watch(
   ],
   () => {
     if (state.workspaceTeamId !== activeTeamId.value) return;
-    const mine = takeLocalActivateIntent(state.workspaceActive);
+    const mine = takeLocalActivateIntent(
+      state.workspaceActive,
+      state.workspaceActiveConversation,
+    );
     const decision = decideOnWorkspaceBroadcast({
       currentSessionId: activeSessionId.value,
       active: state.workspaceActive,
       activeConversation: state.workspaceActiveConversation,
       sessions: state.workspaceSessions,
       hasLocalIntent: mine,
-      landing: localLanding(activeTeamId.value),
+    });
+    recordWorkspaceDecision({
+      active: state.workspaceActive,
+      activeConversation: state.workspaceActiveConversation,
+      current: activeSessionId.value,
+      mine,
+      decision,
     });
     if (decision.kind !== 'keep' && activeSessionId.value !== decision.next) {
       activeSessionId.value = decision.next;

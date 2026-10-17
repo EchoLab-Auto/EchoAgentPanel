@@ -238,7 +238,7 @@ function saveConversations(
 /** 点选对话 = 激活 (工作区, 对话)；已是当前对 → 不重发。 */
 function switchConversation(session: WorkspaceSessionInfo, conv: WorkspaceConversationInfo) {
   if (!props.teamId || isActiveConversation(session, conv)) return;
-  noteLocalActivateIntent(session.id);
+  noteLocalActivateIntent(session.id, conv.id);
   sendCommand({
     ActivateWorkspaceSession: { team_id: props.teamId, id: session.id, conversation: conv.id },
   });

@@ -220,11 +220,6 @@ export function workspacePickIntent(
     return { kind: 'deactivate' };
   }
   return { kind: 'none' };
-  // 选默认本地会话 = 取消激活（仅当已知存在激活时发；快照未知不猜）。
-  if (sessionId === LOCAL_DEFAULT_SESSION && synced && active) {
-    return { kind: 'deactivate' };
-  }
-  return { kind: 'none' };
 }
 
 // ── 多窗口互不干扰（2026-10 用户反馈）────────────────────────────────────
@@ -246,31 +241,71 @@ export function workspacePickIntent(
 // 安全网：本地停留的工作区/对话被删除后必须回退，否则视图会指向一个不再
 // 存在的通道（见 [`decideOnWorkspaceBroadcast`]）。
 
-/** 本窗口发起、尚未被回推消费的激活意图（`id === null` = 取消激活）。 */
-let localActivateIntent: { id: string | null } | null = null;
-
-/**
- * 登记「本窗口即将发起的激活」——必须在 `sendCommand(ActivateWorkspaceSession)`
- * 之前调用，否则回推可能先到（同一次同步里 Core 的广播早于本函数的旧路径）。
- *
- * 调用点：App.vue 的 `sendWorkspaceActivate`（会话切换器 / 模型落点跟随）、
- * WorkspacePanel 的「激活」切换与「点选对话」。
- */
-export function noteLocalActivateIntent(id: string | null): void {
-  localActivateIntent = { id };
+/** 本窗口发起、尚未被回推消费的激活意图。 */
+interface LocalActivateIntent {
+  /** 目标工作区（`null` = 取消激活）。 */
+  id: string | null;
+  /** 目标对话（`null` = 由 Core 决定，如「进 last_conversation」）。 */
+  conversation: string | null;
+  /** 登记时刻（ms）：过期即作废，见 [`LOCAL_INTENT_TTL_MS`]。 */
+  at: number;
 }
 
 /**
- * 消费意图：回推的 `active` 与本窗口意图一致 → 这是自己刚才那一下，
- * 允许跟随投影；否则（含无意图）= 他端（另一窗口 / 模型工具）发起。
+ * 意图有效期。**这是本机制的关键防线**（2026-10 二次修复）：
+ *
+ * 意图只有在「回推被真正消费」时才清空，而消费点可能因为前置条件不满足而
+ * **被跳过**——最典型的是 App 的跟随 watcher：`state.workspaceTeamId !==
+ * activeTeamId` 时提前 return（切 agent 中、快照未到、跨 core 竞态）。此时
+ * 意图留在内存里，等到**任意窗口**（另一浏览器 / 模型 `use` 工具）激活同一个
+ * 工作区时命中残留 → 本窗口莫名其妙跟着跳。
+ *
+ * 实测症状：B 窗口早先点过一次工作区通道（那一刻 team 还没同步），此后 A
+ * 窗口每次激活该工作区，B 都跟着跳——即使 B 从未在当前时刻做过任何操作。
+ * 加 TTL 后残留最多影响 5 秒，且只会影响「本窗口刚刚点过同一目标」的窗口。
+ */
+const LOCAL_INTENT_TTL_MS = 5_000;
+
+/** 本窗口发起、尚未被回推消费的激活意图。 */
+let localActivateIntent: LocalActivateIntent | null = null;
+
+/**
+ * 登记「本窗口即将发起的激活」——必须在 `sendCommand(ActivateWorkspaceSession)`
+ * 之前调用，否则回推可能先到。
+ *
+ * 调用点：App.vue 的 `sendWorkspaceActivate`（会话切换器）、WorkspacePanel 的
+ * 「激活」切换与「点选对话」。
+ */
+export function noteLocalActivateIntent(id: string | null, conversation: string | null = null): void {
+  localActivateIntent = { id, conversation, at: Date.now() };
+}
+
+/**
+ * 消费意图：回推的 `active`（+ 对话）与本窗口意图一致且未过期 → 这是自己
+ * 刚才那一下，允许跟随投影；否则（含无意图 / 已过期 / 目标不同）= 他端
+ * （另一窗口 / 模型工具）发起，本窗口不跟随。
  *
  * 一次性语义：无论是否匹配都清空——广播可能被规范化（如裸 ws 通道由 Core
  * 补全为 last_conversation），不能让残留意图把**下一次**他端变更误判成自己的。
+ *
+ * @param active   回推的激活工作区
+ * @param activeConversation 回推的激活对话（`null` = 无对话维度 / 旧 Core）
  */
-export function takeLocalActivateIntent(active: string | null): boolean {
-  const mine = localActivateIntent !== null && localActivateIntent.id === active;
-  localActivateIntent = null;
-  return mine;
+export function takeLocalActivateIntent(
+  active: string | null,
+  activeConversation: string | null = null,
+): boolean {
+  const intent = localActivateIntent;
+  localActivateIntent = null; // 一次性：无论结论如何都清空
+  if (!intent) return false;
+  if (Date.now() - intent.at > LOCAL_INTENT_TTL_MS) return false; // 残留意图已过期
+  if (intent.id !== active) return false;
+  // 对话维度更严格：本窗口若指定了具体对话，回推必须命中同一对话。
+  // （`intent.conversation === null` = 交给 Core 决定，只按工作区匹配。）
+  if (intent.conversation != null && (activeConversation ?? null) !== intent.conversation) {
+    return false;
+  }
+  return true;
 }
 
 /** 测试用：清空意图（避免用例间串味）。 */
@@ -294,7 +329,8 @@ export type WorkspaceBroadcastDecision =
  * 1. **本窗口意图**（`hasLocalIntent`）→ 跟随投影；但当前停在 QQ/global 等
  *    非 local 会话上时不覆盖（用户刚点了别处，别抢回来）。
  * 2. **他端变更** → 默认 `keep`（不打扰）。唯二例外是本地视图指向的通道
- *    已失效：工作区被删 / 该工作区里的对话被删 → `reset` 到 `landing`。
+ *    已失效：工作区被删 / 该工作区里的对话被删 → `reset` 到**默认本地会话**
+ *    （不是 active 投影——那是他人正在看的地方）。
  * 3. 当前不是工作区通道（默认本地会话 / QQ / global）→ `keep`。
  *
  * @param currentSessionId 本窗口当前 activeSessionId
@@ -302,7 +338,6 @@ export type WorkspaceBroadcastDecision =
  * @param activeConversation Core 回推的激活对话
  * @param sessions        广播携带的工作区快照（含各工作区对话清单）
  * @param hasLocalIntent  本窗口刚发起过这次激活
- * @param landing         失效回退落点（调用方传 `localLanding(teamId)`）
  */
 export function decideOnWorkspaceBroadcast(p: {
   currentSessionId: string;
@@ -310,9 +345,8 @@ export function decideOnWorkspaceBroadcast(p: {
   activeConversation: string | null;
   sessions: WorkspaceSessionInfo[] | null;
   hasLocalIntent: boolean;
-  landing: string;
 }): WorkspaceBroadcastDecision {
-  const { currentSessionId, active, activeConversation, sessions, hasLocalIntent, landing } = p;
+  const { currentSessionId, active, activeConversation, sessions, hasLocalIntent } = p;
   // 1) 本窗口自己的激活：跟随投影（与 2026-09 原行为一致）。
   if (hasLocalIntent) {
     if (!currentSessionId.startsWith('local:')) return { kind: 'keep' };
@@ -324,11 +358,17 @@ export function decideOnWorkspaceBroadcast(p: {
   if (!ref) return { kind: 'keep' };
   const workspace = sessions?.find((s) => s.id === ref.workspaceId) ?? null;
   // 工作区被删（或快照尚未到达：sessions 为 null 时不猜，保持视图）。
-  if (sessions && !workspace) return { kind: 'reset', next: landing };
-  // 对话被删：通道 id 内嵌的 conv 已不在该工作区 → 回退。
+  //
+  // 落点必须用**中立的默认本地会话**，不能用调用方传的 `landing`——后者是
+  // `localLanding()`，即「active 投影」= 他人刚激活的那个工作区通道。用它
+  // 就等于「本窗口的工作区被删了 → 跳到别人正在看的工作区」，观感与串台
+  // 无异（2026-10 二次修复）。`landing` 参数仅保留给 follow 分支的调用方
+  // 语义，reset 一律回默认会话。
+  if (sessions && !workspace) return { kind: 'reset', next: LOCAL_DEFAULT_SESSION };
+  // 对话被删：通道 id 内嵌的 conv 已不在该工作区 → 回退到默认本地会话。
   if (workspace && ref.conversationId) {
     const alive = conversationsView(workspace).some((c) => c.id === ref.conversationId);
-    if (!alive) return { kind: 'reset', next: landing };
+    if (!alive) return { kind: 'reset', next: LOCAL_DEFAULT_SESSION };
   }
   return { kind: 'keep' };
 }

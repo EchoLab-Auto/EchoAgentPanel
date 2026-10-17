@@ -82,7 +82,6 @@ describe('decideOnWorkspaceBroadcast 决策规则', () => {
     activeConversation: null as string | null,
     sessions: [wsA, wsB] as WorkspaceSessionInfo[] | null,
     hasLocalIntent: false,
-    landing: LOCAL_DEFAULT_SESSION,
   };
 
   it('本窗口意图 → 跟随投影', () => {
@@ -274,5 +273,75 @@ describe('App 集成：他端广播不切换本窗口视图', () => {
 
     expect(wrapper.find('.stub-chat').text()).toBe(LOCAL_DEFAULT_SESSION);
     wrapper.unmount();
+  });
+});
+
+// ── 二次修复回归（2026-10）：意图残留与 reset 落点 ──
+//
+// 首轮修复只做了「有意图才跟随」，但意图本身可能**永久残留**：
+// 消费点在 `state.workspaceTeamId !== activeTeamId` 时提前 return（切 agent 中 /
+// 快照未到 / 跨 core 竞态），意图没被消费就留着 —— 之后任意窗口激活同一工作区
+// 都会命中残留，本窗口莫名跳转。故加 TTL + 对话维度匹配。
+describe('意图 TTL：残留不会长期生效', () => {
+  beforeEach(() => {
+    __resetLocalActivateIntentForTest();
+  });
+
+  it('刚登记（TTL 内）→ 命中', () => {
+    noteLocalActivateIntent('wsA');
+    expect(takeLocalActivateIntent('wsA')).toBe(true);
+  });
+
+  it('超过 TTL 的残留意图 → 不命中（模拟消费点被跳过后的迟到广播）', () => {
+    vi.useFakeTimers();
+    try {
+      noteLocalActivateIntent('wsA');
+      // 消费点因 team 未同步被跳过，5s 后另一窗口激活同一工作区
+      vi.advanceTimersByTime(5_001);
+      expect(takeLocalActivateIntent('wsA')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('TTL 内但目标工作区不同 → 不命中', () => {
+    noteLocalActivateIntent('wsA');
+    expect(takeLocalActivateIntent('wsB')).toBe(false);
+  });
+
+  it('本窗口指定了对话：回推必须命中同一对话', () => {
+    noteLocalActivateIntent('wsA', 'c2');
+    expect(takeLocalActivateIntent('wsA', 'main')).toBe(false);
+    noteLocalActivateIntent('wsA', 'c2');
+    expect(takeLocalActivateIntent('wsA', 'c2')).toBe(true);
+  });
+
+  it('本窗口未指定对话（交给 Core 决定）：只按工作区匹配', () => {
+    noteLocalActivateIntent('wsA', null);
+    expect(takeLocalActivateIntent('wsA', 'main')).toBe(true);
+  });
+});
+
+describe('reset 落点：回默认本地会话，不跳到他人激活的工作区', () => {
+  it('本地工作区被删 → reset 到 LOCAL_DEFAULT_SESSION（不是 active 投影）', () => {
+    const decision = decideOnWorkspaceBroadcast({
+      currentSessionId: 'local:workspace:dead:local_user',
+      active: 'wsB', // 另��窗口刚激活 wsB
+      activeConversation: null,
+      sessions: [wsB], // dead 已被删
+      hasLocalIntent: false,
+    });
+    expect(decision).toEqual({ kind: 'reset', next: LOCAL_DEFAULT_SESSION });
+  });
+
+  it('本地对话被删 → 同样回默认本地会话', () => {
+    const decision = decideOnWorkspaceBroadcast({
+      currentSessionId: 'local:workspace:wsA/gone:local_user',
+      active: 'wsB',
+      activeConversation: null,
+      sessions: [wsA, wsB],
+      hasLocalIntent: false,
+    });
+    expect(decision).toEqual({ kind: 'reset', next: LOCAL_DEFAULT_SESSION });
   });
 });
