@@ -55,8 +55,21 @@ interface CachePayload {
 /** 最近一次写入的原文，避免无变化时空写（10s 一次的检查几乎零成本）。 */
 let lastWritten = '';
 
-/** 当前选中的人格复合键 `(core, team_id)`；与 `state.teamTimelines` 键一致。 */
+/**
+ * 当前选中的人格复合键 `(core, team_id)`；与 `state.teamTimelines` 键一致。
+ *
+ * 读**内存**状态而不是 localStorage（2026-10 多窗口审计）：`echo-panel-active-team`
+ * 是跨窗口共享的偏好键，多窗口各自停在不同 agent 时，谁最后切换谁写盘——
+ * 若这里读 localStorage，本窗口会把**另一个窗口的 agent**当成「当前」而优先
+ * 写它的缓存，自己正在看的那个反而被预算挤掉。
+ */
 function activeTeamKey(): string {
+  // 运行期：读内存（本窗口真实在看哪个 agent）。
+  if (state.activeTeamId != null) {
+    return teamKey(state.activeRegion ?? null, state.activeTeamId);
+  }
+  // 引导期：`main.ts` 的 hydrateTrunkCache 早于 App 挂载（App.vue 负责把
+  // localStorage 还原的 (id, core) 同步进 state），此时只能读持久化偏好。
   try {
     const id = localStorage.getItem('echo-panel-active-team') ?? '';
     const core = localStorage.getItem('echo-panel-active-team-core');
@@ -127,6 +140,47 @@ export function hydrateTrunkCache(): void {
   }
 }
 
+/**
+ * 既有文档里**本窗口这次不写**的 team 条目（多窗口共存，2026-10 审计）。
+ *
+ * 背景：`echo-panel-trunk-cache` 是跨窗口共享的单一键，而每个窗口的
+ * `state.teamTimelines` 只装它自己**访问过**的 team。两个窗口停在不同 agent
+ * 时，先前实现是整体覆盖 → 每次落盘都把对方的缓存冲掉，两个窗口互相清了
+ * 对方的「零等待首屏」，缓存实际只剩最后写的那一个 team。
+ *
+ * 这里读出既有文档、剔除本次要写的键、只保留形状正确的条目；写盘时在
+ * 预算内追加，于是两个窗口的缓存可以共存。
+ *
+ * 脏数据（版本不符 / 非对象 / msgs 非数组 / 超单条预算）一律丢弃——不冒险
+ * 让坏条目进新文档。
+ */
+function foreignTeamEntries(ownKeys: Set<string>): string[] {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return []; // 隐私模式等：无既有文档可用
+  }
+  if (!raw) return [];
+  let parsed: { v?: number; teams?: Record<string, unknown> };
+  try {
+    parsed = JSON.parse(raw) as { v?: number; teams?: Record<string, unknown> };
+  } catch {
+    return []; // 损坏文档：本次直接整体重写
+  }
+  if (parsed?.v !== VERSION || !parsed.teams || typeof parsed.teams !== 'object') return [];
+  const out: string[] = [];
+  for (const [key, entry] of Object.entries(parsed.teams)) {
+    if (ownKeys.has(key)) continue;
+    const candidate = entry as { seq?: unknown; msgs?: unknown } | null;
+    if (!candidate || typeof candidate !== 'object' || !Array.isArray(candidate.msgs)) continue;
+    const chunk = JSON.stringify(candidate);
+    if (chunk.length > MAX_SINGLE_CHARS) continue;
+    out.push(`${JSON.stringify(key)}:${chunk}`);
+  }
+  return out;
+}
+
 /** 组装待写入的原文；预算内优先当前 team，其余按缓存体积装填。 */
 export function serializeTrunkCache(): string | null {
   const active = activeTeamKey();
@@ -137,13 +191,22 @@ export function serializeTrunkCache(): string | null {
   entries.sort(([a], [b]) => Number(b === active) - Number(a === active));
   const chunks: string[] = [];
   let budget = MAX_TOTAL_CHARS;
+  const ownKeys = new Set<string>();
   for (const [key, cache] of entries) {
+    ownKeys.add(key); // 先登记：即使本条超预算被跳过，也不该从旧文档里捡回来
     const chunk = JSON.stringify({ seq: cache.seq, msgs: cache.msgs });
     if (chunk.length > MAX_SINGLE_CHARS || chunk.length > budget) continue;
     budget -= chunk.length;
     chunks.push(`${JSON.stringify(key)}:${chunk}`);
   }
+  // 本窗口没有任何可写条目 → 保持既有文档原样（旧行为：不用空覆盖）。
   if (!chunks.length) return null;
+  // 多窗口共存：把其他窗口写过的 team 条目在本窗口预算余量内保留下来。
+  for (const chunk of foreignTeamEntries(ownKeys)) {
+    if (chunk.length > budget) continue;
+    budget -= chunk.length;
+    chunks.push(chunk);
+  }
   return `{"v":${VERSION},"teams":{${chunks.join(',')}}}`;
 }
 

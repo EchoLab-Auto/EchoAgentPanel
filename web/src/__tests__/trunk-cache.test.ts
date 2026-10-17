@@ -252,3 +252,90 @@ describe('引导请求使用还原出的游标', () => {
     expect(timeline).toContain('"since_seq":0');
   });
 });
+
+// ── 多窗口共存（2026-10 审计）──
+//
+// 两个窗口停在不同 agent 时，`echo-panel-trunk-cache` 是共享单一键：
+// 先前实现整体覆盖，各自落盘就把对方缓存冲掉（互相清「零等待首屏」）。
+// 现在本窗口条目优先，其余从既有文档的预算余量里保留。
+describe('trunk-cache 多窗口共存', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    localStorage.clear();
+  });
+
+  /** 造一个 team 缓存条目（key = teamKey 复合键）。 */
+  function seed(key: string, content: string, seq = 1) {
+    localStorage.setItem(
+      KEY,
+      payload({ [key]: { seq, msgs: [msg('user', content)] } }),
+    );
+  }
+
+  it('落盘保留他窗口写过的 team 条目（不再互相冲掉）', async () => {
+    seed('teamB', '窗口 B 的时间线'); // 另一个窗口写入的
+    const { serializeTrunkCache, resetTrunkCacheStateForTests } = await import('../trunk-cache');
+    const { state } = await import('../store');
+    resetTrunkCacheStateForTests();
+    // 本窗口只有 teamA
+    state.teamTimelines['teamA'] = { seq: 7, msgs: [msg('user', '本窗口')] as never };
+
+    const raw = serializeTrunkCache();
+    expect(raw).toBeTruthy();
+    const teams = (JSON.parse(raw as string) as { teams: Record<string, unknown> }).teams;
+    expect(Object.keys(teams).sort()).toEqual(['teamA', 'teamB']);
+  });
+
+  it('同名 team 以本窗口内存为准（不被既有文档覆盖）', async () => {
+    seed('teamA', '旧内容', 3);
+    const { serializeTrunkCache, resetTrunkCacheStateForTests } = await import('../trunk-cache');
+    const { state } = await import('../store');
+    resetTrunkCacheStateForTests();
+    state.teamTimelines['teamA'] = { seq: 99, msgs: [msg('user', '新内容')] as never };
+
+    const raw = serializeTrunkCache();
+    const teams = (JSON.parse(raw as string) as {
+      teams: Record<string, { seq: number; msgs: Array<{ content: string }> }>;
+    }).teams;
+    expect(teams.teamA.seq).toBe(99);
+    expect(teams.teamA.msgs[0].content).toBe('新内容');
+  });
+
+  it('本窗口无任何条目 → 返回 null（不拿空文档覆盖既有缓存）', async () => {
+    seed('teamB', '保留我');
+    const { serializeTrunkCache, resetTrunkCacheStateForTests } = await import('../trunk-cache');
+    resetTrunkCacheStateForTests();
+    expect(serializeTrunkCache()).toBeNull();
+    // 既有文档原样还在
+    expect(localStorage.getItem(KEY)).toContain('保留我');
+  });
+
+  it('既有文档损坏/版本不符 → 忽略外来条目，本窗口条目照常写入', async () => {
+    localStorage.setItem(KEY, '{ 损坏 json');
+    const { serializeTrunkCache, resetTrunkCacheStateForTests } = await import('../trunk-cache');
+    const { state } = await import('../store');
+    resetTrunkCacheStateForTests();
+    state.teamTimelines['teamA'] = { seq: 1, msgs: [msg('user', 'ok')] as never };
+    const raw = serializeTrunkCache();
+    const teams = (JSON.parse(raw as string) as { teams: Record<string, unknown> }).teams;
+    expect(Object.keys(teams)).toEqual(['teamA']);
+  });
+
+  it('超单条预算的本窗口条目被跳过，也不会从旧文档里捡回来', async () => {
+    const { serializeTrunkCache, resetTrunkCacheStateForTests, MAX_SINGLE_CHARS } =
+      await import('../trunk-cache');
+    const { state } = await import('../store');
+    resetTrunkCacheStateForTests();
+    // 旧文档里有一条同名但很小的 teamA
+    seed('teamA', '小条目');
+    // 本窗口的 teamA 超限 → 被跳过；旧文档里的 teamA 也不该被当成「外来」保留
+    state.teamTimelines['teamA'] = {
+      seq: 1,
+      msgs: [{ key: 'k', role: 'user', content: 'x'.repeat(MAX_SINGLE_CHARS + 10), time: 1 }],
+    } as never;
+    state.teamTimelines['teamB'] = { seq: 1, msgs: [msg('user', 'b')] as never };
+    const raw = serializeTrunkCache();
+    const teams = (JSON.parse(raw as string) as { teams: Record<string, unknown> }).teams;
+    expect(Object.keys(teams)).toEqual(['teamB']);
+  });
+});

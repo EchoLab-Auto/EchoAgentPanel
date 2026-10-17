@@ -650,6 +650,19 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 响应必须属于当前运行区域；重连/切换 core 后到达的旧响应不能
       // 覆盖新鲜列表（单上游/旧 Core 的 core=null 仍兼容放行）。
       if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) return state;
+      // 响应必须属于当前 **agent**（2026-10 多窗口审计）：workspace store 是
+      // per-persona，`WorkspaceSessions` 广播经进程级 EventSink 发给所有 Panel
+      // 连接并携带 `team_id`。工作区状态在 Panel 是**单槽**——不过滤时：
+      // · 另一窗口（或模型的 use 工具）在别的 agent 上激活工作区 → 通播覆盖
+      //   本窗口的单槽 → `workspaceTeamId !== activeTeamId`，文件浏览器卡
+      //   门控失败、`localLanding` 落点错、`workspacePickIntent` 每次都发激活
+      //   （点一下就把全局 active 抢走，反过来影响另一窗口）；
+      // · 同窗口切 agent 时，旧 agent 的迟到响应/广播污染新 agent 的快照。
+      // 放行条件：team_id 缺省（旧 Core 帧）或本端尚未确定 agent（等 TeamsList
+      // 校正后 App 会按新 agent 重拉）。
+      if (e.team_id != null && state.activeTeamId != null && e.team_id !== state.activeTeamId) {
+        return state;
+      }
       state.workspaceSessions = e.sessions ?? [];
       state.workspaceActive = e.active ?? null;
       state.workspaceActiveConversation = e.active_conversation ?? null;
