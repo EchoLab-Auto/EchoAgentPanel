@@ -12,7 +12,7 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::Instant;
 use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 /// 心跳间隔：每 30s 向两侧各发一次 Ping。
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -492,15 +492,96 @@ pub async fn probe_pump(state: AppState) {
 
 /// 给上游事件帧加壳：`{core: "<上游名>", frame: <原 WsMessage>}`。
 /// 解析只为加壳（serde_json Value 级），不触碰业务载荷。
-fn wrap_event(upstream_name: &str, text: &str) -> Option<String> {
+/// 解码一条 Core → Panel 文本帧：一次性完成"加壳"与"取扇出序号"。
+///
+/// 返回 `None` 表示**无法转发**（仅限加壳模式下解析失败的帧）。
+///
+/// 序号来自 Core 的 `serialize_event_sequenced`（顶层 `"seq":N`）。提取它
+/// 是为了做中继侧的**丢帧诊断**——本函数是中继唯一解析帧的地方，复用同一次
+/// `serde_json` 解析、不额外增加开销（多上游模式此前就已解析过）。
+fn decode_core_frame(
+    upstream_name: &str,
+    text: &str,
+    wrap: bool,
+) -> Option<(String, Option<u64>)> {
+    if !wrap {
+        // 单上游：原样透传（非 JSON 帧也照旧发）。序号取不到就返回 None，
+        // 不影响转发。
+        let seq = serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|v| v.get("seq").and_then(serde_json::Value::as_u64));
+        return Some((text.to_string(), seq));
+    }
     let frame: serde_json::Value = serde_json::from_str(text).ok()?;
-    Some(
+    let seq = frame.get("seq").and_then(serde_json::Value::as_u64);
+    Some((
         serde_json::json!({
             "core": upstream_name,
             "frame": frame,
         })
         .to_string(),
-    )
+        seq,
+    ))
+}
+
+/// 一条上游链路（一次 WebSocket 会话）的转发统计——丢帧诊断用。
+///
+/// 中继是纯透传，历史上"帧去哪了"完全不可见：用户看到工具行一直读秒，
+/// 但 journalctl 里既没有 core 侧丢弃的痕迹、也没有中继侧丢弃的痕迹。
+/// 有了这份统计（配合前端 `event-seq.ts` 的序号校验）就能判断是
+/// **core 没发**（`last_seq` 连续、前端却跳号）、**中继没收到**
+/// （`seq_gaps` > 0）还是**中继没转给浏览器**（链路因写超时被拆，
+/// 下一节连上后由 `missed_while_disconnected` 报出）。
+#[derive(Debug, Default)]
+struct LinkStats {
+    /// 本连接从 Core 收到的文本帧数。
+    frames: u64,
+    /// 最后见到的扇出序号。
+    last_seq: Option<u64>,
+    /// 本连接内序号跳号次数（core→relay 之间丢帧）。
+    seq_gaps: u64,
+    /// 跳号累计缺失条数。
+    seq_missed: u64,
+    /// 加壳模式下无法解析（非 JSON）而被丢弃的帧数。
+    non_json: u64,
+    /// 因浏览器侧写不动而提前结束（其余排队帧由重连补拉）。
+    browser_stalled: bool,
+}
+
+/// 一条链路上相邻两帧序号的连续性判定（纯函数，便于单测）。
+#[derive(Debug, PartialEq, Eq)]
+enum SeqCheck {
+    /// 本连接的首个序号（基线）。
+    First,
+    /// 严格 +1。
+    Contiguous,
+    /// 向前跳——core→relay 之间丢了 `missed` 条。
+    Gap { missed: u64 },
+    /// 回退或重复：Core 重启（序号归 1）或补发了旧帧。不报警。
+    Reset,
+}
+
+fn check_seq(prev: Option<u64>, cur: u64) -> SeqCheck {
+    let Some(prev) = prev else {
+        return SeqCheck::First;
+    };
+    if cur == prev + 1 {
+        SeqCheck::Contiguous
+    } else if cur > prev {
+        SeqCheck::Gap {
+            missed: cur - prev - 1,
+        }
+    } else {
+        SeqCheck::Reset
+    }
+}
+
+/// 断链期间丢失的条数：新连接首帧与上一条连接最后帧之间的空洞。
+///
+/// Core 重启会让序号归 1（`next <= prev`），此时返回 0——不是丢帧，是换了
+/// 一代事件流。用饱和减法即可覆盖，无需额外判据。
+fn resume_gap(prev: u64, next: u64) -> u64 {
+    next.saturating_sub(prev + 1)
 }
 
 /// 浏览器命令帧的投递意图——中继**不做命令语义分类**（纯透传）。
@@ -630,6 +711,10 @@ async fn bridge(browser: WebSocket, state: AppState) {
                 // 连续失败计数：≥5 次进入降级（退避上限 60s），成功复位。
                 let mut backoff = RECONNECT_BASE;
                 let mut failures: u32 = 0;
+                // 上一条连接见到的最后一个扇出序号。重连后拿它和新连接首帧
+                // 对比即可算出"断链期间丢了 N 条"——这条日志是判断
+                // "core 没发 / 中继没收到 / 中继没转给浏览器"的关键证据。
+                let mut last_seq_seen: Option<u64> = None;
                 loop {
                     // 浏览器已断开（事件出口无接收方）→ 退出整个重连循环。
                     // （2026-10 修复：此前该存活检查只在链路建立后的读泵
@@ -733,31 +818,88 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     // reader 需要自己的 multi 句柄做加壳判定；外层循环保留
                     // multi 用于链路增删时的 refresh_multi。
                     let multi_reader = multi.clone();
+                    // 断链前的最后序号（重连时由外层传入）：首帧到达时即可
+                    // 报出"断开期间丢了多少条"。Core 重启会让序号归 1，那时
+                    // 差值为负，`saturating_sub` 自然不报警。
+                    let resume_from = last_seq_seen;
                     let reader = tokio::spawn(async move {
                         let mut last_frame = Instant::now();
                         let mut hb = tokio::time::interval(heartbeat_interval());
                         hb.tick().await;
+                        let mut stats = LinkStats::default();
+                        let mut resume_pending = resume_from.is_some();
                         loop {
                             tokio::select! {
                                 message = core_rx.next() => {
                                     let message = match message {
                                         Some(Ok(m)) => m,
+                                        // 上游关闭：返回统计供外层写日志。
                                         _ => break,
                                     };
                                     last_frame = Instant::now();
                                     let forward = match message {
                                         tokio_tungstenite::tungstenite::Message::Text(text) => {
-                                            let out = if multi_reader
-                                                .load(std::sync::atomic::Ordering::Relaxed)
-                                            {
-                                                match wrap_event(&name2, &text) {
-                                                    Some(w) => w,
-                                                    None => continue, // 非 JSON 帧：丢弃
+                                            let wrap = multi_reader
+                                                .load(std::sync::atomic::Ordering::Relaxed);
+                                            match decode_core_frame(&name2, &text, wrap) {
+                                                Some((out, seq)) => {
+                                                    stats.frames += 1;
+                                                    if let Some(cur) = seq {
+                                                        // 断链后首帧：报出"core 在无接收方
+                                                        // 期间发了多少条"（浏览器会按
+                                                        // since_seq 补拉）。
+                                                        if resume_pending {
+                                                            resume_pending = false;
+                                                            if let Some(prev) = resume_from {
+                                                                let missed = resume_gap(prev, cur);
+                                                                if missed > 0 {
+                                                                    warn!(
+                                                                        core = %name2,
+                                                                        last_seq = prev,
+                                                                        next_seq = cur,
+                                                                        missed,
+                                                                        "relay was disconnected from core: events missed in between \
+                                                                         (browser re-syncs them via since_seq)"
+                                                                    );
+                                                                }
+                                                            }
+                                                        }
+                                                        // 同一条连接内的跳号 = WS 层真丢帧。
+                                                        match check_seq(stats.last_seq, cur) {
+                                                            SeqCheck::Gap { missed } => {
+                                                                stats.seq_gaps += 1;
+                                                                stats.seq_missed += missed;
+                                                                warn!(
+                                                                    core = %name2,
+                                                                    prev_seq = stats
+                                                                        .last_seq
+                                                                        .unwrap_or_default(),
+                                                                    next_seq = cur,
+                                                                    missed,
+                                                                    "event frames lost inside the upstream link (core→relay)"
+                                                                );
+                                                            }
+                                                            SeqCheck::Reset => debug!(
+                                                                core = %name2,
+                                                                prev_seq = stats
+                                                                    .last_seq
+                                                                    .unwrap_or_default(),
+                                                                next_seq = cur,
+                                                                "event seq went backwards (core restarted?): re-baselining"
+                                                            ),
+                                                            _ => {}
+                                                        }
+                                                        stats.last_seq = Some(cur);
+                                                    }
+                                                    BrowserMessage::Text(out.into())
                                                 }
-                                            } else {
-                                                text.to_string()
-                                            };
-                                            BrowserMessage::Text(out.into())
+                                                None => {
+                                                    // 加壳模式下无法解析的帧：无法归属
+                                                    // core，只能丢弃——但要留痕。
+                                                    stats.non_json += 1;
+                                                    continue;
+                                                }
+                                            }
                                         }
                                         tokio_tungstenite::tungstenite::Message::Ping(p) => {
                                             BrowserMessage::Ping(p.to_vec().into())
@@ -770,6 +912,8 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                         _ => continue,
                                     };
                                     if event_tx_reader.send(forward).await.is_err() {
+                                        // 浏览器侧出口已关：本链路剩余事件无处可去。
+                                        stats.browser_stalled = true;
                                         break;
                                     }
                                 }
@@ -782,6 +926,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                 }
                             }
                         }
+                        stats
                     });
                     let abort = reader.abort_handle();
                     let writer_abort = writer.abort_handle();
@@ -814,7 +959,37 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     // 旧 socket 的读半边一直被 reader 持有、永不关闭，到 Core
                     // 的连接持续泄漏直至进程 FD 耗尽（EMFILE，Panel 表现为
                     // "cannot connect ... Too many open files"）。
-                    let _ = reader.await;
+                    let stats = reader.await.unwrap_or_default();
+                    if stats.last_seq.is_some() {
+                        last_seq_seen = stats.last_seq;
+                    }
+                    // 链路关闭诊断（2026-10）：把这四条计数写进日志，配合
+                    // 前端 event-seq 的跳号记录即可定位丢帧发生在哪一跳：
+                    //   frames/last_seq  → Core 侧发到哪（连续即 Core 正常）
+                    //   seq_gaps/missed  → core→relay 之间丢了几条
+                    //   non_json         → 无法归属 core 被丢弃的帧
+                    //   browser_stalled  → 浏览器侧出口先关，剩余帧由重连补拉
+                    if stats.frames > 0 || stats.seq_gaps > 0 || stats.non_json > 0 {
+                        if stats.seq_gaps > 0 || stats.non_json > 0 || stats.browser_stalled {
+                            warn!(
+                                core = %name,
+                                frames = stats.frames,
+                                last_seq = ?stats.last_seq,
+                                seq_gaps = stats.seq_gaps,
+                                missed = stats.seq_missed,
+                                non_json = stats.non_json,
+                                browser_stalled = stats.browser_stalled,
+                                "upstream link closed with dropped frames"
+                            );
+                        } else {
+                            info!(
+                                core = %name,
+                                frames = stats.frames,
+                                last_seq = ?stats.last_seq,
+                                "upstream link closed"
+                            );
+                        }
+                    }
                     writer_abort.abort();
                     links.write().await.remove(&name);
                     refresh_multi(&state.registry, &multi, &links).await;
@@ -1056,13 +1231,31 @@ async fn bridge(browser: WebSocket, state: AppState) {
 
     // 事件出口：event_rx + 心跳 Ping → 浏览器（带写超时）。
     let browser_write = tokio::spawn(async move {
+        let mut sent: u64 = 0;
+        let mut close_reason = "browser closed";
         loop {
             tokio::select! {
                 frame = event_rx.recv() => {
                     let Some(frame) = frame else { break };
                     match tokio::time::timeout(SEND_TIMEOUT, browser_tx.send(frame)).await {
-                        Ok(Ok(())) => {}
-                        _ => break,
+                        Ok(Ok(())) => sent += 1,
+                        Ok(Err(_)) => {
+                            // 浏览器连接已断：写失败即是正常退出路径。
+                            close_reason = "browser gone";
+                            break;
+                        }
+                        Err(_) => {
+                            // 写超时（浏览器标签冻结/网络黑洞）：判死并拆链路。
+                            // 此刻 event_rx 里可能还排着若干条——它们不会到达
+                            // 浏览器，由前端重连后的 since_seq 补拉找回。
+                            close_reason = "browser write timed out";
+                            warn!(
+                                sent,
+                                timeout_s = SEND_TIMEOUT.as_secs(),
+                                "browser relay write timed out; closing relay link                                  (queued events are re-synced by the client after reconnect)"
+                            );
+                            break;
+                        }
                     }
                 }
                 _ = browser_ping_rx.recv() => {
@@ -1071,11 +1264,13 @@ async fn bridge(browser: WebSocket, state: AppState) {
                         .await
                         .is_err()
                     {
+                        close_reason = "browser gone (heartbeat write failed)";
                         break;
                     }
                 }
             }
         }
+        debug!(sent, close_reason, "browser relay writer finished");
         let _ = browser_tx.close().await;
     });
 
@@ -1187,6 +1382,110 @@ mod tests {
     }
 
     /// 广播重放缓冲：按序记录、越容量丢最旧（供晚建成的链路补投）。
+    // ── Core 帧解码与丢帧诊断（2026-10）────────────────────────────────
+
+    /// 单上游：原样透传，同时取到顶层的扇出序号。
+    #[test]
+    fn decode_passthrough_extracts_seq() {
+        let text = r#"{"type":"event","payload":{"AgentThinking":{"session_id":"s"}},"seq":42}"#;
+        let (out, seq) = decode_core_frame("core", text, false).expect("single upstream always forwards");
+        assert_eq!(out, text, "单上游必须原样透传");
+        assert_eq!(seq, Some(42));
+    }
+
+    /// 单上游 + 旧版 Core（无 seq）：照旧转发，序号为 None（校验跳过）。
+    #[test]
+    fn decode_passthrough_without_seq() {
+        let text = r#"{"type":"event","payload":{"AgentThinking":{"session_id":"s"}}}"#;
+        let (out, seq) = decode_core_frame("core", text, false).unwrap();
+        assert_eq!(out, text);
+        assert_eq!(seq, None, "旧版 Core 无 seq → 不参与连续性校验");
+    }
+
+    /// 单上游的非 JSON 帧也必须转发（历史行为，不能因诊断而丢）。
+    #[test]
+    fn decode_passthrough_keeps_non_json() {
+        let (out, seq) = decode_core_frame("core", "not-json-at-all", false).unwrap();
+        assert_eq!(out, "not-json-at-all");
+        assert_eq!(seq, None);
+    }
+
+    /// 多上游：加壳 + 序号保留在**内层** frame 上（前端从 frame 里取）。
+    #[test]
+    fn decode_wraps_and_keeps_seq_inner() {
+        let text = r#"{"type":"event","payload":{"AgentThinking":{"session_id":"s"}},"seq":7}"#;
+        let (out, seq) = decode_core_frame("node-a", text, true).unwrap();
+        assert_eq!(seq, Some(7));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v.get("core").and_then(|c| c.as_str()), Some("node-a"));
+        assert_eq!(
+            v.pointer("/frame/seq").and_then(|s| s.as_u64()),
+            Some(7),
+            "序号必须在内层 frame 上，前端 parseFrame 才能取到"
+        );
+    }
+
+    /// 多上游的非 JSON 帧无法归属 core：丢弃（返回 None → 计数 + 告警）。
+    #[test]
+    fn decode_drops_non_json_when_wrapping() {
+        assert!(decode_core_frame("node-a", "plain text", true).is_none());
+    }
+
+    /// 序号提取只看**顶层**：payload 内部的同名字段不能污染（TrunkTimeline
+    /// 的条目自带 `seq`，取错会误报持续跳号）。
+    #[test]
+    fn decode_reads_top_level_seq_only() {
+        let text = r#"{"type":"event","payload":{"TrunkTimeline":{"messages":[{"seq":900},{"seq":901}]}},"seq":12}"#;
+        let (_, seq) = decode_core_frame("core", text, false).unwrap();
+        assert_eq!(seq, Some(12), "必须取顶层 seq，而不是 payload 条目里的");
+        // payload 里有 seq、顶层没有 → 视为无序号（旧版 Core）
+        let old = r#"{"type":"event","payload":{"TrunkTimeline":{"messages":[{"seq":900}]}}}"#;
+        let (_, seq) = decode_core_frame("core", old, false).unwrap();
+        assert_eq!(seq, None);
+    }
+
+    // ── 序号连续性判定（纯函数）────────────────────────────────────────
+
+    #[test]
+    fn check_seq_classifies_all_cases() {
+        // 首帧：建立基线
+        assert_eq!(check_seq(None, 1), SeqCheck::First);
+        assert_eq!(check_seq(None, 9000), SeqCheck::First);
+        // 严格 +1
+        assert_eq!(check_seq(Some(1), 2), SeqCheck::Contiguous);
+        assert_eq!(check_seq(Some(900), 901), SeqCheck::Contiguous);
+        // 跳号：缺几条要说准
+        assert_eq!(check_seq(Some(10), 15), SeqCheck::Gap { missed: 4 });
+        assert_eq!(check_seq(Some(1), 3), SeqCheck::Gap { missed: 1 });
+        // 回退 / 重复：Core 重启或补发旧帧，不报警
+        assert_eq!(check_seq(Some(500), 1), SeqCheck::Reset);
+        assert_eq!(check_seq(Some(7), 7), SeqCheck::Reset);
+        assert_eq!(check_seq(Some(7), 3), SeqCheck::Reset);
+    }
+
+    #[test]
+    fn resume_gap_counts_disconnected_window() {
+        // 断在 100，重连首帧 105 → 期间 101..=104 共 4 条没收到
+        assert_eq!(resume_gap(100, 105), 4);
+        // 紧接下一帧：没有丢
+        assert_eq!(resume_gap(100, 101), 0);
+        // Core 重启（序号归 1 / 更小）：不算丢帧
+        assert_eq!(resume_gap(500, 1), 0);
+        assert_eq!(resume_gap(500, 500), 0);
+    }
+
+    /// stats 默认值：全零 / 未见过序号。
+    #[test]
+    fn link_stats_default_is_empty() {
+        let stats = LinkStats::default();
+        assert_eq!(stats.frames, 0);
+        assert_eq!(stats.last_seq, None);
+        assert_eq!(stats.seq_gaps, 0);
+        assert_eq!(stats.seq_missed, 0);
+        assert_eq!(stats.non_json, 0);
+        assert!(!stats.browser_stalled);
+    }
+
     #[test]
     fn broadcast_replay_keeps_most_recent_in_order() {
         let mut replay = BroadcastReplay::new();
