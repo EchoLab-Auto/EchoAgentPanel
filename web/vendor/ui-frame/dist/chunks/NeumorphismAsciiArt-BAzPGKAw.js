@@ -47,34 +47,37 @@ import '../NeumorphismAsciiArt.css';const x = ["aria-label"], L = {
       palette: a(() => e.palette),
       seed: a(() => {
       }),
-      src: a(() => e.src)
+      src: a(() => e.src),
+      // 呼吸流光为低频缓动：30fps 上限于观感无差别，空闲常驻开销减半
+      // （指针交互中不节流，滚动期间与视口外由 useArtRenderer 自动停摆）
+      idleFps: 30
     });
-    const f = a(() => e.ariaLabel || u("asciiArtLabel"));
+    const p = a(() => e.ariaLabel || u("asciiArtLabel"));
     function o(t) {
       return typeof t == "number" ? `${t}px` : t;
     }
-    const p = a(() => ({
+    const f = a(() => ({
       borderRadius: m[e.radius],
       width: e.width !== void 0 ? o(e.width) : "100%",
       ...e.height !== void 0 ? { height: o(e.height) } : i.value ? { aspectRatio: String(i.value) } : { height: "240px" }
     }));
     return (t, r) => (l(), d("div", {
       class: "nm-ascii-art",
-      style: _(p.value)
+      style: _(f.value)
     }, [
       g("canvas", {
         ref_key: "canvasRef",
         ref: s,
         class: "nm-ascii-art__canvas",
         role: "img",
-        "aria-label": f.value
+        "aria-label": p.value
       }, null, 8, x),
       t.$slots.default ? (l(), d("div", L, [
         b(t.$slots, "default", {}, void 0, !0)
       ])) : y("", !0)
     ], 4));
   }
-}), C = /* @__PURE__ */ R(N, [["__scopeId", "data-v-b0f6e7fd"]]);
+}), C = /* @__PURE__ */ R(N, [["__scopeId", "data-v-6b0e6db3"]]);
 export {
   C as N
 };

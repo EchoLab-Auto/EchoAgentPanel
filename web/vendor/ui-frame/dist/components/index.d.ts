@@ -125,5 +125,7 @@ export { default as NeumorphismSpinner } from './NeumorphismSpinner';
 export type { NeumorphismSpinnerProps, SpinnerSize } from './NeumorphismSpinner';
 export { default as NeumorphismStatusDot } from './NeumorphismStatusDot';
 export type { NeumorphismStatusDotProps, StatusDotStatus, StatusDotSize, } from './NeumorphismStatusDot';
+export { default as NeumorphismIcon } from './NeumorphismIcon';
+export type { NeumorphismIconProps } from './NeumorphismIcon';
 export { default as NeumorphismSegmented } from './NeumorphismSegmented';
 export type { NeumorphismSegmentedProps, SegmentedOption, SegmentedSize, } from './NeumorphismSegmented';

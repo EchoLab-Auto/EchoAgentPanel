@@ -1,4 +1,4 @@
-import { defineComponent as C, computed as u, useAttrs as g, ref as z, watch as B, openBlock as r, createElementBlock as c, unref as n, normalizeStyle as N, normalizeClass as V, createElementVNode as a, mergeProps as w, createCommentVNode as h, renderSlot as S, createTextVNode as A, toDisplayString as D } from "vue";
+import { defineComponent as C, computed as u, useAttrs as g, ref as z, watch as B, openBlock as r, createElementBlock as c, unref as n, normalizeStyle as N, normalizeClass as V, createElementVNode as a, mergeProps as w, createCommentVNode as f, renderSlot as S, createTextVNode as A, toDisplayString as D } from "vue";
 import { useCheckable as j } from "../composables/useCheckable.js";
 import { u as E } from "./createComponent-jnXBYqCm.js";
 import { _ as I } from "./_plugin-vue_export-helper-CHgC5LLL.js";
@@ -45,7 +45,7 @@ import '../NeumorphismCheckbox.css';const L = ["for"], M = { class: "nm-checkbox
       for (const t of Object.keys(i))
         t !== "class" && t !== "style" && (e[t] = i[t]);
       return e;
-    }), { inputId: f, classList: v } = j(() => ({
+    }), { inputId: h, classList: v } = j(() => ({
       prefix: "checkbox",
       isChecked: l.value,
       isDisabled: s.disabled,
@@ -69,11 +69,11 @@ import '../NeumorphismCheckbox.css';const L = ["for"], M = { class: "nm-checkbox
     return (e, t) => (r(), c("label", {
       class: V([n(v), n(i).class]),
       style: N(n(i).style),
-      for: n(f)
+      for: n(h)
     }, [
       a("span", M, [
         a("input", w({
-          id: n(f),
+          id: n(h),
           ref_key: "inputRef",
           ref: d,
           type: "checkbox",
@@ -98,17 +98,17 @@ import '../NeumorphismCheckbox.css';const L = ["for"], M = { class: "nm-checkbox
               "stroke-linecap": "round",
               "stroke-linejoin": "round"
             }, null, -1)
-          ])])) : h("", !0)
+          ])])) : f("", !0)
         ])
       ]),
       o.label || e.$slots.default ? (r(), c("span", O, [
         S(e.$slots, "default", {}, () => [
           A(D(o.label), 1)
         ], !0)
-      ])) : h("", !0)
+      ])) : f("", !0)
     ], 14, L));
   }
-}), K = /* @__PURE__ */ I(T, [["__scopeId", "data-v-b0f5de8b"]]);
+}), K = /* @__PURE__ */ I(T, [["__scopeId", "data-v-b1b907c9"]]);
 export {
   K as N
 };

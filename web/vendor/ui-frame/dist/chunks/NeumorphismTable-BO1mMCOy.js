@@ -2,7 +2,7 @@ import { defineComponent as P, computed as i, openBlock as a, createElementBlock
 import { useTable as U } from "../composables/useTable.js";
 import { useConfig as X } from "../composables/useConfig.js";
 import { useLocale as Y } from "../composables/useLocale.js";
-import { N as z } from "./NeumorphismCheckbox-C1s5xpZU.js";
+import { N as z } from "./NeumorphismCheckbox-YoI_8c5H.js";
 import { _ as Z } from "./_plugin-vue_export-helper-CHgC5LLL.js";
 import '../NeumorphismTable.css';const ee = { class: "nm-table__wrapper" }, te = { class: "nm-table__inner" }, le = {
   key: 0,
