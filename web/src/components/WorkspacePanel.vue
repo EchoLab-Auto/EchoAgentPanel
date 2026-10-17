@@ -20,6 +20,7 @@ import { sendCommand, sendPending } from '../connection';
 import { sessionKey } from '../keys';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
+import PanelIcon from './PanelIcon.vue';
 import type { WorkspaceConversationInfo, WorkspaceSessionInfo } from '../protocol';
 import {
   conversationsView,
@@ -425,7 +426,8 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
             :title="directoryToInput(dir)"
           >
             <span v-if="directoryNode(dir)" class="ws-dir-chip__node">
-              {{ directoryNode(dir) }}⛓
+              {{ directoryNode(dir) }}
+              <PanelIcon name="link" size="xs" aria-label="远程节点" />
             </span>{{ directoryPath(dir) }}
           </span>
           <span v-if="!(session.directories ?? []).length" class="muted">（尚未配置目录）</span>
@@ -653,6 +655,9 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
 .ws-card__desc { margin: 0; font-size: 11px; color: var(--nm-text-secondary); }
 .ws-card__dirs { display: flex; flex-wrap: wrap; gap: 4px; }
 .ws-dir-chip__node {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   color: var(--panel-accent, #0969da);
   font-weight: 600;
   margin-right: 2px;

@@ -15,6 +15,7 @@ import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSele
 import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { ChatCopyButton } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
+import PanelIcon from './PanelIcon.vue';
 import {
   alignBalanceSeries,
   alignUsageSeries,
@@ -1054,7 +1055,8 @@ watch(
         <span class="api-remote-entry__name">{{ entry.name }}</span>
         <span class="muted">{{ entry.provider }} / {{ entry.model }}</span>
         <span v-if="!entry.key_set" class="api-remote-entry__warn" title="远端未配置 key">
-          ⚠ 无 key
+          <PanelIcon name="warning" size="xs" tone="warn" />
+          无 key
         </span>
         <NeumorphismButton variant="glass" size="small" @click="importFromRemote(entry)">
           导入
@@ -1285,7 +1287,13 @@ watch(
   font-size: 13px;
 }
 .api-remote-entry__name { font-weight: 600; }
-.api-remote-entry__warn { color: var(--panel-warn, #9a6700); font-size: 12px; }
+.api-remote-entry__warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--panel-warn, #9a6700);
+  font-size: 12px;
+}
 /* 余额与用量总览（近 7 天；多 profile 对比） */
 .api-metrics {
   margin: 4px 0 14px;

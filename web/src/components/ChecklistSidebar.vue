@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { state } from '../store';
 import { checklistsForSession } from '../state';
 import SidebarCard from './SidebarCard.vue';
+import PanelIcon from './PanelIcon.vue';
 
 //! 清单快照按 (core, team_id, session_id) 复合键存储（state.checklists，
 //! 2026-10：多上游 core 维度 + 多 persona team 维度）——本组件只显示
@@ -54,7 +55,13 @@ const lists = computed(() => {
           class="checklist-item"
           :class="{ done: item.done }"
         >
-          {{ item.done ? '☑' : '☐' }} {{ item.text }}
+          <PanelIcon
+            :name="item.done ? 'check-square' : 'square'"
+            size="sm"
+            :tone="item.done ? 'ok' : 'muted'"
+            class="checklist-item__icon"
+          />
+          <span class="checklist-item__text">{{ item.text }}</span>
         </div>
       </div>
     </SidebarCard>

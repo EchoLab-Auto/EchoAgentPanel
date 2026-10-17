@@ -358,14 +358,16 @@ describe('ChatView 布局契约', () => {
     expect(emitted![0][1]).toEqual([]);
   });
 
-  it('受限样式契约：actions 行底对齐、图标 17px、SVG 图标而非 emoji', () => {
+  it('受限样式契约：actions 行底对齐、图标取 ui-frame 档位、SVG 图标而非 emoji', () => {
     const raw = require('fs').readFileSync(
       require('path').resolve(__dirname, '../ChatView.vue'),
       'utf-8',
     );
     const styleBlock = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
-    // 图标规格：17px stroke SVG
-    expect(styleBlock).toMatch(/chat-view__icon\s*\{[^}]*width:\s*17px/s);
+    // 图标规格（2026-10 图标统一）：尺寸取 --nm-icon-size-md（16px 档），
+    // 不再自造 17px / 15px 档位（UI Frame §8 尺寸须为枚举档）。
+    expect(styleBlock).toMatch(/chat-view__icon\s*\{[^}]*width:\s*var\(--nm-icon-size-md\)/s);
+    expect(styleBlock).not.toMatch(/chat-view__icon[^{]*\{[^}]*width:\s*1[57]px/s);
     // actions 行底对齐
     expect(styleBlock).toMatch(/nm-chat-composer__row[^}]*align-items:\s*flex-end/s);
     // 源文件不得出现 emoji 图标

@@ -548,26 +548,26 @@ function ariaOf(item: WorkRunItem): string {
 
 /* 思考 chip：静态为柔和紫（与工具的灰系同族但可辨识），悬停/展开/播放转亮紫 */
 .work-run-group__chip--reasoning {
-  color: color-mix(in srgb, #a78bfa 78%, var(--nm-text-secondary));
+  color: color-mix(in srgb, var(--panel-reasoning) 85%, var(--nm-text-secondary));
 }
 .work-run-group__chip--reasoning:hover {
-  color: #c4b5fd;
+  color: var(--panel-reasoning);
 }
 .work-run-group__chip--reasoning.work-run-group__chip--open {
-  color: #a78bfa;
-  border-color: color-mix(in srgb, #8b5cf6 55%, transparent);
+  color: var(--panel-reasoning);
+  border-color: color-mix(in srgb, var(--panel-reasoning) 55%, transparent);
 }
 
 /* 子代理 chip：青色系（与既有"子代理完成"行同色），与工具/思考同规格 */
 .work-run-group__chip--subagent {
-  color: color-mix(in srgb, #14b8a6 78%, var(--nm-text-secondary));
+  color: color-mix(in srgb, var(--panel-subagent) 85%, var(--nm-text-secondary));
 }
 .work-run-group__chip--subagent:hover {
-  color: #5eead4;
+  color: var(--panel-subagent);
 }
 .work-run-group__chip--subagent.work-run-group__chip--open {
-  color: #14b8a6;
-  border-color: color-mix(in srgb, #14b8a6 55%, transparent);
+  color: var(--panel-subagent);
+  border-color: color-mix(in srgb, var(--panel-subagent) 55%, transparent);
 }
 .work-run-group__chip--subagent.work-run-group__chip--failed {
   color: var(--panel-err);
@@ -589,7 +589,7 @@ function ariaOf(item: WorkRunItem): string {
 }
 @keyframes work-run-pulse-reasoning {
   50% {
-    box-shadow: 0 3px 12px color-mix(in srgb, #8b5cf6 32%, transparent);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-reasoning) 32%, transparent);
   }
 }
 .work-run-group__chip--active .work-run-group__think {
@@ -611,7 +611,7 @@ function ariaOf(item: WorkRunItem): string {
 }
 @keyframes work-run-pulse-subagent {
   50% {
-    box-shadow: 0 3px 12px color-mix(in srgb, #14b8a6 32%, transparent);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-subagent) 32%, transparent);
   }
 }
 .work-run-group__chip--active .work-run-group__agent {
@@ -637,8 +637,8 @@ function ariaOf(item: WorkRunItem): string {
 }
 /* 子代理运行中的转圈点：青色（与 chip 同色系） */
 .work-run-group__dot--live {
-  border-color: color-mix(in srgb, #14b8a6 30%, transparent);
-  border-top-color: #14b8a6;
+  border-color: color-mix(in srgb, var(--panel-subagent) 30%, transparent);
+  border-top-color: var(--panel-subagent);
 }
 @keyframes work-run-spin {
   to {
@@ -681,10 +681,14 @@ function ariaOf(item: WorkRunItem): string {
   flex: 0 0 auto;
 }
 .work-run-group__detail-icon--reasoning {
-  color: #a78bfa;
+  /* 主题令牌（styles.css）：亮色档 #7c3aed / 暗色档 #a78bfa——两档对背景
+     均 ≥4:1（WCAG 1.4.11 非文本图形 ≥3:1）。此前硬编码 #a78bfa 在亮色
+     背景上仅 2.06:1，图标发虚难以辨识。 */
+  color: var(--panel-reasoning);
 }
 .work-run-group__detail-icon--subagent {
-  color: #14b8a6;
+  /* 同上：亮色档 #0f766e（4.15:1）/ 暗色档 #14b8a6（6.85:1）。 */
+  color: var(--panel-subagent);
 }
 .work-run-group__detail-name {
   font-family: var(--nm-font-mono, monospace);
@@ -723,8 +727,8 @@ function ariaOf(item: WorkRunItem): string {
   color: var(--panel-err);
 }
 .work-run-group__detail-status--reasoning.work-run-group__detail-status--live {
-  color: #a78bfa;
-  background: color-mix(in srgb, #8b5cf6 14%, transparent);
+  color: var(--panel-reasoning);
+  background: color-mix(in srgb, var(--panel-reasoning) 14%, transparent);
 }
 
 .work-run-group__pre {
@@ -763,8 +767,8 @@ function ariaOf(item: WorkRunItem): string {
   white-space: nowrap;
 }
 .work-run-group__badge--reasoning {
-  color: #a78bfa;
-  border-color: color-mix(in srgb, #8b5cf6 38%, transparent);
+  color: var(--panel-reasoning);
+  border-color: color-mix(in srgb, var(--panel-reasoning) 38%, transparent);
 }
 
 /* 详情头部时长：运行中实时刷新，完成后固定为总耗时 */

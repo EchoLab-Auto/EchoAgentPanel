@@ -1431,10 +1431,12 @@ function mediaSrc(img: string): string {
   min-width: 0;
 }
 
-/* 图标基准：与 neumorphism stroke 风格保持一致 */
+/* 图标基准：取 --nm-icon-size-md（16px）——此前 17px/15px 两个自造档位，
+  同一输入行内发送钮与附件钮图标大小不一致（UI Frame §8：尺寸须取
+  12/14/16/18/20/24/32 枚举档）。 */
 .chat-view__icon {
-  width: 17px;
-  height: 17px;
+  width: var(--nm-icon-size-md);
+  height: var(--nm-icon-size-md);
   flex: 0 0 auto;
 }
 .chat-view__cancel {
@@ -1474,8 +1476,9 @@ function mediaSrc(img: string): string {
   border-radius: 12px !important;
 }
 .chat-view__icon--btn {
-  width: 15px;
-  height: 15px;
+  /* 与 .chat-view__icon 同档（16px）：发送钮与附件钮并排，尺寸必须一致 */
+  width: var(--nm-icon-size-md);
+  height: var(--nm-icon-size-md);
 }
 
 /* 消息内图片 */

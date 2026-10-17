@@ -3,7 +3,7 @@
 //! 分隔条可拖动调整上下空间分配（flex-grow 比例，持久化）。
 //!
 //! 拖动（2026-09-24 双侧边栏）：
-//! - 卡头是拖动把手（握把图标 ⠿ 悬停可见）：按下后移动超过阈值进入拖动，
+//! - 卡头是拖动把手（握把图标（grip 六点）悬停可见）：按下后移动超过阈值进入拖动，
 //!   拖影由 `RailDragGhost`（Teleport 到 body）渲染，卡片本身从本列摘除
 //!   （其余卡片以 FLIP 过渡补齐）；落点指示线/空列虚线框由拖动状态驱动；
 //! - 卡头右侧另有「移到左/右侧」按钮（键盘可达的等价操作，见 a11y 说明）；
@@ -36,6 +36,7 @@ import {
   updateCardDrag,
 } from '../rail-drag';
 import { moveToOtherSide, type RailSide } from '../rail-layout';
+import PanelIcon from './PanelIcon.vue';
 
 export interface RailCardDef {
   /** 稳定 id（折叠态与高度比例持久化键） */
@@ -414,7 +415,9 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
               @pointerdown="onHeadPointerDown($event, card)"
               @click="onHeadClick(card)"
             >
-              <span v-if="canDrag" class="rail-stack__grip" aria-hidden="true">⠿</span>
+              <span v-if="canDrag" class="rail-stack__grip" aria-hidden="true">
+                <PanelIcon name="grip" size="xs" />
+              </span>
               <span class="rail-stack__title">
                 {{ card.title }}
                 <span
@@ -434,9 +437,14 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
                 @pointerdown.stop
                 @click.stop="onRelocate(card)"
               >
-                {{ side === 'left' ? '⇥' : '⇤' }}
+                <PanelIcon :name="side === 'left' ? 'arrow-right' : 'arrow-left'" size="sm" />
               </button>
-              <span class="rail-stack__caret">{{ isOpen(card.id) ? '▾' : '▸' }}</span>
+              <span class="rail-stack__caret" aria-hidden="true">
+                <PanelIcon
+                  :name="isOpen(card.id) ? 'chevron-down' : 'chevron-right'"
+                  size="xs"
+                />
+              </span>
             </header>
           </template>
           <div v-if="isOpen(card.id)" class="rail-stack__body">
@@ -599,8 +607,9 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
 }
 /* 握把：与卡头同一拖动把手（悬停可见，视觉提示「可拖」） */
 .rail-stack__grip {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
-  font-size: 11px;
   color: var(--nm-text-placeholder, #888);
   opacity: 0;
   transition: opacity 0.15s;
@@ -619,17 +628,19 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   white-space: nowrap;
 }
 .rail-stack__caret {
+  display: inline-flex;
+  align-items: center;
   color: var(--nm-text-secondary);
-  font-size: 11px;
   flex: 0 0 auto;
 }
 /* 「移到另一侧」：键盘/鼠标等价路径（拖动之外的显式操作） */
 .rail-stack__relocate {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
   border: none;
   background: transparent;
   color: var(--nm-text-secondary);
-  font-size: 12px;
   line-height: 1;
   padding: 2px 4px;
   border-radius: 6px;

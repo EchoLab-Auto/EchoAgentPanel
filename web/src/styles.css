@@ -38,6 +38,13 @@
   --panel-glass-highlight: rgba(255, 255, 255, 0.6);
   --panel-glass-shadow-md: 0 12px 32px rgba(15, 23, 42, 0.16);
   --panel-glass-shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.18);
+
+  /* 图标语义色（2026-10 图标统一）：推理 / 子代理图标的专属色调——
+     此前硬编码 #a78bfa / #14b8a6，是"只按暗色调"的值：亮色背景
+     （--nm-bg-color #e0e0e0）上对比度仅 2.06:1 / 1.89:1，低于
+     WCAG 1.4.11 对非文本图形要求的 3:1。此处按主题分档，两档均 ≥4:1。 */
+  --panel-reasoning: #7c3aed;
+  --panel-subagent: #0f766e;
 }
 
 [data-theme='dark'] {
@@ -56,6 +63,11 @@
   --panel-glass-highlight: rgba(255, 255, 255, 0.12);
   --panel-glass-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.45);
   --panel-glass-shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+
+  /* 图标语义色暗色档：同一组色调在深底上需要更亮的取值
+     （暗底 #1c1c1c 上 6.26:1 / 6.85:1，均远超 3:1）。 */
+  --panel-reasoning: #a78bfa;
+  --panel-subagent: #14b8a6;
 }
 
 * { box-sizing: border-box; }
@@ -368,7 +380,15 @@ body {
 .checklist-progress { color: var(--nm-text-secondary); }
 .checklist-bar { height: 6px; background: var(--panel-hover); border-radius: 3px; margin: 6px 0; }
 .checklist-bar-fill { height: 100%; background: var(--panel-ok); border-radius: 3px; }
-.checklist-item { padding: 2px 0; }
+/* 清单行：图标列 + 文本（图标基线对齐，替代 ☑/☐ 字符） */
+.checklist-item {
+  padding: 2px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--nm-icon-size-xs);
+}
+.checklist-item__icon { margin-top: 1px; }
+.checklist-item__text { min-width: 0; }
 .checklist-item.done { color: var(--nm-text-secondary); text-decoration: line-through; }
 
 /* ── 设置表单 ── */

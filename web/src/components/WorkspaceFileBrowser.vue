@@ -25,6 +25,7 @@ import { sendCommand } from '../connection';
 import { scopedKey } from '../keys';
 import type { WorkspaceSessionInfo } from '../protocol';
 import { directoryToInput, isRemoteDirectoryInput } from '../workspace';
+import PanelIcon from './PanelIcon.vue';
 
 const props = defineProps<{
   teamId: string | null;
@@ -346,54 +347,15 @@ function formatSize(size: number): string {
           >
             <span class="wfb-twistie">
               <NeumorphismSpinner v-if="row.loading" :size="12" label="读取中" />
-              <svg
-                v-else
-                class="wfb-chevron"
-                viewBox="0 0 16 16"
-                width="10"
-                height="10"
-                aria-hidden="true"
-              >
-                <path
-                  d="M6 3.5 10.5 8 6 12.5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <PanelIcon v-else class="wfb-chevron" name="chevron-right" size="xs" />
             </span>
             <span class="wfb-ico" aria-hidden="true">
-              <svg v-if="row.isOpen" viewBox="0 0 16 16" class="wfb-svg wfb-svg--open">
-                <path
-                  d="M1.5 3.2a1 1 0 0 1 1-1h3l1.4 1.6h6.6a1 1 0 0 1 1 1v1H3.1L1.7 9.4V3.2z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M3.1 6.5h11l-1.3 5.4a1 1 0 0 1-1 .8H2.6a1 1 0 0 1-1-1.2L3.1 6.5z"
-                  fill="currentColor"
-                  opacity="0.16"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <svg v-else viewBox="0 0 16 16" class="wfb-svg">
-                <path
-                  d="M1.8 3.2a1 1 0 0 1 1-1h3l1.4 1.6h6a1 1 0 0 1 1 1v7.4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1V3.2z"
-                  fill="currentColor"
-                  opacity="0.16"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <PanelIcon :name="row.isOpen ? 'folder-open' : 'folder'" size="sm" />
             </span>
-            <span v-if="row.remoteNode" class="wfb-badge">{{ row.remoteNode }}⛓</span>
+            <span v-if="row.remoteNode" class="wfb-badge">
+              {{ row.remoteNode }}
+              <PanelIcon name="link" size="xs" aria-label="远程节点" />
+            </span>
             <span class="wfb-name">{{ row.label }}</span>
           </button>
 
@@ -401,22 +363,7 @@ function formatSize(size: number): string {
           <div v-else-if="row.kind === 'file'" class="wfb-tbtn wfb-tbtn--file" :title="row.path">
             <span class="wfb-twistie" aria-hidden="true" />
             <span class="wfb-ico wfb-ico--file" aria-hidden="true">
-              <svg viewBox="0 0 16 16" class="wfb-svg">
-                <path
-                  d="M4 1.8h4.6L12.2 5.4v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.8a1 1 0 0 1 1-1z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M8.4 1.8v3.8h3.8"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <PanelIcon name="file" size="sm" />
             </span>
             <span class="wfb-name">{{ row.label }}</span>
             <span class="wfb-size">{{ formatSize(row.size) }}</span>
@@ -526,20 +473,28 @@ function formatSize(size: number): string {
   height: 16px;
   color: var(--nm-text-secondary);
 }
-.wfb-svg {
-  width: 15px;
-  height: 15px;
-  display: block;
-}
 .wfb-ico--file { opacity: 0.6; }
 /* 目录图标跟随目录行的主色（accent），文件图标保持次级灰 */
 .wfb-trow--dir .wfb-ico,
 .wfb-trow--root .wfb-ico { color: var(--panel-accent); }
+/* twistie 固定槽宽 14px：图标 12px 居中 + 两侧各 1px——
+   保证展开/折叠/加载三态切换时行内名称左缘不位移；
+   占位行缩进 34px = 14(twistie) + 2(gap) + 16(图标) + 2(gap) 与此一致。 */
+.wfb-twistie {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
 .wfb-chevron { transition: transform 0.12s ease; }
 .wfb-trow.is-open .wfb-chevron { transform: rotate(90deg); }
 
 .wfb-badge {
-  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   flex: none;
   margin-right: 2px;
   color: var(--panel-accent, #0969da);

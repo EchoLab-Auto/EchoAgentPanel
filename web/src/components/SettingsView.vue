@@ -35,6 +35,7 @@ import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTextarea';
 import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
 import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
+import PanelIcon from './PanelIcon.vue';
 import { confirmDialog } from '../confirm';
 import { state } from '../store';
 import { regionLabel } from '../state';
@@ -1759,8 +1760,20 @@ watch(
                     />
                     <span class="caps-list-item__name">{{ s.name }}</span>
                     <span class="caps-skill-item__marks">
-                      <span v-if="s.always" class="caps-mark caps-mark--always" title="常驻：每轮都注入">★</span>
-                      <span v-if="s.system" class="caps-mark caps-mark--system" title="系统提示词技能">⇧</span>
+                      <span
+                        v-if="s.always"
+                        class="caps-mark caps-mark--always caps-mark--icon"
+                        title="常驻：每轮都注入"
+                      >
+                        <PanelIcon name="pin" size="xs" />
+                      </span>
+                      <span
+                        v-if="s.system"
+                        class="caps-mark caps-mark--system caps-mark--icon"
+                        title="系统提示词技能"
+                      >
+                        <PanelIcon name="sparkle" size="xs" />
+                      </span>
                       <span v-if="s.source" class="caps-mark caps-mark--git" title="外部 Git 来源">Git</span>
                       <span v-if="skillPackageDisabled(s)" class="caps-mark caps-mark--warn" title="所属包已禁用">包已禁用</span>
                     </span>
@@ -1894,15 +1907,26 @@ watch(
                       >
                         {{ pluginMembers(p).tools.length }} 工具 · {{ pluginMembers(p).skills.length }} 技能
                       </span>
-                      <span v-if="pluginProtected(p)" class="caps-mark caps-mark--warn" title="禁用即断连自锁，Core 拒绝">
-                        🔒 受保护
+                      <span
+                        v-if="pluginProtected(p)"
+                        class="caps-mark caps-mark--warn caps-mark--icon"
+                        title="禁用即断连自锁，Core 拒绝"
+                      >
+                        <PanelIcon name="lock" size="xs" tone="warn" />
+                        受保护
                       </span>
                       <span v-else-if="pluginSemantic(p) === 'mode'" class="caps-mark caps-mark--system" title="互斥模式插件">
                         模式
                       </span>
                     </span>
                     <span class="caps-skill-item__quick" @click.stop>
-                      <span v-if="pluginProtected(p)" class="caps-lock" title="禁用即断连自锁（受保护）">🔒</span>
+                      <span
+                        v-if="pluginProtected(p)"
+                        class="caps-lock"
+                        title="禁用即断连自锁（受保护）"
+                      >
+                        <PanelIcon name="lock" size="sm" tone="warn" aria-label="受保护" />
+                      </span>
                       <NeumorphismSwitch
                         v-else
                         :model-value="p.enabled"
@@ -2083,7 +2107,12 @@ watch(
               <div class="detail-field">
                 <span>
                   系统提示词（注入 base 区，影响该智能体的身份/规则层）
-                  <span class="skill-warn-icon" title="高风险：内容会进入所有启用它的智能体的系统提示词">⚠</span>
+                  <span
+                    class="skill-warn-icon"
+                    title="高风险：内容会进入所有启用它的智能体的系统提示词"
+                  >
+                    <PanelIcon name="warning" size="sm" tone="warn" aria-label="高风险" />
+                  </span>
                 </span>
                 <NeumorphismSwitch
                   :model-value="selectedSkill.system === true"
@@ -2515,7 +2544,13 @@ watch(
                 <NeumorphismTag v-if="!selectedPlugin.builtin" variant="info" size="small">
                   外部插件
                 </NeumorphismTag>
-                <span v-if="pluginProtected(selectedPlugin)" class="caps-mark caps-mark--warn">🔒 受保护</span>
+                <span
+                  v-if="pluginProtected(selectedPlugin)"
+                  class="caps-mark caps-mark--warn caps-mark--icon"
+                >
+                  <PanelIcon name="lock" size="xs" tone="warn" />
+                  受保护
+                </span>
                 <NeumorphismSwitch
                   v-else
                   :model-value="selectedPlugin.enabled"
@@ -3270,6 +3305,12 @@ watch(
   color: var(--nm-text-secondary);
   background: color-mix(in srgb, var(--nm-text-primary) 7%, transparent);
 }
+/* 带图标的徽标：图标与文字同排居中对齐（徽标高度由 padding 决定） */
+.caps-mark--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 .caps-mark--always {
   color: var(--panel-warn);
 }
@@ -3409,6 +3450,8 @@ watch(
   width: 130px;
 }
 .skill-warn-icon {
+  display: inline-flex;
+  align-items: center;
   cursor: help;
   color: var(--panel-warn);
 }
@@ -3543,7 +3586,8 @@ watch(
 
 /* 受保护项：行内锁标记占位（与开关同宽，保持行对齐） */
 .caps-lock {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
   opacity: 0.7;
   cursor: help;
 }

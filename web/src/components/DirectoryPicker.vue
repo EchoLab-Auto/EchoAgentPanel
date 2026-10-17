@@ -10,7 +10,7 @@
 //! - `<peer>`：联邦节点（经 activeRegion core 代理 `Query(BrowseDirectories)`，
 //!   对端限同浏览根；需对端 allow_queries 含 browse_directories）。
 //!
-//! 行交互：点击 = 选择该目录（立即回填）；行尾「▸」= 进入浏览。
+//! 行交互：点击 = 选择该目录（立即回填）；行尾「›」= 进入浏览。
 
 import { computed, ref, watch } from 'vue';
 import { state } from '../store';
@@ -18,6 +18,7 @@ import { scopedKey } from '../keys';
 import { sendCommand } from '../connection';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
+import PanelIcon from './PanelIcon.vue';
 import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 
 const props = defineProps<{
@@ -83,7 +84,7 @@ function pickLocation(next: string) {
   browse(rootsRequestPath.value);
 }
 
-/** 进入一个目录（行尾「▸」）。 */
+/** 进入一个目录（行尾「›」）。 */
 function enter(label: string, path: string) {
   stack.value = [...stack.value, { label, path }];
   browse(path);
@@ -178,7 +179,7 @@ watch(
           class="dp-up"
           @click="goUp"
         >
-          ↑ 上一级
+          <PanelIcon name="arrow-up" size="sm" /> 上一级
         </NeumorphismButton>
       </div>
 
@@ -199,11 +200,11 @@ watch(
               :title="displayPath(root.path)"
               @click="select(root.path)"
             >
-              <span class="dp-row__icon">🏠</span>
+              <PanelIcon name="home" size="sm" class="dp-row__icon" />
               <span class="dp-row__name">{{ root.label }}</span>
               <span class="dp-row__path muted">{{ displayPath(root.path) }}</span>
               <button class="dp-enter" title="进入浏览" @click.stop="enter(root.label, root.path)">
-                ▸
+                <PanelIcon name="chevron-right" size="sm" />
               </button>
             </div>
           </template>
@@ -217,11 +218,11 @@ watch(
               :title="displayPath(entry.path)"
               @click="select(entry.path)"
             >
-              <span class="dp-row__icon">📁</span>
+              <PanelIcon name="folder" size="sm" class="dp-row__icon" />
               <span class="dp-row__name">{{ entry.name }}</span>
               <span class="dp-row__path muted">{{ displayPath(entry.path) }}</span>
               <button class="dp-enter" title="进入浏览" @click.stop="enter(entry.name, entry.path)">
-                ▸
+                <PanelIcon name="chevron-right" size="sm" />
               </button>
             </div>
           </template>
@@ -312,7 +313,14 @@ watch(
   cursor: pointer;
 }
 .dp-row:hover { background: var(--panel-hover); }
-.dp-row__icon { font-size: 13px; }
+/* 图标列：固定槽宽保证名称左缘对齐（emoji 换线框图标后不再依赖字号） */
+.dp-row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--nm-icon-size-md);
+  color: var(--nm-text-secondary);
+}
 .dp-row__name { font-weight: 500; min-width: 0; }
 .dp-row__path {
   flex: 1;

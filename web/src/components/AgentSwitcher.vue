@@ -114,12 +114,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        stroke-width="2.5"
+        stroke-width="2"
         stroke-linecap="round"
         stroke-linejoin="round"
         aria-hidden="true"
       >
-        <!-- 默认朝上（提示菜单向上弹出），打开时旋转 180° 朝下 -->
+        <!-- 默认朝上（提示菜单向上弹出），打开时旋转 180° 朝下。
+             线宽 2（§8：14px 显示档的标准线宽；2.5 仅用于 ≤12px 微图标补偿）。 -->
         <path d="m6 15 6-6 6 6" />
       </svg>
     </button>
