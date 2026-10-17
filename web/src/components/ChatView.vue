@@ -17,6 +17,7 @@ import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpi
 import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
 import { useChatScroll } from '@echolab-auto/ui-frame/composables/useChatScroll';
 import { ChatComposer, type ChatMessage } from '@echolab-auto/ui-frame/chat';
+import PanelIcon from './PanelIcon.vue';
 import { state } from '../store';
 import { checklistsForSession, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
@@ -1086,8 +1087,13 @@ function mediaSrc(img: string): string {
       <div v-if="attachments.length" class="chat-view__attachments">
         <div v-for="(img, i) in attachments" :key="i" class="chat-view__attach">
           <img :src="img" class="chat-view__attach-img" alt="" />
-          <button class="chat-view__attach-remove" title="移除" @click="removeAttachment(i)">
-            ×
+          <button
+            class="chat-view__attach-remove"
+            title="移除"
+            aria-label="移除图片"
+            @click="removeAttachment(i)"
+          >
+            <PanelIcon name="close" size="xs" />
           </button>
         </div>
       </div>
@@ -1539,13 +1545,14 @@ function mediaSrc(img: string): string {
   border: none;
   background: var(--nm-surface-color);
   color: var(--nm-text-secondary);
-  font-size: 13px;
-  line-height: 20px;
-  text-align: center;
   cursor: pointer;
-  padding: 0;
   box-shadow: 0 2px 6px var(--nm-shadow-dark, rgba(0, 0, 0, 0.35));
   transition: color 0.15s ease, background 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--nm-text-secondary);
 }
 .chat-view__attach-remove:hover {
   color: var(--nm-text-primary);

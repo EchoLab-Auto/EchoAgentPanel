@@ -458,6 +458,8 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+/* 小节标题里的折叠指示图标（替代 ▾/▸ 字符）：与标题文本行内垂直居中 */
+.ctx-section-title__caret { vertical-align: middle; margin-left: 2px; }
 .ctx-clickable { cursor: pointer; user-select: none; }
 .ctx-clickable:hover { color: var(--panel-accent); }
 .ctx-blocks { display: flex; flex-direction: column; gap: 6px; }

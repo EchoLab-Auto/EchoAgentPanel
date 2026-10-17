@@ -9,6 +9,7 @@
 //! 视觉连续；不渲染卡体（体量大、且拖动中无需交互）。
 
 import { computed } from 'vue';
+import PanelIcon from './PanelIcon.vue';
 import {
   GHOST_FADE_MS,
   GHOST_FLIGHT_MS,
@@ -51,7 +52,7 @@ const snapshot = computed(() => railDrag.snapshot);
   <Teleport to="body">
     <div v-if="visible" class="rail-ghost" :style="style" aria-hidden="true">
       <div class="rail-ghost__head">
-        <span class="rail-ghost__grip">⠿</span>
+        <span class="rail-ghost__grip"><PanelIcon name="grip" size="xs" /></span>
         <span class="rail-ghost__title">{{ snapshot?.title }}</span>
         <span
           v-if="snapshot?.count && snapshot.count > 0"
@@ -88,8 +89,9 @@ const snapshot = computed(() => railDrag.snapshot);
   padding: 12px 14px;
 }
 .rail-ghost__grip {
+  display: inline-flex;
+  align-items: center;
   color: var(--nm-text-placeholder, #888);
-  font-size: 12px;
 }
 .rail-ghost__title {
   flex: 1;

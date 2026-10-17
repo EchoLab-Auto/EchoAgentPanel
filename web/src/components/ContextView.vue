@@ -12,6 +12,7 @@ import { sessionKey } from '../keys';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
+import PanelIcon from './PanelIcon.vue';
 import LoadHint from './LoadHint.vue';
 import { confirmDialog } from '../confirm';
 
@@ -254,8 +255,11 @@ async function compactHistory() {
         size="small"
         title="刷新"
         :loading="ctxLoading"
+        aria-label="刷新上下文快照"
         @click="refresh"
-      >↻</NeumorphismButton>
+      >
+        <PanelIcon name="refresh" size="sm" />
+      </NeumorphismButton>
     </div>
 
     <div v-if="!snapshot" class="ctx-state">
@@ -278,7 +282,7 @@ async function compactHistory() {
         @retry="requestSnapshot"
       />
       <span v-else class="muted">
-        （暂无快照——点右上角 ↻ 重新拉取；若持续为空，请确认已选择智能体与会话）
+        （暂无快照——点右上角刷新按钮重新拉取；若持续为空，请确认已选择智能体与会话）
       </span>
     </div>
     <template v-else>
@@ -350,8 +354,17 @@ async function compactHistory() {
         </ChatFold>
       </div>
 
-      <div class="ctx-section-title ctx-clickable" @click="showMessages = !showMessages">
-        逐条消息明细（{{ snapshot.messages.length }}） {{ showMessages ? '▾' : '▸' }}
+      <div
+        class="ctx-section-title ctx-clickable"
+        :aria-expanded="showMessages"
+        @click="showMessages = !showMessages"
+      >
+        逐条消息明细（{{ snapshot.messages.length }}）
+        <PanelIcon
+          :name="showMessages ? 'chevron-down' : 'chevron-right'"
+          size="xs"
+          class="ctx-section-title__caret"
+        />
       </div>
       <template v-if="showMessages">
         <div v-for="(message, index) in snapshot.messages" :key="index" class="context-row">
