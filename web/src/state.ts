@@ -37,6 +37,7 @@ import type {
 } from './protocol';
 
 import { checklistKey, scopedKey, sessionKey, teamKey } from './keys';
+import { hasRecentLocalActivateIntent } from './workspace';
 
 export const TRUNK_SESSION_ID = 'trunk';
 
@@ -1036,7 +1037,16 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       if (!isFull && cached) {
         // 增量：追加新条目。core 对运行中工具条目的就地更新会带新 seq
         // 重新投递完成态——按 tool_call_id 原地修补，不追加重复行。
+        //
+        // **seq 去重**（2026-10 多窗口）：`TrunkTimeline` 是广播事件——本窗口
+        // 请求的响应，**其他所有窗口**也会收到（`RequestTrunkTimeline` 由各
+        // 窗口按自己的游标发，Core 只 emit 一次全量广播）。若本窗口游标比
+        // 请求方新，同一批条目会被再 push 一遍 → 消息列表出现重复行、key 全
+        // 换、看起来像"列表被刷新/换了会话"。用游标以下界过滤即可幂等。
+        const floor = cached.seq;
         for (const message of e.messages) {
+          const msgSeq = message.seq ?? 0;
+          if (msgSeq > 0 && msgSeq <= floor) continue; // 已经见过这一条
           const display = toDisplayMessage(message);
           if (!patchToolMessage(cached.msgs, display)) cached.msgs.push(display);
           if (state.trunkTeamId === key) {
@@ -1440,6 +1450,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { Error: { session_id: string | null; message: string } }).Error;
       // 流式：错误中断当前步——冻结该会话流式行（保留已显示的部分文本）。
       if (e.session_id) freezeStreams(state, e.session_id);
+      // 工作区激活/取消的成功提示：Core 用 `Error{session_id:null}` 广播给
+      // **所有**连接（`workspace/commands.rs`）。不过滤的话，A 窗口点一下
+      // 工作区通道，B 窗口也弹出「已激活工作区会话：X」——多窗口串台
+      // （2026-10）。只在本窗口刚发起激活时显示（提示对本窗口有意义，
+      // 对其他窗口是噪音且会被误读成"我也被切过去了"）。
+      if (!e.session_id && isWorkspaceActivationNotice(e.message) && !hasRecentLocalActivateIntent()) {
+        return state;
+      }
       pushToast(state, e.message, 'info');
       return state;
     }
@@ -1582,6 +1600,16 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   for (const key of Object.keys(state.adapterUiByKey)) {
     if (key.startsWith(prefix)) delete state.adapterUiByKey[key];
   }
+}
+
+/**
+ * 是否为「工作区激活/取消」的成功提示（Core 侧 `workspace/commands.rs` 的
+ * `BackendEvent::Error{session_id: None, message}`）。
+ *
+ * 用前缀匹配而非精确串：文案带工作区名/对话名（`已激活工作区会话：{id}（对话 {conv}）`）。
+ */
+function isWorkspaceActivationNotice(message: string): boolean {
+  return message.startsWith('已激活工作区会话') || message.startsWith('已取消工作区会话激活');
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {

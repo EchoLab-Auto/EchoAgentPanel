@@ -308,6 +308,23 @@ export function takeLocalActivateIntent(
   return true;
 }
 
+/**
+ * **只窥探不消费**：本窗口刚刚发起过激活吗（TTL 内）？
+ *
+ * 供「不该广播给别人的提示」过滤用——最典型的是 Core 在激活成功时发的
+ * `BackendEvent::Error{message:"已激活工作区会话：X"}`（`workspace/commands.rs`）。
+ * 该事件经 EventBroker 扇出给**所有** Panel 连接，于是 A 点一下，B 窗口也弹
+ * 出一条「已激活…」——用户观感就是「B 跟着跳了」（2026-10 多窗口串台）。
+ *
+ * 与 [`takeLocalActivateIntent`] 的区别：不消费意图。两者服务于不同对象——
+ * 视图跟随要一次性消费（避免残留误判），提示过滤只需"此刻是不是我在操作"。
+ */
+export function hasRecentLocalActivateIntent(): boolean {
+  const intent = localActivateIntent;
+  if (!intent) return false;
+  return Date.now() - intent.at <= LOCAL_INTENT_TTL_MS;
+}
+
 /** 测试用：清空意图（避免用例间串味）。 */
 export function __resetLocalActivateIntentForTest(): void {
   localActivateIntent = null;

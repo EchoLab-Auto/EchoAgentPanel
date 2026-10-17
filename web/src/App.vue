@@ -35,12 +35,24 @@ import FullscreenToggleButton from './components/FullscreenToggleButton.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { mobileCardsDrawerOpen } from './mobile-cards';
+import { railSessionId } from './rail-cards';
+import { readPref, readTabOnly, writePref, writeTabOnly } from './tab-prefs';
 
 startConnection();
 
 // 竖屏移动端（2026-10）：断点与库同源（innerWidth < 768）。移动端隐藏
 // 全屏按钮（CSS），顶栏出现「卡片」入口（打开 ChatView 内的卡片抽屉）。
 const { isMobile } = useTouchDevice();
+
+// ── 持久化键（必须在首次读取之前声明：`view` 的初值就地调 loadView）──
+// 记住上次使用的 Agent（Team）：刷新/重连后恢复，避免回到默认 agent。
+// ⚠️ 全部经 `tab-prefs` 读写——本标签页权威 + 全局默认兜底，避免多窗口串台
+// （详见 tab-prefs.ts 的说明）。
+const ACTIVE_TEAM_KEY = 'echo-panel-active-team';
+const ACTIVE_TEAM_CORE_KEY = 'echo-panel-active-team-core';
+/** 视图 / 当前会话的键（均为 per-tab）。 */
+const VIEW_KEY = 'echo-panel-view';
+const SESSION_KEY = 'echo-panel-session';
 
 type View = 'chat' | 'settings' | 'shell';
 
@@ -55,7 +67,8 @@ function openShellDetail(sessionId: string) {
 
 function loadView(): View {
   try {
-    const saved = localStorage.getItem('echo-panel-view');
+    // 本标签页优先（视图是窗口内状态）；新标签回退全局默认。
+    const saved = readPref(VIEW_KEY);
     // 旧视图名迁移：资源/日志视图已合并进设置视图；任务视图已并入
     // 聊天入口行的「任务」弹层（按当前 agent 的当前会话过滤）。
     if (saved === 'caps' || saved === 'logs') return 'settings';
@@ -66,13 +79,9 @@ function loadView(): View {
   }
 }
 
-// ── 记住上次使用的 Agent（Team）：刷新/重连后恢复，避免回到默认 agent ──
-const ACTIVE_TEAM_KEY = 'echo-panel-active-team';
-const ACTIVE_TEAM_CORE_KEY = 'echo-panel-active-team-core';
-
 function loadActiveTeam(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_TEAM_KEY) || null;
+    return readPref(ACTIVE_TEAM_KEY) || null;
   } catch {
     return null;
   }
@@ -80,7 +89,7 @@ function loadActiveTeam(): string | null {
 
 function loadActiveTeamCore(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_TEAM_CORE_KEY) || null;
+    return readPref(ACTIVE_TEAM_CORE_KEY) || null;
   } catch {
     return null;
   }
@@ -88,16 +97,8 @@ function loadActiveTeamCore(): string | null {
 
 function saveActiveTeam(id: string | null, core: string | null) {
   try {
-    if (id) {
-      localStorage.setItem(ACTIVE_TEAM_KEY, id);
-    } else {
-      localStorage.removeItem(ACTIVE_TEAM_KEY);
-    }
-    if (core) {
-      localStorage.setItem(ACTIVE_TEAM_CORE_KEY, core);
-    } else {
-      localStorage.removeItem(ACTIVE_TEAM_CORE_KEY);
-    }
+    writePref(ACTIVE_TEAM_KEY, id);
+    writePref(ACTIVE_TEAM_CORE_KEY, core);
   } catch {
     // ignore storage errors (private mode)
   }
@@ -139,20 +140,24 @@ function onTeamSelect(next: string | null, core?: string | null) {
     state.trunkTeamId = tk;
     sendCommand({ RequestTrunkTimeline: { team_id: next } });
   }
-  selectSession(localLanding(next));
+  // 用户**主动**切 agent：落到该 agent 自己的 active 投影（per-persona 状态，
+  // 不是"另一个窗口的选择"，故此处用 localLanding 是合理的）。
+  selectSession(localLanding(next), 'team-select');
 }
 
 function setView(next: View) {
   view.value = next;
   try {
-    localStorage.setItem('echo-panel-view', next);
+    writePref(VIEW_KEY, next);
   } catch {
     // ignore storage errors (private mode)
   }
 }
 
 // 当前对话目标会话；'global' = 全局上下文（显示全部消息）。默认 local user 会话。
-const activeSessionId = ref('local:tui::local_user');
+const activeSessionId = ref(readTabOnly(SESSION_KEY) ?? 'local:tui::local_user');
+/** 侧栏卡片读它来决定"文件浏览器绑哪个工作区"（per-window，非全局 active）。 */
+railSessionId.value = activeSessionId.value;
 const activeBranchId = ref<string | null>(null);
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
 // 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
@@ -211,8 +216,8 @@ function cancelWork() {
   });
 }
 
-function selectSession(id: string) {
-  activeSessionId.value = id;
+function selectSession(id: string, reason = 'select') {
+  setActiveSession(id, reason);
   setView('chat');
 }
 
@@ -273,6 +278,59 @@ function onSessionPick(id: string) {
   if (intent.kind === 'activate') sendWorkspaceActivate(intent.workspaceId, intent.conversation);
   else if (intent.kind === 'deactivate') sendWorkspaceActivate(null);
   selectSession(id);
+}
+
+/**
+ * 排障用：记录 `activeSessionId` 的**每一次**变更（谁改的 + 调用栈）。
+ *
+ * 多窗口「串台」这类问题只有两条线索可用：① 变更是谁发起的 ② 改成了什么。
+ * 现象层面无法区分「他端广播 / 残留意图 / teams 重排 / 通道失效回退」，而
+ * 调用栈能一眼定案。故所有赋值点统一走 [`setActiveSession`]，并把最近 20 条
+ * 记进 `window.__echoPanelSessionLog`（纯内存，无 IO，无 console 输出）。
+ *
+ * 用户复现后一条命令导出：
+ * ```js
+ * copy(JSON.stringify(window.__echoPanelSessionLog, null, 2))
+ * ```
+ */
+function recordSessionChange(next: string, reason: string, stack: string): void {
+  const w = window as unknown as { __echoPanelSessionLog?: unknown[] };
+  const log = (w.__echoPanelSessionLog ??= []);
+  // 只留前 6 帧：够看出是哪个函数/哪一行触发的，又不至于刷屏。
+  const frames = stack
+    .split('\n')
+    .slice(2, 8)
+    .map((line) => line.trim());
+  log.push({
+    t: new Date().toISOString(),
+    from: currentSessionIdForLog,
+    to: next,
+    reason,
+    frames,
+  });
+  currentSessionIdForLog = next;
+  if (log.length > 20) log.shift();
+}
+
+/** recordSessionChange 用的「上一次值」（ref 已被改后拿不到旧值）。 */
+let currentSessionIdForLog = '';
+
+/**
+ * `activeSessionId` 的唯一写入口（诊断 + 变更原因）。
+ *
+ * 直接 `activeSessionId.value = x` 会绕过诊断；新代码请一律用本函数并在
+ * `reason` 里写明来源（`select` / `team-reset` / `global-fallback` /
+ * `workspace-follow` / `workspace-reset`），便于事后从日志定位。
+ */
+function setActiveSession(next: string, reason: string): void {
+  if (activeSessionId.value === next) return;
+  recordSessionChange(next, reason, new Error().stack ?? '');
+  activeSessionId.value = next;
+  // 侧栏「文件浏览器」卡按本窗口会话解析所属工作区（见 rail-cards.ts）。
+  railSessionId.value = next;
+  // 严格 per-tab：只写 sessionStorage。若写进 localStorage，另一窗口重载后
+  // 就会落到本窗口正在看的会话上（「跟着跳」的另一半）。
+  writeTabOnly(SESSION_KEY, next);
 }
 
 /**
@@ -344,7 +402,7 @@ watch(
       decision,
     });
     if (decision.kind !== 'keep' && activeSessionId.value !== decision.next) {
-      activeSessionId.value = decision.next;
+      setActiveSession(decision.next, `workspace-${decision.kind}`);
     }
   },
 );
@@ -382,7 +440,12 @@ watch(
   () => {
     const team = currentTeam(state);
     if (activeSessionId.value === 'global' && team && loopModeOf(team) !== 'parallel') {
-      selectSession(localLanding(activeTeamId.value));
+      // 落点必须是**中立的默认本地会话**（2026-10 多窗口三次修复）：
+      // `localLanding()` 读的是 per-persona 全局 `workspaceActive`——另一个
+      // 窗口（或模型 use 工具）刚激活哪个工作区，这里就会把本窗口带过去。
+      // 本 watcher 由 `state.teams` 的任何变动触发（TeamsList 广播 = 全窗口
+      // 都会收到），所以它是一条真实的跨窗口串台路径。
+      selectSession(LOCAL_DEFAULT_SESSION, 'global-fallback');
     }
   },
 );
@@ -420,7 +483,9 @@ function resetToFirstTeam() {
     state.trunkTeamId = tk;
     sendCommand({ RequestTrunkTimeline: { team_id: next } });
   }
-  selectSession(localLanding(next));
+  // 自动兜底（当前 agent 从列表消失 / 未选中）：**不能用 localLanding**——
+  // 同 global 兜底的理由，它会把本窗口带到他人刚激活的工作区。回中立默认会话。
+  selectSession(LOCAL_DEFAULT_SESSION, 'team-reset');
 }
 
 watch(

@@ -11,6 +11,8 @@ import { state } from './store';
 import { loopModeOf } from './protocol';
 import { teamPluginEnabled, teamToolAvailable } from './capabilities';
 import { railLayout, type RailSide } from './rail-layout';
+import { ref } from 'vue';
+import { parseWorkspaceChannelId } from './workspace';
 import type { RailCardDef } from './components/RailStack.vue';
 
 /** 当前激活人格（用于卡片门控与计数）。 */
@@ -20,15 +22,34 @@ function currentTeam(teamId: string | null) {
 }
 
 /**
- * 文件浏览器卡的激活工作区会话。
- * 门控：workspace 插件与工具均可用、列表归属当前 agent、且存在激活会话。
+ * 本窗口正在查看的会话 id（App.vue 在 activeSessionId 变化时写入）。
+ *
+ * 为什么要这个：文件浏览器卡此前只按**全局** `state.workspaceActive` 绑定
+ * 工作区——那是 per-persona 单槽，另一个窗口（或模型 `use` 工具）一激活，
+ * 本窗口的卡片标题/目录树就跟着换、取消激活时整张卡消失（2026-10 多窗口
+ * 串台）。按本窗口会话解析后，卡片只反映"我这一格在看哪个工作区"。
+ */
+export const railSessionId = ref<string | null>(null);
+
+/**
+ * 文件浏览器卡绑定的工作区会话。
+ *
+ * 解析顺序（2026-10 多窗口修复）：
+ * 1. **本窗口会话是工作区通道** → 用该通道的工作区（与全局 active 无关）；
+ * 2. 本窗口停在别处（默认本地会话 / QQ / global）→ 退回全局 `workspaceActive`
+ *    （保持旧行为：用户没在看通道时，卡片跟随 Core 的激活态仍是有用信息）。
+ *
+ * 门控不变：workspace 插件与工具均可用、且列表归属当前 agent。
  */
 export function workspaceCardFor(teamId: string | null) {
   const team = currentTeam(teamId);
   const ok = teamPluginEnabled(team, 'echo-agent.workspace') && teamToolAvailable(team, 'workspace');
   const synced = state.workspaceTeamId === (teamId ?? state.teams[0]?.id ?? null);
-  if (!ok || !synced || !state.workspaceActive) return null;
-  return state.workspaceSessions.find((s) => s.id === state.workspaceActive) ?? null;
+  if (!ok || !synced) return null;
+  const own = parseWorkspaceChannelId(railSessionId.value ?? '')?.workspaceId ?? null;
+  const target = own ?? state.workspaceActive;
+  if (!target) return null;
+  return state.workspaceSessions.find((s) => s.id === target) ?? null;
 }
 
 /** 临时分支卡可见性：仅并行多会话模式（单会话模式 Core 不发 ReplyBranch*）。 */
