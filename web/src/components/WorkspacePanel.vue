@@ -28,6 +28,7 @@ import {
   directoryNode,
   directoryPath,
   directoryToInput,
+  noteLocalActivateIntent,
   workspaceChannelSessionId,
 } from '../workspace';
 import DirectoryPicker from './DirectoryPicker.vue';
@@ -180,6 +181,8 @@ function save() {
 function toggleActive(session: WorkspaceSessionInfo) {
   if (!props.teamId || actionPending.value) return;
   const id = session.id === activeId.value ? null : session.id;
+  // 本窗口意图：回推到达时据此让视图跟随（他端广播不跟随，见 workspace.ts）。
+  noteLocalActivateIntent(id);
   sendCommand({ ActivateWorkspaceSession: { team_id: props.teamId, id } });
 }
 
@@ -235,6 +238,7 @@ function saveConversations(
 /** 点选对话 = 激活 (工作区, 对话)；已是当前对 → 不重发。 */
 function switchConversation(session: WorkspaceSessionInfo, conv: WorkspaceConversationInfo) {
   if (!props.teamId || isActiveConversation(session, conv)) return;
+  noteLocalActivateIntent(session.id);
   sendCommand({
     ActivateWorkspaceSession: { team_id: props.teamId, id: session.id, conversation: conv.id },
   });

@@ -18,7 +18,10 @@ import { loopModeOf } from './protocol';
 import { currentTeam, teamPluginEnabled } from './capabilities';
 import {
   LOCAL_DEFAULT_SESSION,
+  decideOnWorkspaceBroadcast,
   localSessionProjection,
+  noteLocalActivateIntent,
+  takeLocalActivateIntent,
   workspacePickIntent,
 } from './workspace';
 import ChatView from './components/ChatView.vue';
@@ -231,6 +234,9 @@ function localLanding(teamId: string | null): string {
 }
 
 function sendWorkspaceActivate(id: string | null, conversation: string | null = null) {
+  // 先登记本窗口意图再发命令：回推到达时据此判断「这次是自己在切」，
+  // 而不是另一窗口/模型工具改的（见 workspace.ts 的多窗口一节）。
+  noteLocalActivateIntent(id);
   sendCommand({
     ActivateWorkspaceSession: {
       team_id: activeTeamId.value ?? undefined,
@@ -269,10 +275,16 @@ function onSessionPick(id: string) {
   selectSession(id);
 }
 
-// active 回推（面板激活按钮 / 模型 use 工具 / 切换器）→ 本地视图跟随投影。
-// 仅当停留在 Local 来源会话上：正在看 QQ/global 会话时不打扰（切回本地
-// 时由 localLanding / 本 watcher 落到 active 对应通道）；不在会话视图时
-// 只更新目标会话，不强制拉回聊天视图。
+// active 回推 → 本窗口视图是否跟随（多窗口互不干扰，2026-10）。
+//
+// Core 的 workspace `active` 是全局单例，`WorkspaceSessions` 会广播给所有
+// Panel 连接。此前这里**无条件**跟随投影：A 窗口点选工作区会话（或选默认
+// 会话取消激活）会把其他所有窗口一起跳走——两个浏览器窗口无法各看各的。
+//
+// 现在只跟随「本窗口自己发起的激活」（`takeLocalActivateIntent` 消费意图），
+// 他端广播只同步 workspace 状态（面板高亮 / 切换器激活标记照常更新）；另加
+// 安全网：本地停留的通道被删时回退（`decideOnWorkspaceBroadcast`）。
+// 详细规则见 `workspace.ts` 的「多窗口互不干扰」一节。
 watch(
   [
     () => state.workspaceTeamId,
@@ -281,13 +293,18 @@ watch(
   ],
   () => {
     if (state.workspaceTeamId !== activeTeamId.value) return;
-    if (!activeSessionId.value.startsWith('local:')) return;
-    const next = localSessionProjection(
-      state.workspaceActive,
-      state.workspaceActiveConversation,
-      state.workspaceSessions,
-    );
-    if (activeSessionId.value !== next) activeSessionId.value = next;
+    const mine = takeLocalActivateIntent(state.workspaceActive);
+    const decision = decideOnWorkspaceBroadcast({
+      currentSessionId: activeSessionId.value,
+      active: state.workspaceActive,
+      activeConversation: state.workspaceActiveConversation,
+      sessions: state.workspaceSessions,
+      hasLocalIntent: mine,
+      landing: localLanding(activeTeamId.value),
+    });
+    if (decision.kind !== 'keep' && activeSessionId.value !== decision.next) {
+      activeSessionId.value = decision.next;
+    }
   },
 );
 // 连接/切换 Team 后拉取工作区会话快照（投影与切换器双击绑定依赖它）。
