@@ -32,9 +32,25 @@
 //! 按消息 key 缓存渲染产物（`ChatMessageWithImages`），只有**影响渲染的字段**
 //! 真的变了才重建。未变消息沿用上次的对象引用 → 子组件 props 恒等 → Vue 跳过。
 //!
-//! 缓存判据（[`sameForRender`]）覆盖 `toChatMessage` 会读到的全部字段：
+//! 缓存判据覆盖 `toChatMessage` 会读到的全部字段：
 //! `key` / `role` / `content` / `time` / `animate` / `streamState` /
 //! `reasoning` / `images` / `subagent` / `source` / `tool.*` / `branch.*`。
+//!
+//! ## ⚠️ 判等必须基于**值快照**，不能基于对象引用（2026-10 事故修复）
+//!
+//! `state.ts` 的 reduce 在 ~30 个分支里**原地深变异**状态（见 store.ts 模块
+//! 注释）：`msg.content += delta`、`msg.tool.status = 'succeeded'` 都不改变
+//! 对象引用。早期版本用 `if (a === b) return true` 做"最快路径"，并只比
+//! `tool` 的对象引用——于是原地变异后缓存**永远命中**，渲染对象永不重建：
+//!
+//! - 工具行卡在 `running` → `WorkRunGroup` 的 50ms ticker 一直读秒；
+//! - 流式正文不增长（`content` 原地拼新串，引用同样是同一个消息对象）。
+//!
+//! 两者都只有刷新页面（清空本模块级缓存）才恢复。实测复现：
+//! `渲染 status = running | store status = succeeded`。
+//!
+//! 现在 [`RenderSnapshot`] 存**值**：字符串本身不可变（`+=` 赋新串），存
+//! 引用即快照；数组与 `tool` 这类会被原地改的对象在 `snapshotOf` 里拷一份。
 //!
 //! ## 为什么不缓存 reasoning 消息
 //!
@@ -45,14 +61,161 @@
 //!
 //! [`claimReasoningAnimation`]: ./reasoning-anim.ts
 
-import type { BranchMsg, DisplayMessage } from './state';
+import type { DisplayMessage } from './state';
 import type { ChatMessageWithImages } from './chat-adapter';
 
 interface CachedEntry {
-  /** 上次建对象时的源消息（用于判等；同引用时走最快路径）。 */
-  src: DisplayMessage;
+  /** 上次建对象时源消息的**值快照**（原地变异也能检测出来）。 */
+  snap: RenderSnapshot;
   /** 已构建的渲染产物。 */
   cm: ChatMessageWithImages;
+}
+
+/** `tool` 的渲染相关字段快照（原地写字段，必须拷值）。 */
+interface ToolSnapshot {
+  name: string;
+  input: string;
+  output: string | null;
+  status: string | undefined;
+  startedAtMs: number | undefined;
+  elapsedMs: number | undefined;
+}
+
+/** 分支内条目的渲染相关字段快照。 */
+interface BranchEntrySnapshot {
+  kind: string;
+  text: string;
+  status: string | undefined;
+  output: string | undefined;
+  toolName: string | undefined;
+}
+
+interface BranchSnapshot {
+  branchId: string;
+  summary: string;
+  entries: BranchEntrySnapshot[];
+}
+
+/**
+ * 渲染相关字段的**值快照**——判等的唯一依据（理由见模块注释）。
+ *
+ * 存引用的安全性：`content` 等字符串字段是不可变的（`+=` 会赋一个新串），
+ * 存引用即等于存值；`subagent` / `source` 在 state.ts 里是整体替换
+ * （`msg.subagent = { ...info, running: false }`），引用比较可靠。
+ * 其余会被原地改的（`tool` 字段、`reasoning`/`images` 数组、`branch.msgs`）
+ * 都在 [`snapshotOf`] 里逐项拷贝。
+ */
+interface RenderSnapshot {
+  key: string;
+  role: string;
+  content: string;
+  time: number;
+  animate: boolean | undefined;
+  streamState: DisplayMessage['streamState'];
+  reasoning: string[] | undefined;
+  images: string[] | undefined;
+  tool: ToolSnapshot | undefined;
+  branch: BranchSnapshot | undefined;
+  subagent: unknown;
+  source: unknown;
+}
+
+function snapshotOf(m: DisplayMessage): RenderSnapshot {
+  return {
+    key: m.key,
+    role: m.role,
+    content: m.content,
+    time: m.time,
+    animate: m.animate,
+    streamState: m.streamState,
+    reasoning: m.reasoning ? [...m.reasoning] : undefined,
+    images: m.images ? [...m.images] : undefined,
+    tool: m.tool
+      ? {
+          name: m.tool.name,
+          input: m.tool.input,
+          output: m.tool.output,
+          status: m.tool.status,
+          startedAtMs: m.tool.startedAtMs,
+          elapsedMs: m.tool.elapsedMs,
+        }
+      : undefined,
+    branch: m.branch
+      ? {
+          branchId: m.branch.branchId,
+          summary: m.branch.summary,
+          entries: m.branch.msgs.map((x) => ({
+            kind: x.kind,
+            text: x.text,
+            status: x.status,
+            output: x.output,
+            toolName: x.toolName,
+          })),
+        }
+      : undefined,
+    subagent: m.subagent,
+    source: m.source,
+  };
+}
+
+/** 字符串数组比较：长度 + 逐项（元素是不可变字符串，引用比较即值比较）。 */
+function sameStrings(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function sameToolSnapshot(snap: ToolSnapshot | undefined, tool: DisplayMessage['tool']): boolean {
+  if (!snap || !tool) return snap === undefined && tool === undefined;
+  return (
+    snap.name === tool.name &&
+    snap.input === tool.input &&
+    snap.output === tool.output &&
+    snap.status === tool.status &&
+    snap.startedAtMs === tool.startedAtMs &&
+    snap.elapsedMs === tool.elapsedMs
+  );
+}
+
+function sameBranchSnapshot(
+  snap: BranchSnapshot | undefined,
+  branch: DisplayMessage['branch'],
+): boolean {
+  if (!snap || !branch) return snap === undefined && branch === undefined;
+  if (snap.branchId !== branch.branchId) return false;
+  if (snap.summary !== branch.summary) return false;
+  if (snap.entries.length !== branch.msgs.length) return false;
+  for (let i = 0; i < snap.entries.length; i++) {
+    const x = snap.entries[i]!;
+    const y = branch.msgs[i]!;
+    if (
+      x.kind !== y.kind ||
+      x.text !== y.text ||
+      x.status !== y.status ||
+      x.output !== y.output ||
+      x.toolName !== y.toolName
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** 快照与源消息当前的渲染字段是否仍然一致。 */
+function matchesSnapshot(snap: RenderSnapshot, m: DisplayMessage): boolean {
+  if (snap.key !== m.key || snap.role !== m.role || snap.time !== m.time) return false;
+  if (snap.content !== m.content) return false;
+  if (snap.animate !== m.animate) return false;
+  if (snap.streamState !== m.streamState) return false;
+  if (!sameStrings(snap.reasoning, m.reasoning)) return false;
+  if (!sameStrings(snap.images, m.images)) return false;
+  if (!sameToolSnapshot(snap.tool, m.tool)) return false;
+  if (!sameBranchSnapshot(snap.branch, m.branch)) return false;
+  if (snap.subagent !== m.subagent) return false;
+  if (snap.source !== m.source) return false;
+  return true;
 }
 
 /** 模块级缓存：消息 key → 渲染产物。SPA 生命周期内有效（页面刷新重建）。 */
@@ -69,70 +232,7 @@ export const chatMessageCacheStats = { hits: 0, misses: 0 };
  * 所以常见路径（未变消息）的判等成本极低。
  */
 export function sameForRender(a: DisplayMessage, b: DisplayMessage): boolean {
-  // 最快路径：同一个对象（`state.trunk.filter` 返回的正是 trunk 里的引用，
-  // 无 sessionHistory 快照时全列表都走这条）。
-  if (a === b) return true;
-
-  if (a.key !== b.key) return false;
-  if (a.role !== b.role) return false;
-  if (a.content !== b.content) return false;
-  if (a.time !== b.time) return false;
-  if (a.animate !== b.animate) return false;
-  if (a.streamState !== b.streamState) return false;
-  if (a.reasoning !== b.reasoning) return false;
-  // 以下三项在 toChatMessage 里是直接透传引用，比引用即可。
-  if (a.images !== b.images) return false;
-  if (a.subagent !== b.subagent) return false;
-  if (a.source !== b.source) return false;
-
-  // tool：内联小对象。绝大多数消息没有 tool，`a.tool === b.tool`（都 undefined）直接过。
-  if (a.tool !== b.tool) {
-    const x = a.tool;
-    const y = b.tool;
-    if (!x || !y) return false;
-    if (
-      x.name !== y.name ||
-      x.input !== y.input ||
-      x.output !== y.output ||
-      x.status !== y.status ||
-      x.startedAtMs !== y.startedAtMs ||
-      x.elapsedMs !== y.elapsedMs
-    ) {
-      return false;
-    }
-  }
-
-  // branch：分支内消息流经 mergeReasoning 展平成 entries，需覆盖"追加/改文本"。
-  if (a.branch !== b.branch) {
-    const x = a.branch;
-    const y = b.branch;
-    if (!x || !y) return false;
-    if (x.branchId !== y.branchId || x.summary !== y.summary) return false;
-    if (!sameBranchMsgs(x.msgs, y.msgs)) return false;
-  }
-
-  return true;
-}
-
-/** 分支消息数组等价（长度 + 每条 kind/text；工具字段变化也影响渲染）。 */
-function sameBranchMsgs(a: BranchMsg[], b: BranchMsg[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i];
-    const y = b[i];
-    if (x === y) continue;
-    if (
-      x.kind !== y.kind ||
-      x.text !== y.text ||
-      x.status !== y.status ||
-      x.output !== y.output ||
-      x.toolName !== y.toolName
-    ) {
-      return false;
-    }
-  }
-  return true;
+  return matchesSnapshot(snapshotOf(a), b);
 }
 
 /**
@@ -143,7 +243,9 @@ function sameBranchMsgs(a: BranchMsg[], b: BranchMsg[]): boolean {
  */
 export function reuseChatMessage(src: DisplayMessage): ChatMessageWithImages | null {
   const hit = cache.get(src.key);
-  if (hit && sameForRender(hit.src, src)) {
+  // 与**值快照**比较（不是与上次的源对象比较）：state 是原地变异的，
+  // 同引用不代表未变（见模块注释）。
+  if (hit && matchesSnapshot(hit.snap, src)) {
     chatMessageCacheStats.hits += 1;
     return hit.cm;
   }
@@ -153,7 +255,7 @@ export function reuseChatMessage(src: DisplayMessage): ChatMessageWithImages | n
 
 /** 记住刚构建的对象（供下次求值复用）。 */
 export function rememberChatMessage(src: DisplayMessage, cm: ChatMessageWithImages): void {
-  cache.set(src.key, { src, cm });
+  cache.set(src.key, { snap: snapshotOf(src), cm });
 }
 
 /**
