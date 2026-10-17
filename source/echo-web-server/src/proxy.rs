@@ -203,6 +203,100 @@ pub async fn ws_handler(
 struct ConnectFailure {
     kind: &'static str, // "config" | "network" | "auth" | "protocol"
     message: String,
+    /// 原始错误文本（日志用；去重签名 = kind + detail）。
+    detail: String,
+}
+
+// ── 重连退避与日志降噪（2026-10）──
+// 永久不可达的上游（308 重定向 / 连接拒绝）此前每个浏览器标签页各跑一条
+// 1s→30s 重连循环，且探活泵每 10s 再拨一次，每次失败都 warn——1 小时
+// 1000+ 条同样的日志。现在：连续失败 ≥ RECONNECT_DEGRADE_AFTER 次后退避
+// 上限提到 60s，每次睡眠加 ±20% 抖动（多标签页错峰）；同一上游同一错误
+// 只 warn 一次，直到连接成功或错误变化。
+
+/// 连续失败多少次后进入降级（退避上限 60s）。
+const RECONNECT_DEGRADE_AFTER: u32 = 5;
+const RECONNECT_BASE: Duration = Duration::from_secs(1);
+const RECONNECT_CAP: Duration = Duration::from_secs(30);
+const RECONNECT_CAP_DEGRADED: Duration = Duration::from_secs(60);
+
+/// 下一档退避：翻倍，上限按连续失败次数取 30s / 60s。
+fn next_backoff(current: Duration, failures: u32) -> Duration {
+    let cap = if failures >= RECONNECT_DEGRADE_AFTER {
+        RECONNECT_CAP_DEGRADED
+    } else {
+        RECONNECT_CAP
+    };
+    (current * 2).min(cap)
+}
+
+/// ±20% 抖动：`factor` ∈ [0,1) 映射到 [0.8, 1.2)。
+fn jitter_with(base: Duration, factor: f64) -> Duration {
+    base.mul_f64(0.8 + 0.4 * factor.clamp(0.0, 1.0))
+}
+
+/// 取一个 [0,1) 随机数（std RandomState 的随机键——无需额外依赖）。
+fn random_unit() -> f64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
+    (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
+}
+
+fn jittered(base: Duration) -> Duration {
+    jitter_with(base, random_unit())
+}
+
+/// 每个上游最近一次已记录的失败签名（进程级——跨浏览器标签页与探活泵去重）。
+fn connect_log_state() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static STATE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::OnceLock::new();
+    STATE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// 是否应记录这次失败：同一上游同一签名只返回一次 true。
+fn should_log_failure(name: &str, signature: &str) -> bool {
+    let Ok(mut map) = connect_log_state().lock() else {
+        return true;
+    };
+    if map.get(name).map(String::as_str) == Some(signature) {
+        return false;
+    }
+    map.insert(name.to_string(), signature.to_string());
+    true
+}
+
+/// 连接成功：清除去重状态；若此前记录过失败则返回 true（打一条恢复日志）。
+fn clear_failure_log(name: &str) -> bool {
+    connect_log_state()
+        .lock()
+        .map(|mut map| map.remove(name).is_some())
+        .unwrap_or(false)
+}
+
+fn log_connect_failure(upstream: &Upstream, failure: &ConnectFailure) {
+    let signature = format!("{}|{}", failure.kind, failure.detail);
+    if should_log_failure(&upstream.name, &signature) {
+        warn!(
+            core = %upstream.url,
+            upstream = %upstream.name,
+            error = %failure.detail,
+            kind = failure.kind,
+            "cannot connect to Core management WS; upstream skipped \
+             (same error is logged once until it recovers or changes)"
+        );
+    }
+}
+
+fn log_connect_success(upstream: &Upstream) {
+    if clear_failure_log(&upstream.name) {
+        tracing::info!(core = %upstream.url, upstream = %upstream.name, "Core management WS reachable again");
+    }
 }
 
 /// 解析上游的有效拨号地址：SSH 上游 = 本地隧道端口
@@ -223,7 +317,22 @@ async fn effective_url(state: &AppState, cfg: &crate::upstreams::UpstreamConfig)
     }
 }
 
+/// 连一个上游（带去重日志：同一错误只 warn 一次，成功后复位）。
 async fn connect_upstream(
+    upstream: &Upstream,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ConnectFailure,
+> {
+    let result = connect_upstream_raw(upstream).await;
+    match &result {
+        Ok(_) => log_connect_success(upstream),
+        Err(failure) => log_connect_failure(upstream, failure),
+    }
+    result
+}
+
+async fn connect_upstream_raw(
     upstream: &Upstream,
 ) -> Result<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
@@ -238,10 +347,10 @@ async fn connect_upstream(
                         request.headers_mut().insert("authorization", value);
                     }
                     Err(error) => {
-                        warn!(%error, "invalid Core access token");
                         return Err(ConnectFailure {
                             kind: "config",
                             message: format!("访问令牌格式非法: {error}"),
+                            detail: format!("invalid Core access token: {error}"),
                         });
                     }
                 }
@@ -249,10 +358,10 @@ async fn connect_upstream(
             request
         }
         Err(error) => {
-            warn!(%error, "invalid Core WebSocket URL");
             return Err(ConnectFailure {
                 kind: "config",
                 message: format!("WebSocket 地址非法: {error}"),
+                detail: format!("invalid Core WebSocket URL: {error}"),
             });
         }
     };
@@ -265,13 +374,11 @@ async fn connect_upstream(
     )
     .await
     {
-        Err(_) => {
-            warn!(core = %upstream.url, "connect to Core management WS timed out (5s)");
-            Err(ConnectFailure {
-                kind: "network",
-                message: "连接超时（5s 无响应）".into(),
-            })
-        }
+        Err(_) => Err(ConnectFailure {
+            kind: "network",
+            message: "连接超时（5s 无响应）".into(),
+            detail: "connect timed out (5s)".into(),
+        }),
         Ok(Ok((core, _))) => Ok(core),
         Ok(Err(error)) => {
             // 分类：HTTP 401/403 → 认证失败；连接拒绝/超时/DNS → 网络；
@@ -299,12 +406,11 @@ async fn connect_upstream(
                     .to_string(),
                 _ => error.to_string(),
             };
-            warn!(
-                core = %upstream.url,
-                %error, kind,
-                "cannot connect to Core management WS; upstream skipped"
-            );
-            Err(ConnectFailure { kind, message })
+            Err(ConnectFailure {
+                kind,
+                message,
+                detail: error.to_string(),
+            })
         }
     }
 }
@@ -521,7 +627,9 @@ async fn bridge(browser: WebSocket, state: AppState) {
                 let name = cfg.name.clone();
                 // 断连重连循环：Core 重启/闪断后退避重试（1s→30s），不再
                 // 一断即永久离线。浏览器断开（event_tx 关闭）即停止。
-                let mut backoff = std::time::Duration::from_secs(1);
+                // 连续失败计数：≥5 次进入降级（退避上限 60s），成功复位。
+                let mut backoff = RECONNECT_BASE;
+                let mut failures: u32 = 0;
                 loop {
                     // 浏览器已断开（事件出口无接收方）→ 退出整个重连循环。
                     // （2026-10 修复：此前该存活检查只在链路建立后的读泵
@@ -554,8 +662,9 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                     last_checked: now_unix(),
                                 },
                             );
-                            tokio::time::sleep(backoff).await;
-                            backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                            failures = failures.saturating_add(1);
+                            tokio::time::sleep(jittered(backoff)).await;
+                            backoff = next_backoff(backoff, failures);
                             continue;
                         }
                     };
@@ -583,12 +692,14 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                     last_checked: now_unix(),
                                 },
                             );
-                            tokio::time::sleep(backoff).await;
-                            backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                            failures = failures.saturating_add(1);
+                            tokio::time::sleep(jittered(backoff)).await;
+                            backoff = next_backoff(backoff, failures);
                             continue;
                         }
                     };
-                    backoff = std::time::Duration::from_secs(1);
+                    backoff = RECONNECT_BASE;
+                    failures = 0;
                     state.set_online_ok(&name);
                     // 每轮克隆句柄——reader/心跳任务 move 走本轮副本，
                     // 下轮重连仍可用。
@@ -984,6 +1095,64 @@ async fn bridge(browser: WebSocket, state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backoff_caps_at_30s_then_60s_after_degrade() {
+        let mut backoff = RECONNECT_BASE;
+        for failures in 1..RECONNECT_DEGRADE_AFTER {
+            backoff = next_backoff(backoff, failures);
+        }
+        // 4 次失败：1→2→4→8→16，仍 < 30s 上限。
+        assert_eq!(backoff, Duration::from_secs(16));
+        assert_eq!(
+            next_backoff(Duration::from_secs(20), 4),
+            Duration::from_secs(30)
+        );
+        // 降级后上限 60s。
+        assert_eq!(
+            next_backoff(Duration::from_secs(20), 5),
+            Duration::from_secs(40)
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(40), 9),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(60), 50),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn jitter_stays_within_twenty_percent() {
+        let base = Duration::from_secs(10);
+        assert_eq!(jitter_with(base, 0.0), Duration::from_secs(8));
+        assert_eq!(jitter_with(base, 0.5), Duration::from_secs(10));
+        assert!(jitter_with(base, 0.999_999) < Duration::from_secs(12));
+        for _ in 0..200 {
+            let d = jittered(base);
+            assert!(
+                d >= Duration::from_secs(8) && d < Duration::from_secs(12),
+                "{d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn same_failure_is_logged_once_until_recovery() {
+        let name = "dedup-test-upstream";
+        assert!(should_log_failure(name, "network|refused"));
+        assert!(!should_log_failure(name, "network|refused"));
+        assert!(!should_log_failure(name, "network|refused"));
+        // 错误变化 → 再记一次。
+        assert!(should_log_failure(name, "protocol|308"));
+        assert!(!should_log_failure(name, "protocol|308"));
+        // 恢复后复位。
+        assert!(clear_failure_log(name));
+        assert!(!clear_failure_log(name));
+        assert!(should_log_failure(name, "protocol|308"));
+        clear_failure_log(name);
+    }
 
     /// 定向壳：解析出目标上游名。
     #[test]

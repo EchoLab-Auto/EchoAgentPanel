@@ -2,7 +2,8 @@
 //! （移植自 React 版的 ws.ts useAgentConnection hook。）
 //!
 //! 韧性设计：
-//! - 断线退避重连（500ms 起 ×2，上限 30s，无限重试）
+//! - 断线退避重连（500ms 起 ×2，无限重试）：页面可见时上限 3s（部署/重启
+//!   后几秒内即恢复，不再「连接中…」卡半分钟）；不可见时上限 30s（省电）
 //! - 自愈（heal）：页面回到前台（visibilitychange）或网络恢复（online）时
 //!   主动评估连接——已断开则立即重连（不等可能被浏览器冻结的退避定时器）；
 //!   显示 OPEN 也可能半死（设备休眠期间对端已消失而本端未察觉），发探测帧，
@@ -38,6 +39,19 @@ let lastFrameAt = 0;
 const pendingCommands: BackendCommand[] = [];
 /** 队列上限：握手期正常只有个位数条；上限只用于防御性封顶。 */
 const PENDING_LIMIT = 128;
+
+/** 断线重连退避上限：可见时 3s（尽快恢复），不可见时 30s（省电/省资源）。 */
+export const RETRY_CAP_VISIBLE_MS = 3_000;
+export const RETRY_CAP_HIDDEN_MS = 30_000;
+
+/** 下一档退避：翻倍，上限按页面可见性取。 */
+export function nextRetryMs(current: number, visible: boolean): number {
+  return Math.min(current * 2, visible ? RETRY_CAP_VISIBLE_MS : RETRY_CAP_HIDDEN_MS);
+}
+
+function pageVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden';
+}
 
 export function startConnection(): void {
   if (started) return;
@@ -159,8 +173,12 @@ export function startConnection(): void {
         disconnectedNotified = true;
         pushToast(state, '与后端断开，正在重连…', 'error');
       }
-      retryTimer = window.setTimeout(connect, retryMs);
-      retryMs = Math.min(retryMs * 2, 30_000);
+      // 可见时退避封顶 3s：本次等待也按当前可见性封顶（从后台切回前台时
+      // 由 heal() 立即重连，不等旧的长定时器）。
+      const visible = pageVisible();
+      const wait = Math.min(retryMs, visible ? RETRY_CAP_VISIBLE_MS : RETRY_CAP_HIDDEN_MS);
+      retryTimer = window.setTimeout(connect, wait);
+      retryMs = nextRetryMs(retryMs, visible);
     };
 
     ws.onerror = () => {
