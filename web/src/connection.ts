@@ -224,6 +224,24 @@ export function startConnection(): void {
   });
   window.addEventListener('online', heal);
 
+  // 空闲看门狗（2026-10）：WebSocket 可能「半死」——readyState 仍是 OPEN，
+  // 但一条帧也收不到（中继任务卡住 / NAT 静默丢弃 / 代理缓冲挂起）。此时
+  // 既不触发 onclose（没有"断开"提示），也不会走上面的事件监听自愈：
+  // 表现就是「问了之后工具行一直在读秒、等多久都不动，刷新才恢复」。
+  //
+  // 只要页面可见且超过 WATCHDOG_IDLE_MS 没有任何下行帧，就走 heal()
+  // 的探测逻辑（发幂等 RequestTeamsList，5s 无响应即主动 close → 标准
+  // 重连 + 按游标增量对账）。空闲会话也会每 45s 产生一次小请求，代价
+  // 可忽略（core 侧每 30s 本来就发 Ping）。
+  const WATCHDOG_TICK_MS = 30_000;
+  const WATCHDOG_IDLE_MS = 45_000;
+  window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - lastFrameAt < WATCHDOG_IDLE_MS) return;
+    heal();
+  }, WATCHDOG_TICK_MS);
+
   connect();
 }
 

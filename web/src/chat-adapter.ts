@@ -17,8 +17,11 @@ function mergeReasoning(msgs: BranchMsg[]): ChatBranchEntry[] {
     if (m.kind === 'reasoning' && last && last.kind === 'reasoning') {
       last.text += '\n\n' + m.text;
     } else {
-      // BranchMsg 与 ChatBranchEntry 字段同构，直接展开。
-      out.push({ ...m });
+      // BranchMsg 与 ChatBranchEntry 字段同构，直接展开（status 走本地
+      // 加宽后的转换——分支条目同样可能出现 unknown）。
+      const entry = { ...m } as ChatBranchEntry;
+      if (m.status) entry.status = asVendorToolStatus(m.status);
+      out.push(entry);
     }
   }
   return out;
@@ -32,6 +35,18 @@ export type ChatToolCallWithTiming = ChatToolCall & {
   /** 执行总耗时（ms；完成后展示） */
   elapsedMs?: number;
 };
+
+/** vendor 契约为三态（running / succeeded / failed）；panel 本地多一个
+ *  `unknown`：**回合已结束但没收到该次调用的结果事件**（ToolResult 丢帧）。
+ *  与 failed 区分——工具不一定失败，只是前端没拿到回执（2026-10）。
+ *
+ *  ui-frame 的 chat 组件不按 status 分支渲染（工具行由 panel 的
+ *  WorkRunGroup 渲染），所以本地加宽不会影响上游渲染；此处用一个收窄
+ *  断言把值交给 vendor 类型，断言只出现在这一处。 */
+export type LocalToolStatus = NonNullable<ChatToolCall['status']> | 'unknown';
+
+const asVendorToolStatus = (status: LocalToolStatus): NonNullable<ChatToolCall['status']> =>
+  status as NonNullable<ChatToolCall['status']>;
 
 export interface ChatMessageWithImages extends ChatMessage {
   images?: string[];
@@ -79,7 +94,7 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
       name: m.tool.name,
       input: m.tool.input,
       output: m.tool.output,
-      status: m.tool.status,
+      status: asVendorToolStatus(m.tool.status),
       startedAtMs: m.tool.startedAtMs,
       elapsedMs: m.tool.elapsedMs,
     },

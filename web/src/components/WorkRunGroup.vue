@@ -182,6 +182,9 @@ const STATUS_LABEL: Record<string, string> = {
   running: '运行中',
   succeeded: '成功',
   failed: '失败',
+  // 回合已结束但前端没收到该次调用的结果事件（ToolResult 丢失）：
+  // 不代表执行失败，只表示没回执——不读秒、不染红（2026-10）。
+  unknown: '未收到回执',
 };
 
 /** 字数（完整）：如 "1.2k 字"。 */

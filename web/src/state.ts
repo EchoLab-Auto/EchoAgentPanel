@@ -7,7 +7,7 @@ import {
   startReplyBranch,
   completeReplyBranch,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
+import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 import { adapterOpKey, settleAdapterOp } from './adapterOps';
 import { settleAdapterOpsOfCore } from './pending';
@@ -166,7 +166,9 @@ export function resetManagementState(state: AppState): void {
 }
 
 export type MsgRole = 'user' | 'backend' | 'reasoning' | 'tool' | 'system' | 'branch' | 'subagent';
-export type ToolStatus = 'running' | 'succeeded' | 'failed';
+/** `unknown` = 回合已结束但没收到该次调用的结果事件（ToolResult 丢失）。
+ * 与 failed 区分：不代表执行失败，只代表前端没拿到回执（2026-10）。 */
+export type ToolStatus = 'running' | 'succeeded' | 'failed' | 'unknown';
 
 export interface ToolMsg {
   name: string;
@@ -928,18 +930,26 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
       const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
-        pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
-          sessionId: e.session_id,
-          animate: true,
-          tool: {
-            name: e.tool_name,
-            input: summarizeArguments(e.arguments),
-            output: null,
-            status: 'running',
-            toolCallId: e.tool_call_id || undefined,
-            startedAtMs,
-          },
-        });
+        // 幂等：同 id 的 ToolCall 已在时间线里（重放 / 重连补发 / 结果先到
+        // 的乱序场景）就不再建第二条 running 行——否则会出现「一条已完成 +
+        // 一条永远读秒」的重复行（2026-10）。
+        const duplicate =
+          !!e.tool_call_id &&
+          state.trunk.some((m) => m.role === 'tool' && m.tool?.toolCallId === e.tool_call_id);
+        if (!duplicate) {
+          pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
+            sessionId: e.session_id,
+            animate: true,
+            tool: {
+              name: e.tool_name,
+              input: summarizeArguments(e.arguments),
+              output: null,
+              status: 'running',
+              toolCallId: e.tool_call_id || undefined,
+              startedAtMs,
+            },
+          });
+        }
       }
       if (tab) {
         tab.msgs.push({
@@ -1132,6 +1142,21 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       ) {
         setPhase(state, sessionKey(core, e.session_id), 'completed', null);
       }
+      // 回合收尾兜底（2026-10）：ToolResult 一旦丢失，工具行会永久 running
+      // 一直读秒，只能刷新页面才好。turn 结束是"本轮不会再有工具结果"的
+      // 确定信号——把该会话残留的 running 行收尾（见 settleRunningTools）。
+      // 有并发分支/任务在跑时跳过：它们有各自的结束事件与独立会话。
+      const stillBusy =
+        state.tasks.some(
+          (t) =>
+            t.sessionId === e.session_id &&
+            (t.core ?? null) === core &&
+            t.status === 'running',
+        ) ||
+        Object.values(state.branchTabs).some(
+          (tab) => tab.sessionId === e.session_id && tab.core === core && tab.status === 'running',
+        );
+      if (!stillBusy) settleRunningTools(state, e.session_id);
       // 兜底：turn 完成时若该会话仍无任何 backend（回答缺失），主动拉取
       // 时间线对齐——推理/工具已实时显示但回答丢失时保证补齐。
       //
@@ -1449,7 +1474,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
     case 'Error': {
       const e = (event as { Error: { session_id: string | null; message: string } }).Error;
       // 流式：错误中断当前步——冻结该会话流式行（保留已显示的部分文本）。
-      if (e.session_id) freezeStreams(state, e.session_id);
+      if (e.session_id) {
+        freezeStreams(state, e.session_id);
+        // 错误同样中断本轮：残留 running 工具行一并收尾（否则永久读秒）。
+        settleRunningTools(state, e.session_id);
+      }
       // 工作区激活/取消的成功提示：Core 用 `Error{session_id:null}` 广播给
       // **所有**连接（`workspace/commands.rs`）。不过滤的话，A 窗口点一下
       // 工作区通道，B 窗口也弹出「已激活工作区会话：X」——多窗口串台

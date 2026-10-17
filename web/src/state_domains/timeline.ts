@@ -233,19 +233,62 @@ export function parseSubagentEvent(content: string): SubagentEventInfo | null {
   }
 }
 
+/** 在时间线里找一条「还在运行」的工具行。
+ *
+ * 配对优先级（2026-10 修复「工具行一直读秒到刷新」）：
+ * 1. `toolCallId` 精确配对——core 恒下发，同名并行调用不会配错；
+ * 2. **名字兜底**：id 缺失（旧 core / 某些供应商不回 id）或 id 对不上时，
+ *    若该工具名恰好只有一条 running，就用它。core 侧 timeline 的
+ *    `ToolResult` 回填早已是同一套兜底（按 name 匹配 output 为空的条目），
+ *    分支 tab 侧也有，只有主时间线此前缺这一步：id 缺失时 `finishToolMessage`
+ *    直接 continue 到底 → 原 running 行永远留着（ticker 一直在读秒），
+ *    同时 fallback 又追加一条完成行 → 重复行。
+ * 3. 同名多条并发 running → 不猜（返回 null，走 append，宁可重复不配错）。
+ *
+ * 另外把 `unknown`（回合结束兜底收尾态，见 `settleRunningTools`）也当作
+ * "未定"参与配对：并发 turn 时先结束的那一轮可能误把另一轮在跑的工具收尾
+ * 成 unknown，迟到的 ToolResult 必须还能把它修正回来（否则又会多出一条
+ * 重复行 + 一条永远"未收到回执"）。
+ */
+function findRunningTool(
+  list: DisplayMessage[],
+  toolName: string,
+  toolCallId?: string,
+): DisplayMessage | null {
+  const open = (m: DisplayMessage): boolean =>
+    m.role === 'tool' && (m.tool?.status === 'running' || m.tool?.status === 'unknown');
+  if (toolCallId) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const msg = list[i];
+      if (!open(msg)) continue;
+      if (msg.tool?.toolCallId === toolCallId) return msg;
+    }
+  }
+  let candidate: DisplayMessage | null = null;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const msg = list[i];
+    if (!open(msg)) continue;
+    if (msg.tool?.name !== toolName) continue;
+    if (candidate) return null; // 同名多条在跑：不猜
+    candidate = msg;
+  }
+  return candidate;
+}
+
 /** 工具结果回填：按 toolCallId 精确配对（同名并行调用不再配错对）——
- * id 恒由 core 随 ToolCall/ToolResult 提供。
+ * id 恒由 core 随 ToolCall/ToolResult 提供；缺失/失配时按名字兜底（见
+ * `findRunningTool`）。
  * timedOut（外圈超时守卫中止）与 error: 前缀一样渲染为失败。 */
 export function finishToolMessage(state: AppState, toolName: string, result: string, toolCallId?: string, timedOut?: boolean, elapsedMs?: number) {
   const failed = timedOut === true || result.trimStart().startsWith('error:');
-  for (let i = state.trunk.length - 1; i >= 0; i--) {
-    const msg = state.trunk[i];
-    if (msg.role !== 'tool' || !msg.tool || msg.tool.status !== 'running') continue;
-    if (!toolCallId || msg.tool.toolCallId !== toolCallId) continue;
-    msg.tool.output = bounded(result, 4000);
-    msg.tool.status = failed ? 'failed' : 'succeeded';
+  const target = findRunningTool(state.trunk, toolName, toolCallId);
+  if (target && target.tool) {
+    target.tool.output = bounded(result, 4000);
+    target.tool.status = failed ? 'failed' : 'succeeded';
     // 总耗时：core 随 ToolResult 上报（毫秒）。
-    msg.tool.elapsedMs = elapsedMs;
+    target.tool.elapsedMs = elapsedMs;
+    // 兜底配对时补上 id（后续同 id 的增量/修补即可精确命中）。
+    if (!target.tool.toolCallId && toolCallId) target.tool.toolCallId = toolCallId;
     return;
   }
   // No running entry (e.g. restored timeline): append a completed entry.
@@ -261,8 +304,36 @@ export function finishToolMessage(state: AppState, toolName: string, result: str
   });
 }
 
-/** TimelineTool（持久化条目）→ 前端 ToolMsg 状态映射。
- * output 为 null 且未失败 = 仍在运行（旧版误恢复为 succeeded）。 */
+/** 回合结束兜底：把残留的「运行中」工具行收尾（2026-10）。
+ *
+ * 任何一次 `ToolResult` 丢失（连接重建窗口、中继抖动、标签页后台节流、
+ * id 不匹配被跳过……）都会让该行永久停在 running：WorkRunGroup 的
+ * `hasRunning` 恒为真 → 50ms ticker 一直把耗时往上读，只有刷新页面（全量
+ * 重建 timeline，按 `output != null` 判完成）才恢复。
+ *
+ * 回合结束（AgentCompleted / Error）是"这一轮不可能再有工具在跑"的确定
+ * 信号，此时仍未回执的行按 `unknown` 收尾：不再读秒、不再计入活动态，
+ * 详情里明确写出"未收到执行回执"，避免误报成失败。
+ *
+ * 只在没有并发分支/任务在跑时收尾——子代理与 reply 分支各有独立会话与
+ * 结束事件，不能因为主会话一轮结束就掐掉它们的时间线。
+ */
+export function settleRunningTools(state: AppState, sessionId?: string): number {
+  let settled = 0;
+  for (const msg of state.trunk) {
+    if (msg.role !== 'tool' || msg.tool?.status !== 'running') continue;
+    if (sessionId && msg.sessionId && msg.sessionId !== sessionId) continue;
+    msg.tool.status = 'unknown';
+    msg.tool.output =
+      msg.tool.output ?? '（未收到执行回执：本次调用的结果事件没有到达前端，可能因连接中断）';
+    msg.tool.elapsedMs =
+      typeof msg.tool.startedAtMs === 'number'
+        ? Math.max(0, Date.now() - msg.tool.startedAtMs)
+        : msg.tool.elapsedMs;
+    settled += 1;
+  }
+  return settled;
+}
 function toolStatusOf(tool: { output: string | null; failed: boolean; timed_out?: boolean }): 'running' | 'succeeded' | 'failed' {
   if (tool.failed || tool.timed_out === true) return 'failed';
   return tool.output == null ? 'running' : 'succeeded';
@@ -351,14 +422,29 @@ export function toDisplayMessages(messages: TimelineMessage[]): DisplayMessage[]
  * 而不是追加，避免重复行。返回 true 表示已修补。 */
 export function patchToolMessage(list: DisplayMessage[], incoming: DisplayMessage): boolean {
   const tool = incoming.tool;
-  if (!tool?.toolCallId) return false;
+  if (!tool) return false;
+  if (tool.toolCallId) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const existing = list[i];
+      if (existing.role === 'tool' && existing.tool?.toolCallId === tool.toolCallId) {
+        existing.tool = { ...tool };
+        existing.content = incoming.content;
+        return true;
+      }
+    }
+    return false;
+  }
+  // 无 id 的条目（旧 core / 供应商未回 id）：只有「完成态增量」才按名字
+  // 就地修补——按名字把运行中条目替换成另一条运行中条目毫无意义，还会
+  // 抹掉 startedAtMs 让计时跳变。
+  if (tool.output == null) return false;
   for (let i = list.length - 1; i >= 0; i--) {
     const existing = list[i];
-    if (existing.role === 'tool' && existing.tool?.toolCallId === tool.toolCallId) {
-      existing.tool = { ...tool };
-      existing.content = incoming.content;
-      return true;
-    }
+    if (existing.role !== 'tool' || existing.tool?.name !== tool.name) continue;
+    if (existing.tool.status !== 'running') continue;
+    existing.tool = { ...tool, toolCallId: existing.tool.toolCallId };
+    existing.content = incoming.content;
+    return true;
   }
   return false;
 }
