@@ -13,6 +13,7 @@ import { state, dispatch } from './store';
 import { coreForTeam, currentRegion, pushToast } from './state';
 import { teamKey } from './keys';
 import { trackRequest } from './pending';
+import { observeEventSeq, resetEventSeq } from './event-seq';
 import {
   parseEvent,
   serializeCommand,
@@ -84,6 +85,10 @@ export function startConnection(): void {
       // 时间线到达标志按"本次连接"计：重连后若无缓存需要重新加载，
       // 聊天区据此显示「正在加载时间线…」而不是「暂无消息」（见 ChatView）。
       state.timelineArrivedOnce = false;
+      // 新连接 = 新基线：Core 的序号是进程级连续的，但重连窗口里丢掉的帧
+      // 由下面的 since_seq 补拉负责，不该在重连后第一帧被误判成"跳号"
+      // （见 event-seq.ts）。
+      resetEventSeq();
       // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
       // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。
       state.branchTabs = {};
@@ -152,13 +157,23 @@ export function startConnection(): void {
       lastFrameAt = Date.now();
       // 多上游信封（聚合视图，2026-10）：`{core: "<上游名>", frame: <WsMessage>}`。
       // 单上游时中继不加壳，parseEvent 直接命中。
-      const { core, event } = parseFrame(String(message.data));
+      const { core, event, seq } = parseFrame(String(message.data));
       if (event) {
         // 事件信封只用来登记"已知区域"。activeRegion（当前运行区域）是
         // **派生量**——由选中的 agent / 会话决定（App.vue 的 teams watcher
         // 与 onSessionPick），绝不随事件流漂移。
         if (core) state.knownCores.add(core);
         dispatch(event, core);
+      }
+      // 事件流连续性校验（2026-10，见 event-seq.ts）：序号跳号 = 中间有帧
+      // 没到。先 dispatch（让本帧先落地、游标更准），再按游标补拉。
+      const observation = observeEventSeq(core, seq);
+      if (observation.kind === 'gap') {
+        console.warn(
+          `[events] 事件流跳号：core=${core ?? '(单上游)'} 缺 ${observation.missed} 条 ` +
+            `(最新 seq=${observation.last})，按游标补拉 timeline`,
+        );
+        requestTimelineResync(core);
       }
     };
 
@@ -268,16 +283,40 @@ export function sendPending(command: BackendCommand, key: string, targetCore?: s
 }
 
 /** 解一帧下行消息：多上游信封拆壳（core 名 + 内层事件），无壳 = 单上游。 */
-function parseFrame(text: string): { core: string | null; event: ReturnType<typeof parseEvent> } {
+function parseFrame(text: string): {
+  core: string | null;
+  event: ReturnType<typeof parseEvent>;
+  seq: number | null;
+} {
   try {
     const parsed = JSON.parse(text) as { core?: unknown; frame?: unknown };
     if (parsed && typeof parsed.core === 'string' && parsed.frame) {
-      return { core: parsed.core, event: parseEvent(JSON.stringify(parsed.frame)) };
+      return {
+        core: parsed.core,
+        event: parseEvent(JSON.stringify(parsed.frame)),
+        seq: seqOf(parsed.frame),
+      };
     }
   } catch {
     // 非信封：按单上游原格式解析
   }
-  return { core: null, event: parseEvent(text) };
+  return { core: null, event: parseEvent(text), seq: seqOf(text) };
+}
+
+/**
+ * 从事件帧里取扇出序号（Core 侧 `serialize_event_sequenced` 附加的顶层
+ * 字段）。`frame` 既可能是已解析的对象（多上游信封内层），也可能是原始
+ * JSON 文本（单上游无壳）。取不到（旧版 Core / 非事件帧）返回 null ——
+ * 校验据此跳过，保持向后兼容。
+ */
+function seqOf(frame: unknown): number | null {
+  try {
+    const value = typeof frame === 'string' ? (JSON.parse(frame) as unknown) : frame;
+    const seq = (value as { seq?: unknown } | null)?.seq;
+    return typeof seq === 'number' && Number.isFinite(seq) ? seq : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 命令的会话归属解析（2026-10 深度融合 P1）：命令 payload 里带
@@ -401,6 +440,31 @@ export function sendCommand(command: BackendCommand, targetCore?: string): boole
   }
   pushToast(state, '未连接到 Core，命令未发送', 'error');
   return false;
+}
+
+/** 事件流跳号后的补拉节流窗口（2026-10）。 */
+const RESYNC_MIN_INTERVAL_MS = 4000;
+let lastResyncAtMs = 0;
+
+/**
+ * 按当前游标补拉一次 trunk timeline —— 事件流连续性校验的修复动作。
+ *
+ * 带 `since_seq` 走增量：不带游标时 Core 回 `full:true` 全量，前端 trunk
+ * 整体替换、消息 key 全部重建、DOM 回顶（用户会看到「列表被刷新/换了
+ * 会话」）。带游标则只追加缺失条目（工具完成态按 tool_call_id 就地修补）。
+ *
+ * 节流 4s：一次半死通常连着跳好几十号，逐帧补拉没有意义。
+ */
+function requestTimelineResync(core: string | null): void {
+  const now = Date.now();
+  if (now - lastResyncAtMs < RESYNC_MIN_INTERVAL_MS) return;
+  lastResyncAtMs = now;
+  const region = core ?? state.activeRegion;
+  const sinceSeq = state.teamTimelines[teamKey(region, state.activeTeamId)]?.seq ?? 0;
+  sendCommand(
+    { RequestTrunkTimeline: { team_id: state.activeTeamId, since_seq: sinceSeq } },
+    core ?? undefined,
+  );
 }
 
 /** 面板访问令牌：URL ?token= 播种一次后存 localStorage；fetch 经
