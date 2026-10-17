@@ -322,7 +322,12 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   const out = hist.messages.map((m) => ({ ...m })); // 浅拷贝：补丁不得污染快照
   for (const w of windowMsgs) {
     const seq = w.seq ?? 0;
-    if (seq > 0 && seq <= hist.baseSeq) continue; // 已被快照覆盖
+    // 推理**永不**按 seq 过滤：历史派生不含推理（Core `history.rs` 模块注释
+    // 的已知差异——活链路的 AssistantMessage 恒为 reasoning_content: None，
+    // 推理只存在于实时 timeline）。对旧版 Core（水位线仍含推理 seq）来说，
+    // 这一条就是"看不到思考 chip"的唯一防线；新版 Core 已把推理排除出
+    // 水位线，这里是双保险（2026-10）。
+    if (seq > 0 && seq <= hist.baseSeq && w.role !== 'reasoning') continue; // 已被快照覆盖
     if (patchToolMessage(out, w)) continue; // 工具行按 id 就地修补
     // 无条目级 seq 的实时副本：`baseSeq` 对它们完全失效（`seq ?? 0` 恒 0），
     // 于是历史上被一律 append 到末尾 —— 表现为「思考/工具小方块重复出现在

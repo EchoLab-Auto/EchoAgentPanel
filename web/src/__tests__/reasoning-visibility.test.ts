@@ -86,7 +86,7 @@ describe('推理条目不被 baseSeq 过滤掉', () => {
     expect(reasoning[0]!.content).toBe('思考内容');
   });
 
-  it('对照：带 seq 的条目若 ≤ baseSeq 仍按"已覆盖"过滤（避免重复）', () => {
+  it('带 seq 的推理即使 ≤ baseSeq 也**不**被过滤（旧版 Core 双保险）', () => {
     state.sessionHistory[checklistKey(null, TEAM, SID)] = {
       messages: [
         { key: 'h1', role: 'user', content: '问一句', time: 100, sessionId: SID } as never,
@@ -95,7 +95,7 @@ describe('推理条目不被 baseSeq 过滤掉', () => {
       truncated: false,
       baseSeq: 9000,
     };
-    // 直接塞一条带 seq 的实时条目（模拟其它路径生成的条目）
+    // 旧版 Core 的水位线包含推理 seq（新版已排除）——前端仍须保留推理。
     state.trunk = [
       {
         key: 'r1',
@@ -107,6 +107,24 @@ describe('推理条目不被 baseSeq 过滤掉', () => {
       } as never,
     ];
     const view = sessionMessagesFor(state, SID, TEAM);
-    expect(view.filter((m) => m.role === 'reasoning')).toHaveLength(0);
+    expect(view.filter((m) => m.role === 'reasoning')).toHaveLength(1);
+  });
+
+  it('对照：非推理条目仍按 seq 水位线过滤（去重语义未破）', () => {
+    state.sessionHistory[checklistKey(null, TEAM, SID)] = {
+      messages: [
+        { key: 'h1', role: 'user', content: '问一句', time: 100, sessionId: SID } as never,
+        { key: 'h2', role: 'backend', content: '回答', time: 101, sessionId: SID } as never,
+      ],
+      total: 2,
+      truncated: false,
+      baseSeq: 9000,
+    };
+    // 同一回答的实时副本（带 seq，≤ 水位线）→ 应被判为已覆盖
+    state.trunk = [
+      { key: 'r2', role: 'backend', content: '回答', time: 101, sessionId: SID, seq: 8000 } as never,
+    ];
+    const view = sessionMessagesFor(state, SID, TEAM);
+    expect(view.filter((m) => m.role === 'backend')).toHaveLength(1);
   });
 });
