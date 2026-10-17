@@ -171,3 +171,53 @@ describe('未变消息仍复用（性能契约不能破）', () => {
     expect(reused[999]).toBe(firstPass[999]);
   });
 });
+
+/**
+ * TrunkTimeline 增量对账路径（审计补充项）。
+ *
+ * Core 对"运行中工具条目的就地更新"会带新 seq 重新投递完成态；前端
+ * `patchToolMessage` 在**已有的** DisplayMessage 上替换 `tool`（消息对象
+ * 身份不变）。若缓存只看对象身份，这条路径同样会把完成态吞掉——即使实时
+ * `ToolResult` 丢了、靠 seq 补拉找回来也一样不显示。
+ */
+describe('TrunkTimeline 增量对账也必须穿透缓存', () => {
+  it('patchToolMessage 就地替换 tool → 缓存失效', async () => {
+    const { patchToolMessage, toDisplayMessage } = await import('../state_domains/timeline');
+
+    const trunk: DisplayMessage[] = [
+      {
+        key: 'm1',
+        role: 'tool',
+        content: '',
+        time: 0,
+        seq: 5,
+        tool: { name: 'bash', input: '{}', output: null, status: 'running' },
+      } as unknown as DisplayMessage,
+    ];
+    buildOnce(trunk[0]!);
+
+    // Core 补投的完成态条目（新 seq、output 非空）
+    const incoming = toDisplayMessage({
+      kind: 'tool',
+      content: '',
+      time: 0,
+      seq: 9,
+      tool: {
+        name: 'bash',
+        input: '{}',
+        output: 'ok',
+        failed: false,
+        tool_call_id: undefined,
+        elapsed_ms: 1234,
+      },
+    } as never);
+    // 无 toolCallId 时 patchToolMessage 按名字兜底修补（同 finishToolMessage 的契约）
+    const patched = patchToolMessage(trunk, incoming);
+    expect(patched).toBe(true);
+
+    // store 层已变成完成态
+    expect(trunk[0]!.tool?.status).toBe('succeeded');
+    // 渲染层必须重建，否则 UI 仍显示 running
+    expect(reuseChatMessage(trunk[0]!)).toBeNull();
+  });
+});
