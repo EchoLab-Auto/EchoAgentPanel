@@ -7,7 +7,7 @@ import {
   startReplyBranch,
   completeReplyBranch,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessage, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
+import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessage, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 import { adapterOpKey, settleAdapterOp } from './adapterOps';
 import { settleAdapterOpsOfCore } from './pending';
@@ -323,9 +323,44 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   for (const w of windowMsgs) {
     const seq = w.seq ?? 0;
     if (seq > 0 && seq <= hist.baseSeq) continue; // 已被快照覆盖
-    if (!patchToolMessage(out, w)) out.push(w);
+    if (patchToolMessage(out, w)) continue; // 工具行按 id 就地修补
+    // 无条目级 seq 的实时副本：`baseSeq` 对它们完全失效（`seq ?? 0` 恒 0），
+    // 于是历史上被一律 append 到末尾 —— 表现为「思考/工具小方块重复出现在
+    // 主回复后面」，刷新（重建 hist 与 trunk）才消失（2026-10 修复）。
+    if (seq === 0 && coveredBySnapshot(out, w)) continue;
+    out.push(w);
   }
   return out;
+}
+
+/**
+ * 实时条目是否已包含在历史快照里（去重用）。
+ *
+ * 为什么需要：`SessionHistory` 由 Core 从**事件日志**派生，因此包含当前回合
+ * 已落盘的条目（`ToolCall` / `ToolResult` / `AgentReasoning` / `AgentOutput`
+ * 都是 durable 事件）；同时 WebSocket 实时事件把这些条目也 push 进了
+ * `state.trunk`，而实时条目**不带条目级 seq**（`ToolCall` 等事件只有帧级
+ * 事件序号，不是 timeline 条目的 seq）。`hist.baseSeq` 因此只能过滤带 seq
+ * 的条目，实时副本全部漏过 → 追加到末尾 → 小方块跑到主回复后面。
+ *
+ * 判据刻意保守：必须**同角色 + 同时间 + 内容兼容**才判为重复。宁可重复显示
+ * 也不丢内容——漏显示一条回答远比多显示一节严重。
+ */
+function coveredBySnapshot(snapshot: DisplayMessage[], live: DisplayMessage): boolean {
+  for (let i = snapshot.length - 1; i >= 0; i--) {
+    const h = snapshot[i];
+    if (h.role !== live.role || h.time !== live.time) continue;
+    if (h.content === live.content) return true;
+    // 流式副本可能只是终值的前缀（快照是终值、实时行还在增长），或反过来。
+    if ((live.role === 'reasoning' || live.role === 'backend') && (h.content.startsWith(live.content) || live.content.startsWith(h.content))) {
+      return true;
+    }
+    // 工具行：同名的快照条目已给出完成态（output 非空）→ 实时副本是重复的。
+    if (live.role === 'tool' && h.tool && live.tool && h.tool.name === live.tool.name && h.tool.output != null) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export interface ApiConfig {
@@ -1058,11 +1093,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           const msgSeq = message.seq ?? 0;
           if (msgSeq > 0 && msgSeq <= floor) continue; // 已经见过这一条
           const display = toDisplayMessage(message);
-          if (!patchToolMessage(cached.msgs, display)) cached.msgs.push(display);
+          // 缓存列表只含时间线条目（无实时副本），但仍走同一合并函数以覆盖
+          // 「工具就地更新」；trunk 里则可能是实时推送的无-seq 副本，需要
+          // 认领升级而不是追加（见 mergeTimelineEntry）。
+          if (!mergeTimelineEntry(cached.msgs, display)) cached.msgs.push(display);
           if (state.trunkTeamId === key) {
             // 两个列表各持一份副本（独立 key/对象），避免跨列表别名。
             const forTrunk = toDisplayMessage(message);
-            if (!patchToolMessage(state.trunk, forTrunk)) state.trunk.push(forTrunk);
+            if (!mergeTimelineEntry(state.trunk, forTrunk)) state.trunk.push(forTrunk);
           }
         }
         cached.seq = Math.max(seq, cached.seq);

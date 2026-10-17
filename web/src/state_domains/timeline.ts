@@ -339,6 +339,54 @@ function toolStatusOf(tool: { output: string | null; failed: boolean; timed_out?
   return tool.output == null ? 'running' : 'succeeded';
 }
 
+/** 内容兼容：相等，或一方是另一方的前缀（实时流式行仍在增长 / 快照是终值）。 */
+function compatibleContent(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.startsWith(b) || b.startsWith(a);
+}
+
+/**
+ * 把一条**权威**时间线条目并入已有列表：优先按 tool_call_id 修补工具行，
+ * 否则认领 trunk 里的「实时孪生」条目（就地升级），都失败才返回 false
+ * 让调用方追加。
+ *
+ * 为什么需要（2026-10 修复「思考小方块重复出现在主回复后面」）：
+ * 实时事件（`AgentReasoningDelta` / `AgentOutput` …）push 的条目**不带条目
+ * 级 seq**；随后 Core 的 `TrunkTimeline` 增量又推同一条目的权威版本（带
+ * seq）。`patchToolMessage` 只认工具行，非工具条目一律被当作新条目追加 →
+ * 同一段思考/回答显示两次，且第二次落在末尾（主回复后面）。
+ *
+ * 判据刻意保守：角色相同 + 实时侧 seq 为 0 + 内容兼容 + 时间接近（±2s，
+ * 两侧时钟同源但取整时机不同）。宁可重复也不丢内容。
+ */
+export function mergeTimelineEntry(list: DisplayMessage[], incoming: DisplayMessage): boolean {
+  if (patchToolMessage(list, incoming)) return true;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const live = list[i];
+    // 只认领实时副本（无 seq）——已有 seq 的条目属于时间线自己的序列。
+    if ((live.seq ?? 0) !== 0) continue;
+    if (live.role !== incoming.role) continue;
+    if (Math.abs(live.time - incoming.time) > 2) continue;
+    if (!compatibleContent(live.content, incoming.content)) continue;
+    // 就地升级为权威版本：保留 key（Vue keyed v-for 的稳定身份与入场动画），
+    // 其余渲染相关字段以 incoming 为准。
+    live.content = incoming.content;
+    live.seq = incoming.seq;
+    live.tool = incoming.tool;
+    live.reasoning = incoming.reasoning;
+    live.images = incoming.images;
+    live.branch = incoming.branch;
+    live.subagent = incoming.subagent;
+    live.source = incoming.source;
+    // 权威条目到达即代表该步已收敛：清掉流式标记，避免后续增量继续追加。
+    live.streamState = incoming.streamState;
+    live.streamBranch = incoming.streamBranch;
+    return true;
+  }
+  return false;
+}
+
 /** 单条 TimelineMessage → DisplayMessage（供全量重建与增量追加共用） */
 export function toDisplayMessage(message: TimelineMessage): DisplayMessage {
   const base = {
