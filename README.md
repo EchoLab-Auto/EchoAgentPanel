@@ -37,8 +37,10 @@
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
 - 工具调用、思考（推理）与子代理完成统一为 chip 行（连续工作条目合并为一排小圆角矩形图标、点击展开详情；2026-10 一般化）、临时回复分支面板（入口行「任务」弹层，按当前会话过滤）、清单面板
 - API 设置（provider / model / base_url / api_key / profiles；system prompt 在智能体配置弹层 AgentConfigModal 中编辑）；DeepSeek 余额查询（含充值/赠送分账）+ **余额与用量图表**（近 7 天：总览对比图 + profile 卡内嵌 sparkline；数据由 Core 本地积累，含 token 费用估算）
-- QQ 管理（多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
+- 适配器管理（描述符驱动，**Panel 无平台专属逻辑**：布局由插件 `AdapterStatus.ui` 声明、动作经 `InvokeAdapterOp` 透传、状态经 `AdapterState` 回推；当前内置的 QQ 适配器即多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
 - 工作区会话管理（入口行「工作区」宽版面板：多会话 / 多工作区目录 / 各目录 git 状态；文件浏览器已迁至会话视图右侧边栏，2026-09-19；`echo-agent.workspace` 插件）
+- 插件工作台（设置·插件）：支持多 Core 节点聚合展示，按**运行位置**分组（内置 / 进程外），卡片标注运行形态与来源，可在线启停
+- 技能安装（设置·技能）：Git 来源安装/更新，克隆与构建进度实时可见（不再是长时间静默），失败自动清场并提示残留
 - 上下文快照、深浅主题
 - Core 连接（设置·Core 连接，2026-10 末联邦并入本页）：连接管理统一入口——
   上游区块（多上游聚合管理：在线增删/编辑上游、在线状态指示）+
@@ -139,8 +141,16 @@ echo-agent-panel
 
 本仓库文档已合并到 EchoAgentCore 仓库的文档群（`document/`，ProDoc 格式）：
 
-- `document/panel/panel.md` — Panel 前端（仓库布局、数据流、视图规范、无状态中继架构）
-- `document/panel/panel-chat.md` — 会话视图（消息时序与入场动画）
+- `document/panel/panel.md` — Panel 前端（仓库布局、中继模型、状态管理与数据流）
+- `document/panel/panel-interaction.md` — 交互定义总入口（模块树与索引）
+- `document/panel/panel-layout.md` — 布局与导航（视图层级、外壳、侧边栏、连接生命周期、多窗口语义）
+- `document/panel/panel-chat.md` — 会话视图（消息列表、工具卡、推理块、输入区）
+- `document/panel/panel-modals.md` — 模态与覆盖层
+- `document/panel/panel-settings.md` — 设置视图（API、资源工作区、技能安装、插件工作台、Core 连接与联邦、日志）
+- `document/panel/panel-adapter-tasks.md` — 适配器弹层（描述符驱动，与平台无关）、任务弹层、Shell 视图、HTTP 通道
+- `document/panel/panel-system.md` — 系统交互（Toast、键盘、常量速查）
+- `document/panel/panel-mobile.md` — 移动端适配
+- `document/protocol/protocol.md` — 线协议与数据流（命令/事件、时间线同步、事件流连续性）
 - `document/ops/ops-deploy.md` — Panel 安装 / 更新 / 卸载（与 Core 同篇）
 
 ## 工作区同步契约（2026-10）
