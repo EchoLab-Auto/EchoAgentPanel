@@ -182,6 +182,10 @@ const toolbarSubtitle = computed(() => {
     if (pluginGroupBy.value === 'source') {
       if (external) parts.push(`${external} 外部插件`);
       if (c.all - external) parts.push(`${c.all - external} 内部插件`);
+      // 来源维度之外单列运行形态：否则「内部插件」会吞掉跑在独立进程里的
+      // 适配器插件（QQ 适配器 → 用户的疑问从这里来）。
+      const subprocess = catalog.filter(pluginIsSubprocess).length;
+      if (subprocess) parts.push(`${subprocess} 独立进程`);
     } else {
       if (gated) parts.push(`${gated} 包维度门控`);
       if (modes) parts.push(`${modes} 模式插件`);
@@ -785,6 +789,22 @@ function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
 function pluginSource(p: PluginInfo): 'builtin' | 'external' { return p.builtin === false ? 'external' : 'builtin'; }
 const PLUGIN_SOURCE_LABELS = { builtin: '内部插件', external: '外部插件' } as const;
 
+/**
+ * 运行形态：实现跑在 Core 进程内，还是独立子进程（`runtime`，旧 Core 缺失 =
+ * 进程内）。
+ *
+ * 与 `builtin`（来源）**正交**——QQ 适配器的门控 manifest 编译在 Core 里
+ * （`builtin = true` → 「内部插件」组），但适配器实现由独立进程
+ * `echo-adapter-qq` 提供。只看 `builtin` 会把「独立进程」的插件显示成
+ * 「内部插件」，描述与分组互相矛盾（2026-10-18 报障）。
+ */
+function pluginIsSubprocess(p: PluginInfo): boolean { return p.runtime === 'subprocess'; }
+const PLUGIN_RUNTIME_LABELS = { subprocess: '独立进程', in_process: '进程内' } as const;
+/** 运行形态的人读标签（旧 Core 缺字段 → 进程内）。 */
+function pluginRuntimeLabel(p: PluginInfo): string {
+  return PLUGIN_RUNTIME_LABELS[p.runtime === 'subprocess' ? 'subprocess' : 'in_process'];
+}
+
 function pluginMatchesFilter(p: PluginInfo, filter: PluginFilter): boolean {
   switch (filter) {
     case 'all':
@@ -856,6 +876,16 @@ const pluginWorkbenchGroups = computed(() => {
     hint: v.hint,
     items: v.items.sort((a, b) => a.id.localeCompare(b.id, 'en')),
   }));
+  // 来源分组：组内若有进程外实现，hint 点明——「内部插件」讲的是 manifest
+  // 来源，不是执行位置（QQ 适配器即此类）。
+  if (pluginGroupBy.value === 'source') {
+    for (const e of entries) {
+      const subprocess = e.items.filter(pluginIsSubprocess).length;
+      if (subprocess) {
+        e.hint = `${e.hint ?? ''}；其中 ${subprocess} 个实现在独立进程（行内标「独立进程」）`;
+      }
+    }
+  }
   if (pluginGroupBy.value !== 'semantic') return entries;
   return entries.sort(
     (a, b) =>
@@ -1979,6 +2009,13 @@ watch(
                         {{ pluginMembers(p).tools.length }} 工具 · {{ pluginMembers(p).skills.length }} 技能
                       </span>
                       <span
+                        v-if="pluginIsSubprocess(p)"
+                        class="caps-mark caps-mark--system"
+                        :title="`实现在独立子进程（Core 侧只有启停门控）：${p.name}`"
+                      >
+                        独立进程
+                      </span>
+                      <span
                         v-if="pluginProtected(p)"
                         class="caps-mark caps-mark--warn caps-mark--icon"
                         title="禁用即断连自锁，Core 拒绝"
@@ -2615,6 +2652,9 @@ watch(
                 <NeumorphismTag v-if="!selectedPlugin.builtin" variant="info" size="small">
                   外部插件
                 </NeumorphismTag>
+                <NeumorphismTag v-if="pluginIsSubprocess(selectedPlugin)" variant="info" size="small">
+                  独立进程
+                </NeumorphismTag>
                 <span
                   v-if="pluginProtected(selectedPlugin)"
                   class="caps-mark caps-mark--warn caps-mark--icon"
@@ -2710,6 +2750,10 @@ watch(
                 <div class="skill-source__row">
                   <span class="muted">Entry</span>
                   <code>{{ selectedPlugin.entry || '—' }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">运行形态</span>
+                  <code>{{ pluginRuntimeLabel(selectedPlugin) }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">Author</span>

@@ -285,6 +285,14 @@ export interface PluginInfo {
   enabled: boolean;
   /** true = Core 编译内置；false = 外部插件。旧 Core 缺失时按 true 兼容。 */
   builtin?: boolean;
+  /**
+   * 运行形态：`in_process` = 实现编译在 Core 进程内；`subprocess` = 实现由
+   * 独立子进程提供（Core 侧只有启停门控，如 QQ 适配器）。
+   *
+   * 与 `builtin` **正交**：`builtin` 说来源，`runtime` 说代码在哪跑。旧 Core
+   * 缺失该字段 = 进程内。
+   */
+  runtime?: string;
   /** 插件所属 Core，由 Panel 多节点中继注入。 */
   core?: string | null;
   /** 所属包 id（横跨 plugin+tool+skill 的组合标签；未声明 = 插件 id） */
