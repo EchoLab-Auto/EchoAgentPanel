@@ -274,39 +274,58 @@ describe('SettingsView 插件工作台', () => {
   });
 
   /**
-   * 2026-10-18 报障：QQ 适配器描述写着「独立进程」，Panel 却把它归到
-   * 「内部插件」——用户据此质疑分类错了。
+   * 2026-10-18 报障（二次修正）：QQ 适配器描述写着「独立进程」，Panel 却把它
+   * 归到「内部插件」——用户据此质疑分类错了。
    *
-   * 实情：`builtin` 讲**来源**（manifest 编译在 Core 里），`runtime` 讲
-   * **执行位置**（实现跑在独立子进程）。两个维度正交，来源分组本身没错，
-   * 但必须把运行形态单独显示出来，否则「内部插件」把进程外实现吞掉。
+   * 第一版修法保留了 `builtin` 判定（把它留在「内部插件」组，只加徽标），
+   * 用户仍然不接受：对使用者而言「外部插件」= 不在 Core 进程内（独立 PID、
+   * 独立生命周期、崩了不带走 Core）。现在 `pluginSource()` 按 `runtime`
+   * 判定，QQ 适配器直接落到「外部插件」组。
    */
-  it('运行形态独立于来源：subprocess 仍归「内部插件」组，但行内标「独立进程」', async () => {
-    // QQ 适配器：builtin=true（门控 manifest 编译内置）+ runtime=subprocess
+  it('运行位置决定分组：runtime=subprocess → 外部插件（即使 builtin=true）', async () => {
+    // QQ 适配器：门控 manifest 编译在 Core 里（builtin=true），
+    // 但适配器实现由独立进程 echo-adapter-qq 提供（runtime=subprocess）。
     state.plugins = state.plugins.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, runtime: 'subprocess' } : p,
     );
     const wrapper = await openCategory('插件');
 
-    // 来源分组不变：仍是内部插件组（builtin 语义没动）
+    // 分组：外部插件组里出现 QQ 适配器
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['内部插件']);
+    expect(groups).toEqual(['内部插件', '外部插件']);
+    const externalGroup = wrapper
+      .findAll('.caps-list-group')
+      .find((g) => g.find('.caps-list-group__name').text() === '外部插件')!;
+    expect(externalGroup.text()).toContain('QQ 适配器');
+    expect(externalGroup.text()).not.toContain('单会话循环');
 
-    // 副标题把运行形态单列
+    // 副标题按运行位置统计
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('共 5 项');
-    expect(subtitle).toContain('5 内部插件');
-    expect(subtitle).toContain('1 独立进程');
+    expect(subtitle).toContain('1 外部插件');
+    expect(subtitle).toContain('4 内部插件');
 
-    // 分组 hint 点明「内部插件」讲的是来源
-    expect(wrapper.find('.caps-list-group__hint').text()).toContain('实现在独立进程');
+    // 外部组 hint 说明「独立进程」语义（而非「第三方」）
+    expect(externalGroup.find('.caps-list-group__hint').text()).toContain('独立进程');
 
-    // 行内徽标
-    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 适配器'))!;
-    expect(row.text()).toContain('独立进程');
-    // 其他插件（进程内）没有该标记
-    const other = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
-    expect(other.text()).not.toContain('独立进程');
+    // 行内徽标：外部组内标「独立进程」，内部组不标
+    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 适配器'))!;
+    expect(qqRow.text()).toContain('独立进程');
+    const innerRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
+    expect(innerRow.text()).not.toContain('独立进程');
+  });
+
+  it('runtime=in_process 明确声明时留在「内部插件」组（不受 builtin 影响）', async () => {
+    // 显式 in_process 覆盖任何来源推断
+    state.plugins = state.plugins.map((p) =>
+      p.id === 'echo-agent.adapter.qq'
+        ? { ...p, builtin: false, runtime: 'in_process' }
+        : p,
+    );
+    const wrapper = await openCategory('插件');
+    const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
+    expect(groups).toEqual(['内部插件']);
+    expect(wrapper.find('.caps-toolbar-title .muted').text()).toContain('5 内部插件');
   });
 
   it('旧 Core 缺 runtime 字段：一律按进程内渲染（零变化）', async () => {

@@ -182,10 +182,6 @@ const toolbarSubtitle = computed(() => {
     if (pluginGroupBy.value === 'source') {
       if (external) parts.push(`${external} 外部插件`);
       if (c.all - external) parts.push(`${c.all - external} 内部插件`);
-      // 来源维度之外单列运行形态：否则「内部插件」会吞掉跑在独立进程里的
-      // 适配器插件（QQ 适配器 → 用户的疑问从这里来）。
-      const subprocess = catalog.filter(pluginIsSubprocess).length;
-      if (subprocess) parts.push(`${subprocess} 独立进程`);
     } else {
       if (gated) parts.push(`${gated} 包维度门控`);
       if (modes) parts.push(`${modes} 模式插件`);
@@ -786,19 +782,28 @@ function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
   return 'other';
 }
 
-function pluginSource(p: PluginInfo): 'builtin' | 'external' { return p.builtin === false ? 'external' : 'builtin'; }
+/**
+ * 插件的**来源分组**：内部 / 外部。
+ *
+ * 判定按**实现跑在哪**，不按「manifest 是否编译进 Core」（2026-10-18 二次
+ * 修正）——用户对「外部插件」的语义预期就是「不在 Core 进程内」：独立 PID、
+ * 独立生命周期、崩了不带走 Core。
+ *
+ * - `runtime === 'subprocess'` → 外部。QQ 适配器即此类：门控 manifest 编译
+ *   在 Core 里（`builtin = true`），但适配器实现由独立进程
+ *   `echo-adapter-qq` 提供。早期按 `builtin` 判定会把它归到「内部插件」，
+ *   而它自己的描述写着「独立进程」——分组与文案互相矛盾。
+ * - 旧 Core 无 `runtime` 字段 → 回退按 `builtin` 推断（外部 manifest 一律是
+ *   stdio 子进程）。
+ */
+function pluginSource(p: PluginInfo): 'builtin' | 'external' {
+  if (p.runtime) return p.runtime === 'subprocess' ? 'external' : 'builtin';
+  return p.builtin === false ? 'external' : 'builtin';
+}
 const PLUGIN_SOURCE_LABELS = { builtin: '内部插件', external: '外部插件' } as const;
 
-/**
- * 运行形态：实现跑在 Core 进程内，还是独立子进程（`runtime`，旧 Core 缺失 =
- * 进程内）。
- *
- * 与 `builtin`（来源）**正交**——QQ 适配器的门控 manifest 编译在 Core 里
- * （`builtin = true` → 「内部插件」组），但适配器实现由独立进程
- * `echo-adapter-qq` 提供。只看 `builtin` 会把「独立进程」的插件显示成
- * 「内部插件」，描述与分组互相矛盾（2026-10-18 报障）。
- */
-function pluginIsSubprocess(p: PluginInfo): boolean { return p.runtime === 'subprocess'; }
+/** 实现是否跑在独立子进程（=`外部插件`；判定见 [`pluginSource`]）。 */
+function pluginIsSubprocess(p: PluginInfo): boolean { return pluginSource(p) === 'external'; }
 const PLUGIN_RUNTIME_LABELS = { subprocess: '独立进程', in_process: '进程内' } as const;
 /** 运行形态的人读标签（旧 Core 缺字段 → 进程内）。 */
 function pluginRuntimeLabel(p: PluginInfo): string {
@@ -861,7 +866,16 @@ const pluginWorkbenchGroups = computed(() => {
       push('__all__', '全部插件', undefined, p);
     } else if (pluginGroupBy.value === 'source') {
       const source = pluginSource(p);
-      push(`source:${source}`, PLUGIN_SOURCE_LABELS[source], source === 'external' ? '运行期插件；仅影响当前节点' : '随 Core 发布；仅影响当前节点', p);
+      // 外部组的 hint 要讲清「独立进程」而非「第三方」：QQ 适配器随 Core
+      // 发布，但实现在独立进程里（2026-10-18 报障的正是这一点）。
+      push(
+        `source:${source}`,
+        PLUGIN_SOURCE_LABELS[source],
+        source === 'external'
+          ? '实现在独立进程（独立 PID / 生命周期）；随 Core 发布或来自插件目录'
+          : '实现编译在 Core 进程内；随 Core 发布',
+        p,
+      );
     } else if (pluginGroupBy.value === 'semantic') {
       const sem = pluginSemantic(p);
       push(`sem:${sem}`, PLUGIN_SEMANTIC_LABELS[sem], SEMANTIC_HINT[sem], p);
@@ -876,16 +890,6 @@ const pluginWorkbenchGroups = computed(() => {
     hint: v.hint,
     items: v.items.sort((a, b) => a.id.localeCompare(b.id, 'en')),
   }));
-  // 来源分组：组内若有进程外实现，hint 点明——「内部插件」讲的是 manifest
-  // 来源，不是执行位置（QQ 适配器即此类）。
-  if (pluginGroupBy.value === 'source') {
-    for (const e of entries) {
-      const subprocess = e.items.filter(pluginIsSubprocess).length;
-      if (subprocess) {
-        e.hint = `${e.hint ?? ''}；其中 ${subprocess} 个实现在独立进程（行内标「独立进程」）`;
-      }
-    }
-  }
   if (pluginGroupBy.value !== 'semantic') return entries;
   return entries.sort(
     (a, b) =>
@@ -2649,11 +2653,8 @@ watch(
                 <span class="skill-detail__pkg">{{ PLUGIN_SEMANTIC_LABELS[pluginSemantic(selectedPlugin)] }}</span>
               </div>
               <div class="detail-actions">
-                <NeumorphismTag v-if="!selectedPlugin.builtin" variant="info" size="small">
-                  外部插件
-                </NeumorphismTag>
                 <NeumorphismTag v-if="pluginIsSubprocess(selectedPlugin)" variant="info" size="small">
-                  独立进程
+                  外部插件 · 独立进程
                 </NeumorphismTag>
                 <span
                   v-if="pluginProtected(selectedPlugin)"
