@@ -768,6 +768,39 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* 移动端 v2：品牌位改为「当前视图标题」（聊天 = Agent 名 / 设置 / Shell）。
+     字重提到 600 作页面标题，字号 15px 与视图内标题对齐；仍保留省略号，
+     因为 Agent 名可能很长（多节点聚合时带 region 后缀）。 */
+  .brand.brand--view {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  /* 移动端 v2：视图切换入口（☰）。44×44 触控区（iOS HIG 下限），
+     视觉上用玻璃圆钮与顶栏其它按钮同族；按钮本体比图标大一圈靠 padding。 */
+  .mobile-view-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    margin-left: -8px;
+    padding: 0;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--nm-text-primary);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mobile-view-btn:active {
+    background: var(--panel-hover, rgba(0, 0, 0, 0.08));
+  }
+  .mobile-view-btn[aria-expanded='true'] {
+    background: var(--panel-hover, rgba(0, 0, 0, 0.08));
+  }
   /* 库的 header-left 是 flex: 0 0 auto（不收缩）——放开收缩，让品牌让位 */
   #app .nm-layout__header-left {
     flex: 0 1 auto;
@@ -822,3 +855,39 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 .lazy-load-error__btn:hover { background: var(--panel-hover); }
 .lazy-load-error__btn:focus-visible { outline: 2px solid var(--nm-primary-color); outline-offset: 2px; }
 .lazy-load-error__btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Shell 视图空态（2026-10 移动端布局 v2）─────────────────────────────
+   Shell 视图现在可从视图菜单直接进入（原先只能经侧栏 Shell 卡的「详情」，
+   必然带目标会话）。没有任何 shell 会话时给一条明确说明 + 回聊天的出口，
+   而不是留白。 */
+.shell-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.shell-empty__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.shell-empty__hint {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--nm-text-secondary);
+}
+
+.shell-empty__hint code {
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--panel-hover, rgba(0, 0, 0, 0.06));
+}

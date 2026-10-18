@@ -2,7 +2,7 @@
 //! 应用壳：NeumorphismLayout（`show-header` + `height="100%"`；**不使用库的 sider 槽位**——
 //! 原左侧边栏已移除，卡片改由会话视图内的 chat-rail 双列承载）+ 主视图 + 弹窗 + toast 桥。
 
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { lazy } from './lazy';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismLayout from '@echolab-auto/ui-frame/components/NeumorphismLayout';
@@ -34,7 +34,9 @@ const BranchModal = lazy(() => import('./components/BranchModal.vue'), 'BranchMo
 import FullscreenToggleButton from './components/FullscreenToggleButton.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import { mobileCardsDrawerOpen } from './mobile-cards';
+import { mobileCardsDrawerOpen, mobileViewSheetOpen } from './mobile-sheets';
+import MobileViewSheet from './components/MobileViewSheet.vue';
+import PanelIcon from './components/PanelIcon.vue';
 import { railSessionId } from './rail-cards';
 import { readPref, readTabOnly, writePref, writeTabOnly } from './tab-prefs';
 
@@ -43,6 +45,19 @@ startConnection();
 // 竖屏移动端（2026-10）：断点与库同源（innerWidth < 768）。移动端隐藏
 // 全屏按钮（CSS），顶栏出现「卡片」入口（打开 ChatView 内的卡片抽屉）。
 const { isMobile } = useTouchDevice();
+
+/**
+ * 移动端顶栏标题（2026-10 布局 v2）：品牌让位给「当前在哪」。
+ *
+ * 桌面顶栏的品牌 + 三个视图按钮在 375px 上放不下（品牌被迫压成省略号），
+ * 且 Shell 视图没有入口。移动端改为「`☰` + 标题」：`☰` 打开视图 Sheet，
+ * 标题随视图变化——聊天显示当前 Agent 名（人格即身份），其余显示视图名。
+ */
+const mobileTitle = computed<string>(() => {
+  if (view.value === 'settings') return '设置';
+  if (view.value === 'shell') return 'Shell';
+  return currentTeam(state)?.name?.trim() || '聊天';
+});
 
 // ── 持久化键（必须在首次读取之前声明：`view` 的初值就地调 loadView）──
 // 记住上次使用的 Agent（Team）：刷新/重连后恢复，避免回到默认 agent。
@@ -64,6 +79,40 @@ function openShellDetail(sessionId: string) {
   shellDetailId.value = sessionId;
   setView('shell');
 }
+/**
+ * Shell 视图的「自动选会话」兜底（2026-10 移动端布局 v2）。
+ *
+ * Shell 视图原本只有**详情**一种形态（`v-if="shellDetailId"`），入口藏在侧栏
+ * Shell 卡的「详情」按钮里。v2 把 Shell 提到移动端视图菜单后，从菜单直接进入
+ * 会命中「view === 'shell' 但没有 shellDetailId」→ 主区一片空白。
+ *
+ * 兜底策略：切到 shell 且当前没有目标会话时，取当前 core 下的第一个 shell 会话；
+ * 一个都没有（用户还没开过 Shell）则渲染空态提示，而不是静默空白。
+ */
+const shellFallbackId = computed<string | null>(() => {
+  const list = state.shellSessions;
+  if (!list.length) return null;
+  const region = state.activeRegion;
+  const pick =
+    region == null ? list[0] : list.find((s) => (s.core ?? null) === region) ?? list[0];
+  return pick?.session_id ?? null;
+});
+
+/** Shell 视图实际渲染的会话：显式详情优先，否则用兜底。 */
+const shellViewId = computed(
+  () => shellDetailId.value ?? (view.value === 'shell' ? shellFallbackId.value : null),
+);
+
+watch(
+  () => view.value,
+  (next) => {
+    // 进 shell 时若无详情但有会话，直接落到第一个（避免空白）；离开时保留旧值，
+    // 下次进来仍是上次看的那条（除非它已经不在了）。
+    if (next !== 'shell') return;
+    if (shellDetailId.value) return;
+    shellDetailId.value = shellFallbackId.value;
+  },
+);
 
 function loadView(): View {
   try {
@@ -577,7 +626,19 @@ watch(
     <NeumorphismLayout show-header height="100%" class="panel-layout">
       <!-- 顶部栏左：库自带折叠按钮 + 品牌 -->
       <template #header-left>
-        <div class="brand">EchoAgent Panel</div>
+        <!-- 移动端（<768px，2026-10 布局 v2）：视图切换收进 `☰` 打开的底部 Sheet，
+             顶栏让出空间给「当前在哪」——品牌在 375px 屏上只能压成省略号，无信息量。 -->
+        <button
+          v-if="isMobile"
+          type="button"
+          class="mobile-view-btn"
+          aria-label="切换视图"
+          :aria-expanded="mobileViewSheetOpen"
+          @click="mobileViewSheetOpen = !mobileViewSheetOpen"
+        >
+          <PanelIcon name="list" size="md" tone="inherit" />
+        </button>
+        <div class="brand" :class="{ 'brand--view': isMobile }">{{ isMobile ? mobileTitle : 'EchoAgent Panel' }}</div>
       </template>
 
       <!-- 顶部栏中：连接状态已迁入右侧边栏「连接状态」卡（2026-09-23）——
@@ -587,24 +648,29 @@ watch(
       <!-- 顶部栏右：导航 -->
       <template #header-right>
         <div class="topbar-actions">
-          <NeumorphismButton
-            size="small"
-            variant="glass"
-            :pressed="view === 'chat'"
-            @click="setView('chat')"
-          >
-            聊天
-          </NeumorphismButton>
-          <NeumorphismButton
-            size="small"
-            variant="glass"
-            :pressed="view === 'settings'"
-            @click="setView('settings')"
-          >
-            设置
-          </NeumorphismButton>
+          <!-- 桌面：视图按钮直接可见。移动端收进 `☰` 打开的 Sheet——
+               375px 上「品牌 + 两个视图按钮 + 卡片 + 主题」必然溢出（v1 实测品牌被
+               压成省略号），且 Shell 视图当时没有顶栏入口。 -->
+          <template v-if="!isMobile">
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              :pressed="view === 'chat'"
+              @click="setView('chat')"
+            >
+              聊天
+            </NeumorphismButton>
+            <NeumorphismButton
+              size="small"
+              variant="glass"
+              :pressed="view === 'settings'"
+              @click="setView('settings')"
+            >
+              设置
+            </NeumorphismButton>
+          </template>
           <!-- 卡片抽屉入口（仅移动端且会话视图；抽屉本体在 ChatView 内，
-               state 经 mobile-cards.ts 模块级 ref 通信） -->
+               state 经 mobile-sheets.ts 的互斥 sheet 开关通信） -->
           <NeumorphismButton
             v-if="isMobile && view === 'chat'"
             size="small"
@@ -648,10 +714,23 @@ watch(
           :active-team-id="activeTeamId"
         />
         <ShellPanel
-          v-if="view === 'shell' && shellDetailId"
-          :session-id="shellDetailId"
+          v-if="view === 'shell' && shellViewId"
+          :session-id="shellViewId"
           @back="setView('chat')"
         />
+        <!-- Shell 视图空态（v2）：用户还没开过任何 Shell 会话。此前这种情况是
+             一片空白（Shell 视图只从侧栏卡的「详情」进入，永远有目标会话）；
+             收进视图菜单后必须显式说明，否则像页面坏了。 -->
+        <div v-else-if="view === 'shell'" class="shell-empty">
+          <p class="shell-empty__title">还没有 Shell 会话</p>
+          <p class="shell-empty__hint">
+            在会话视图右侧边栏的「Shell」卡片里新建一个，或让模型调用
+            <code>shell_start</code> 工具创建。
+          </p>
+          <NeumorphismButton size="small" variant="glass" @click="setView('chat')">
+            回到聊天
+          </NeumorphismButton>
+        </div>
       </div>
     </NeumorphismLayout>
 
@@ -669,6 +748,10 @@ watch(
     />
 
     <!-- 全局确认对话框（2026-10 审计修复）：window.confirm 的统一替代 -->
+    <!-- 移动端视图切换菜单（<768px）：`☰` 打开，含聊天/设置/Shell 三项。
+         桌面不渲染（桌面顶栏已有常驻按钮）。 -->
+    <MobileViewSheet v-if="isMobile" :view="view" @select="setView" />
+
     <ConfirmDialog />
   </ThemeProvider>
 </template>

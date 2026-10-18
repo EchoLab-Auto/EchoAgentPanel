@@ -293,12 +293,36 @@ const sessionSwitcherAvailable = computed(() => {
   return loopModeOf(team) === 'parallel';
 });
 
+/**
+ * 入口行横向滚动的「还有更多」提示（2026-10 移动端布局 v2）。
+ *
+ * 背景：入口行最多可挂 8 个控件（AgentSwitcher + 配置/上下文/清单/会话/工作区/
+ * 任务/实例），375px 屏上必然溢出。v1 只是 `overflow-x: auto` + 隐藏滚动条——
+ * 用户在窄屏上看不出右边还有按钮（实测首屏只露出前 3-4 个）。
+ *
+ * v2：可滚且未滚到底时，右端叠一个渐隐 + `›` 提示；滚到底即消失。不改布局、
+ * 不动按钮顺序（保留肌肉记忆），只补「还有内容」这一条视觉信号。
+ * 桌面：入口行不溢出 → `entryScrollable` 恒 false → 提示不渲染，零回归。
+ */
+const entryRowRef = ref<HTMLElement | null>(null);
+const entryScrollable = ref(false);
+const entryAtEnd = ref(true);
+
+function syncEntryScroll(): void {
+  const el = entryRowRef.value;
+  if (!el) return;
+  const max = el.scrollWidth - el.clientWidth;
+  entryScrollable.value = max > 2;
+  entryAtEnd.value = el.scrollLeft >= max - 2;
+}
+
 const showSessions = ref(false);
 const sessionsBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
 
 function toggleSessions() {
   showSessions.value = !showSessions.value;
 }
+
 
 function pickSession(id: string) {
   showSessions.value = false;
@@ -310,6 +334,16 @@ const workspaceAvailable = computed(() =>
   teamPluginEnabled(currentTeam.value, 'echo-agent.workspace') &&
   teamToolAvailable(currentTeam.value, 'workspace'),
 );
+// 入口行按钮随工具可用性增减（会话/工作区/任务/实例各有 v-if），任一变化都要重算。
+watch(
+  [sessionSwitcherAvailable, workspaceAvailable, tasksAvailable, instanceAvailable],
+  () => void nextTick(syncEntryScroll),
+);
+onMounted(() => {
+  syncEntryScroll();
+  window.addEventListener('resize', syncEntryScroll, { passive: true });
+});
+onBeforeUnmount(() => window.removeEventListener('resize', syncEntryScroll));
 
 const showWorkspace = ref(false);
 const workspaceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
@@ -779,7 +813,7 @@ function mediaSrc(img: string): string {
 <template>
   <div class="chat-view" :class="{ 'chat-view--overlay-open': anyOverlayOpen }" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
-    <div class="entry-row">
+    <div ref="entryRowRef" class="entry-row" @scroll.passive="syncEntryScroll">
       <div v-if="activityText" class="chat-activity">
         <span class="chat-activity__spinner" />
         <span class="chat-activity__text">{{ activityText }}</span>
@@ -917,6 +951,13 @@ function mediaSrc(img: string): string {
           任务
         </NeumorphismButton>
       </NeumorphismBadge>
+      <!-- 「还有更多」提示（2026-10 v2）：仅在入口行可横滚且未滚到底时出现。
+           叠在容器右端（sticky 右贴边，不随内容滚动），滚到底即消失。 -->
+      <span
+        v-if="entryScrollable && !entryAtEnd"
+        class="entry-row__more"
+        aria-hidden="true"
+      >›</span>
     </div>
 
     <!-- 入口行面板统一由 PanelPopover 提供：定位、尺寸、外部点击和 Escape。 -->
@@ -1839,6 +1880,29 @@ function mediaSrc(img: string): string {
   /* 活动浮条不占满：截断更紧，给按钮留浏览空间 */
   .chat-activity__text {
     max-width: 42vw;
+  }
+
+  /* 「还有更多」提示（v2）：sticky 右贴边叠在滚动容器末端——不随内容滚走，
+     也不需要额外包裹层（entry-row 自身就是 overflow-x 容器）。
+     左缘渐隐用 mask 实现（不引入新色值，深浅主题都成立）；提示只占右侧 36px，
+     遮住的是最后半个按钮的边缘，正好传达「这里还接得住」。 */
+  .entry-row__more {
+    position: sticky;
+    right: 0;
+    flex: 0 0 auto;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 36px;
+    margin-left: -36px;
+    padding-right: 2px;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--nm-text-secondary);
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 45%);
+    mask-image: linear-gradient(to right, transparent, #000 45%);
   }
 
   /* 输入区：左右收窄 + 底部安全区（Home 指示条）+ 软键盘偏移；圆角与桌面一致 */
