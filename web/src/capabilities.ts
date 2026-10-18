@@ -1,7 +1,7 @@
 //! 当前 agent 能力推导（前端只读，与后端 persona 名单语义一致）。
 //! 后端权威：enabled_* 非空 = 仅列出的可用（空白名单 = 全部可用）；工具/技能
 //! 另有 disabled_tools/disabled_skills 黑名单细化。插件维度自 2026-09-11 起
-//! 只有白名单（黑名单已移除）：包维度插件（tools.builtin/skills.dir/adapter.qq/
+//! 只有白名单（黑名单已移除）：包维度插件（tools.builtin/skills.dir/
 //! workspace/management.panel）不在白名单即其注册表整体不可见。这里复刻同一
 //! 语义供 UI 入口显隐。
 //! 2026-09：任务清单（checklist）降级为普通工具——插件维度移除，开关在
@@ -11,16 +11,20 @@ import type { TeamInfo } from './protocol';
 import { activeTeam, type AppState } from './state';
 
 /**
- * 包维度门控插件 id（单一来源）——「启用插件」勾选区除 adapter/management/
- * interaction 类之外的补充成员。
+ * 包维度门控插件 id（单一来源）——「启用插件」勾选区中除 kind 类
+ * （adapter / management / interaction）之外的补充成员。
  *
- * 其中多数（tools.builtin / skills.dir / workspace）的 kind 是 `tool`，
- * 但它们是**整类能力开关**（禁用 = 其包内全部工具/技能对 LLM 不可见），
- * 因此必须出现在智能体配置弹层（⚙ 配置）与设置视图智能体编辑器的
- * 「启用插件」勾选区里；adapter.qq 由 kind 判定即已覆盖，列在此处是为了与
- * Core 的 `GATED_PLUGIN_IDS` 保持逐项镜像（对齐测试守护）。任务清单
- * （checklist）已降级为普通工具，不再有插件维度，其开关在工具白/黑名单
- * 里进行。
+ * 这些插件的 kind 多为 `tool`，但它们是**整类能力开关**（禁用 = 其包内全部
+ * 工具/技能对 LLM 不可见），因此必须出现在智能体配置弹层（⚙ 配置）与设置
+ * 视图智能体编辑器的「启用插件」勾选区里。
+ *
+ * **适配器不在本清单内**——与 Core 一致，按 kind 运行期推导：
+ * Core `gated_plugin_ids()` 遍历插件注册表，`kind == "adapter"` 即纳入，
+ * 因此框架里没有任何平台名；本文件的对应实现就是 `isPluginCheckboxVisible`
+ * 的 kind 判定。这样新增平台（`echo-agent.adapter.<platform>`）两侧都自动
+ * 生效、无需改清单（2026-10 适配器解耦后 QQ 已从两侧清单移除，本清单与 Core
+ * `GATED_PLUGIN_IDS` 的 4 项逐项镜像）。任务清单（checklist）已降级为普通
+ * 工具，不再有插件维度，其开关在工具白/黑名单里进行。
  *
  * 维护规则（对应 Core 端 `echo-agent/src/plugins.rs::GATED_PLUGIN_IDS`）：
  * **新增包维度门控插件时，同步：
@@ -38,11 +42,16 @@ export const PACKAGE_GATED_PLUGIN_IDS = [
   'echo-agent.tools.builtin',
   'echo-agent.skills.dir',
   'echo-agent.workspace',
-  'echo-agent.adapter.qq',
   'echo-agent.subagent',
 ] as const;
 
-/** 包维度门控插件的中文显示名（工具/技能按包分组时的可读名）。 */
+/**
+ * 包/插件的中文显示名（工具·技能按包分组、插件勾选区、插件列表共用）。
+ *
+ * 只影响**显示**，不参与可见性判定——因此这里可以出现具体平台名
+ * （`adapter.qq` 是 QQ 适配器插件自己声明的工具包 id，见
+ * `AdapterToolSpec.package`），框架逻辑本身不枚举平台。
+ */
 export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
   'echo-agent.adapter.qq': 'QQ 适配器包',
   'echo-agent.orchestration': '编排工具包',

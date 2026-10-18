@@ -38,23 +38,3 @@ export function summarizeTimerEvent(content: string): string {
 export function bounded(value: string, max: number): string {
   return value.length <= max ? value : value.slice(0, max) + '…';
 }
-
-export function targetLabel(target: unknown, originSession: string): string {
-  if (!target || typeof target !== 'object') return '源会话';
-  const t = target as Record<string, unknown>;
-  const kind = String(t['kind'] ?? '');
-  const id = (v: unknown) => (typeof v === 'string' ? v : '');
-  switch (kind) {
-    case 'qq_private':
-      return `QQ 私聊 ${id(t['user_id'] ?? t['id']) || '未知'}`;
-    case 'qq_group':
-      return `QQ 群 ${id(t['group_id'] ?? t['id']) || '未知'}`;
-    case 'backend': {
-      const session = id(t['session_id'] ?? t['id']) || originSession;
-      return session === originSession ? '源会话' : `后台 ${session}`;
-    }
-    default:
-      return '源会话';
-  }
-}
-

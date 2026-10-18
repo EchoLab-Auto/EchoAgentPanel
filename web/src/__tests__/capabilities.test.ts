@@ -1,11 +1,12 @@
 //! 能力推导 + 插件勾选清单契约。
 //!
 //! 背景（2026-09-13 工作区插件「配置里看不到」遗漏）：Panel 「启用插件」
-//! 勾选区是**硬编码允许清单**（kind ∈ {adapter, management} ∪ 包维度门控
-//! 插件），新增包维度插件时容易漏同步。本测试锁定：
+//! 勾选区是**硬编码允许清单**（kind ∈ {adapter, management, interaction} ∪
+//! 包维度门控插件），新增包维度插件时容易漏同步。本测试锁定：
 //!   1. 清单收敛为单一来源（capabilities.ts），两个组件引用同一常量；
-//!   2. 清单内容与 Core 的 GATED_PLUGIN_IDS 对齐（含 workspace）；
-//!   3. 勾选可见性判定语义。
+//!   2. 清单内容与 Core 的 GATED_PLUGIN_IDS 对齐（4 项，含 workspace）；
+//!   3. 勾选可见性判定语义；
+//!   4. 适配器**不走清单**（kind 运行期推导），新增平台零改动。
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -19,18 +20,30 @@ import {
 import type { TeamInfo } from '../protocol';
 
 describe('包维度门控插件清单（单一来源）', () => {
-  it('包含全部包维度门控插件（对齐 Core GATED_PLUGIN_IDS）', () => {
+  it('包含全部包维度门控插件（对齐 Core GATED_PLUGIN_IDS 的 4 项）', () => {
     // Core 侧 echo-agent/src/plugins.rs::GATED_PLUGIN_IDS 的镜像：
     // 增删任一侧都必须两边同改（此处防回归）。
+    // 适配器**不在**两侧清单里——按 kind 运行期推导（见下一个用例）。
     expect([...PACKAGE_GATED_PLUGIN_IDS].sort()).toEqual(
       [
-        'echo-agent.adapter.qq',
         'echo-agent.skills.dir',
         'echo-agent.subagent',
         'echo-agent.tools.builtin',
         'echo-agent.workspace',
       ].sort(),
     );
+  });
+
+  it('适配器按 kind 运行期推导：新增平台无需改清单', () => {
+    // 2026-10 适配器解耦：框架不再枚举平台名——Core `gated_plugin_ids()`
+    // 遍历插件注册表取 `kind == "adapter"`，Panel 侧即
+    // `isPluginCheckboxVisible` 的 kind 判定。这里锁定同一语义：将来接入
+    // telegram / discord 等新平台插件，不改任何清单也会出现在勾选区。
+    for (const platform of ['qq', 'telegram', 'discord']) {
+      const id = `echo-agent.adapter.${platform}`;
+      expect((PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(id), id).toBe(false);
+      expect(isPluginCheckboxVisible({ id, kind: 'adapter' }), id).toBe(true);
+    }
   });
 
   it('每个门控插件都有中文显示名（工具/包分组可读性）', () => {
