@@ -49,6 +49,11 @@ const kind = computed<IconKind>(() => {
     case 'send_group_msg':
     case 'send_backend_message':
       return 'message';
+    case 'instance_start':
+    case 'instance_stop':
+    case 'instance_restart':
+    case 'instance_status':
+    // 旧工具名（2026-10 去适配器化前；旧 Core 仍发这些名字）。
     case 'adapter_start':
     case 'adapter_stop':
     case 'adapter_restart':
