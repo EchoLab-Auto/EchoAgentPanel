@@ -12,16 +12,16 @@ import { activeTeam, type AppState } from './state';
 
 /**
  * 包维度门控插件 id（单一来源）——「启用插件」勾选区中除 kind 类
- * （adapter / management / interaction）之外的补充成员。
+ * （instance / management / interaction）之外的补充成员。
  *
  * 这些插件的 kind 多为 `tool`，但它们是**整类能力开关**（禁用 = 其包内全部
  * 工具/技能对 LLM 不可见），因此必须出现在智能体配置弹层（⚙ 配置）与设置
  * 视图智能体编辑器的「启用插件」勾选区里。
  *
  * **适配器不在本清单内**——与 Core 一致，按 kind 运行期推导：
- * Core `gated_plugin_ids()` 遍历插件注册表，`kind == "adapter"` 即纳入，
+ * Core `gated_plugin_ids()` 遍历插件注册表，`kind == "instance"` 即纳入，
  * 因此框架里没有任何平台名；本文件的对应实现就是 `isPluginCheckboxVisible`
- * 的 kind 判定。这样新增平台（`echo-agent.adapter.<platform>`）两侧都自动
+ * 的 kind 判定。这样新增平台（`echo-agent.instance.<platform>`）两侧都自动
  * 生效、无需改清单（2026-10 适配器解耦后 QQ 已从两侧清单移除，本清单与 Core
  * `GATED_PLUGIN_IDS` 的 4 项逐项镜像）。任务清单（checklist）已降级为普通
  * 工具，不再有插件维度，其开关在工具白/黑名单里进行。
@@ -34,7 +34,7 @@ import { activeTeam, type AppState } from './state';
  * **新增插件 type（Core `PluginKind`）时，同步：
  *   1. 本文件 `PLUGIN_KIND_LABELS`（中文显示名；
  *      测试覆盖 Core 全部 wire 名）；
- *   2. 若新类型属于「整类能力开关」（adapter/management/interaction 同层），
+ *   2. 若新类型属于「整类能力开关」（instance/management/interaction 同层），
  *      加入 `isPluginCheckboxVisible` 的 kind 类判定。**
  * 回归测试见 `src/__tests__/capabilities.test.ts`。
  */
@@ -49,10 +49,13 @@ export const PACKAGE_GATED_PLUGIN_IDS = [
  * 包/插件的中文显示名（工具·技能按包分组、插件勾选区、插件列表共用）。
  *
  * 只影响**显示**，不参与可见性判定——因此这里可以出现具体平台名
- * （`adapter.qq` 是 QQ 适配器插件自己声明的工具包 id，见
+ * （`instance.qq` 是 QQ 插件自己声明的工具包 id，见
  * `AdapterToolSpec.package`），框架逻辑本身不枚举平台。
  */
 export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
+  'echo-agent.instance.qq': 'QQ 适配器包',
+  // 旧 id（2026-10 去适配器化前）。保留是为了「新 Panel + 旧 Core」以及
+  // 尚未迁移 `package:` 的 SKILL.md 仍显示可读名；新 id 优先。
   'echo-agent.adapter.qq': 'QQ 适配器包',
   'echo-agent.orchestration': '编排工具包',
   'echo-agent.tools.builtin': '内置工具集',
@@ -62,18 +65,32 @@ export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
 };
 
 /**
+ * 实例类插件的 kind 取值（新 `instance` + 旧 `adapter` 双认）。
+ *
+ * 2026-10 去适配器化把 wire 名改成 `instance`；旧 Core 仍发 `adapter`。
+ * 前端同时接受两者，避免「升级 Panel 就看不到平台通道」或反之。
+ */
+export const INSTANCE_PLUGIN_KINDS = ['instance', 'adapter'] as const;
+
+/** 该 kind 是否属于「实例类」（平台通道）插件。 */
+export function isInstancePluginKind(kind: string): boolean {
+  return (INSTANCE_PLUGIN_KINDS as readonly string[]).includes(kind);
+}
+
+/**
  * 插件是否属于「启用插件」勾选区（kind 类 + 包维度门控清单）。
  *
- * kind 类 = adapter / management / interaction——这三类的存在方式就是
- * 「整类能力开关」（适配器进程、管理通道、人在环交互通道），按 kind
- * 即应出现在勾选区；其余 kind 需要显式列入包维度门控清单。
+ * kind 类 = instance / adapter（同一类的新旧 wire 名）、management、
+ * interaction——这三类的存在方式就是「整类能力开关」（平台实例进程、管理
+ * 通道、人在环交互通道），按 kind 即应出现在勾选区；其余 kind 需要显式列入
+ * 包维度门控清单。实例类**不进清单**：新增平台两侧都零改动。
  */
 export function isPluginCheckboxVisible(plugin: {
   id: string;
   kind: string;
 }): boolean {
   if (
-    plugin.kind === 'adapter' ||
+    isInstancePluginKind(plugin.kind) ||
     plugin.kind === 'management' ||
     plugin.kind === 'interaction'
   ) {
@@ -88,7 +105,9 @@ export const PLUGIN_KIND_LABELS: Record<string, string> = {
   tool: '工具',
   provider: 'LLM Provider',
   loop: '循环驱动',
-  adapter: '适配器',
+  instance: '平台实例',
+  /** 旧 wire 名（2026-10 去适配器化前的 `adapter`）。 */
+  adapter: '平台实例',
   orchestration: '编排',
   management: '管理面',
   interaction: '交互',

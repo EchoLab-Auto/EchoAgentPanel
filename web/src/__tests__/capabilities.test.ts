@@ -13,6 +13,7 @@ import {
   PACKAGE_GATED_PLUGIN_IDS,
   PACKAGE_DISPLAY_NAMES,
   PLUGIN_KIND_LABELS,
+  isInstancePluginKind,
   isPluginCheckboxVisible,
   teamPluginEnabled,
   teamToolAvailable,
@@ -32,6 +33,18 @@ describe('包维度门控插件清单（单一来源）', () => {
         'echo-agent.workspace',
       ].sort(),
     );
+  });
+
+  it('实例类 kind 新旧 wire 名都可见（instance / adapter）', () => {
+    // 2026-10 去适配器化：Core 的 wire 名由 `adapter` 改为 `instance`。
+    // Panel 与 Core 独立升级，因此两者都必须被认作「平台通道」。
+    for (const kind of ['instance', 'adapter']) {
+      expect(isInstancePluginKind(kind), kind).toBe(true);
+      expect(isPluginCheckboxVisible({ id: 'echo-agent.instance.qq', kind }), kind).toBe(true);
+    }
+    for (const kind of ['tool', 'skill', 'loop', 'provider', 'orchestration']) {
+      expect(isInstancePluginKind(kind), kind).toBe(false);
+    }
   });
 
   it('适配器按 kind 运行期推导：新增平台无需改清单', () => {

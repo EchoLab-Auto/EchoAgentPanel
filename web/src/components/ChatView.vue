@@ -25,7 +25,7 @@ import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
 import { checklistKey, sessionKey } from '../keys';
-import { teamPluginEnabled, teamToolAvailable } from '../capabilities';
+import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
 import ChecklistSidebar from './ChecklistSidebar.vue';
@@ -191,7 +191,7 @@ function onSelectionChange() {
 // 适配器按钮显隐：仅当当前 Agent（team）启用了 adapter 类插件时显示。
 // 依据 TeamInfo 的 enabled_plugins 白名单判断（插件黑名单已移除），
 // 与 Core apply_capabilities 的过滤语义一致。
-const ADAPTER_PLUGIN_FALLBACK = ['echo-agent.adapter.qq'];
+const ADAPTER_PLUGIN_FALLBACK = ['echo-agent.instance.qq'];
 
 const currentTeam = computed(() => {
   if (!props.activeTeamId) return null;
@@ -200,7 +200,7 @@ const currentTeam = computed(() => {
 
 /** 当前团队视角下的适配器插件 id 列表（无 plugins 数据时回退到内置 id） */
 const adapterPluginIds = computed<string[]>(() => {
-  const fromState = state.plugins.filter((p) => p.kind === 'adapter').map((p) => p.id);
+  const fromState = state.plugins.filter((p) => isInstancePluginKind(p.kind)).map((p) => p.id);
   return fromState.length ? fromState : ADAPTER_PLUGIN_FALLBACK;
 });
 

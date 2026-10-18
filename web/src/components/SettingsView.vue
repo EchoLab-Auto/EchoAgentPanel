@@ -47,6 +47,7 @@ import {
   PACKAGE_GATED_PLUGIN_IDS,
   PLUGIN_KIND_LABELS,
   isPluginCheckboxVisible,
+  isInstancePluginKind,
 } from '../capabilities';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
@@ -777,7 +778,7 @@ const PLUGIN_SEMANTIC_LABELS: Record<string, string> = {
 
 function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
   if (p.kind === 'loop') return 'mode';
-  if (p.kind === 'adapter' || p.kind === 'management') return 'channel';
+  if (isInstancePluginKind(p.kind) || p.kind === 'management') return 'channel';
   if ((PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(p.id)) return 'gated';
   return 'other';
 }
