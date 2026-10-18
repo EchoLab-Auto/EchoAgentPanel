@@ -37,7 +37,7 @@
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
 - 工具调用、思考（推理）与子代理完成统一为 chip 行（连续工作条目合并为一排小圆角矩形图标、点击展开详情；2026-10 一般化）、临时回复分支面板（入口行「任务」弹层，按当前会话过滤）、清单面板
 - API 设置（provider / model / base_url / api_key / profiles；system prompt 在智能体配置弹层 AgentConfigModal 中编辑）；DeepSeek 余额查询（含充值/赠送分账）+ **余额与用量图表**（近 7 天：总览对比图 + profile 卡内嵌 sparkline；数据由 Core 本地积累，含 token 费用估算）
-- 适配器管理（描述符驱动，**Panel 无平台专属逻辑**：布局由插件 `AdapterStatus.ui` 声明、动作经 `InvokeAdapterOp` 透传、状态经 `AdapterState` 回推；当前内置的 QQ 适配器即多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
+- 适配器管理（描述符驱动，**Panel 无平台专属逻辑**：布局由插件 `AdapterStatus.ui` 声明、动作经 `InvokeAdapterOp` 透传、状态经 `AdapterState` 回推；当前在册的 `echo-agent.adapter.qq` 是**进程外插件**（实现在独立进程 `echo-adapter-qq`，不在 Core 内），它提供多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
 - 工作区会话管理（入口行「工作区」宽版面板：多会话 / 多工作区目录 / 各目录 git 状态；文件浏览器已迁至会话视图右侧边栏，2026-09-19；`echo-agent.workspace` 插件）
 - 插件工作台（设置·插件）：支持多 Core 节点聚合展示，按**运行位置**分组（内置 / 进程外），卡片标注运行形态与来源，可在线启停
 - 技能安装（设置·技能）：Git 来源安装/更新，克隆与构建进度实时可见（不再是长时间静默），失败自动清场并提示残留
