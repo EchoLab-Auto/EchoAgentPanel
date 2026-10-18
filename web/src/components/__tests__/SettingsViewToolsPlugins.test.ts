@@ -336,6 +336,71 @@ describe('SettingsView 插件工作台', () => {
     expect(wrapper.text()).not.toContain('独立进程');
   });
 
+  /**
+   * Git 安装：克隆是分钟级操作。旧实现点「安装」立刻关闭弹层，接着是
+   * **最长两分钟的零反馈**（2026-10-18 实查：HTTPS 不可达时正是如此，
+   * 用户以为按钮没生效）。现在弹层保持打开并显示已等待秒数。
+   */
+  it('Git 安装：发命令后弹层保持打开并显示进度，技能列表刷新后才关闭', async () => {
+    // 弹层走 <teleport to="body">：内容在 wrapper 之外，用原生 DOM 断言。
+    const wrapper = await openCategory('技能');
+    const gitBtn = wrapper
+      .findAll('.caps-toolbar-actions button')
+      .find((b) => b.text().includes('Git 安装'))!;
+    expect(gitBtn).toBeTruthy();
+    await gitBtn.trigger('click');
+    await wrapper.vm.$nextTick();
+
+    const urlInput = document.body.querySelector<HTMLInputElement>('.git-modal input')!;
+    expect(urlInput).toBeTruthy();
+    urlInput.value = 'git@github.com:EchoLab-Auto/skill-echo-prodoc.git';
+    urlInput.dispatchEvent(new Event('input'));
+    await wrapper.vm.$nextTick();
+
+    const installBtn = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('.git-modal__actions button'),
+    ).find((b) => b.textContent?.includes('安装'))!;
+    expect(installBtn).toBeTruthy();
+    installBtn.click();
+    await wrapper.vm.$nextTick();
+
+    // 命令已发出
+    expect(vi.mocked(sendCommand)).toHaveBeenCalledWith({
+      InstallSkillFromGit: {
+        url: 'git@github.com:EchoLab-Auto/skill-echo-prodoc.git',
+        name: null,
+        branch: null,
+      },
+    });
+
+    // 弹层仍然打开：有进度条，按钮变「安装中…」且禁用（旧实现此刻已关窗）
+    const progress = document.body.querySelector('.git-modal__progress');
+    expect(progress).toBeTruthy();
+    expect(progress!.textContent).toContain('正在克隆');
+    const busyBtn = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('.git-modal__actions button'),
+    ).find((b) => b.textContent?.includes('安装中'))!;
+    expect(busyBtn.disabled).toBe(true);
+
+    // 技能列表刷新（Core 装完推 SkillsList）→ 进度消失（弹层关闭）
+    state.skills = [
+      ...state.skills,
+      {
+        name: 'prodoc-format',
+        description: 'ProDoc 规范',
+        keywords: [],
+        category: '',
+        package: '',
+        content: '',
+        enabled: true,
+        source: { url: 'git@github.com:EchoLab-Auto/skill-echo-prodoc.git', rev: 'f727ad5' },
+      } as never,
+    ];
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(document.body.querySelector('.git-modal__progress')).toBeNull();
+  });
+
   it('切到门控语义分组：恢复门控 → 通道 → 模式 → 其它 + 语义提示', async () => {
     const wrapper = await openCategory('插件');
     // 分组维度选择器：PLUGIN_GROUP_OPTIONS 的第二项（按门控语义）

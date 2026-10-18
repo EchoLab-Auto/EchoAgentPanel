@@ -1466,8 +1466,51 @@ function openGitModal() {
   gitModalOpen.value = true;
 }
 
+// 克隆耗时：秒级（本地 / 内网）到分钟级（公网、慢链路，Core 侧硬超时 120s）。
+// 弹层在此期间保持打开并显示进度——否则用户面对的是两分钟静默，无从判断
+// 是"在跑"还是"点了没反应"（2026-10-18 实查：HTTPS 不可达时正是如此）。
+const gitInstalling = ref(false);
+const gitInstallStartedAt = ref(0);
+const gitInstallElapsed = ref(0);
+const gitInstallSlow = ref(false);
+let gitInstallTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopGitInstallTimer() {
+  if (gitInstallTimer) clearInterval(gitInstallTimer);
+  gitInstallTimer = null;
+}
+
+function startGitInstallWatch() {
+  gitInstalling.value = true;
+  gitInstallStartedAt.value = Date.now();
+  gitInstallElapsed.value = 0;
+  gitInstallSlow.value = false;
+  stopGitInstallTimer();
+  gitInstallTimer = setInterval(() => {
+    const secs = Math.round((Date.now() - gitInstallStartedAt.value) / 1000);
+    gitInstallElapsed.value = secs;
+    gitInstallSlow.value = secs >= 20;
+  }, 500);
+}
+
+/** 技能列表变化 = 安装成功（Core 装完即推 SkillsList）。 */
+watch(
+  () => state.skills.map((s) => s.name).join('\u0000'),
+  () => {
+    if (!gitInstalling.value) return;
+    gitInstalling.value = false;
+    stopGitInstallTimer();
+    gitUrl.value = '';
+    gitName.value = '';
+    gitBranch.value = '';
+    gitModalOpen.value = false;
+  },
+);
+
+onUnmounted(stopGitInstallTimer);
+
 function installGitSkill() {
-  if (!gitUrl.value.trim()) return;
+  if (!gitUrl.value.trim() || gitInstalling.value) return;
   sendCommand({
     InstallSkillFromGit: {
       url: gitUrl.value.trim(),
@@ -1475,11 +1518,7 @@ function installGitSkill() {
       branch: gitBranch.value.trim() || null,
     },
   });
-  gitUrl.value = '';
-  gitName.value = '';
-  gitBranch.value = '';
-  gitModalOpen.value = false;
-  // 稍后由 SkillsList 事件刷新
+  startGitInstallWatch();
 }
 
 function updateGitSkill(skill: SkillInfo) {
@@ -2890,8 +2929,19 @@ watch(
         <p class="muted caps-hint">
           浅克隆仓库并把技能目录提升到 skills_dir；安装后可在详情页「更新 / 移除来源」。
         </p>
+        <div v-if="gitInstalling" class="git-modal__progress" role="status">
+          <PanelIcon name="refresh" size="sm" tone="accent" />
+          <span>
+            正在克隆…已等待 {{ gitInstallElapsed }}s
+            <template v-if="gitInstallSlow">（已超过 20s，网络慢或不可达；Core 侧最长等 120s）</template>
+          </span>
+        </div>
+        <p v-if="!gitInstalling" class="muted caps-hint">
+          私有仓库 / 内网仓库建议用 SSH 地址（<code>git@github.com:org/repo.git</code>）：
+          HTTPS 若被网络阻断，只能在 120s 超时后失败。
+        </p>
         <label class="git-modal__label">仓库 URL（https / ssh / 本地路径）<span class="git-modal__req">*</span></label>
-        <NeumorphismInput v-model="gitUrl" placeholder="https://github.com/user/my-skill.git" size="small" />
+        <NeumorphismInput v-model="gitUrl" placeholder="git@github.com:user/my-skill.git" size="small" :disabled="gitInstalling" />
         <div class="git-modal__row">
           <div class="git-modal__col">
             <label class="git-modal__label">安装目录名（默认仓库名）</label>
@@ -2903,14 +2953,21 @@ watch(
           </div>
         </div>
         <div class="git-modal__actions">
-          <NeumorphismButton size="small" variant="glass" @click="gitModalOpen = false">取消</NeumorphismButton>
+          <NeumorphismButton
+            size="small"
+            variant="glass"
+            :disabled="gitInstalling"
+            @click="gitModalOpen = false"
+          >
+            取消
+          </NeumorphismButton>
           <NeumorphismButton
             size="small"
             variant="primary"
-            :disabled="!gitUrl.trim()"
+            :disabled="!gitUrl.trim() || gitInstalling"
             @click="installGitSkill"
           >
-            安装
+            {{ gitInstalling ? '安装中…' : '安装' }}
           </NeumorphismButton>
         </div>
       </div>
@@ -3303,6 +3360,28 @@ watch(
   gap: 6px;
   min-width: 0;
 }
+.git-modal__progress :deep(svg) {
+  animation: git-modal-spin 1.2s linear infinite;
+}
+
+@keyframes git-modal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.git-modal__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-accent-border, rgba(120, 160, 255, 0.35));
+  background: var(--panel-accent-soft, rgba(120, 160, 255, 0.08));
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+}
+
 .git-modal__actions {
   display: flex;
   justify-content: flex-end;
