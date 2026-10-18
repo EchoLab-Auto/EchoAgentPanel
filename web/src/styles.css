@@ -137,8 +137,8 @@ body {
   flex-direction: column;
 }
 
-/* ── 适配器 ── */
-.adapter-item {
+/* ── 实例 ── */
+.instance-item {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -146,10 +146,10 @@ body {
   border-radius: 6px;
   margin-bottom: 2px;
 }
-.adapter-item:hover { background: var(--panel-hover); }
-.adapter-name { font-weight: 600; }
-.adapter-id { color: var(--nm-text-secondary); font-size: 12px; }
-.adapter-actions { margin-left: auto; display: flex; gap: 4px; }
+.instance-item:hover { background: var(--panel-hover); }
+.instance-name { font-weight: 600; }
+.instance-id { color: var(--nm-text-secondary); font-size: 12px; }
+.instance-actions { margin-left: auto; display: flex; gap: 4px; }
 
 /* ── 会话分组与 tag ── */
 .session-group { margin-bottom: 6px; }

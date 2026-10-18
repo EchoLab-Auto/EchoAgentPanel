@@ -1,4 +1,4 @@
-//! 适配器 UI 描述符类型（03a §1.1；00 §二 冻结的 7 类节点）。
+//! 实例 UI 描述符类型（03a §1.1；00 §二 冻结的 7 类节点）。
 //!
 //! 渲染器只消费「已解析好的描述符对象」（A1），不关心载体；
 //! 扩展字段白名单（01a §3.1 写入 v1）：select `options` 对象形态
@@ -118,11 +118,11 @@ export interface ParsedDescriptor {
   warnings: UiWarning[];
 }
 
-/** 适配器元信息（03a §1.2；来自 AdapterStatus）。 */
-export interface AdapterUiMeta {
+/** 实例元信息（03a §1.2；来自 InstanceStatus）。 */
+export interface InstanceUiMeta {
   /** 显式目标 core（多上游路由；02a §5.3 D4 允许 null = 单上游裸命令）。 */
   core: string | null;
-  adapter: string;
+  instance: string;
   displayName?: string;
   running: boolean;
   connected: boolean;

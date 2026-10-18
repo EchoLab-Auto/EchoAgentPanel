@@ -89,9 +89,9 @@ function seed() {
     },
     {
       id: 'echo-agent.adapter.qq',
-      name: 'QQ 适配器',
+      name: 'QQ 实例',
       version: '1',
-      kind: 'adapter',
+      kind: 'instance',
       description: 'QQ 平台',
       entry: '',
       author: '',
@@ -162,12 +162,12 @@ describe('SettingsView 工具工作台', () => {
   it('默认按包分组 + 副标题统计 + 状态 chips', async () => {
     const wrapper = await openCategory('工具');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['QQ 适配器包', '内置工具集', '独立工具']);
+    expect(groups).toEqual(['QQ 实例包', '内置工具集', '独立工具']);
     // 独立工具排最后
     expect(groups[groups.length - 1]).toBe('独立工具');
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('共 3 项');
-    // 2 个包（内置工具集 + QQ 适配器包），独立工具无包归属不计入
+    // 2 个包（内置工具集 + QQ 实例包），独立工具无包归属不计入
     expect(subtitle).toContain('2 个包');
     expect(subtitle).toContain('1 已禁用');
     const chips = wrapper.findAll('.caps-chip').map((c) => c.text());
@@ -222,7 +222,7 @@ describe('SettingsView 工具工作台', () => {
     const wrapper = await openCategory('工具');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('send_group_msg'))!;
     await row.trigger('click');
-    expect(wrapper.find('.skill-banner--warn').text()).toContain('QQ 适配器包');
+    expect(wrapper.find('.skill-banner--warn').text()).toContain('QQ 实例包');
     // 列表行标记「包已禁用」
     expect(wrapper.findAll('.caps-mark--warn').length).toBeGreaterThan(0);
   });
@@ -274,29 +274,29 @@ describe('SettingsView 插件工作台', () => {
   });
 
   /**
-   * 2026-10-18 报障（二次修正）：QQ 适配器描述写着「独立进程」，Panel 却把它
+   * 2026-10-18 报障（二次修正）：QQ 实例描述写着「独立进程」，Panel 却把它
    * 归到「内部插件」——用户据此质疑分类错了。
    *
    * 第一版修法保留了 `builtin` 判定（把它留在「内部插件」组，只加徽标），
    * 用户仍然不接受：对使用者而言「外部插件」= 不在 Core 进程内（独立 PID、
    * 独立生命周期、崩了不带走 Core）。现在 `pluginSource()` 按 `runtime`
-   * 判定，QQ 适配器直接落到「外部插件」组。
+   * 判定，QQ 实例直接落到「外部插件」组。
    */
   it('运行位置决定分组：runtime=subprocess → 外部插件（即使 builtin=true）', async () => {
-    // QQ 适配器：门控 manifest 编译在 Core 里（builtin=true），
-    // 但适配器实现由独立进程 echo-adapter-qq 提供（runtime=subprocess）。
+    // QQ 实例：门控 manifest 编译在 Core 里（builtin=true），
+    // 但实例实现由独立进程 echo-instance-qq 提供（runtime=subprocess）。
     state.plugins = state.plugins.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, runtime: 'subprocess' } : p,
     );
     const wrapper = await openCategory('插件');
 
-    // 分组：外部插件组里出现 QQ 适配器
+    // 分组：外部插件组里出现 QQ 实例
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
     expect(groups).toEqual(['内部插件', '外部插件']);
     const externalGroup = wrapper
       .findAll('.caps-list-group')
       .find((g) => g.find('.caps-list-group__name').text() === '外部插件')!;
-    expect(externalGroup.text()).toContain('QQ 适配器');
+    expect(externalGroup.text()).toContain('QQ 实例');
     expect(externalGroup.text()).not.toContain('单会话循环');
 
     // 副标题按运行位置统计
@@ -309,7 +309,7 @@ describe('SettingsView 插件工作台', () => {
     expect(externalGroup.find('.caps-list-group__hint').text()).toContain('独立进程');
 
     // 行内徽标：外部组内标「独立进程」，内部组不标
-    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 适配器'))!;
+    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     expect(qqRow.text()).toContain('独立进程');
     const innerRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
     expect(innerRow.text()).not.toContain('独立进程');
@@ -417,7 +417,7 @@ describe('SettingsView 插件工作台', () => {
 
   it('行内：包规模徽标 / 受保护锁 / 模式标记；受保护项无开关', async () => {
     const wrapper = await openCategory('插件');
-    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 适配器'))!;
+    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     // 包规模：1 工具 · 1 技能
     expect(qqRow.text()).toContain('1 工具 · 1 技能');
     const mgmtRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('管理面'))!;
@@ -435,7 +435,7 @@ describe('SettingsView 插件工作台', () => {
 
   it('插件详情：四分区 + 成员 chips + 启停影响文案', async () => {
     const wrapper = await openCategory('插件');
-    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 适配器'))!;
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
     const titles = wrapper.findAll('.detail-section__title').map((t) => t.text());
     expect(titles.some((t) => t.includes('这个插件带来什么'))).toBe(true);
@@ -466,7 +466,7 @@ describe('SettingsView 插件工作台', () => {
 
   it('交叉跳转：插件成员 chip → 工具/技能分类并选中；工具「所属包」→ 插件', async () => {
     const wrapper = await openCategory('插件');
-    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 适配器'))!;
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
     // 点工具 chip → 工具分类并选中
     const toolChip = wrapper.findAll('.plugin-member-chip').find((c) => c.text() === 'send_group_msg')!;
@@ -479,18 +479,18 @@ describe('SettingsView 插件工作台', () => {
       .find((b) => b.text().includes('在「插件」中查看'))!;
     await jumpBtn.trigger('click');
     expect(wrapper.find('.caps-nav-item--active').text()).toContain('插件');
-    expect(wrapper.find('.skill-detail h3').text()).toBe('QQ 适配器');
+    expect(wrapper.find('.skill-detail h3').text()).toBe('QQ 实例');
   });
 
   it('技术信息折叠：默认收起，点击展开显示 ID/Package/Entry', async () => {
     const wrapper = await openCategory('插件');
-    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 适配器'))!;
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
     expect(wrapper.find('.plugin-info__head').text()).toContain('技术信息');
     expect(wrapper.find('.skill-source').exists()).toBe(false);
     await wrapper.find('.plugin-info__head').trigger('click');
     expect(wrapper.find('.skill-source').text()).toContain('echo-agent.adapter.qq');
-    expect(wrapper.find('.skill-source').text()).toContain('adapter');
+    expect(wrapper.find('.skill-source').text()).toContain('instance');
   });
 });
 

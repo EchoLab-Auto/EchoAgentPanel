@@ -48,7 +48,7 @@ function seed() {
   ] as typeof state.tools;
   state.plugins = [
     { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin' },
-    { id: 'echo-agent.adapter.qq', name: 'QQ 适配器', version: '1', kind: 'adapter', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.adapter.qq' },
+    { id: 'echo-agent.adapter.qq', name: 'QQ 实例', version: '1', kind: 'instance', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.adapter.qq' },
     { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace' },
     { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.future-interaction' },
   ] as typeof state.plugins;
@@ -112,7 +112,7 @@ describe('SettingsView 智能体编辑器', () => {
     expect(subs).toContain('工具');
     expect(subs).toContain('技能');
     // 包聚合显示 QQ 包成员
-    expect(capsPanel.text()).toContain('QQ 适配器包');
+    expect(capsPanel.text()).toContain('QQ 实例包');
     expect(capsPanel.text()).toContain('send_private_msg');
   });
 

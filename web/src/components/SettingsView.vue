@@ -219,7 +219,7 @@ async function switchCategory(cat: CategoryKey) {
 // ── 条目列表：按分类分组（组可折叠）──
 // 排序 locale 约定（2026-10）：全部 `localeCompare` **pin 'en'**——不传
 // locale 时按运行环境（LANG）选 collation：本地 zh_CN 与 CI en_US 下
-// 「QQ 适配器包」与「内置工具集」的顺序相反，测试与行为跨环境分裂
+// 「QQ 实例包」与「内置工具集」的顺序相反，测试与行为跨环境分裂
 // （本地 zh 环境稳定失败、CI 过）。pin 后两环境完全一致。
 const collapsedGroups = ref(new Set<string>());
 function toggleGroup(key: string) {
@@ -790,9 +790,9 @@ function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
  * 修正）——用户对「外部插件」的语义预期就是「不在 Core 进程内」：独立 PID、
  * 独立生命周期、崩了不带走 Core。
  *
- * - `runtime === 'subprocess'` → 外部。QQ 适配器即此类：门控 manifest 编译
- *   在 Core 里（`builtin = true`），但适配器实现由独立进程
- *   `echo-adapter-qq` 提供。早期按 `builtin` 判定会把它归到「内部插件」，
+ * - `runtime === 'subprocess'` → 外部。QQ 实例即此类：门控 manifest 编译
+ *   在 Core 里（`builtin = true`），但实例实现由独立进程
+ *   `echo-instance-qq` 提供。早期按 `builtin` 判定会把它归到「内部插件」，
  *   而它自己的描述写着「独立进程」——分组与文案互相矛盾。
  * - 旧 Core 无 `runtime` 字段 → 回退按 `builtin` 推断（外部 manifest 一律是
  *   stdio 子进程）。
@@ -867,7 +867,7 @@ const pluginWorkbenchGroups = computed(() => {
       push('__all__', '全部插件', undefined, p);
     } else if (pluginGroupBy.value === 'source') {
       const source = pluginSource(p);
-      // 外部组的 hint 要讲清「独立进程」而非「第三方」：QQ 适配器随 Core
+      // 外部组的 hint 要讲清「独立进程」而非「第三方」：QQ 实例随 Core
       // 发布，但实现在独立进程里（2026-10-18 报障的正是这一点）。
       push(
         `source:${source}`,
@@ -952,7 +952,7 @@ const pluginImpactText = computed(() => {
     return `整包门控：禁用后其包内 ${members.tools.length} 个工具、${members.skills.length} 个技能对所有智能体不可见（含白名单内的智能体）。`;
   }
   if (sem === 'channel') {
-    return '平台通道：禁用即卸载该适配器/管理通道注册，对应平台会话与连接停止；对其他插件无影响。';
+    return '平台通道：禁用即卸载该实例/管理通道注册，对应平台会话与连接停止；对其他插件无影响。';
   }
   if (sem === 'mode') {
     return '模式插件：全局停用 = 卸载 echo-loop 驱动（单会话与并行多会话都停用则回退内置循环实现）。某智能体的「单会话 / 并行多会话」在「智能体」配置的循环模式里选择，与这里的全局开关是两层。';
@@ -1178,7 +1178,7 @@ const teamFormModel = computed(() => ({
 }));
 
 // 能力列表（复选框）：插件 / 工具 / 技能
-// 插件级勾选只保留"整类能力"：kind ∈ {adapter, management} ∪ 包维度门控
+// 插件级勾选只保留"整类能力"：kind ∈ {instance, management} ∪ 包维度门控
 // 插件（判定单一来源 = capabilities.ts::isPluginCheckboxVisible；
 // 编排互斥子插件由「编排模式」分段控件管理）。
 const capabilityPluginOptions = computed(() =>
@@ -2587,7 +2587,7 @@ watch(
                 <template #caps>
                   <div class="sec-sub">插件</div>
                   <p class="muted caps-hint">
-                    勾选该智能体可用的能力块（适配器/交互/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
+                    勾选该智能体可用的能力块（实例/交互/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
                   </p>
                   <div class="caps-checkbox-grid caps-checkbox-grid--grid">
                     <NeumorphismCheckbox
@@ -2604,7 +2604,7 @@ watch(
                   <NeumorphismDivider dashed inset />
                   <div class="sec-sub">包（Package）</div>
                   <p class="muted caps-hint">
-                    同一个包（如 QQ 适配器）的工具+技能作为一个整体，勾选/取消即同时开关包内所有成员。
+                    同一个包（如 QQ 实例）的工具+技能作为一个整体，勾选/取消即同时开关包内所有成员。
                   </p>
                   <div v-for="pkg in capabilityPackages" :key="pkg.id" class="caps-tool-group">
                     <div class="caps-tool-group__head">

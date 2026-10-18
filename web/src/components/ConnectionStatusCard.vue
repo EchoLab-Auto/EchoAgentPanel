@@ -1,28 +1,28 @@
 <script setup lang="ts">
 //! 连接状态卡（右侧边栏卡片栈）：浏览器↔Panel 通道 + **每个运行区域**（上游
-//! Core）的连通性/认证 + 当前区域的 QQ 适配器实例。
+//! Core）的连通性/认证 + 当前区域的 QQ 实例。
 //!
 //! 注意：这里**不**标记"当前区域"——当前 agent 所属区域在 AgentSwitcher 的
 //! 区域徽标里展示，避免同一信息两处重复。
 //!
 //! 2026-09-23 从顶栏中段迁入：连接状态是"面板级"信息，放顶栏会与业务导航
 //! 混在一起，且断连时最该被看见的提示被压在顶栏中线；迁入右侧栏后与
-//! 文件浏览器 / Shell 同级，常驻可见、可折叠，且能顺带展示各适配器实例
+//! 文件浏览器 / Shell 同级，常驻可见、可折叠，且能顺带展示各实例
 //! 的连接态（顶栏一行放不下多实例）。
 //!
-//! 数据源：`state.connected`（management WS）+ `state.adapters`
-//! （`AdapterList` / `AdapterStateChanged` 事件维护）。
+//! 数据源：`state.connected`（management WS）+ `state.instances`
+//! （`InstanceList` / `InstanceStateChanged` 事件维护）。
 
 import { computed } from 'vue';
 import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
 import { state } from '../store';
 import { regionLabel } from '../state';
-import { adapterStatusView, type AdapterDotStatus } from '../composables/useAdapterStatusView';
+import { instanceStatusView, type InstanceDotStatus } from '../composables/useInstanceStatusView';
 
 /** 状态点语义：connected（绿）/ running 未连（呼吸）/ stopped（灰）。 */
-type DotStatus = AdapterDotStatus;
+type DotStatus = InstanceDotStatus;
 
-interface AdapterRow {
+interface InstanceRow {
   key: string;
   label: string;
   selfId: string | null;
@@ -66,10 +66,10 @@ const coreRows = computed<CoreRow[]>(() =>
     };
   }),
 );
-// 状态文案 / 状态点：与通用 AdapterPanel 共用计算（03b S1）。
-const adapters = computed<AdapterRow[]>(() =>
-  state.adapters.map((a) => {
-    const view = adapterStatusView(a);
+// 状态文案 / 状态点：与通用 InstancePanel 共用计算（03b S1）。
+const instances = computed<InstanceRow[]>(() =>
+  state.instances.map((a) => {
+    const view = instanceStatusView(a);
     return {
       key: a.name,
       label: a.display_name || a.name,
@@ -114,12 +114,12 @@ const adapters = computed<AdapterRow[]>(() =>
     </div>
 
 
-    <!-- QQ 适配器实例 -->
-    <div v-if="adapters.length" class="conn-group">
+    <!-- QQ 实例 -->
+    <div v-if="instances.length" class="conn-group">
       <div class="conn-group__title">
-        QQ 适配器（{{ state.activeRegion ?? '本机' }}）
+        QQ 实例（{{ state.activeRegion ?? '本机' }}）
       </div>
-      <div v-for="row in adapters" :key="row.key" class="conn-row">
+      <div v-for="row in instances" :key="row.key" class="conn-row">
         <NeumorphismStatusDot :status="row.dot" size="small" />
         <span class="conn-row__label" :title="row.label">{{ row.label }}</span>
         <span v-if="row.selfId" class="conn-row__id">{{ row.selfId }}</span>
@@ -128,7 +128,7 @@ const adapters = computed<AdapterRow[]>(() =>
         </span>
       </div>
     </div>
-    <p v-else class="conn-hint muted">（无适配器）</p>
+    <p v-else class="conn-hint muted">（无实例）</p>
   </div>
 </template>
 

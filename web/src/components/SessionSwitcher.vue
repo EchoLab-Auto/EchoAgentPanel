@@ -15,9 +15,9 @@
 //!
 //! 通用化（03b §1.3 / §4.3）：非 local 会话按 `platform` 字符串分组
 //! （组键 `<platform>-dm / <platform>-group`，行内标签配色类 `.tag-dm /
-//! .tag-group`）；分组标题取 `state.adapters` 中 platform 匹配条目的
+//! .tag-group`）；分组标题取 `state.instances` 中 platform 匹配条目的
 //! `session_labels`——无 labels 回退 `<display_name> 私聊/群聊`、整个
-//! platform 无匹配适配器回退「私聊/群聊」（session-labels.ts）。
+//! platform 无匹配实例回退「私聊/群聊」（session-labels.ts）。
 
 import { computed } from 'vue';
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';

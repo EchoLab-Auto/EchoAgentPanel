@@ -60,10 +60,10 @@ async function onChange(value: string | number | (string | number)[] | undefined
 </script>
 
 <template>
-  <div class="adapter-node select-node" :data-node-key="nodeKey">
+  <div class="instance-node select-node" :data-node-key="nodeKey">
     <div class="select-node__head">
-      <span v-if="node.label" class="adapter-node__label">{{ node.label }}</span>
-      <span v-if="hintText" class="adapter-node__hint">{{ hintText }}</span>
+      <span v-if="node.label" class="instance-node__label">{{ node.label }}</span>
+      <span v-if="hintText" class="instance-node__hint">{{ hintText }}</span>
     </div>
     <div v-if="ctx.state.value === null" class="select-node__skeleton">
       <NeumorphismSkeleton />

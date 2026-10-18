@@ -55,7 +55,7 @@ describe('MessageItem 消息行', () => {
     );
     const bubble = wrapper.find('.msg-item__bubble');
     expect(bubble.classes()).toContain('msg-item__bubble--user');
-    // 头部：来源标签（适配器 · 用户名）+ 时间；user 不显示角色名
+    // 头部：来源标签（实例 · 用户名）+ 时间；user 不显示角色名
     expect(wrapper.text()).toContain('local · local user');
     expect(wrapper.text()).toContain('T1700000000');
     expect(wrapper.text()).not.toContain('Agent');

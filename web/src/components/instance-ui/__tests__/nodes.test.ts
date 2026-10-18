@@ -1,36 +1,36 @@
 //! nodes.test.ts（03a §5.3）：七类节点逐类——渲染值 / 交互载荷 / 在途态 /
 //! 错误态 / 禁用态（meta.running=false）。
 //!
-//! 挂载整个 AdapterUiRenderer（单节点描述符 + 单节点 panel）而非裸节点组件：
-//! 获得真实 provide 上下文与命令总线；mock 边界只有 `invokeAdapterOp`
+//! 挂载整个 InstanceUiRenderer（单节点描述符 + 单节点 panel）而非裸节点组件：
+//! 获得真实 provide 上下文与命令总线；mock 边界只有 `invokeInstanceOp`
 //!（03a §5：不 mock 节点组件和 ui-frame）。
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 
-vi.mock('../../../adapterOps', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../adapterOps')>();
-  return { ...actual, invokeAdapterOp: vi.fn() };
+vi.mock('../../../instanceOps', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../instanceOps')>();
+  return { ...actual, invokeInstanceOp: vi.fn() };
 });
 
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
-import AdapterUiRenderer from '../AdapterUiRenderer.vue';
+import InstanceUiRenderer from '../InstanceUiRenderer.vue';
 import { settleConfirm } from '../../../confirm';
-import { invokeAdapterOp, type AdapterOpOutcome } from '../../../adapterOps';
-import type { AdapterUiMeta } from '../types';
+import { invokeInstanceOp, type InstanceOpOutcome } from '../../../instanceOps';
+import type { InstanceUiMeta } from '../types';
 
-const invokeMock = vi.mocked(invokeAdapterOp);
+const invokeMock = vi.mocked(invokeInstanceOp);
 
-const META: AdapterUiMeta = { core: 'core-a', adapter: 'qq', running: true, connected: true };
+const META: InstanceUiMeta = { core: 'core-a', instance: 'qq', running: true, connected: true };
 
 /** 挂一个 renderer，panel 内只含给定节点（panel id = p，节点 index = 0）。 */
 function mountNode(
   node: Record<string, unknown>,
   state: Record<string, unknown> | null = {},
-  meta: Partial<AdapterUiMeta> = {},
+  meta: Partial<InstanceUiMeta> = {},
 ) {
-  return mount(AdapterUiRenderer, {
+  return mount(InstanceUiRenderer, {
     props: {
       descriptor: { version: 1, panels: [{ id: 'p', nodes: [node] }] },
       state,
@@ -39,8 +39,8 @@ function mountNode(
   });
 }
 
-function hanging(): Promise<AdapterOpOutcome> {
-  return new Promise<AdapterOpOutcome>(() => {});
+function hanging(): Promise<InstanceOpOutcome> {
+  return new Promise<InstanceOpOutcome>(() => {});
 }
 
 function deferred<T>() {
@@ -147,7 +147,7 @@ describe('text 节点（03a §2.2）', () => {
   });
 
   it('在途：输入与按钮禁用 + loading；错误态显示报错文本', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountNode(editable, { owner: 10002 });
     await findButton(w, '保存').trigger('click');
@@ -240,7 +240,7 @@ describe('select 节点（03a §2.4）', () => {
   });
 
   it('在途：禁用 + 显示临时值；失败回弹 state 值 + 错误提示', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountNode(node, stateOf('allowlist'));
     emitSelect(w, 'denylist');
@@ -314,7 +314,7 @@ describe('list_editor 节点（03a §2.5）', () => {
   });
 
   it('非数组 bind 视为空 + Empty；在途整卡禁用', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountNode(node, stateOf('bad'));
     expect(w.find('.nm-empty__description').text()).toBe('未添加');
@@ -332,7 +332,7 @@ describe('list_editor 节点（03a §2.5）', () => {
   });
 
   it('错误态提示；禁用态（running=false）输入与添加按钮禁用', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountNode(node, stateOf(['1']));
     await w.find('input').setValue('42');
@@ -357,7 +357,7 @@ describe('image 节点（03a §2.6 / §4.3）', () => {
   };
 
   it('初始不自动 fetch；点击 → login_qrcode {}；结果渲染 data URL + alt', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountNode(node, { online: false });
     expect(invokeMock).not.toHaveBeenCalled(); // 不自动拉取（二维码生成有副作用）
@@ -392,7 +392,7 @@ describe('image 节点（03a §2.6 / §4.3）', () => {
   });
 
   it('在途：按钮 loading + 占位；重复点击被忽略', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountNode(node, { online: false });
     await findButton(w, '获取').trigger('click');
@@ -462,7 +462,7 @@ describe('button 节点（03a §2.7）', () => {
   });
 
   it('在途重复点击只发送一次；禁用态不发', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountNode({ type: 'button', label: 'B', action: { method: 'm' } });
     await findButton(w, 'B').trigger('click');

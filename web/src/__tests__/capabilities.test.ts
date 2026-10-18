@@ -1,12 +1,12 @@
 //! 能力推导 + 插件勾选清单契约。
 //!
 //! 背景（2026-09-13 工作区插件「配置里看不到」遗漏）：Panel 「启用插件」
-//! 勾选区是**硬编码允许清单**（kind ∈ {adapter, management, interaction} ∪
+//! 勾选区是**硬编码允许清单**（kind ∈ {instance, management, interaction} ∪
 //! 包维度门控插件），新增包维度插件时容易漏同步。本测试锁定：
 //!   1. 清单收敛为单一来源（capabilities.ts），两个组件引用同一常量；
 //!   2. 清单内容与 Core 的 GATED_PLUGIN_IDS 对齐（4 项，含 workspace）；
 //!   3. 勾选可见性判定语义；
-//!   4. 适配器**不走清单**（kind 运行期推导），新增平台零改动。
+//!   4. 实例**不走清单**（kind 运行期推导），新增平台零改动。
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -24,7 +24,7 @@ describe('包维度门控插件清单（单一来源）', () => {
   it('包含全部包维度门控插件（对齐 Core GATED_PLUGIN_IDS 的 4 项）', () => {
     // Core 侧 echo-agent/src/plugins.rs::GATED_PLUGIN_IDS 的镜像：
     // 增删任一侧都必须两边同改（此处防回归）。
-    // 适配器**不在**两侧清单里——按 kind 运行期推导（见下一个用例）。
+    // 实例**不在**两侧清单里——按 kind 运行期推导（见下一个用例）。
     expect([...PACKAGE_GATED_PLUGIN_IDS].sort()).toEqual(
       [
         'echo-agent.skills.dir',
@@ -47,15 +47,15 @@ describe('包维度门控插件清单（单一来源）', () => {
     }
   });
 
-  it('适配器按 kind 运行期推导：新增平台无需改清单', () => {
-    // 2026-10 适配器解耦：框架不再枚举平台名——Core `gated_plugin_ids()`
-    // 遍历插件注册表取 `kind == "adapter"`，Panel 侧即
+  it('实例按 kind 运行期推导：新增平台无需改清单', () => {
+    // 2026-10 实例解耦：框架不再枚举平台名——Core `gated_plugin_ids()`
+    // 遍历插件注册表取 `kind == "instance"`，Panel 侧即
     // `isPluginCheckboxVisible` 的 kind 判定。这里锁定同一语义：将来接入
     // telegram / discord 等新平台插件，不改任何清单也会出现在勾选区。
     for (const platform of ['qq', 'telegram', 'discord']) {
-      const id = `echo-agent.adapter.${platform}`;
+      const id = `echo-agent.instance.${platform}`;
       expect((PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(id), id).toBe(false);
-      expect(isPluginCheckboxVisible({ id, kind: 'adapter' }), id).toBe(true);
+      expect(isPluginCheckboxVisible({ id, kind: 'instance' }), id).toBe(true);
     }
   });
 
@@ -66,8 +66,8 @@ describe('包维度门控插件清单（单一来源）', () => {
   });
 
   it('勾选可见性：kind 类 + 门控清单 + 其余不可见', () => {
-    // adapter / management / interaction 类恒可见（整类能力开关）
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.adapter.qq', kind: 'adapter' })).toBe(true);
+    // instance / management / interaction 类恒可见（整类能力开关）
+    expect(isPluginCheckboxVisible({ id: 'echo-agent.adapter.qq', kind: 'instance' })).toBe(true);
     expect(isPluginCheckboxVisible({ id: 'echo-agent.management.panel', kind: 'management' })).toBe(true);
     // interaction 类不在门控清单里也可见（kind 判定生效）
     expect(isPluginCheckboxVisible({ id: 'echo-agent.future-interaction', kind: 'interaction' })).toBe(true);
@@ -84,7 +84,7 @@ describe('包维度门控插件清单（单一来源）', () => {
 
   it('插件 kind 中文显示名覆盖 Core PluginKind 全部 wire 名（含 interaction=交互）', () => {
     // Core 端 echo-plugin::PluginKind 的 as_str 全集（新增 kind 必须同步标签）。
-    const kinds = ['skill', 'tool', 'provider', 'loop', 'adapter', 'orchestration', 'management', 'interaction'];
+    const kinds = ['skill', 'tool', 'provider', 'loop', 'instance', 'orchestration', 'management', 'interaction'];
     for (const kind of kinds) {
       expect(PLUGIN_KIND_LABELS[kind], `缺少 kind 显示名: ${kind}`).toBeTruthy();
     }

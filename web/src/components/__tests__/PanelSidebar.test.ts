@@ -91,8 +91,8 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     expect(titles.some((t) => t.includes('文件浏览器'))).toBe(false);
   });
 
-  it('连接状态卡：Core 状态 + QQ 适配器实例（紧凑卡固定高度、不参与 flex 分配）', async () => {
-    state.adapters = [
+  it('连接状态卡：Core 状态 + QQ 实例（紧凑卡固定高度、不参与 flex 分配）', async () => {
+    state.instances = [
       {
         name: 'qq',
         display_name: 'QQ（alix）',
@@ -113,7 +113,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
         started_at: null,
         persona: 'alix',
       },
-    ] as typeof state.adapters;
+    ] as typeof state.instances;
     const wrapper = await mountSidebar();
     // 置顶且为紧凑卡（不参与剩余空间分配）
     const cards = wrapper.findAll('.rail-stack__card');
@@ -128,17 +128,17 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     // 紧凑卡与相邻卡之间的分隔条不可拖动
     const divider = wrapper.find('.rail-stack__divider');
     expect(divider.classes()).not.toContain('rail-stack__divider--draggable');
-    state.adapters = [];
+    state.instances = [];
   });
 
-  it('连接状态卡：断连时展示重连提示；无适配器时显示空态', async () => {
+  it('连接状态卡：断连时展示重连提示；无实例时显示空态', async () => {
     state.connected = false;
-    state.adapters = [];
+    state.instances = [];
     const wrapper = await mountSidebar();
     const status = wrapper.find('.conn-card');
     expect(status.text()).toContain('连接中');
     expect(status.text()).toContain('正在自动重连');
-    expect(status.text()).toContain('（无适配器）');
+    expect(status.text()).toContain('（无实例）');
     state.connected = true;
   });
 

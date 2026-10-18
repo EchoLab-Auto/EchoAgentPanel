@@ -16,7 +16,7 @@
 //! - **防闪烁**：加载态一旦可见，保证至少 400ms 的最短可见时长（响应
 //!   到达即准备内容，到点替换）——避免骨架闪一下。
 //!
-//! 显式销账（02a §5.1）：不在 `REQUEST_RESPONSES` 的请求（如适配器统一
+//! 显式销账（02a §5.1）：不在 `REQUEST_RESPONSES` 的请求（如实例统一
 //! op 通道）由服务层按精确键 `settlePending(key)` 销账；上游 core 离线/
 //! 移除时 `dropPendingOfCore(core)` 清理其全部登记。
 //! UI 契约（各模块交互文档同步）：`phase==='idle'` 的「（暂无…）」空态
@@ -145,7 +145,7 @@ export function trackRequest(
  * 销账（响应到达）：立即清未显示的；已显示则等到最短可见时长后清。
  *
  * 导出供服务层按**精确键**销账（有响应事件但不在 `REQUEST_RESPONSES` 的
- * 路径，如适配器统一 op 通道；02a §5.1）。语义与内部完成路径一致。
+ * 路径，如实例统一 op 通道；02a §5.1）。语义与内部完成路径一致。
  */
 export function settlePending(key: string): void {
   const entry = entries[key];
@@ -180,19 +180,19 @@ export function dropPendingOfCore(core: string | null): void {
 }
 
 /**
- * 适配器启停/重启的成批销账（03b §2.2 收尾）：Core 执行完 Start/Stop/
- * RestartAdapter 后必重发 `AdapterList` 事件（三臂各含 emit_adapter_list），
- * 故「收到某 core 的 AdapterList」= 该 core 启停类操作已完成，可结算。
- * 按 core 段精确匹配键 `adapter:<op>:<core段>:<name>`（core=null → 空段）。
+ * 实例启停/重启的成批销账（03b §2.2 收尾）：Core 执行完 Start/Stop/
+ * RestartInstance 后必重发 `InstanceList` 事件（三臂各含 emit_instance_list），
+ * 故「收到某 core 的 InstanceList」= 该 core 启停类操作已完成，可结算。
+ * 按 core 段精确匹配键 `instance:<op>:<core段>:<name>`（core=null → 空段）。
  *
- * 只认 4 段 `adapter:` 前缀键；`adapter-op:` 前缀键（adapterOps.ts 的 op
+ * 只认 4 段 `instance:` 前缀键；`instance-op:` 前缀键（instanceOps.ts 的 op
  * 通道，各自按精确键 `settlePending`）不受影响。
  */
-export function settleAdapterOpsOfCore(core: string | null): void {
+export function settleInstanceOpsOfCore(core: string | null): void {
   const coreSegment = core ?? '';
   for (const key of Object.keys(entries)) {
     const parts = key.split(':');
-    if (parts.length !== 4 || parts[0] !== 'adapter') continue;
+    if (parts.length !== 4 || parts[0] !== 'instance') continue;
     if (parts[2] !== coreSegment) continue;
     settlePending(key);
   }
@@ -223,7 +223,7 @@ export function releasePending(key: string): void {
 }
 
 /** 视图侧读取阶段：`usePending('context')` 等；key 也可传 getter（动态 key，
- *  如适配器面板 `() => adapterOpKey(core, activeName, method)`），切换时自动追踪新 key。 */
+ *  如实例面板 `() => instanceOpKey(core, activeName, method)`），切换时自动追踪新 key。 */
 export function usePending(key: string | (() => string)): {
   phase: ComputedRef<PendingPhase>;
   loading: ComputedRef<boolean>;

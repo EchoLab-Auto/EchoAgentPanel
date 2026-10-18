@@ -2,38 +2,38 @@
 //! 缺 descriptor/state=null）、接线与并发（路由/同 method 串行/多实例隔离/
 //! 卸载丢弃/state 回推/emits）、QQ 真实描述符集成（ui.rs fixture）。
 //!
-//! mock 边界只有 `invokeAdapterOp`（03a §5：不 mock 节点组件和 ui-frame）。
+//! mock 边界只有 `invokeInstanceOp`（03a §5：不 mock 节点组件和 ui-frame）。
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { flushPromises, mount, type BaseWrapper } from '@vue/test-utils';
 
-vi.mock('../../../adapterOps', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../adapterOps')>();
-  return { ...actual, invokeAdapterOp: vi.fn() };
+vi.mock('../../../instanceOps', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../instanceOps')>();
+  return { ...actual, invokeInstanceOp: vi.fn() };
 });
 
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
-import AdapterUiRenderer from '../AdapterUiRenderer.vue';
-import { invokeAdapterOp, type AdapterOpOutcome } from '../../../adapterOps';
-import type { AdapterUiMeta, UiWarning } from '../types';
+import InstanceUiRenderer from '../InstanceUiRenderer.vue';
+import { invokeInstanceOp, type InstanceOpOutcome } from '../../../instanceOps';
+import type { InstanceUiMeta, UiWarning } from '../types';
 
-const invokeMock = vi.mocked(invokeAdapterOp);
+const invokeMock = vi.mocked(invokeInstanceOp);
 
-const META: AdapterUiMeta = { core: 'core-a', adapter: 'qq', running: true, connected: true };
+const META: InstanceUiMeta = { core: 'core-a', instance: 'qq', running: true, connected: true };
 
 function mountRenderer(
   descriptor: unknown,
   state: Record<string, unknown> | null = {},
-  meta: Partial<AdapterUiMeta> = {},
+  meta: Partial<InstanceUiMeta> = {},
 ) {
-  return mount(AdapterUiRenderer, {
+  return mount(InstanceUiRenderer, {
     props: { descriptor, state, meta: { ...META, ...meta } },
   });
 }
 
-function hanging(): Promise<AdapterOpOutcome> {
-  return new Promise<AdapterOpOutcome>(() => {});
+function hanging(): Promise<InstanceOpOutcome> {
+  return new Promise<InstanceOpOutcome>(() => {});
 }
 
 function deferred<T>() {
@@ -80,7 +80,7 @@ describe('渲染器：解析容错（03a §5.2 / §3.2）', () => {
       },
       { self_id: '10001' },
     );
-    expect(w.findAll('.adapter-node')).toHaveLength(1);
+    expect(w.findAll('.instance-node')).toHaveLength(1);
     expect(w.find('.text-node__value').text()).toBe('10001');
     expect(warningCodes(w).filter((c) => c === 'unknown_node')).toHaveLength(1);
   });
@@ -90,7 +90,7 @@ describe('渲染器：解析容错（03a §5.2 / §3.2）', () => {
       { version: 1, panels: [{ id: 'p', nodes: [{ foo: 1 }, { type: 'text', bind: 'self_id' }] }] },
       { self_id: 'x' },
     );
-    expect(w.findAll('.adapter-node')).toHaveLength(1);
+    expect(w.findAll('.instance-node')).toHaveLength(1);
     expect(warningCodes(w)).toContain('unknown_node');
   });
 
@@ -131,12 +131,12 @@ describe('渲染器：解析容错（03a §5.2 / §3.2）', () => {
   it('descriptor=null / undefined / 缺省 → 渲染空、无 warning', () => {
     for (const descriptor of [null, undefined]) {
       const w = mountRenderer(descriptor);
-      expect(w.find('.adapter-ui').exists()).toBe(true);
+      expect(w.find('.instance-ui').exists()).toBe(true);
       expect(w.find('.nm-card').exists()).toBe(false);
       expect(w.emitted('warning')).toBeUndefined();
     }
     // 整个 prop 缺省（不传 descriptor）
-    const w2 = mount(AdapterUiRenderer, { props: { state: null, meta: META } });
+    const w2 = mount(InstanceUiRenderer, { props: { state: null, meta: META } });
     expect(w2.find('.nm-card').exists()).toBe(false);
     expect(w2.emitted('warning')).toBeUndefined();
   });
@@ -181,17 +181,17 @@ describe('渲染器：接线与并发（03a §5.4）', () => {
   const buttonNode = { type: 'button', label: 'B', action: { method: 'm' } };
   const descriptorOf = (nodes: unknown[]) => ({ version: 1, panels: [{ id: 'p', nodes }] });
 
-  it('路由：core/adapter 使用 meta 显式值（不依赖默认推断）', async () => {
+  it('路由：core/instance 使用 meta 显式值（不依赖默认推断）', async () => {
     invokeMock.mockResolvedValue({ result: null, error: null });
-    const w = mountRenderer(descriptorOf([buttonNode]), {}, { core: 'core-zz', adapter: 'adapter-x' });
+    const w = mountRenderer(descriptorOf([buttonNode]), {}, { core: 'core-zz', instance: 'instance-x' });
     await findButton(w, 'B').trigger('click');
     await flushPromises();
-    expect(invokeMock).toHaveBeenCalledWith('core-zz', 'adapter-x', 'm', {});
+    expect(invokeMock).toHaveBeenCalledWith('core-zz', 'instance-x', 'm', {});
   });
 
   it('同 method 串行：第二个请求等第一个 settle 才发出', async () => {
-    const d1 = deferred<AdapterOpOutcome>();
-    const d2 = deferred<AdapterOpOutcome>();
+    const d1 = deferred<InstanceOpOutcome>();
+    const d2 = deferred<InstanceOpOutcome>();
     invokeMock
       .mockImplementationOnce(() => d1.promise)
       .mockImplementationOnce(() => d2.promise)
@@ -228,17 +228,17 @@ describe('渲染器：接线与并发（03a §5.4）', () => {
   });
 
   it('多实例二维码隔离：各自 fetch 的结果只显示在自己的 renderer', async () => {
-    const byCore: Record<string, ReturnType<typeof deferred<AdapterOpOutcome>>> = {};
+    const byCore: Record<string, ReturnType<typeof deferred<InstanceOpOutcome>>> = {};
     invokeMock.mockImplementation((core) => {
-      const d = deferred<AdapterOpOutcome>();
+      const d = deferred<InstanceOpOutcome>();
       byCore[String(core)] = d;
       return d.promise;
     });
     const descriptor = descriptorOf([
       { type: 'image', label: '二维码', fetch: { method: 'login_qrcode', result_key: 'png_base64' } },
     ]);
-    const a = mountRenderer(descriptor, {}, { core: 'core-a', adapter: 'qq' });
-    const b = mountRenderer(descriptor, {}, { core: 'core-b', adapter: 'qq' });
+    const a = mountRenderer(descriptor, {}, { core: 'core-a', instance: 'qq' });
+    const b = mountRenderer(descriptor, {}, { core: 'core-b', instance: 'qq' });
 
     await findButton(a, '获取').trigger('click');
     await findButton(b, '获取').trigger('click');
@@ -255,7 +255,7 @@ describe('渲染器：接线与并发（03a §5.4）', () => {
   });
 
   it('卸载丢弃：fetch 在途时卸载，随后 resolve 不报错、不写入', async () => {
-    const d = deferred<AdapterOpOutcome>();
+    const d = deferred<InstanceOpOutcome>();
     invokeMock.mockImplementation(() => d.promise);
     const w = mountRenderer(
       descriptorOf([
@@ -303,7 +303,7 @@ describe('渲染器：接线与并发（03a §5.4）', () => {
     invokeMock.mockResolvedValue({ result: { ok: 1 }, error: null });
     const w = mountRenderer(descriptorOf([{ type: 'button', label: 'B', action: { method: 'm', arg: { a: 1 } } }]), {}, {
       core: 'c9',
-      adapter: 'a9',
+      instance: 'a9',
     });
     await findButton(w, 'B').trigger('click');
     await flushPromises();
@@ -318,7 +318,7 @@ describe('渲染器：接线与并发（03a §5.4）', () => {
 });
 
 describe('QQ 真实描述符（ui.rs fixture，03a §5.5 集成）', () => {
-  /** 与 echo-adapter-qq `ui.rs::ui_descriptor()` 等价的 JSON（3 panel / 7 类节点）。 */
+  /** 与 echo-instance-qq `ui.rs::ui_descriptor()` 等价的 JSON（3 panel / 7 类节点）。 */
   const QQ_DESCRIPTOR = {
     version: 1,
     panels: [
@@ -433,7 +433,7 @@ describe('QQ 真实描述符（ui.rs fixture，03a §5.5 集成）', () => {
   });
 
   it('关键 action 载荷正确（select / list_editor / set_owner / button / image fetch）', async () => {
-    invokeMock.mockImplementation((_core, _adapter, method) =>
+    invokeMock.mockImplementation((_core, _instance, method) =>
       method === 'login_qrcode'
         ? Promise.resolve({ result: { png_base64: 'QUJD' }, error: null })
         : Promise.resolve({ result: null, error: null }),

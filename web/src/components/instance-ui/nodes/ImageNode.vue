@@ -20,7 +20,7 @@ const requested = ref(false);
 
 const pending = computed(() => ctx.bus.isPending(props.nodeKey));
 const error = computed(() => localError.value ?? ctx.bus.errorOf(props.nodeKey));
-const alt = computed(() => props.node.label || '适配器图片');
+const alt = computed(() => props.node.label || '实例图片');
 
 async function load() {
   if (pending.value || ctx.disabled.value) return;
@@ -58,9 +58,9 @@ watch(ctx.running, (running) => {
 </script>
 
 <template>
-  <div class="adapter-node image-node" :data-node-key="nodeKey">
+  <div class="instance-node image-node" :data-node-key="nodeKey">
     <div class="image-node__head">
-      <span v-if="node.label" class="adapter-node__label">{{ node.label }}</span>
+      <span v-if="node.label" class="instance-node__label">{{ node.label }}</span>
       <NeumorphismButton
         size="small"
         variant="glass"

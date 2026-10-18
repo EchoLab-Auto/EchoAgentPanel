@@ -105,7 +105,9 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
     },
     subagent: m.subagent,
     source: m.source && {
-      adapterName: m.source.adapter_name,
+        // ui-frame 的 ChatMessageSource 属性名是 `adapterName`（外部库快照，不改）；
+        // 协议侧字段是 `instance_name`（Core 去适配器化后的名字）。
+        adapterName: m.source.instance_name,
       platform: m.source.platform,
       userId: m.source.user_id,
       userName: m.source.user_name,

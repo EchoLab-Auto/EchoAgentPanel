@@ -18,11 +18,11 @@ import { activeTeam, type AppState } from './state';
  * 工具/技能对 LLM 不可见），因此必须出现在智能体配置弹层（⚙ 配置）与设置
  * 视图智能体编辑器的「启用插件」勾选区里。
  *
- * **适配器不在本清单内**——与 Core 一致，按 kind 运行期推导：
+ * **实例不在本清单内**——与 Core 一致，按 kind 运行期推导：
  * Core `gated_plugin_ids()` 遍历插件注册表，`kind == "instance"` 即纳入，
  * 因此框架里没有任何平台名；本文件的对应实现就是 `isPluginCheckboxVisible`
  * 的 kind 判定。这样新增平台（`echo-agent.instance.<platform>`）两侧都自动
- * 生效、无需改清单（2026-10 适配器解耦后 QQ 已从两侧清单移除，本清单与 Core
+ * 生效、无需改清单（2026-10 实例解耦后 QQ 已从两侧清单移除，本清单与 Core
  * `GATED_PLUGIN_IDS` 的 4 项逐项镜像）。任务清单（checklist）已降级为普通
  * 工具，不再有插件维度，其开关在工具白/黑名单里进行。
  *
@@ -53,10 +53,10 @@ export const PACKAGE_GATED_PLUGIN_IDS = [
  * `AdapterToolSpec.package`），框架逻辑本身不枚举平台。
  */
 export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
-  'echo-agent.instance.qq': 'QQ 适配器包',
+  'echo-agent.instance.qq': 'QQ 实例包',
   // 旧 id（2026-10 去适配器化前）。保留是为了「新 Panel + 旧 Core」以及
   // 尚未迁移 `package:` 的 SKILL.md 仍显示可读名；新 id 优先。
-  'echo-agent.adapter.qq': 'QQ 适配器包',
+  'echo-agent.adapter.qq': 'QQ 实例包',
   'echo-agent.orchestration': '编排工具包',
   'echo-agent.tools.builtin': '内置工具集',
   'echo-agent.skills.dir': '技能目录',

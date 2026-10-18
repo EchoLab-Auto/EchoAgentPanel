@@ -26,8 +26,8 @@ const text = computed(() => {
 </script>
 
 <template>
-  <div class="adapter-node status-node" :data-node-key="nodeKey">
-    <span v-if="node.label" class="adapter-node__label">{{ node.label }}</span>
+  <div class="instance-node status-node" :data-node-key="nodeKey">
+    <span v-if="node.label" class="instance-node__label">{{ node.label }}</span>
     <NeumorphismStatusDot :status="dot" size="small" />
     <span class="status-node__text">{{ text }}</span>
   </div>

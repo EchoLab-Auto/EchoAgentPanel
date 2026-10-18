@@ -1,6 +1,6 @@
-//! 02a S5 集成：state.ts 两个新臂（AdapterState → adapterUiByKey；
-//! AdapterOpResult → invokeAdapterOp Promise resolve）+ removeSessionsOfCore
-//! 前缀清理 + upstreams 离线 diff → dropCoreAdapterChannel。
+//! 02a S5 集成：state.ts 两个新臂（InstanceState → instanceUiByKey；
+//! InstanceOpResult → invokeInstanceOp Promise resolve）+ removeSessionsOfCore
+//! 前缀清理 + upstreams 离线 diff → dropCoreInstanceChannel。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { state, dispatch } from '../store';
@@ -10,7 +10,7 @@ import {
   trackRequest,
   usePending,
 } from '../pending';
-import { adapterOpKey, invokeAdapterOp, onCoreDropped } from '../adapterOps';
+import { instanceOpKey, invokeInstanceOp, onCoreDropped } from '../instanceOps';
 import { removeSessionsOfCore } from '../state';
 import { refreshUpstreams } from '../upstreams';
 import type { BackendEvent } from '../protocol';
@@ -28,7 +28,7 @@ describe('02a S5 集成：新臂 / 清理钩子', () => {
   beforeEach(() => {
     sendCommandMock.mockReset();
     sendCommandMock.mockReturnValue(true);
-    state.adapterUiByKey = {};
+    state.instanceUiByKey = {};
     state.knownCores = new Set();
     state.activeRegion = null;
     state.activeTeamId = null;
@@ -40,27 +40,27 @@ describe('02a S5 集成：新臂 / 清理钩子', () => {
     vi.unstubAllGlobals();
   });
 
-  it('AdapterState：整文档写入 scopedKey 键（替换不 merge；单上游退化为裸实例名）', () => {
+  it('InstanceState：整文档写入 scopedKey 键（替换不 merge；单上游退化为裸实例名）', () => {
     const doc = { online: true, gate: { mode: 'allowlist' } };
-    dispatch({ AdapterState: { adapter: 'qq', state: doc } } as unknown as BackendEvent, 'core-a');
-    expect(state.adapterUiByKey['core-a\u0000qq']).toEqual(doc);
+    dispatch({ InstanceState: { instance: 'qq', state: doc } } as unknown as BackendEvent, 'core-a');
+    expect(state.instanceUiByKey['core-a\u0000qq']).toEqual(doc);
     // 整文档替换（02a §3.1）：新文档不留旧字段（state 为 Vue 响应式代理，
     // 引用比较走代理，故用深比较断言"就是新文档、无旧字段残留"）。
     const next = { online: false };
-    dispatch({ AdapterState: { adapter: 'qq', state: next } } as unknown as BackendEvent, 'core-a');
-    expect(state.adapterUiByKey['core-a\u0000qq']).toEqual(next);
+    dispatch({ InstanceState: { instance: 'qq', state: next } } as unknown as BackendEvent, 'core-a');
+    expect(state.instanceUiByKey['core-a\u0000qq']).toEqual(next);
 
     // 单上游（无信封）：core=null ⇒ 键退化为裸实例名。
-    dispatch({ AdapterState: { adapter: 'qq', state: doc } } as unknown as BackendEvent, null);
-    expect(state.adapterUiByKey['qq']).toEqual(doc);
+    dispatch({ InstanceState: { instance: 'qq', state: doc } } as unknown as BackendEvent, null);
+    expect(state.instanceUiByKey['qq']).toEqual(doc);
   });
 
-  it('AdapterOpResult：dispatch 命中键 → invokeAdapterOp resolve（业务失败也 resolve）', async () => {
-    const key = adapterOpKey('core-a', 'qq', 'get_state');
-    const p = invokeAdapterOp('core-a', 'qq', 'get_state');
+  it('InstanceOpResult：dispatch 命中键 → invokeInstanceOp resolve（业务失败也 resolve）', async () => {
+    const key = instanceOpKey('core-a', 'qq', 'get_state');
+    const p = invokeInstanceOp('core-a', 'qq', 'get_state');
     dispatch(
       {
-        AdapterOpResult: { adapter: 'qq', method: 'get_state', result: { online: true }, error: null },
+        InstanceOpResult: { instance: 'qq', method: 'get_state', result: { online: true }, error: null },
       } as unknown as BackendEvent,
       'core-a',
     );
@@ -68,32 +68,32 @@ describe('02a S5 集成：新臂 / 清理钩子', () => {
     expect(usePending(key).phase.value).toBe('idle'); // 显式销账
 
     // 失败路径：{result:null, error} 也 resolve（02a §5.3 约定）。
-    const key2 = adapterOpKey('core-a', 'qq', 'update_allowlist');
-    const p2 = invokeAdapterOp('core-a', 'qq', 'update_allowlist', { user_ids: [], group_ids: [] });
+    const key2 = instanceOpKey('core-a', 'qq', 'update_allowlist');
+    const p2 = invokeInstanceOp('core-a', 'qq', 'update_allowlist', { user_ids: [], group_ids: [] });
     dispatch(
-      { AdapterOpResult: { adapter: 'qq', method: 'update_allowlist', error: '适配器实例未找到' } } as unknown as BackendEvent,
+      { InstanceOpResult: { instance: 'qq', method: 'update_allowlist', error: '实例未找到' } } as unknown as BackendEvent,
       'core-a',
     );
-    await expect(p2).resolves.toEqual({ result: null, error: '适配器实例未找到' });
+    await expect(p2).resolves.toEqual({ result: null, error: '实例未找到' });
     expect(usePending(key2).phase.value).toBe('idle');
 
     // 无命中的迟到结果：静默丢弃（不抛错，02a §6.2-1）。
     expect(() =>
       dispatch(
-        { AdapterOpResult: { adapter: 'qq', method: 'get_state', result: null, error: null } } as unknown as BackendEvent,
+        { InstanceOpResult: { instance: 'qq', method: 'get_state', result: null, error: null } } as unknown as BackendEvent,
         'core-a',
       ),
     ).not.toThrow();
   });
 
-  it('removeSessionsOfCore：该 core 前缀的 adapterUiByKey 一并清理', () => {
-    state.adapterUiByKey = { 'core-a\u0000qq': 1, 'core-b\u0000qq': 2 };
+  it('removeSessionsOfCore：该 core 前缀的 instanceUiByKey 一并清理', () => {
+    state.instanceUiByKey = { 'core-a\u0000qq': 1, 'core-b\u0000qq': 2 };
     removeSessionsOfCore(state, 'core-a');
-    expect(state.adapterUiByKey['core-a\u0000qq']).toBeUndefined();
-    expect(state.adapterUiByKey['core-b\u0000qq']).toBe(2);
+    expect(state.instanceUiByKey['core-a\u0000qq']).toBeUndefined();
+    expect(state.instanceUiByKey['core-b\u0000qq']).toBe(2);
   });
 
-  it('refreshUpstreams：online→offline 触发 dropCoreAdapterChannel（清文档 + 拒在途）', async () => {
+  it('refreshUpstreams：online→offline 触发 dropCoreInstanceChannel（清文档 + 拒在途）', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const upstream = (name: string, connectivity: string) => ({ name, connectivity });
@@ -101,10 +101,10 @@ describe('02a S5 集成：新臂 / 清理钩子', () => {
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [upstream('core-a', 'online')] });
     await refreshUpstreams();
 
-    state.adapterUiByKey['core-a\u0000qq'] = { online: true };
+    state.instanceUiByKey['core-a\u0000qq'] = { online: true };
     const dropSpy = vi.fn();
     const off = onCoreDropped(dropSpy);
-    const p = invokeAdapterOp('core-a', 'qq', 'get_state');
+    const p = invokeInstanceOp('core-a', 'qq', 'get_state');
     const rejected = expect(p).rejects.toThrow('核心已离线，操作已取消');
 
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [upstream('core-a', 'offline')] });
@@ -112,19 +112,19 @@ describe('02a S5 集成：新臂 / 清理钩子', () => {
 
     await rejected;
     expect(dropSpy).toHaveBeenCalledWith('core-a');
-    expect(state.adapterUiByKey['core-a\u0000qq']).toBeUndefined();
+    expect(state.instanceUiByKey['core-a\u0000qq']).toBeUndefined();
     off();
   });
 
-  it('AdapterList 到达：该 core 的启停 pending 键即结算（03b §2.2 收尾）', () => {
+  it('InstanceList 到达：该 core 的启停 pending 键即结算（03b §2.2 收尾）', () => {
     vi.useFakeTimers();
     try {
-      const key = 'adapter:start:core-a:qq';
-      trackRequest(key, 'StartAdapter', 'core-a');
+      const key = 'instance:start:core-a:qq';
+      trackRequest(key, 'StartInstance', 'core-a');
       vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
       expect(usePending(key).phase.value).toBe('pending');
 
-      dispatch({ AdapterList: { adapters: [] } } as unknown as BackendEvent, 'core-a');
+      dispatch({ InstanceList: { instances: [] } } as unknown as BackendEvent, 'core-a');
       vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS);
       expect(usePending(key).phase.value).toBe('idle');
     } finally {

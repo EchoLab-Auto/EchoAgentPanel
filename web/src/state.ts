@@ -9,15 +9,15 @@ import {
 } from './state_domains/orchestration';
 import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessage, findToolEntryIndex, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
-import { adapterOpKey, settleAdapterOp } from './adapterOps';
-import { settleAdapterOpsOfCore } from './pending';
+import { instanceOpKey, settleInstanceOp } from './instanceOps';
+import { settleInstanceOpsOfCore } from './pending';
 
 //! 前端应用状态与 reducer（移植自 EchoAgentTui 的 state.rs + events.rs）。
 //! 事件流从 `/ws` 进来，reducer 把它映射成 React 可渲染的状态。
 
 import type {
-  AdapterOpMethod,
-  AdapterStatus,
+  InstanceOpMethod,
+  InstanceStatus,
   ApiMetricsEntry,
   ApiProfileInfo,
   BackendEvent,
@@ -150,13 +150,34 @@ function managementCoreCurrent(state: AppState, core: string | null): boolean {
   return core == null || state.activeRegion == null || core === state.activeRegion;
 }
 
+/** ToolResult 先于 ToolCall 到达时，完成态工具会暂时追加到末尾。 */
+function repositionCompletedTool(state: AppState, index: number, startedAtMs: number): void {
+  const tool = state.trunk[index];
+  if (!tool || tool.role !== 'tool' || tool.tool?.status === 'running') return;
+  const sessionId = tool.sessionId;
+  let before = -1;
+  for (let i = index + 1; i < state.trunk.length; i++) {
+    const candidate = state.trunk[i];
+    if (candidate.sessionId === sessionId && candidate.role === 'backend') { before = i; break; }
+  }
+  if (before < 0) {
+    for (let i = index - 1; i >= 0; i--) {
+      const candidate = state.trunk[i];
+      if (candidate.sessionId === sessionId && candidate.role === 'backend' && candidate.time * 1000 >= startedAtMs - 2000) before = i;
+    }
+  }
+  if (before < 0 || before === index) return;
+  const [entry] = state.trunk.splice(index, 1);
+  state.trunk.splice(before > index ? before - 1 : before, 0, entry!);
+}
+
 /** 切换 activeRegion 时清空"单值管理面"缓存，避免短暂显示上一个 core 的值。 */
 export function resetManagementState(state: AppState): void {
   state.api = null;
   state.skills = [];
   state.tools = [];
   state.plugins = [];
-  state.adapters = [];
+  state.instances = [];
   state.federation = null;
   state.federationInvite = null;
   state.apiTests = {};
@@ -213,7 +234,7 @@ export interface DisplayMessage {
   /** 流式归属分支（对账用；终值替换后清除）。 */
   streamBranch?: string;
   source?: {
-    adapter_name: string;
+    instance_name: string;
     platform: string;
     user_id: string;
     user_name: string;
@@ -561,20 +582,20 @@ export interface AppState {
   /// 这是 Panel 的"区域注册表"：agent 的「运行区域」即其 `core` 对应的区域名。
   regions: Record<string, RegionInfo>;
   tasks: OrchActivity[];
-  adapters: AdapterStatus[];
+  instances: InstanceStatus[];
   api: ApiConfig | null;
   // model / systemPrompt 字段已删除（2026-10 巡检：死状态——事件写入后
   // 零读取方；LlmRequest 的模型名可由 api/会话归属推导，SystemPrompt 的
   // 回推文本仅面向调试，无消费方）。
 
   /**
-   * 通用适配器状态文档（02a §3.1）：`scopedKey(core, adapter)` → `AdapterState`
+   * 通用实例状态文档（02a §3.1）：`scopedKey(core, instance)` → `InstanceState`
    * 事件的 `state` 原始文档（**整文档替换**，不做字段 merge）。
    *
-   * 值类型 `unknown`：Panel 不校验形状——core 的适配器状态文档 schema v1
+   * 值类型 `unknown`：Panel 不校验形状——core 的实例状态文档 schema v1
    * （00 §三）是唯一引用标准；bind 取值容错由渲染器（03a §2.0）负责。
    */
-  adapterUiByKey: Record<string, unknown>;
+  instanceUiByKey: Record<string, unknown>;
 
   /**
    * 各会话的清单快照（复合键 `(core, session_id)` → 清单列表，2026-10 多上游修复）。
@@ -707,9 +728,9 @@ export function initialState(): AppState {
     upstreams: [],
     regions: {},
     tasks: [],
-    adapters: [],
+    instances: [],
     api: null,
-    adapterUiByKey: {},
+    instanceUiByKey: {},
     checklists: {},
     sessionHistory: {},
     toasts: [],
@@ -747,15 +768,15 @@ export function initialState(): AppState {
 
 export function reduce(state: AppState, event: BackendEvent): AppState {
   switch (Object.keys(event)[0]) {
-    case 'AdapterStateChanged': {
+    case 'InstanceStateChanged': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
-      const e = (event as { AdapterStateChanged: { adapter_name: string; connected: boolean; self_id: string | null } }).AdapterStateChanged;
-      upsertAdapter(state, {
-        name: e.adapter_name,
-        display_name: e.adapter_name,
+      const e = (event as { InstanceStateChanged: { instance_name: string; connected: boolean; self_id: string | null } }).InstanceStateChanged;
+      upsertInstance(state, {
+        name: e.instance_name,
+        display_name: e.instance_name,
         connected: e.connected,
-        // `AdapterStateChanged` only fires while the adapter is running; a
-        // disconnected client still means the adapter process is up.
+        // `InstanceStateChanged` only fires while the instance is running; a
+        // disconnected client still means the instance process is up.
         running: true,
         self_id: e.self_id,
         bind_address: '',
@@ -763,14 +784,14 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       });
       return state;
     }
-    case 'AdapterList': {
+    case 'InstanceList': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
-      // 启停/重启销账（03b §2.2 收尾）：Core 完成 Start/Stop/RestartAdapter
-      // 后必重发本事件 → 事件到达即结算该 core 的 `adapter:<op>:<core>:<name>`
-      // 登记（core 段精确匹配，见 pending.ts::settleAdapterOpsOfCore）。
-      settleAdapterOpsOfCore(payloadCore(event));
-      const e = (event as { AdapterList: { adapters: AdapterStatus[] } }).AdapterList;
-      state.adapters = e.adapters;
+      // 启停/重启销账（03b §2.2 收尾）：Core 完成 Start/Stop/RestartInstance
+      // 后必重发本事件 → 事件到达即结算该 core 的 `instance:<op>:<core>:<name>`
+      // 登记（core 段精确匹配，见 pending.ts::settleInstanceOpsOfCore）。
+      settleInstanceOpsOfCore(payloadCore(event));
+      const e = (event as { InstanceList: { instances: InstanceStatus[] } }).InstanceList;
+      state.instances = e.instances;
       return state;
     }
     case 'WorkspaceSessions': {
@@ -1068,9 +1089,11 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         // 幂等：同 id 的 ToolCall 已在时间线里（重放 / 重连补发 / 结果先到
         // 的乱序场景）就不再建第二条 running 行——否则会出现「一条已完成 +
         // 一条永远读秒」的重复行（2026-10）。
-        const duplicate =
-          !!e.tool_call_id &&
-          state.trunk.some((m) => m.role === 'tool' && m.tool?.toolCallId === e.tool_call_id);
+        const duplicateIndex = e.tool_call_id
+          ? state.trunk.findIndex((m) => m.role === 'tool' && m.tool?.toolCallId === e.tool_call_id)
+          : -1;
+        const duplicate = duplicateIndex >= 0;
+        if (duplicate) repositionCompletedTool(state, duplicateIndex, startedAtMs);
         if (!duplicate) {
           pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
             sessionId: e.session_id,
@@ -1568,34 +1591,34 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       delete state.shellTerminals[sessionKey(core, e.session_id)];
       return state;
     }
-    // ── 适配器泛化（02a §6.2）：统一 op 结果配对与状态文档写入 ────────────
+    // ── 实例泛化（02a §6.2）：统一 op 结果配对与状态文档写入 ────────────
     // 二者都**不**经 managementCoreCurrent 过滤：op 可发往非活跃 core，
     // 且多 core 聚合靠 scopedKey 隔离（过滤会让非活跃 core 的文档永远进不来）。
     // 顺序：两臂互不依赖、各自幂等（结果与状态到达顺序无保证，03a §4.2）。
-    case 'AdapterOpResult': {
+    case 'InstanceOpResult': {
       const e = (event as {
-        AdapterOpResult: {
-          adapter: string;
+        InstanceOpResult: {
+          instance: string;
           method: string;
           result?: unknown;
           error?: string | null;
           core?: string | null;
         };
-      }).AdapterOpResult;
+      }).InstanceOpResult;
       // 键配对（无线协议无请求 id，02a §1-D1）：resolve 在途 Promise 并放行
       // 同键 FIFO 的下一个；无命中的迟到结果由服务层静默丢弃。
-      settleAdapterOp(adapterOpKey(evtCore(e), e.adapter, e.method as AdapterOpMethod), {
+      settleInstanceOp(instanceOpKey(evtCore(e), e.instance, e.method as InstanceOpMethod), {
         result: e.result ?? null,
         error: e.error ?? null,
       });
       return state;
     }
-    case 'AdapterState': {
+    case 'InstanceState': {
       const e = (event as {
-        AdapterState: { adapter: string; state: unknown; core?: string | null };
-      }).AdapterState;
+        InstanceState: { instance: string; state: unknown; core?: string | null };
+      }).InstanceState;
       // 整文档替换，不做字段 merge（02a §3.1）。
-      state.adapterUiByKey[scopedKey(evtCore(e), e.adapter)] = e.state;
+      state.instanceUiByKey[scopedKey(evtCore(e), e.instance)] = e.state;
       return state;
     }
     case 'SessionMigrated': {
@@ -1635,12 +1658,12 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
   }
 }
 
-function upsertAdapter(state: AppState, entry: AdapterStatus) {
-  const index = state.adapters.findIndex((a) => a.name === entry.name);
+function upsertInstance(state: AppState, entry: InstanceStatus) {
+  const index = state.instances.findIndex((a) => a.name === entry.name);
   if (index >= 0) {
-    state.adapters[index] = { ...state.adapters[index], ...entry };
+    state.instances[index] = { ...state.instances[index], ...entry };
   } else {
-    state.adapters.push(entry);
+    state.instances.push(entry);
   }
 }
 
@@ -1648,7 +1671,7 @@ function reduceMessage(
   state: AppState,
   e: {
     session_id: string;
-    adapter_name: string;
+    instance_name: string;
     platform: string;
     user_id: string;
     user_name: string;
@@ -1665,11 +1688,11 @@ function reduceMessage(
   // 其他 team 的实时消息不进当前主时间线（跨 agent 不串显）；
   // 其历史会在切换到对应 team 时由增量/全量同步补齐。
   if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
-  if (e.adapter_name === 'timer') {
+  if (e.instance_name === 'timer') {
     pushTo(state, 'system', summarizeTimerEvent(e.content), e.timestamp, {
       sessionId: e.session_id,
     });
-  } else if (e.adapter_name === 'subagent' && parseSubagentEvent(e.content)) {
+  } else if (e.instance_name === 'subagent' && parseSubagentEvent(e.content)) {
     // 子代理完成回报：就地把派发位置的"运行中"行改写为结果行（一份委派一行）；
     // 未命中（行已裁掉/刷新后无合成行）则追加，避免结果丢失。
     const subagent = parseSubagentEvent(e.content) as SubagentEventInfo;
@@ -1684,7 +1707,7 @@ function reduceMessage(
     pushTo(state, 'user', displayContentOf(e.content), e.timestamp, {
       sessionId: e.session_id,
       source: {
-        adapter_name: e.adapter_name,
+        instance_name: e.instance_name,
         platform: e.platform,
         user_id: e.user_id,
         user_name: e.user_name,
@@ -1764,10 +1787,10 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
     if (key.startsWith(prefix)) delete state.teamTimelines[key];
   }
   if (state.trunkTeamId?.startsWith(prefix)) state.trunkTeamId = null;
-  // 适配器状态文档（02a §5.4-2）：该 core 前缀清理——删除路径不等轮询窗，
-  // 立即生效（离线路径的清理钩子在 upstreams.ts，见 adapterOps）。
-  for (const key of Object.keys(state.adapterUiByKey)) {
-    if (key.startsWith(prefix)) delete state.adapterUiByKey[key];
+  // 实例状态文档（02a §5.4-2）：该 core 前缀清理——删除路径不等轮询窗，
+  // 立即生效（离线路径的清理钩子在 upstreams.ts，见 instanceOps）。
+  for (const key of Object.keys(state.instanceUiByKey)) {
+    if (key.startsWith(prefix)) delete state.instanceUiByKey[key];
   }
 }
 

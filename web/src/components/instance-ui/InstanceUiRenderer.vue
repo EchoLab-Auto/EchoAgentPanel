@@ -1,25 +1,25 @@
 <script setup lang="ts">
-//! 适配器 UI 通用渲染器（03a §1）：消费原始描述符 + 状态文档 + 元信息，
-//! 遍历 panels → nodes 分发到 7 类节点组件；命令经 useAdapterOp 直发
-//! （`invokeAdapterOp`，显式 meta.core 路由），`op`/`op-result`/`warning`
+//! 实例 UI 通用渲染器（03a §1）：消费原始描述符 + 状态文档 + 元信息，
+//! 遍历 panels → nodes 分发到 7 类节点组件；命令经 useInstanceOp 直发
+//! （`invokeInstanceOp`，显式 meta.core 路由），`op`/`op-result`/`warning`
 //! 为旁路通知（观测/测试断言用，不影响发送）。
 
 import { computed, provide, watch } from 'vue';
 import NeumorphismAlert from '@echolab-auto/ui-frame/components/NeumorphismAlert';
 import NeumorphismEmpty from '@echolab-auto/ui-frame/components/NeumorphismEmpty';
-import AdapterUiPanel from './AdapterUiPanel.vue';
+import InstanceUiPanel from './InstanceUiPanel.vue';
 import { ADAPTER_UI_CONTEXT } from './context';
 import { parseDescriptor } from './parse';
-import { useAdapterOp } from './useAdapterOp';
-import type { AdapterUiMeta, UiWarning } from './types';
+import { useInstanceOp } from './useInstanceOp';
+import type { InstanceUiMeta, UiWarning } from './types';
 
 const props = withDefaults(
   defineProps<{
     /** 原始描述符（未解析）；null/undefined → 渲染空，无 warning。 */
     descriptor?: unknown;
-    /** 状态文档（adapterUiByKey[scopedKey(core, adapter)]）；null = 未收到 AdapterState。 */
+    /** 状态文档（instanceUiByKey[scopedKey(core, instance)]）；null = 未收到 InstanceState。 */
     state?: Record<string, unknown> | null;
-    meta: AdapterUiMeta;
+    meta: InstanceUiMeta;
     /** 外层强制禁用（核心断线/权限不足等）。 */
     disabled?: boolean;
   }>(),
@@ -44,8 +44,8 @@ watch(
   { immediate: true },
 );
 
-const bus = useAdapterOp(
-  () => ({ core: props.meta.core, adapter: props.meta.adapter }),
+const bus = useInstanceOp(
+  () => ({ core: props.meta.core, instance: props.meta.instance }),
   {
     op: (p) => emit('op', p),
     opResult: (p) => emit('op-result', p),
@@ -62,33 +62,33 @@ provide(ADAPTER_UI_CONTEXT, {
 </script>
 
 <template>
-  <div class="adapter-ui">
+  <div class="instance-ui">
     <NeumorphismEmpty v-if="parsed.invalid" description="界面描述无效" />
     <template v-else>
       <NeumorphismAlert
         v-if="parsed.newerVersion"
         type="info"
         size="small"
-        :message="`该适配器的界面描述版本较新（v${parsed.version}），部分控件可能未显示，请升级 Panel`"
+        :message="`该实例的界面描述版本较新（v${parsed.version}），部分控件可能未显示，请升级 Panel`"
       />
-      <AdapterUiPanel v-for="panel in parsed.panels" :key="panel.id" :panel="panel" />
+      <InstanceUiPanel v-for="panel in parsed.panels" :key="panel.id" :panel="panel" />
     </template>
   </div>
 </template>
 
 <style>
-/* 节点共享样式（非 scoped：跨 7 个节点组件复用；类名带 adapter- 前缀防冲突）。 */
-.adapter-ui {
+/* 节点共享样式（非 scoped：跨 7 个节点组件复用；类名带 instance- 前缀防冲突）。 */
+.instance-ui {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
-.adapter-node__label {
+.instance-node__label {
   font-size: 12px;
   font-weight: 600;
   color: var(--nm-text-secondary);
 }
-.adapter-node__hint {
+.instance-node__hint {
   margin: 0;
   font-size: 11px;
   color: var(--nm-text-secondary);

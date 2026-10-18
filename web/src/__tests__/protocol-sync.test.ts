@@ -69,7 +69,7 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // 此断言是"提醒器"：Core 加事件/自己补定义后，这里失败提醒你确认
     // 变体集合是有意变更，而不是漏同步。数字随协议演进更新。
     // 54 → 56（2026-10 流式输出：+AgentContentDelta / AgentReasoningDelta）
-    // → 58（2026-10 适配器泛化 02a：+AdapterOpResult / AdapterState）
+    // → 58（2026-10 实例泛化 02a：+InstanceOpResult / InstanceState）
     // → 51（2026-10 泛化阶段 2：Panel 删除 7 个迁移期 QQ 变体——GroupList /
     //   QqFilterConfig / QqGateMode / QqOwner / QqLoginStatus / QqQrcode /
     //   FriendList；Core 侧同批直接删除，两端镜像一致）。
@@ -79,10 +79,20 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     expect(variants.size).toBe(52);
   });
 
-  it('适配器泛化事件在联合类型中定义（02a §4.1）', () => {
+  it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {
+    // 双端契约：变体名与字段名必须与 `echo-protocol/src/event.rs` 逐字一致。
+    // 2026-10 的教训：Core 把 `Adapter*` 改成 `Instance*` 时只给了**字段级** alias，
+    // 变体名没有 alias —— Panel 还发旧名时 Core 整帧静默丢弃（无日志、无 toast）。
     const seg = backendEventSegment();
-    expect(seg).toContain('AdapterOpResult');
-    expect(seg).toContain('AdapterState');
+    for (const name of ['InstanceList', 'InstanceState', 'InstanceOpResult', 'InstanceStateChanged']) {
+      expect(seg, `事件联合类型缺 ${name}`).toContain(`${name}:`);
+    }
+    for (const stale of ['AdapterList:', 'AdapterState:', 'AdapterOpResult:', 'AdapterStateChanged:']) {
+      expect(seg, `事件联合类型仍含旧名 ${stale}`).not.toContain(stale);
+    }
+    const m = seg.match(/InstanceStateChanged:\s*\{([^}]*)\}/);
+    expect(m, 'InstanceStateChanged 定义缺失').toBeTruthy();
+    expect(m![1]).toContain('instance_name');
   });
 
   it('ChecklistUpdated 携带 team_id（同一 core 多 persona 隔离，2026-10）', () => {
@@ -132,8 +142,23 @@ describe('命令侧镜像与归零棘轮（2026-10）', () => {
     );
   });
 
-  it('适配器泛化命令在联合类型中定义（02a §4.1）', () => {
-    expect(commandSegment()).toContain('InvokeAdapterOp');
+  it('实例泛化命令的名字与 Core 逐字一致（去适配器化后）', () => {
+    // 双端契约：与 `echo-protocol/src/command.rs` 的变体名逐字一致。
+    const seg = commandSegment();
+    for (const name of [
+      'StartInstance', 'StopInstance', 'RestartInstance', 'RequestInstanceStatus',
+      'StartAllInstances', 'StopAllInstances', 'InvokeInstanceOp',
+    ]) {
+      expect(seg, `命令联合类型缺 ${name}`).toContain(name);
+    }
+    for (const stale of ['StartAdapter', 'StopAdapter', 'RestartAdapter',
+                         'RequestAdapterStatus', 'StartAllAdapters', 'StopAllAdapters',
+                         'InvokeAdapterOp']) {
+      expect(seg, `命令联合类型仍含旧名 ${stale}`).not.toContain(stale);
+    }
+    expect(serializeCommand({ StartInstance: { name: 'qq' } })).toBe(
+      '{"type":"command","payload":{"StartInstance":{"name":"qq"}}}',
+    );
   });
 
   it('RenameApi 线格式与 Core serde 契约一致（2026-10 改名能力）', () => {
@@ -144,12 +169,12 @@ describe('命令侧镜像与归零棘轮（2026-10）', () => {
     );
   });
 
-  it('InvokeAdapterOp 线格式与 Core serde 契约一致（02a §4.1）', () => {
-    // 双端契约：`{ adapter, method, payload }` 逐字一致（core command.rs）。
+  it('InvokeInstanceOp 线格式与 Core serde 契约一致（02a §4.1）', () => {
+    // 双端契约：`{ instance, method, payload }` 逐字一致（core command.rs）。
     expect(
-      serializeCommand({ InvokeAdapterOp: { adapter: 'qq', method: 'get_state', payload: {} } }),
+      serializeCommand({ InvokeInstanceOp: { instance: 'qq', method: 'get_state', payload: {} } }),
     ).toBe(
-      '{"type":"command","payload":{"InvokeAdapterOp":{"adapter":"qq","method":"get_state","payload":{}}}}',
+      '{"type":"command","payload":{"InvokeInstanceOp":{"instance":"qq","method":"get_state","payload":{}}}}',
     );
   });
 

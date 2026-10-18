@@ -54,10 +54,10 @@ const kind = computed<IconKind>(() => {
     case 'instance_restart':
     case 'instance_status':
     // 旧工具名（2026-10 去适配器化前；旧 Core 仍发这些名字）。
-    case 'adapter_start':
-    case 'adapter_stop':
-    case 'adapter_restart':
-    case 'adapter_status':
+    case 'instance_start':
+    case 'instance_stop':
+    case 'instance_restart':
+    case 'instance_status':
       return 'settings';
     case 'workspace':
       return 'workspace';
@@ -135,7 +135,7 @@ const animClass = computed(() => (props.loading ? `tool-icon--anim-${kind.value}
     <template v-else-if="kind === 'message'">
       <path class="ti-message__bubble" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </template>
-    <!-- 适配器/设置 -->
+    <!-- 实例/设置 -->
     <template v-else-if="kind === 'settings'">
       <circle cx="12" cy="12" r="3" />
       <path class="ti-settings__gear" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />

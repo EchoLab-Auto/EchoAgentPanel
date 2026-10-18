@@ -28,7 +28,7 @@ describe('ConnectionStatusCard 上游 Core 状态', () => {
     state.connected = true;
     state.activeRegion = 'core';
     state.knownCores = new Set(['core']);
-    state.adapters = [];
+    state.instances = [];
     state.upstreams = [
       upstream({ name: 'core' }),
       upstream({

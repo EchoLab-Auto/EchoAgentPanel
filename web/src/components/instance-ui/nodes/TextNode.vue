@@ -68,8 +68,8 @@ function copy() {
 </script>
 
 <template>
-  <div class="adapter-node text-node" :data-node-key="nodeKey">
-    <span v-if="node.label" class="adapter-node__label">{{ node.label }}</span>
+  <div class="instance-node text-node" :data-node-key="nodeKey">
+    <span v-if="node.label" class="instance-node__label">{{ node.label }}</span>
 
     <template v-if="editable">
       <div v-if="ctx.state.value === null" class="text-node__skeleton">
@@ -117,7 +117,7 @@ function copy() {
         复制
       </NeumorphismButton>
     </template>
-    <p v-if="node.hint" class="adapter-node__hint">{{ node.hint }}</p>
+    <p v-if="node.hint" class="instance-node__hint">{{ node.hint }}</p>
   </div>
 </template>
 

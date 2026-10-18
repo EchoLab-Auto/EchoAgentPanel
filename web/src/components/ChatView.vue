@@ -46,7 +46,7 @@ import {
 // 打开时才加载对应 chunk（此前全部静态进首包——不打开也付加载成本）。
 const AgentConfigModal = lazy(() => import('./AgentConfigModal.vue'), 'AgentConfigModal');
 const ContextView = lazy(() => import('./ContextView.vue'), 'ContextView');
-const AdapterPanel = lazy(() => import('./AdapterPanel.vue'), 'AdapterPanel');
+const InstancePanel = lazy(() => import('./InstancePanel.vue'), 'InstancePanel');
 const WorkspacePanel = lazy(() => import('./WorkspacePanel.vue'), 'WorkspacePanel');
 const SessionSwitcher = lazy(() => import('./SessionSwitcher.vue'), 'SessionSwitcher');
 const TasksPanel = lazy(() => import('./TasksPanel.vue'), 'TasksPanel');
@@ -115,11 +115,11 @@ function btnElement(instance: unknown): HTMLElement | null {
   return el instanceof HTMLElement ? el : null;
 }
 
-const showAdapter = ref(false);
-const adapterBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
+const showInstance = ref(false);
+const instanceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
 
-function toggleAdapter() {
-  showAdapter.value = !showAdapter.value;
+function toggleInstance() {
+  showInstance.value = !showInstance.value;
 }
 const showChecklist = ref(false);
 const checklistBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
@@ -188,7 +188,7 @@ function onSelectionChange() {
   }
 }
 
-// 适配器按钮显隐：仅当当前 Agent（team）启用了 adapter 类插件时显示。
+// 实例按钮显隐：仅当当前 Agent（team）启用了 instance 类插件时显示。
 // 依据 TeamInfo 的 enabled_plugins 白名单判断（插件黑名单已移除），
 // 与 Core apply_capabilities 的过滤语义一致。
 const ADAPTER_PLUGIN_FALLBACK = ['echo-agent.instance.qq'];
@@ -198,15 +198,15 @@ const currentTeam = computed(() => {
   return state.teams.find((t) => t.id === props.activeTeamId) ?? null;
 });
 
-/** 当前团队视角下的适配器插件 id 列表（无 plugins 数据时回退到内置 id） */
-const adapterPluginIds = computed<string[]>(() => {
+/** 当前团队视角下的实例插件 id 列表（无 plugins 数据时回退到内置 id） */
+const instancePluginIds = computed<string[]>(() => {
   const fromState = state.plugins.filter((p) => isInstancePluginKind(p.kind)).map((p) => p.id);
   return fromState.length ? fromState : ADAPTER_PLUGIN_FALLBACK;
 });
 
-/** 当前 Agent 是否启用了至少一个适配器插件（决定输入框上是否显示"适配器"按钮） */
-const adapterAvailable = computed(() =>
-  adapterPluginIds.value.some((id) => teamPluginEnabled(currentTeam.value, id)),
+/** 当前 Agent 是否启用了至少一个实例插件（决定输入框上是否显示"实例"按钮） */
+const instanceAvailable = computed(() =>
+  instancePluginIds.value.some((id) => teamPluginEnabled(currentTeam.value, id)),
 );
 
 /** 上下文按钮显隐：management.panel 插件对当前 agent 启用才显示 */
@@ -323,11 +323,11 @@ watch(workspaceAvailable, (available) => {
   if (!available) showWorkspace.value = false;
 });
 
-// 切换 Agent 时若适配器/工作区/会话/任务面板打开则关闭，避免残留禁用 agent 的面板
+// 切换 Agent 时若实例/工作区/会话/任务面板打开则关闭，避免残留禁用 agent 的面板
 watch(
   () => props.activeTeamId,
   () => {
-    showAdapter.value = false;
+    showInstance.value = false;
     showWorkspace.value = false;
     showSessions.value = false;
     showTasks.value = false;
@@ -415,7 +415,7 @@ const anyOverlayOpen = computed(() => {
     showChecklist.value ||
     showSessions.value ||
     showWorkspace.value ||
-    showAdapter.value ||
+    showInstance.value ||
     showTasks.value ||
     configOpen.value ||
     showContext.value
@@ -879,21 +879,21 @@ function mediaSrc(img: string): string {
         工作区
       </NeumorphismButton>
       <NeumorphismButton
-        v-if="adapterAvailable"
-        ref="adapterBtnRef"
+        v-if="instanceAvailable"
+        ref="instanceBtnRef"
         class="ctx-entry"
         variant="glass"
         shape="pill"
         size="small"
-        title="平台适配器"
-        @click="toggleAdapter"
+        title="平台实例"
+        @click="toggleInstance"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
           <path d="M3.27 6.96 12 12.01l8.73-5.05" />
           <path d="M12 22.08V12" />
         </svg>
-        适配器
+        实例
       </NeumorphismButton>
       <NeumorphismBadge
         v-if="tasksAvailable"
@@ -930,8 +930,8 @@ function mediaSrc(img: string): string {
     <PanelPopover v-model="showWorkspace" :anchor="btnElement(workspaceBtnRef)">
       <WorkspacePanel :team-id="props.activeTeamId ?? null" />
     </PanelPopover>
-    <PanelPopover v-model="showAdapter" :anchor="btnElement(adapterBtnRef)">
-      <AdapterPanel :team-id="props.activeTeamId ?? null" :core="state.activeRegion ?? null" />
+    <PanelPopover v-model="showInstance" :anchor="btnElement(instanceBtnRef)">
+      <InstancePanel :team-id="props.activeTeamId ?? null" :core="state.activeRegion ?? null" />
     </PanelPopover>
     <PanelPopover v-model="showTasks" :anchor="btnElement(tasksBtnRef)">
       <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />

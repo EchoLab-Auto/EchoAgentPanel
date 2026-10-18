@@ -109,21 +109,21 @@ export function startConnection(): void {
       const broadcastBootstrap: BackendCommand[] = [
         // 只读且需要"发现全部上游"：裸广播给所有在线 core（中继白名单放行）。
         'RequestState',
-        // 适配器管理数据不在这里预取：打开通用适配器面板时按实例经
-        // InvokeAdapterOp 自行刷新；无实例（或多实例未指定实例）时预取
-        // 必被 Core 拒绝，平白弹出"适配器实例未找到"提示。
+        // 实例管理数据不在这里预取：打开通用实例面板时按实例经
+        // InvokeInstanceOp 自行刷新；无实例（或多实例未指定实例）时预取
+        // 必被 Core 拒绝，平白弹出"实例未找到"提示。
         'RequestTeamsList',
       ];
       for (const command of broadcastBootstrap) {
         ws.send(broadcastEnvelope(command));
       }
-      // 定向引导（重连场景补发）：单值管理面（适配器/Shell 会话）仅当目标
+      // 定向引导（重连场景补发）：单值管理面（实例/Shell 会话）仅当目标
       // 区域已解析时发送。首访（activeRegion 未定）跳过——多上游下这两条
       // 会因解析不出目标被拒发并弹「尚未选择 agent」误报 toast，且随后
       // TeamsList 到达时 App.vue 的 activeRegion watcher 会统一拉全
       // （含这两条），重发纯属重复请求（2026-10 审计修复）。
       if (currentRegion(state)) {
-        sendCommand('RequestAdapterStatus');
+        sendCommand('RequestInstanceStatus');
         sendCommand({ RequestShellSessions: {} });
       }
       // 上次使用的 Agent 的 timeline：经 sendCommand 走统一路由（多上游下
@@ -273,7 +273,7 @@ function broadcastEnvelope(command: BackendCommand): string {
  *
  * `key` 是视图本地命名（如 `'context'`、`'settings:teams'`），同一 key
  * 重复发送即覆盖（重试/切换重拉语义）。`targetCore` 显式指定路由目标
- * （02a S3：适配器 op 通道恒显式传 core）；缺省沿用命令自身解析。
+ * （02a S3：实例 op 通道恒显式传 core）；缺省沿用命令自身解析。
  */
 export function sendPending(command: BackendCommand, key: string, targetCore?: string): void {
   // 登记时带上解析出的目标 core：多上游下广播/竞态响应不会误销账别的 core
@@ -350,7 +350,7 @@ function coreForCommand(command: BackendCommand): string | null {
 }
 
 /**
- * 切换到某个 core 后重新拉取"单值管理面"数据（配置/技能/工具/插件/适配器/
+ * 切换到某个 core 后重新拉取"单值管理面"数据（配置/技能/工具/插件/实例/
  * shell/联邦）。这些响应会被 `managementCoreCurrent` 过滤到 activeRegion，
  * 所以切 core 必须重拉一次，否则会短暂显示上一个 core 的值。
  *
@@ -364,7 +364,7 @@ export function requestActiveRegionManagement(options?: { includeCatalogs?: bool
   const includeCatalogs = options?.includeCatalogs ?? true;
   sendCommand('RequestState'); // → ApiConfigUpdated / ApiProfilesUpdated
   sendCommand('RequestSystemPrompt');
-  sendCommand('RequestAdapterStatus');
+  sendCommand('RequestInstanceStatus');
   if (includeCatalogs) {
     sendCommand('RequestSkillsList');
     sendCommand('RequestToolsList');

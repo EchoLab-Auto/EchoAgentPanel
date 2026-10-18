@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import SessionSwitcher from '../SessionSwitcher.vue';
 import { state } from '../../store';
-import type { AdapterStatus, SessionInfo } from '../../protocol';
+import type { InstanceStatus, SessionInfo } from '../../protocol';
 
 function session(over: Partial<SessionInfo>): SessionInfo {
   return {
@@ -29,8 +29,8 @@ function session(over: Partial<SessionInfo>): SessionInfo {
   } as SessionInfo;
 }
 
-/** 平台适配器 fixture（默认 qq）：session_labels 注入后分组标题 = 「QQ 私聊 / QQ 群」。 */
-function adapter(over: Partial<AdapterStatus> = {}): AdapterStatus {
+/** 平台实例 fixture（默认 qq）：session_labels 注入后分组标题 = 「QQ 私聊 / QQ 群」。 */
+function instance(over: Partial<InstanceStatus> = {}): InstanceStatus {
   return {
     name: 'qq',
     display_name: 'QQ（alix）',
@@ -55,8 +55,8 @@ function mountSwitcher(activeSessionId = 'local:tui::local_user') {
 describe('SessionSwitcher 会话切换', () => {
   beforeEach(() => {
     state.teams = [{ id: 'alix', name: 'Alix', enabled: true, sessions: 0 } as never];
-    // 03b S4：分组标题取自 state.adapters 的 session_labels（注入后 = 「QQ 私聊 / QQ 群」）。
-    state.adapters = [adapter()];
+    // 03b S4：分组标题取自 state.instances 的 session_labels（注入后 = 「QQ 私聊 / QQ 群」）。
+    state.instances = [instance()];
     state.sessions = [
       session({}),
       session({
@@ -175,14 +175,14 @@ describe('SessionSwitcher 会话切换', () => {
   // ── 03b S4：platform + session_labels 通用化 ──
 
   it('无 session_labels：回退 <display_name> 私聊 / 群聊', () => {
-    state.adapters = [adapter({ session_labels: null })];
+    state.instances = [instance({ session_labels: null })];
     const wrapper = mountSwitcher();
     expect(wrapper.text()).toContain('QQ（alix） 私聊');
     expect(wrapper.text()).toContain('QQ（alix） 群聊');
   });
 
-  it('整个 platform 无匹配适配器：回退「私聊 / 群聊」', () => {
-    state.adapters = [];
+  it('整个 platform 无匹配实例：回退「私聊 / 群聊」', () => {
+    state.instances = [];
     const wrapper = mountSwitcher();
     expect(wrapper.text()).toContain('私聊');
     expect(wrapper.text()).toContain('群聊');
@@ -199,9 +199,9 @@ describe('SessionSwitcher 会话切换', () => {
         last_active: 5,
       }),
     );
-    state.adapters = [
-      adapter(),
-      adapter({
+    state.instances = [
+      instance(),
+      instance({
         name: 'tg',
         display_name: 'TG（alix）',
         platform: 'telegram',

@@ -12,7 +12,7 @@
 //! 语义与迁移前一致：
 //! - user 居右主色气泡、agent 居左中性气泡（正文走 Markdown）、system 居中
 //!   平铺（细线夹文本）；
-//! - 头部：agent 显示角色名，消息带来源（QQ/本地）时附「适配器 · 群 · 用户名」，
+//! - 头部：agent 显示角色名，消息带来源（QQ/本地）时附「实例 · 群 · 用户名」，
 //!   其后是时间；悬停浮现复制按钮（`ChatCopyButton`，保留的原子组件）。
 
 import { computed } from 'vue';
@@ -31,7 +31,7 @@ const { t } = useLocale();
 
 const isUser = computed(() => props.message.role === 'user');
 
-/** 来源标签（多适配器场景）：适配器 · 群名 · 用户名。 */
+/** 来源标签（多实例场景）：实例 · 群名 · 用户名。 */
 const sourceLabel = computed(() => {
   const source = props.message.source;
   if (!source) return '';

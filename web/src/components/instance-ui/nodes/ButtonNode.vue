@@ -47,7 +47,7 @@ async function activate() {
 </script>
 
 <template>
-  <div class="adapter-node button-node" :data-node-key="nodeKey">
+  <div class="instance-node button-node" :data-node-key="nodeKey">
     <NeumorphismButton
       size="small"
       variant="glass"
@@ -58,7 +58,7 @@ async function activate() {
       {{ node.label || node.action.method }}
     </NeumorphismButton>
     <span v-if="notice" class="button-node__notice">{{ notice }}</span>
-    <p v-if="node.hint" class="adapter-node__hint">{{ node.hint }}</p>
+    <p v-if="node.hint" class="instance-node__hint">{{ node.hint }}</p>
     <NeumorphismAlert
       v-if="error"
       type="error"

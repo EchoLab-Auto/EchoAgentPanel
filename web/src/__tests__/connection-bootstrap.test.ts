@@ -4,7 +4,7 @@
 //! 引导阶段发送的命令必须"必成功"——否则面板每次打开都会弹出无意义提示：
 //! - 不发送 team_id 为空的 RequestTrunkTimeline（等 TeamsList 到达后由
 //!   App 的 watcher 用列表首个发起）；
-//! - 不预取适配器管理数据（打开通用适配器面板时按实例自行刷新）。
+//! - 不预取实例管理数据（打开通用实例面板时按实例自行刷新）。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -78,10 +78,10 @@ describe('重连引导命令（去主智能体）', () => {
     }
   });
 
-  it('不预取适配器管理数据（连接建立不动适配器通道）', async () => {
+  it('不预取实例管理数据（连接建立不动实例通道）', async () => {
     const sent = await bootstrapCommands();
-    // 旧 QQ 命令已随泛化删除；新通道（InvokeAdapterOp）同样不在握手期预取。
-    expect(sent.some((c) => c.includes('InvokeAdapterOp'))).toBe(false);
+    // 旧 QQ 命令已随泛化删除；新通道（InvokeInstanceOp）同样不在握手期预取。
+    expect(sent.some((c) => c.includes('InvokeInstanceOp'))).toBe(false);
   });
 
   it('保存过 Agent 时按其 id 请求时间线', async () => {
@@ -170,7 +170,7 @@ describe('重连引导命令（去主智能体）', () => {
     const sent = await bootstrapCommands();
     for (const cmd of [
       'RequestState',
-      'RequestAdapterStatus',
+      'RequestInstanceStatus',
       'RequestTeamsList',
       'RequestShellSessions',
     ]) {
@@ -184,9 +184,9 @@ describe('重连引导命令（去主智能体）', () => {
     for (const cmd of ['RequestState', 'RequestTeamsList']) {
       expect(sent.some((c) => c.includes(cmd)), cmd).toBe(true);
     }
-    // 单值管理面（适配器/Shell 会话）：区域未定时跳过；TeamsList 到达后
+    // 单值管理面（实例/Shell 会话）：区域未定时跳过；TeamsList 到达后
     // 由 App.vue 的 activeRegion watcher 统一拉取（2026-10 审计修复）。
-    expect(sent.some((c) => c.includes('RequestAdapterStatus'))).toBe(false);
+    expect(sent.some((c) => c.includes('RequestInstanceStatus'))).toBe(false);
     expect(sent.some((c) => c.includes('RequestShellSessions'))).toBe(false);
   });
 });

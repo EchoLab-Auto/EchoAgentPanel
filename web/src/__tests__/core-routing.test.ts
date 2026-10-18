@@ -54,8 +54,8 @@ describe('P1 会话归属自动路由', () => {
 
   // ── 02a S3：sendCommand 返回 boolean（拒发 = false）────────────────────
   it('sendCommand：显式 targetCore 优先（无连接 = false，拒发后仍提示）', () => {
-    expect(resolveTargetCore('RequestAdapterStatus', 'core-a')).toBe('core-a');
-    expect(sendCommand('RequestAdapterStatus', 'core-a')).toBe(false); // 无 WS 连接
+    expect(resolveTargetCore('RequestInstanceStatus', 'core-a')).toBe('core-a');
+    expect(sendCommand('RequestInstanceStatus', 'core-a')).toBe(false); // 无 WS 连接
     expect(state.toasts[state.toasts.length - 1]?.text).toContain('未连接到 Core');
   });
 
@@ -65,7 +65,7 @@ describe('P1 会话归属自动路由', () => {
     state.activeTeamId = null;
     state.sessions = [];
     state.teams = [];
-    expect(sendCommand('RequestAdapterStatus')).toBe(false);
+    expect(sendCommand('RequestInstanceStatus')).toBe(false);
     expect(state.toasts[state.toasts.length - 1]?.text).toContain('尚未选择 agent');
   });
 });

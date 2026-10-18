@@ -88,12 +88,12 @@ describe('toDisplayMessage：历史回放映射', () => {
 });
 
 describe('reduce：实时子代理回报', () => {
-  it('MessageReceived(adapter=subagent) → subagent 行（带结构化载荷）', () => {
+  it('MessageReceived(instance=subagent) → subagent 行（带结构化载荷）', () => {
     const state = initialState();
     reduce(state, {
       MessageReceived: {
         session_id: 'local:workspace:demo:local_user',
-        adapter_name: 'subagent',
+        instance_name: 'subagent',
         platform: 'subagent',
         user_id: 'subagent',
         user_name: 'subagent',
@@ -118,7 +118,7 @@ describe('reduce：实时子代理回报', () => {
     reduce(state, {
       MessageReceived: {
         session_id: 's',
-        adapter_name: 'qq',
+        instance_name: 'qq',
         platform: 'qq',
         user_id: 'u1',
         user_name: '某人',

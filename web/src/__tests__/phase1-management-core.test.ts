@@ -1,8 +1,8 @@
 // Phase 1（2026-10）：管理面（设置/QQ/联邦）绑定"管理目标 core"。
 // - 无 team/session 的管理事件也注入来源 core；
-// - 单值管理面（api/skills/tools/plugins/systemPrompt/adapter/federation）只
+// - 单值管理面（api/skills/tools/plugins/systemPrompt/instance/federation）只
 //   接受 activeRegion 的响应，避免被广播响应里其他 core 的配置覆盖；
-// - 适配器实例名跨 core 可重复，状态文档按 (core, adapter) 存放（adapterUiByKey）。
+// - 实例名跨 core 可重复，状态文档按 (core, instance) 存放（instanceUiByKey）。
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
 import { resetManagementState } from '../state';
@@ -32,7 +32,7 @@ describe('Phase 1：管理面绑定 activeRegion', () => {
     resetManagementState(state);
     state.knownCores = new Set(['core-a', 'core-b']);
     state.activeRegion = 'core-b';
-    state.adapterUiByKey = {};
+    state.instanceUiByKey = {};
   });
 
   it('非 activeRegion 的 ApiConfigUpdated 被忽略；activeRegion 的生效', () => {
@@ -55,17 +55,17 @@ describe('Phase 1：管理面绑定 activeRegion', () => {
     expect(state.api?.model).toBe('local');
   });
 
-  it('适配器状态文档按 (core, adapter) 存放，同名实例不互相覆盖', () => {
+  it('实例状态文档按 (core, instance) 存放，同名实例不互相覆盖', () => {
     dispatch(
-      { AdapterState: { adapter: 'qq', state: { owner: 111 } } } as unknown as BackendEvent,
+      { InstanceState: { instance: 'qq', state: { owner: 111 } } } as unknown as BackendEvent,
       'core-a',
     );
     dispatch(
-      { AdapterState: { adapter: 'qq', state: { owner: 222 } } } as unknown as BackendEvent,
+      { InstanceState: { instance: 'qq', state: { owner: 222 } } } as unknown as BackendEvent,
       'core-b',
     );
-    expect(state.adapterUiByKey[scopedKey('core-a', 'qq')]).toEqual({ owner: 111 });
-    expect(state.adapterUiByKey[scopedKey('core-b', 'qq')]).toEqual({ owner: 222 });
+    expect(state.instanceUiByKey[scopedKey('core-a', 'qq')]).toEqual({ owner: 111 });
+    expect(state.instanceUiByKey[scopedKey('core-b', 'qq')]).toEqual({ owner: 222 });
   });
 
   it('resetManagementState 清空单值管理面缓存', () => {
@@ -74,6 +74,6 @@ describe('Phase 1：管理面绑定 activeRegion', () => {
     resetManagementState(state);
     expect(state.api).toBeNull();
     expect(state.skills).toHaveLength(0);
-    expect(state.adapters).toHaveLength(0);
+    expect(state.instances).toHaveLength(0);
   });
 });

@@ -32,8 +32,8 @@ function nodeKey(index: number, type: UiNodeType): string {
 </script>
 
 <template>
-  <NeumorphismCard class="adapter-ui-panel" :data-panel-id="panel.id">
-    <div v-if="panel.title" class="adapter-ui-panel__head">
+  <NeumorphismCard class="instance-ui-panel" :data-panel-id="panel.id">
+    <div v-if="panel.title" class="instance-ui-panel__head">
       <h3>{{ panel.title }}</h3>
     </div>
     <NeumorphismEmpty v-if="!panel.nodes.length" description="暂无可配置项" size="small" />
@@ -48,13 +48,13 @@ function nodeKey(index: number, type: UiNodeType): string {
 </template>
 
 <style scoped>
-.adapter-ui-panel {
+.instance-ui-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 12px;
 }
-.adapter-ui-panel__head h3 {
+.instance-ui-panel__head h3 {
   margin: 0;
   font-size: 12px;
   font-weight: 600;

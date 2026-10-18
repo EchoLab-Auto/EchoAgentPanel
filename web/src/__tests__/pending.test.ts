@@ -16,7 +16,7 @@ import {
   dropPendingOfCore,
   releasePending,
   resolvePendingEvent,
-  settleAdapterOpsOfCore,
+  settleInstanceOpsOfCore,
   settlePending,
   trackRequest,
   usePending,
@@ -117,18 +117,18 @@ describe('pending：阶段推进', () => {
   });
 
   it('动态 key（getter）：切换后自动追踪新 key 的登记', () => {
-    // getter 内读响应式源（真实场景：适配器面板的选中实例 ref）——
+    // getter 内读响应式源（真实场景：实例面板的选中实例 ref）——
     // ref 变化使 computed 失效并改追踪新 key。
     const name = ref('a');
-    const { phase } = usePending(() => `adapter-op:core:/${name.value}:get_state`);
-    trackRequest('adapter-op:core:/a:get_state', contextCommand());
+    const { phase } = usePending(() => `instance-op:core:/${name.value}:get_state`);
+    trackRequest('instance-op:core:/a:get_state', contextCommand());
     vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
     expect(phase.value).toBe('pending');
 
     // 切到实例 b：b 未登记 → idle；登记后可见。
     name.value = 'b';
     expect(phase.value).toBe('idle');
-    trackRequest('adapter-op:core:/b:get_state', contextCommand());
+    trackRequest('instance-op:core:/b:get_state', contextCommand());
     expect(phase.value).toBe('idle');
     vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
     expect(phase.value).toBe('pending');
@@ -211,34 +211,34 @@ describe('pending：显式销账与按 core 清理（02a §5.1，S2）', () => {
     expect(usePending('drop:b').phase.value).toBe('idle');
   });
 
-  it('settleAdapterOpsOfCore：按 core 段结算启停键（adapter-op: 与异 core 不受影响）', () => {
-    trackRequest('adapter:start::qq', contextCommand(), null);
-    trackRequest('adapter:restart:core-a:qq-2', contextCommand(), 'core-a');
-    trackRequest('adapter-op:core-a\u0000qq:get_state', contextCommand(), 'core-a');
+  it('settleInstanceOpsOfCore：按 core 段结算启停键（instance-op: 与异 core 不受影响）', () => {
+    trackRequest('instance:start::qq', contextCommand(), null);
+    trackRequest('instance:restart:core-a:qq-2', contextCommand(), 'core-a');
+    trackRequest('instance-op:core-a\u0000qq:get_state', contextCommand(), 'core-a');
     vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
-    expect(usePending('adapter:start::qq').phase.value).toBe('pending');
-    expect(usePending('adapter:restart:core-a:qq-2').phase.value).toBe('pending');
-    expect(usePending('adapter-op:core-a\u0000qq:get_state').phase.value).toBe('pending');
+    expect(usePending('instance:start::qq').phase.value).toBe('pending');
+    expect(usePending('instance:restart:core-a:qq-2').phase.value).toBe('pending');
+    expect(usePending('instance-op:core-a\u0000qq:get_state').phase.value).toBe('pending');
 
-    // 只结算 core 段 === 'core-a' 的登记：空 core 段与 `adapter-op:` 前缀不动。
-    settleAdapterOpsOfCore('core-a');
+    // 只结算 core 段 === 'core-a' 的登记：空 core 段与 `instance-op:` 前缀不动。
+    settleInstanceOpsOfCore('core-a');
     vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS); // 已可见：走最短可见后清
-    expect(usePending('adapter:restart:core-a:qq-2').phase.value).toBe('idle');
-    expect(usePending('adapter:start::qq').phase.value).toBe('pending');
-    expect(usePending('adapter-op:core-a\u0000qq:get_state').phase.value).toBe('pending');
+    expect(usePending('instance:restart:core-a:qq-2').phase.value).toBe('idle');
+    expect(usePending('instance:start::qq').phase.value).toBe('pending');
+    expect(usePending('instance-op:core-a\u0000qq:get_state').phase.value).toBe('pending');
 
     // core=null 只结算空 core 段（单上游）；可见窗口已走完 → 立即清。
-    settleAdapterOpsOfCore(null);
-    expect(usePending('adapter:start::qq').phase.value).toBe('idle');
+    settleInstanceOpsOfCore(null);
+    expect(usePending('instance:start::qq').phase.value).toBe('idle');
 
     // 测试隔离：清理剩余登记（pending 为模块级单例）。
-    releasePending('adapter-op:core-a\u0000qq:get_state');
+    releasePending('instance-op:core-a\u0000qq:get_state');
   });
 
-  it('settleAdapterOpsOfCore：未显示（150ms 内）立即清', () => {
-    trackRequest('adapter:stop:core-b:qq', contextCommand(), 'core-b');
-    settleAdapterOpsOfCore('core-b');
+  it('settleInstanceOpsOfCore：未显示（150ms 内）立即清', () => {
+    trackRequest('instance:stop:core-b:qq', contextCommand(), 'core-b');
+    settleInstanceOpsOfCore('core-b');
     vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
-    expect(usePending('adapter:stop:core-b:qq').phase.value).toBe('idle');
+    expect(usePending('instance:stop:core-b:qq').phase.value).toBe('idle');
   });
 });

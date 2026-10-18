@@ -57,9 +57,9 @@ describe('ChatView 竖屏移动端', () => {
   const originalWidth = window.innerWidth;
 
   beforeEach(() => {
-    // 连接状态卡（rail）门控依赖 adapter 状态；清空即可（status 卡常驻）。
+    // 连接状态卡（rail）门控依赖 instance 状态；清空即可（status 卡常驻）。
     state.teams = [{ id: 'alix', name: 'Alix', enabled: true, sessions: 0 } as never];
-    state.adapters = [];
+    state.instances = [];
   });
 
   afterEach(() => {

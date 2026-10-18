@@ -71,7 +71,7 @@ export function containsValuePlaceholder(arg: unknown): boolean {
 }
 
 /**
- * `action → InvokeAdapterOp.payload`（03a §1.6）：
+ * `action → InvokeInstanceOp.payload`（03a §1.6）：
  *
  * - `arg` 缺省 → `fallback()`（节点默认载荷；如 button `{}`、list_editor `{value: 新列表}`）；
  * - `arg === '$value'` → 当前值整体；值为平面对象时深拷贝之，否则包为 `{ value }`；

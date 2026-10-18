@@ -47,7 +47,7 @@ export interface FederationStatus {
   peers: FederationPeerInfo[];
 }
 
-export interface AdapterStatus {
+export interface InstanceStatus {
   name: string;
   display_name: string;
   connected: boolean;
@@ -67,9 +67,9 @@ export interface AdapterStatus {
   session_labels?: Record<string, string> | null;
 }
 
-/** 适配器管理方法名（02a §4.1；Panel 侧防拼写便利类型，不要求 core 同步）。
+/** 实例管理方法名（02a §4.1；Panel 侧防拼写便利类型，不要求 core 同步）。
  *  与 00 §四 的 12 个 custom method + `get_state`（D2 首屏路径）对齐。 */
-export type AdapterOpMethod =
+export type InstanceOpMethod =
   | 'set_gate_mode'
   | 'get_gate_mode'
   | 'update_allowlist'
@@ -287,7 +287,7 @@ export interface PluginInfo {
   builtin?: boolean;
   /**
    * 运行形态：`in_process` = 实现编译在 Core 进程内；`subprocess` = 实现由
-   * 独立子进程提供（Core 侧只有启停门控，如 QQ 适配器）。
+   * 独立子进程提供（Core 侧只有启停门控，如 QQ 实例）。
    *
    * 与 `builtin` **正交**：`builtin` 说来源，`runtime` 说代码在哪跑。旧 Core
    * 缺失该字段 = 进程内。
@@ -364,7 +364,7 @@ export interface ContextBlockInfo {
 }
 
 export interface TimelineSource {
-  adapter_name: string;
+  instance_name: string;
   platform: string;
   user_id: string;
   user_name: string;
@@ -529,13 +529,13 @@ export type BackendCommand =
       };
     }
   | { CancelRequestedWork: { session_id: string; all: boolean; team_id?: string | null } }
-  | { StartAdapter: { name: string } }
-  | { StopAdapter: { name: string } }
-  | { RestartAdapter: { name: string } }
-  | 'RequestAdapterStatus'
-  // ── 适配器泛化（02a · 2026-10）：统一 custom op 命令（core echo-protocol）──
-  // 旧命令的可选 `adapter` 字段升级为必填顶层 `adapter`；method 见 AdapterOpMethod。
-  | { InvokeAdapterOp: { adapter: string; method: string; payload: Record<string, unknown> } }
+  | { StartInstance: { name: string } }
+  | { StopInstance: { name: string } }
+  | { RestartInstance: { name: string } }
+  | 'RequestInstanceStatus'
+  // ── 实例泛化（02a · 2026-10）：统一 custom op 命令（core echo-protocol）──
+  // 旧命令的可选 `instance` 字段升级为必填顶层 `instance`；method 见 InstanceOpMethod。
+  | { InvokeInstanceOp: { instance: string; method: string; payload: Record<string, unknown> } }
   | { RequestWorkspaceSessions: { team_id?: string | null } }
   | { SaveWorkspaceSession: { team_id?: string | null; session: WorkspaceSessionInfo } }
   | { DeleteWorkspaceSession: { team_id?: string | null; id: string } }
@@ -557,8 +557,8 @@ export type BackendCommand =
       };
     }
   | { RequestBrowseDirectories: { path?: string | null } }
-  | 'StartAllAdapters'
-  | 'StopAllAdapters'
+  | 'StartAllInstances'
+  | 'StopAllInstances'
   | 'RequestSelfUpdate'
   | 'RequestSelfUpdateStatus'
   | { MigrateSession: { session_id: string; team_id?: string | null; target_peer: string } }
@@ -575,11 +575,11 @@ export type BackendCommand =
 // ── BackendEvent（外部标签枚举）────────────────────────────────────────────
 
 export type BackendEvent =
-  | { AdapterStateChanged: { adapter_name: string; connected: boolean; self_id: string | null } }
+  | { InstanceStateChanged: { instance_name: string; connected: boolean; self_id: string | null } }
   | {
       MessageReceived: {
         session_id: string;
-        adapter_name: string;
+        instance_name: string;
         platform: string;
         user_id: string;
         user_name: string;
@@ -746,12 +746,12 @@ export type BackendEvent =
         success: boolean;
       };
     }
-  | { AdapterList: { adapters: AdapterStatus[] } }
-  // ── 适配器泛化（02a · 2026-10）：统一 custom op 事件（core echo-protocol）──
-  // `AdapterOpResult.result` 线上 null 时省略（故可选）；`error` 缺省不存在，
-  // 消费侧统一读 `error ?? null`。`AdapterState.state` = 适配器状态文档整文档。
-  | { AdapterOpResult: { adapter: string; method: string; result?: unknown; error?: string | null } }
-  | { AdapterState: { adapter: string; state: unknown } }
+  | { InstanceList: { instances: InstanceStatus[] } }
+  // ── 实例泛化（02a · 2026-10）：统一 custom op 事件（core echo-protocol）──
+  // `InstanceOpResult.result` 线上 null 时省略（故可选）；`error` 缺省不存在，
+  // 消费侧统一读 `error ?? null`。`InstanceState.state` = 实例状态文档整文档。
+  | { InstanceOpResult: { instance: string; method: string; result?: unknown; error?: string | null } }
+  | { InstanceState: { instance: string; state: unknown } }
   | {
       WorkspaceSessions: {
         team_id?: string | null;

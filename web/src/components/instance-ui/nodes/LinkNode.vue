@@ -40,7 +40,7 @@ watch(
 </script>
 
 <template>
-  <div v-if="safe" class="adapter-node link-node" :data-node-key="nodeKey">
+  <div v-if="safe" class="instance-node link-node" :data-node-key="nodeKey">
     <a class="link-node__anchor" :href="url" target="_blank" rel="noopener noreferrer">
       {{ node.label || url }}
     </a>

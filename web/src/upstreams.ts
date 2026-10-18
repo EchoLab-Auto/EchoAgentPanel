@@ -6,14 +6,14 @@
 
 import { state } from './store';
 import { panelFetch } from './connection';
-import { dropCoreAdapterChannel } from './adapterOps';
+import { dropCoreInstanceChannel } from './instanceOps';
 import type { UpstreamStatus } from './state';
 
 /**
  * 上一帧上游快照：`name → connectivity`（diff 基准）。
  *
  * 离线/移除检测（02a §5.4-1）：条目从上游列表**消失** 或 `connectivity`
- * `online → offline` ⇒ `dropCoreAdapterChannel(name)` 清理该 core 的适配器
+ * `online → offline` ⇒ `dropCoreInstanceChannel(name)` 清理该 core 的实例
  * 通道（UI 文档 + pending + 在途 Promise + onCoreDropped 通知）。
  * 清理延迟 ≤ 一个轮询窗（8s）；删除路径另有 removeSessionsOfCore 即时兜底。
  */
@@ -30,7 +30,7 @@ export async function refreshUpstreams(): Promise<void> {
       for (const [name, connectivity] of lastUpstreams) {
         const now = next.find(u => u.name === name)?.connectivity;
         if (now === undefined || (connectivity === 'online' && now === 'offline')) {
-          dropCoreAdapterChannel(name);
+          dropCoreInstanceChannel(name);
         }
       }
     }

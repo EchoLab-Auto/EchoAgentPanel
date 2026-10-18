@@ -105,7 +105,7 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
 
   it('interaction 类插件单列「交互」分组，不混入管理面', () => {
     const wrapper = mountModal();
-    // 回归：分组曾按「非适配器即管理面」粗分，把交互类插件归入管理面。
+    // 回归：分组曾按「非实例即管理面」粗分，把交互类插件归入管理面。
     expect(wrapper.text()).toContain('交互（1）');
     expect(wrapper.text()).toContain('交互示例');
   });

@@ -70,9 +70,9 @@ function remove(raw: unknown) {
 </script>
 
 <template>
-  <div class="adapter-node list-editor-node" :class="{ 'is-pending': pending }" :data-node-key="nodeKey">
+  <div class="instance-node list-editor-node" :class="{ 'is-pending': pending }" :data-node-key="nodeKey">
     <div class="list-editor-node__head">
-      <span v-if="node.label" class="adapter-node__label">{{ node.label }}</span>
+      <span v-if="node.label" class="instance-node__label">{{ node.label }}</span>
       <NeumorphismBadge :value="shown.length" show-zero />
     </div>
 
@@ -118,8 +118,8 @@ function remove(raw: unknown) {
           添加
         </NeumorphismButton>
       </div>
-      <p v-if="notice" class="adapter-node__hint">{{ notice }}</p>
-      <p v-else-if="node.hint" class="adapter-node__hint">{{ node.hint }}</p>
+      <p v-if="notice" class="instance-node__hint">{{ notice }}</p>
+      <p v-else-if="node.hint" class="instance-node__hint">{{ node.hint }}</p>
       <NeumorphismAlert
         v-if="error"
         type="error"

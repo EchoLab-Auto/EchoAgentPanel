@@ -76,7 +76,7 @@ describe('侧栏列显隐：登记（结构）与门控（内容）解耦', () =
       writable: true,
     });
     state.teams = [{ id: 'alix', name: 'Alix', enabled: true, sessions: 0 } as never];
-    state.adapters = [];
+    state.instances = [];
     state.branchTabs = {};
   });
 
