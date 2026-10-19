@@ -342,6 +342,45 @@ export function checklistsForSession(state: AppState, sessionId: string): Checkl
   return state.checklists[checklistKey(state.activeRegion, state.activeTeamId, sessionId)] ?? [];
 }
 
+/** `state.browseDirectories` 常驻上限（目录选择器的浏览结果缓存）。 */
+export const BROWSE_CACHE_LIMIT = 32;
+
+/** `state.sessions` 常驻上限（按 `last_active` 保留最近的）。 */
+export const SESSIONS_LIMIT = 500;
+
+/** `sessionHistory` 常驻上限：超过即按"最久未写入"淘汰（不含 `keep`）。 */
+export const SESSION_HISTORY_LIMIT = 12;
+
+/**
+ * 修剪会话历史快照（2026-10 内存治理）。
+ *
+ * `state.sessionHistory` 是「按会话派生的显示历史」缓存：每次激活会话都会
+ * 拉一份（上限 1000 条）。此前上限 64 份、按**插入序**淘汰——用户逛过的
+ * 会话越多，常驻内存越大，且淘汰的可能是刚用过的那份。
+ *
+ * 现在：上限 [`SESSION_HISTORY_LIMIT`]；`keep`（本次写入的会话）视为最近
+ * 使用，其余按插入序淘汰最旧的。同时把它移回末尾以维持"末尾 = 最近使用"。
+ */
+function pruneSessionHistory(state: AppState, keep: string): void {
+  const store = state.sessionHistory;
+  const entries = Object.entries(store);
+  if (!(keep in store)) {
+    // 极端情况（并发写入竞争）：只做数量裁剪。
+    for (let i = 0; i < entries.length - SESSION_HISTORY_LIMIT; i++) delete store[entries[i]![0]];
+    return;
+  }
+  const current = store[keep]!;
+  delete store[keep]; // 先摘出，再插回末尾（维持最近使用序）
+  store[keep] = current;
+  const keys = Object.keys(store);
+  const excess = keys.length - SESSION_HISTORY_LIMIT;
+  for (let i = 0; i < excess; i++) {
+    const victim = keys[i]!;
+    if (victim === keep) continue;
+    delete store[victim];
+  }
+}
+
 /** 会话消息 = 派生历史快照 ⊕ 窗口增量（工具条目按 tool_call_id 就地补丁）。
  * 无历史快照时退回窗口过滤（现行为）。共享显示窗口（每人格 1024 条 FIFO）
  * 淘汰旧会话条目后，快照让无近期活动的会话仍能显示完整历史（2026-10）。 */
@@ -1394,8 +1433,13 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         truncated: !!e.truncated,
         baseSeq: e.max_seq ?? fallbackBase,
       };
-      const keys = Object.keys(state.sessionHistory);
-      if (keys.length > 64) delete state.sessionHistory[keys[0]];
+      // 常驻上限（2026-10 内存治理）：此前是最多 **64** 份快照、且按插入序
+      // 淘汰（与"最近用过"无关）。实测每份 ≤1000 条、真实内容约 300 字节/条
+      // → 逛得多时几十 MB 常驻，GC 压力随使用时长上升。
+      //
+      // 现在：上限 12 份；**本次写入的会话视为最近使用**（重新插入到末尾），
+      // 淘汰最旧的**非本次**会话——不会把刚拉到的快照立刻删掉。
+      pruneSessionHistory(state, key);
       return state;
     }
     case 'AgentOutput': {
@@ -1506,6 +1550,15 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
           .filter((s, index) => index === adoptIdx || !isSame(s));
       } else if (incomingCore != null || same.length === 0) {
         state.sessions.push(e.session);
+        // 会话列表上限（2026-10 内存治理）：QQ 群多时 `SessionUpdated` 会
+        // 持续新增，此前只增不裁（`SessionSwitcher` 全量渲染所有条目）。
+        // 按 last_active 保留最近的，避免长时间运行后列表无界增长。
+        if (state.sessions.length > SESSIONS_LIMIT) {
+          state.sessions = state.sessions
+            .slice()
+            .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
+            .slice(0, SESSIONS_LIMIT);
+        }
       }
       return state;
     }
@@ -1552,6 +1605,13 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         entries: e.entries ?? [],
         error: e.error ?? null,
       };
+      // 上限（2026-10 内存治理）：目录选择器每次进目录/换位置都会留下一条
+      // 结果（含整目录的 `entries`）。长时间浏览会累积成千上万条文件项且
+      // 永不释放——只保留最近若干条（超出按插入序淘汰最旧）。
+      const browseKeys = Object.keys(state.browseDirectories);
+      for (let i = 0; i < browseKeys.length - BROWSE_CACHE_LIMIT; i++) {
+        delete state.browseDirectories[browseKeys[i]!];
+      }
       return state;
     }
     case 'RemoteApiProfiles': {

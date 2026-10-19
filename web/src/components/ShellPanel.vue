@@ -71,18 +71,32 @@ function statusLabel(entry: { status: string }): string {
   }
 }
 
-// 新输出到达时自动滚动到底部
-watch(
-  () => state.shellTerminals,
-  () => {
-    void nextTick(() => {
-      for (const el of Object.values(terminalEls.value)) {
-        if (el) el.scrollTop = el.scrollHeight;
-      }
-    });
-  },
-  { deep: true },
+// 新输出到达时自动滚动到底部。
+//
+// **定向签名**（2026-10 内存/性能治理）：此前是 `watch(..., { deep: true })`
+// ——`ShellExecOutput` 每个输出块都会触发一次**整棵终端树**的深度遍历
+// （所有会话 × 所有历史条目的每个字段），终端开久了每次输出都要遍历几千个
+// 属性；随后还要对每个终端读 `scrollHeight`（强制布局）。
+//
+// 现在只读"每个会话最后一条的输出长度与 seq"这一串标量：输出增长必然
+// 改变长度（同长度替换在 shell 输出里不出现），因此语义等价而成本从
+// O(全部条目) 降到 O(终端数)。
+const shellTailSignature = computed(() =>
+  Object.entries(state.shellTerminals)
+    .map(([key, entries]) => {
+      const last = entries[entries.length - 1];
+      return `${key}:${entries.length}:${last?.seq ?? 0}:${last?.output.length ?? 0}:${last?.status ?? ''}`;
+    })
+    .join('|'),
 );
+
+watch(shellTailSignature, () => {
+  void nextTick(() => {
+    for (const el of Object.values(terminalEls.value)) {
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  });
+});
 </script>
 
 <template>

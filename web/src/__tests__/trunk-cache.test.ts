@@ -339,3 +339,81 @@ describe('trunk-cache 多窗口共存', () => {
     expect(Object.keys(teams)).toEqual(['teamB']);
   });
 });
+
+// ── 内存/周期落盘治理（2026-10）───────────────────────────────────────────
+//
+// 背景：`installTrunkCacheAutosave` 每 10s 落盘一次。改前每次都做
+//   JSON.parse(既有文档) + JSON.stringify(全部 team) + localStorage.setItem
+// 实测 2 个 team × 1024 条满载 = **24 ms / 次**（4× CPU 约 96 ms）——
+// 长期使用后表现为"每隔十秒卡一下"，而且缓存越大越重。
+//
+// 现在的三级短路：① 签名（每 team 的 `key|seq|条目数`）未变直接返回；
+// ② 序列化结果与上次相同 → 只更新签名；③ 写盘失败静默放弃。
+describe('trunk-cache 周期落盘治理', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('内容未变时第二次落盘不写盘（签名短路，连 stringify 都不做）', async () => {
+    localStorage.setItem('echo-panel-active-team', 'A');
+    const { saveTrunkCacheNow, resetTrunkCacheStateForTests } = await import('../trunk-cache');
+    const { state } = await import('../store');
+    resetTrunkCacheStateForTests();
+    state.teamTimelines['A'] = { seq: 1, msgs: [msg('user', 'x')] as never };
+
+    const spy = vi.spyOn(localStorage, 'setItem');
+    saveTrunkCacheNow();
+    expect(spy).toHaveBeenCalledTimes(1);
+    // 没有变化 → 直接返回
+    saveTrunkCacheNow();
+    saveTrunkCacheNow();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('内容变化后重新落盘（签名变化不被误判为"没变"）', async () => {
+    localStorage.setItem('echo-panel-active-team', 'A');
+    const { saveTrunkCacheNow, resetTrunkCacheStateForTests } = await import('../trunk-cache');
+    const { state } = await import('../store');
+    resetTrunkCacheStateForTests();
+    state.teamTimelines['A'] = { seq: 1, msgs: [msg('user', 'x')] as never };
+    const spy = vi.spyOn(localStorage, 'setItem');
+    saveTrunkCacheNow();
+    // seq 推进（Core 对工具条目就地更新 / ���条目到达 = 水位推进）
+    state.teamTimelines['A'].seq = 2;
+    saveTrunkCacheNow();
+    expect(spy).toHaveBeenCalledTimes(2);
+    // 条目数变化同样必须触发
+    state.teamTimelines['A'].msgs.push(msg('backend', 'y', 2) as never);
+    saveTrunkCacheNow();
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('落盘瘦身：剥掉内嵌 data URI，保留 /media 引用', async () => {
+    localStorage.setItem('echo-panel-active-team', 'A');
+    const { serializeTrunkCache, resetTrunkCacheStateForTests } = await import('../trunk-cache');
+    const { state } = await import('../store');
+    resetTrunkCacheStateForTests();
+    const huge = `data:image/png;base64,${'A'.repeat(4000)}`;
+    state.teamTimelines['A'] = {
+      seq: 5,
+      msgs: [
+        { key: 'k1', role: 'user', content: '带截图', time: 1, images: [huge] },
+        { key: 'k2', role: 'user', content: '带文件图', time: 2, images: ['/media/abc.png'] },
+      ] as never,
+    };
+    const raw = serializeTrunkCache() as string;
+    expect(raw).toBeTruthy();
+    // data URI 不进缓存（否则一次截图就挤爆配额、并拖慢每次 stringify）
+    expect(raw).not.toContain('data:image/png;base64');
+    const parsed = JSON.parse(raw) as { teams: Record<string, { msgs: Array<{ images?: string[] }> }> };
+    expect(parsed.teams['A'].msgs[0].images).toBeUndefined();
+    // 轻量的 `/media/<id>` 引用保留（刷新后图片照常显示）
+    expect(parsed.teams['A'].msgs[1].images).toEqual(['/media/abc.png']);
+  });
+});

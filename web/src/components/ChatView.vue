@@ -555,6 +555,30 @@ const hiddenMessageCount = computed(() =>
   Math.max(0, sourceMessages.value.length - Math.min(sourceMessages.value.length, renderWindow.value)),
 );
 
+/**
+ * Core 那边还有更早的条目（`SessionHistory.total > 已加载`）。
+ *
+ * 渐进式拉取（2026-10）后，"本地已加载的都渲染完"不再等于"没有更早的了"
+ * ——首拉只拿 300 条，而事件日志里的会话可能有一千多条。此时按钮必须
+ * **仍然显示**（否则用户再也够不到更早的历史），点击改为向 Core 多拉一档。
+ */
+const olderInCore = computed(() => {
+  const sid = props.sessionId;
+  if (!sid || sid === 'global') return false;
+  const hist = state.sessionHistory[checklistKey(state.activeRegion, props.activeTeamId ?? null, sid)];
+  return hist ? hist.total > hist.messages.length : false;
+});
+
+/** 「加载更早」入口是否显示。 */
+const showEarlier = computed(() => hiddenMessageCount.value > 0 || olderInCore.value);
+
+/** 入口文案：本地还有就报数，只有远端有就只说"更早"。 */
+const earlierLabel = computed(() =>
+  hiddenMessageCount.value > 0
+    ? `加载更早的消息（还有 ${hiddenMessageCount.value} 条）`
+    : '加载更早的消息',
+);
+
 // **渲染对象复用**（2026-10 性能修复，见 chat-message-cache.ts）：数据链
 // （sessionMessagesFor 的浅拷贝 + toChatMessage）每次都产出全新对象，若直接
 // 用它做 v-for 的 :message，任意一条变化都会让 1000+ 个 MessageItem 全部
@@ -603,15 +627,37 @@ const messages = computed<ChatMessage[]>(() => {
 
 // 会话历史补拉（2026-10）：共享显示窗口 FIFO 淘汰后旧会话条目不可见——
 // 激活会话时从事件日志派生（Core `RequestSessionHistory`）。
+//
+// **渐进式拉取**（2026-10 内存/切会话治理）：此前固定 `limit: 1000`，而渲染
+// 窗口只有 200 条——切一次会话就白拉 5 倍的量（Core 派生 + 传输 +
+// `toDisplayMessages` 全量转换 + 写 store，实测切会话 33 ms）。现在按需：
+// 初始 `HISTORY_STEP` 条；用户点「加载更早」把窗口扩到已加载量之外时再
+// 加拉一档（见 `loadEarlier`）。
+const HISTORY_STEP = 300;
+const historyLimit = ref(HISTORY_STEP);
+
 watch(
-  [() => props.sessionId, () => props.activeTeamId, () => state.connected, () => state.activeRegion],
+  [
+    () => props.sessionId,
+    () => props.activeTeamId,
+    () => state.connected,
+    () => state.activeRegion,
+    historyLimit,
+  ],
   () => {
     const sid = props.sessionId;
     if (!state.connected || !sid || sid === 'global') return;
-    sendCommand({ RequestSessionHistory: { team_id: props.activeTeamId ?? null, session_id: sid, limit: 1000 } });
+    sendCommand({
+      RequestSessionHistory: { team_id: props.activeTeamId ?? null, session_id: sid, limit: historyLimit.value },
+    });
   },
   { immediate: true },
 );
+
+// 切会话 / 切 agent：拉取档位复位（新会话从最新一屏开始）。
+watch([() => props.sessionId, () => props.activeTeamId], () => {
+  historyLimit.value = HISTORY_STEP;
+});
 
 // ── 连续工作条目合并（2026-10 一般化；2026-09-19 起仅合并工具调用）──
 // 工具调用与思考（推理）连续出现时合成一条 WorkRunGroup：折叠态 = 一排
@@ -747,6 +793,12 @@ function rowKey(row: ChatRow): string {
 async function loadEarlier(): Promise<void> {
   const list = listRef.value;
   const fromBottom = list ? list.scrollHeight - list.scrollTop : 0;
+  // 已加载的都渲染完了还要更早 → 向 Core 多拉一档（渐进式历史）。
+  // 此时先不扩窗：新条目到达后 `hiddenMessageCount` 自然 > 0，入口仍在。
+  if (renderWindow.value >= sourceMessages.value.length && props.sessionId !== 'global') {
+    historyLimit.value += HISTORY_STEP;
+    return;
+  }
   renderWindow.value += WINDOW_STEP;
   const restore = () => {
     if (list) list.scrollTop = list.scrollHeight - fromBottom;
@@ -1121,14 +1173,14 @@ function mediaSrc(img: string): string {
       </div>
       <!-- 渲染窗口入口（2026-10 P0）：消息只渲染尾部 200 行，更早的按需
            扩窗——全量 v-for 是"越用越卡"的主因（见 setup 里的实测表）。 -->
-      <div v-if="hiddenMessageCount" class="chat-view__earlier">
+      <div v-if="showEarlier" class="chat-view__earlier">
         <button
           type="button"
           class="chat-view__earlier-btn"
           data-testid="chat-load-earlier"
           @click="loadEarlier"
         >
-          加载更早的消息（还有 {{ hiddenMessageCount }} 条）
+          {{ earlierLabel }}
         </button>
       </div>
       <template v-for="row in messageRows" :key="rowKey(row)">

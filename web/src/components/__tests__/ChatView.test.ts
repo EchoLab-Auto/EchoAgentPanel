@@ -577,7 +577,10 @@ describe('会话历史补拉（RequestSessionHistory，2026-10）', () => {
     const calls = historyCallsFor('sess-open');
     expect(calls.length, '未发出（或重复发出）会话历史补拉').toBe(1);
     expect(calls[0][0]).toEqual({
-      RequestSessionHistory: { team_id: 'alix', session_id: 'sess-open', limit: 1000 },
+      // 渐进式拉取（2026-10 内存/切会话治理）：首拉 300 条（渲染窗口 200
+      // + 余量），用户点「加载更早」把窗口扩到界外时再 +300。
+      // 此前固定 1000 条——切一次会话白拉 5 倍量（实测 33 ms）。
+      RequestSessionHistory: { team_id: 'alix', session_id: 'sess-open', limit: 300 },
     });
     wrapper.unmount();
   });
@@ -607,7 +610,7 @@ describe('会话历史补拉（RequestSessionHistory，2026-10）', () => {
     const calls = historyCallsFor('sess-reconnect');
     expect(calls.length).toBe(1);
     expect(calls[0][0]).toEqual({
-      RequestSessionHistory: { team_id: null, session_id: 'sess-reconnect', limit: 1000 },
+      RequestSessionHistory: { team_id: null, session_id: 'sess-reconnect', limit: 300 },
     });
     wrapper.unmount();
   });
@@ -698,6 +701,96 @@ describe('ChatView 渲染窗口（P0）', () => {
     const wrapper = mount(ChatView, { props: { sessionId: 'sess-window-small' }, global: { stubs } });
     expect(wrapper.findAll('.stub-item').length).toBe(50);
     expect(wrapper.find('[data-testid="chat-load-earlier"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+// ── 渐进式历史拉取（2026-10 内存/切会话治理）──────────────────────────────
+//
+// 改前固定 `limit: 1000`，而渲染窗口只有 200 条：切一次会话白拉 5 倍量
+// （Core 派生 + 传输 + toDisplayMessages 全量转换 + 写 store，实测 33 ms）。
+// 现在首拉 300，用户把窗口扩到已加载量之外时再 +300。
+describe('ChatView 渐进式历史', () => {
+  const stubs = { MessageItem: MessageItemStub, ChatComposer: ChatComposerStub };
+  const sendMock = vi.mocked(sendCommand);
+
+  beforeEach(() => {
+    sendMock.mockClear();
+    state.connected = true;
+    state.trunk = [];
+    state.sessionHistory = {};
+    state.teams = [];
+    state.sessions = [];
+    state.activities = {};
+    state.activeRegion = null;
+    state.activeTeamId = null;
+    state.knownCores = new Set();
+  });
+
+  function limitsFor(sessionId: string): number[] {
+    return sendMock.mock.calls
+      .map(([command]) => command as { RequestSessionHistory?: { session_id?: string; limit?: number } })
+      .filter((payload) => payload?.RequestSessionHistory?.session_id === sessionId)
+      .map((payload) => payload.RequestSessionHistory!.limit!);
+  }
+
+  it('首拉 300；本地渲染完后入口仍在（Core 侧还有更早）→ 再拉 300', async () => {
+    const wrapper = mount(ChatView, { props: { sessionId: 'sess-progressive' }, global: { stubs } });
+    expect(limitsFor('sess-progressive')).toEqual([300]);
+
+    // 灌 300 条（= 首拉量）。同时给一份 `total: 1200, truncated: true` 的快照，
+    // 表示事件日志里还有更早的 900 条没拉下来。
+    const list: DisplayMessage[] = [];
+    for (let i = 0; i < 300; i++) {
+      list.push({ key: `p-${i}`, role: 'backend', content: `m${i}`, sessionId: 'sess-progressive', time: 1000 + i });
+    }
+    state.trunk = list;
+    dispatch(
+      {
+        SessionHistory: {
+          team_id: null,
+          session_id: 'sess-progressive',
+          messages: list.map((m, i) => ({
+            kind: 'backend' as const,
+            content: m.content,
+            session_id: 'sess-progressive',
+            time: m.time,
+            seq: i + 1,
+          })),
+          total: 1200,
+          truncated: true,
+          max_seq: 1200,
+        },
+      },
+      null,
+    );
+    await nextTick();
+    expect(wrapper.findAll('.stub-item').length).toBe(200); // 渲染窗口仍是 200
+
+    // ① 扩窗到 300（仍在本地已加载范围内）
+    await wrapper.find('[data-testid="chat-load-earlier"]').trigger('click');
+    await nextTick();
+    await nextTick();
+    expect(wrapper.findAll('.stub-item').length).toBe(300);
+
+    // ② 本地都渲染完了，但 Core 侧还有 → 入口仍在，文案退化为不带计数
+    const btn = wrapper.find('[data-testid="chat-load-earlier"]');
+    expect(btn.exists()).toBe(true);
+    expect(btn.text()).toContain('加载更早的消息');
+    expect(btn.text()).not.toContain('还有');
+
+    // ③ 再点 → 向 Core 多拉一档（300 → 600）
+    await btn.trigger('click');
+    await nextTick();
+    expect(limitsFor('sess-progressive')).toEqual([300, 600]);
+    wrapper.unmount();
+  });
+
+  it('切会话把拉取档位复位回 300', async () => {
+    const wrapper = mount(ChatView, { props: { sessionId: 'sess-a' }, global: { stubs } });
+    expect(limitsFor('sess-a')).toEqual([300]);
+    await wrapper.setProps({ sessionId: 'sess-b' });
+    await nextTick();
+    expect(limitsFor('sess-b')).toEqual([300]);
     wrapper.unmount();
   });
 });

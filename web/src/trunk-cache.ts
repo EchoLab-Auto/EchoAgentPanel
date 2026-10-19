@@ -52,8 +52,54 @@ interface CachePayload {
   teams: Record<string, CachedTeam>;
 }
 
-/** 最近一次写入的原文，避免无变化时空写（10s 一次的检查几乎零成本）。 */
+/** 最近一次写入的原文，避免无变化时空写。 */
 let lastWritten = '';
+/**
+ * 最近一次写入所对应的**廉价签名**（见 [`cacheSignature`]）。
+ *
+ * 用途：周期落盘前先花 ~0.02 ms 判断"内容有没有变"，变了才走
+ * `JSON.stringify`（实测 2048 条满载时 11 ms）。空闲阅读时每次检查的成本
+ * 因此归零——这是"用久了每 10 秒卡一下"的主因（4× CPU 上单次 24 ms）。
+ */
+let lastSignature = '';
+
+/**
+ * 缓存的廉价签名：每个 team 的 `(key, seq, 条目数)`。
+ *
+ * 为什么这三个量足够：`teamTimelines` 是**服务器投影**（实时推送只进
+ * `state.trunk`），它只在 `TrunkTimeline` 到达时变化；Core 对运行中工具
+ * 条目的就地更新也会推进该 team 的 `seq` 水位（`cached.seq = max(...)`）。
+ * 因此 (seq, 长度) 变化必然意味着内容变化，未变则一定没有内容变化。
+ */
+function cacheSignature(): string {
+  const parts: string[] = [];
+  for (const key of Object.keys(state.teamTimelines)) {
+    const cache = state.teamTimelines[key];
+    if (!cache || !Array.isArray(cache.msgs) || !cache.msgs.length) continue;
+    parts.push(`${key}\u0001${cache.seq}\u0001${cache.msgs.length}`);
+  }
+  parts.sort(); // 键序不应影响签名（对象插入序可能变）
+  return parts.join('\u0002');
+}
+
+/**
+ * 落盘瘦身：剥掉**内嵌 data URI**（截图粘贴的巨大 base64）。
+ *
+ * `images` 里合法的 `/media/<id>` 引用只有几十字符，保留；data URI 动辄
+ * 数百 KB，缓存它们既挤爆 localStorage 配额，又让每次 stringify 变慢——
+ * 而刷新后这些图片本来也只剩占位（`compactForDisplay` 的效果）。
+ */
+function slimForCache(msgs: DisplayMessage[]): DisplayMessage[] {
+  let changed = false;
+  const out = msgs.map((message) => {
+    if (!message.images || !message.images.length) return message;
+    const kept = message.images.filter((image) => !image.startsWith('data:'));
+    if (kept.length === message.images.length) return message;
+    changed = true;
+    return { ...message, images: kept.length ? kept : undefined };
+  });
+  return changed ? out : msgs;
+}
 
 /**
  * 当前选中的人格复合键 `(core, team_id)`；与 `state.teamTimelines` 键一致。
@@ -194,7 +240,7 @@ export function serializeTrunkCache(): string | null {
   const ownKeys = new Set<string>();
   for (const [key, cache] of entries) {
     ownKeys.add(key); // 先登记：即使本条超预算被跳过，也不该从旧文档里捡回来
-    const chunk = JSON.stringify({ seq: cache.seq, msgs: cache.msgs });
+    const chunk = JSON.stringify({ seq: cache.seq, msgs: slimForCache(cache.msgs) });
     if (chunk.length > MAX_SINGLE_CHARS || chunk.length > budget) continue;
     budget -= chunk.length;
     chunks.push(`${JSON.stringify(key)}:${chunk}`);
@@ -210,13 +256,26 @@ export function serializeTrunkCache(): string | null {
   return `{"v":${VERSION},"teams":{${chunks.join(',')}}}`;
 }
 
-/** 立即落盘（有变化才写）。配额满/隐私模式下静默放弃——缓存只是加速。 */
+/**
+ * 立即落盘（**有变化才写**）。配额满/隐私模式下静默放弃——缓存只是加速。
+ *
+ * 三级短路（2026-10 内存治理，实测 2048 条满载）：
+ * 1. 签名未变 → 直接返回（空闲阅读时成本 ≈ 0，改前每 10s 固定 24 ms）；
+ * 2. 序列化结果与上次相同 → 只更新签名，不写盘（省掉 setItem 的 10 ms）；
+ * 3. 写盘失败（配额满）→ 静默放弃，不影响功能。
+ */
 export function saveTrunkCacheNow(): void {
+  const signature = cacheSignature();
+  if (signature === lastSignature) return; // ① 内容没变：连 stringify 都不做
   const payload = serializeTrunkCache();
-  if (payload === null || payload === lastWritten) return;
+  if (payload === null || payload === lastWritten) {
+    lastSignature = signature;
+    return;
+  }
   try {
     localStorage.setItem(STORAGE_KEY, payload);
     lastWritten = payload;
+    lastSignature = signature;
   } catch {
     // 配额满等：放弃本次写入，不影响功能。
   }
@@ -258,4 +317,5 @@ export function installTrunkCacheAutosave(): () => void {
 /** 测试辅助：清掉"最近写入"记忆（模块级状态，跨用例隔离）。 */
 export function resetTrunkCacheStateForTests(): void {
   lastWritten = '';
+  lastSignature = '';
 }
