@@ -1450,6 +1450,54 @@ function togglePlugin(plugin: PluginInfo, enabled: boolean, targetCore?: string)
   sendCommand({ TogglePlugin: { id: plugin.id, enabled } }, targetCore);
 }
 
+/**
+ * 插件「重启」= 卸下 + 重新挂载（Core 的 `RestartPlugin`），**不改**启用状态。
+ *
+ * 与「关再开」的差别：不写 `disabled_plugins`、不触发配置持久化——纯粹让
+ * 插件按最新配置/外部状态重新初始化（子进程插件重连、实例插件重启进程）。
+ * 管理面插件同样受保护：重启 = 先断 management WS，Panel 立即失联。
+ */
+function restartPlugin(plugin: PluginInfo, targetCore?: string) {
+  if (plugin.id === MANAGEMENT_PANEL_PLUGIN_ID) {
+    addToast({
+      message:
+        '「管理面」插件承载 Panel 与 Core 的通信通道，重启会先断开这条通道（Panel 无法经界面恢复）。如需重载请重启 Core 服务。',
+      type: 'warning',
+      duration: 6000,
+    });
+    return;
+  }
+  if (!plugin.enabled) {
+    addToast({
+      message: '插件当前未启用——先启用再重启（未挂载的插件没有可重载的实例）。',
+      type: 'warning',
+      duration: 5000,
+    });
+    return;
+  }
+  sendCommand({ RestartPlugin: { id: plugin.id } }, targetCore);
+}
+
+/** 行内「重启」入口（列表行与管理面用同一套保护判定）。 */
+function quickRestartPlugin(p: PluginInfo) {
+  restartPlugin(p, pluginCoreEffective.value ?? undefined);
+}
+
+/**
+ * 插件的**配置来源层**（`plugins.toml` / `base.toml · layer 0`）。
+ *
+ * 空串 = 配置未提及（编译内置的缺省行为）。这条信息来自 Core 的分层合成，
+ * 与 `echo-agent-core dump-config` 同源——面板只做展示，不解释合成规则。
+ */
+function pluginConfigOrigin(p: PluginInfo): string {
+  return (p.config_origin ?? '').trim();
+}
+
+/** 挂载失败原因（与「用户主动禁用」区分开：两者 enabled 都是 false）。 */
+function pluginMountError(p: PluginInfo): string {
+  return (p.error ?? '').trim();
+}
+
 // ── 工具启停 ──
 function toggleTool(tool: ToolInfo, enabled: boolean) {
   sendCommand({ ToggleTool: { name: tool.name, enabled } });
@@ -2070,6 +2118,14 @@ watch(
                       <span v-else-if="pluginSemantic(p) === 'mode'" class="caps-mark caps-mark--system" title="互斥模式插件">
                         模式
                       </span>
+                      <span
+                        v-if="pluginMountError(p)"
+                        class="caps-mark caps-mark--err caps-mark--icon"
+                        :title="`装配失败：${pluginMountError(p)}`"
+                      >
+                        <PanelIcon name="warning" size="xs" tone="err" />
+                        失败
+                      </span>
                     </span>
                     <span class="caps-skill-item__quick" @click.stop>
                       <span
@@ -2079,12 +2135,23 @@ watch(
                       >
                         <PanelIcon name="lock" size="sm" tone="warn" aria-label="受保护" />
                       </span>
-                      <NeumorphismSwitch
-                        v-else
-                        :model-value="p.enabled"
-                        size="small"
-                        @change="quickTogglePlugin(p, $event)"
-                      />
+                      <template v-else>
+                        <button
+                          v-if="p.enabled"
+                          type="button"
+                          class="plugin-restart-btn"
+                          title="重启（卸下后重新挂载，不改启用状态）"
+                          aria-label="重启插件"
+                          @click="quickRestartPlugin(p)"
+                        >
+                          <PanelIcon name="refresh" size="xs" />
+                        </button>
+                        <NeumorphismSwitch
+                          :model-value="p.enabled"
+                          size="small"
+                          @change="quickTogglePlugin(p, $event)"
+                        />
+                      </template>
                     </span>
                   </div>
                   <div class="caps-skill-item__sub">
@@ -2703,8 +2770,18 @@ watch(
                   <PanelIcon name="lock" size="xs" tone="warn" />
                   受保护
                 </span>
+                <NeumorphismButton
+                  v-if="!pluginProtected(selectedPlugin) && selectedPlugin.enabled"
+                  size="small"
+                  variant="glass"
+                  title="卸下后重新挂载（不改启用状态、不写配置）"
+                  @click="restartPlugin(selectedPlugin!, pluginCoreEffective ?? undefined)"
+                >
+                  <PanelIcon name="refresh" size="xs" />
+                  重启
+                </NeumorphismButton>
                 <NeumorphismSwitch
-                  v-else
+                  v-if="!pluginProtected(selectedPlugin)"
                   :model-value="selectedPlugin.enabled"
                   size="small"
                   active-text="启用"
@@ -2715,6 +2792,19 @@ watch(
             </div>
 
             <p class="skill-detail__desc">{{ selectedPlugin.description || '（无描述）' }}</p>
+
+            <!-- 装配失败：与「用户主动禁用」区分开（两者 enabled 都是 false） -->
+            <div v-if="pluginMountError(selectedPlugin)" class="plugin-mount-error">
+              <PanelIcon name="warning" size="sm" tone="err" />
+              <div>
+                <strong>装配失败（已跳过挂载）</strong>
+                <p>{{ pluginMountError(selectedPlugin) }}</p>
+                <p class="muted">
+                  常见原因：`plugins.toml` 里的 `command` 路径不存在/不可执行、插件进程启动后握手失败。
+                  修好后点「重启」即可重试，无需重启 Core。
+                </p>
+              </div>
+            </div>
 
             <!-- 带来什么：包内工具/技能（可点击跳转） -->
             <div class="detail-section">
@@ -2799,6 +2889,11 @@ watch(
                 <div class="skill-source__row">
                   <span class="muted">Author</span>
                   <code>{{ selectedPlugin.author || '—' }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">配置来源</span>
+                  <code v-if="pluginConfigOrigin(selectedPlugin)">{{ pluginConfigOrigin(selectedPlugin) }}</code>
+                  <code v-else class="muted">未在配置中声明（缺省内置行为）</code>
                 </div>
               </div>
             </div>
@@ -3518,6 +3613,53 @@ watch(
 }
 .caps-mark--warn {
   color: var(--panel-err);
+}
+/* 装配失败徽标（挂载被跳过）：与「用户主动禁用」区分，红色强调 */
+.caps-mark--err {
+  color: var(--panel-err);
+  background: color-mix(in srgb, var(--panel-err) 12%, transparent);
+}
+/* 行内「重启」按钮：hover 才出现（与开关同排，视觉重量低于开关） */
+.plugin-restart-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nm-text-secondary);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.plugin-restart-btn:hover {
+  color: var(--panel-accent);
+  background: color-mix(in srgb, var(--panel-accent) 12%, transparent);
+}
+/* 详情：装配失败提示块 */
+.plugin-mount-error {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-err) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-err) 28%, transparent);
+}
+.plugin-mount-error strong {
+  display: block;
+  font-size: 12px;
+  color: var(--panel-err);
+}
+.plugin-mount-error p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
 }
 .caps-skill-item__quick {
   margin-left: auto;

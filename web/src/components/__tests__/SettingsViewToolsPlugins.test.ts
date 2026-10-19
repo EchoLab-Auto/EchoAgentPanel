@@ -433,6 +433,69 @@ describe('SettingsView 插件工作台', () => {
     });
   });
 
+  it('行内「重启」：已启用且不受保护的插件可发 RestartPlugin，不改启用状态', async () => {
+    const wrapper = await openCategory('插件');
+    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
+    const btn = qqRow.find('.plugin-restart-btn');
+    expect(btn.exists()).toBe(true);
+    await btn.trigger('click');
+    expect(vi.mocked(sendCommand).mock.calls.map((c) => c[0])).toContainEqual({
+      RestartPlugin: { id: 'echo-agent.adapter.qq' },
+    });
+    // 重启 ≠ 启停：不得顺带发 TogglePlugin（否则会在配置里留下禁用记录）。
+    expect(
+      vi.mocked(sendCommand).mock.calls.map((c) => c[0]).some(
+        (cmd) => typeof cmd === 'object' && cmd !== null && 'TogglePlugin' in cmd,
+      ),
+    ).toBe(false);
+    // 受保护（管理面）不给重启按钮。
+    const mgmtRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('管理面'))!;
+    expect(mgmtRow.find('.plugin-restart-btn').exists()).toBe(false);
+  });
+
+  it('未启用的插件不给行内重启按钮（没有可重载的实例）', async () => {
+    state.plugins = state.plugins.map((p) =>
+      p.id === 'echo-agent.adapter.qq' ? { ...p, enabled: false } : p,
+    );
+    const wrapper = await openCategory('插件');
+    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
+    expect(qqRow.find('.plugin-restart-btn').exists()).toBe(false);
+  });
+
+  it('装配失败：行内出「失败」徽标，详情出失败原因块（与主动禁用区分）', async () => {
+    const reason = 'plugin echo-agent.adapter.qq mount failed: command not found';
+    state.plugins = state.plugins.map((p) =>
+      p.id === 'echo-agent.adapter.qq' ? { ...p, enabled: false, error: reason } : p,
+    );
+    const wrapper = await openCategory('插件');
+    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
+    expect(qqRow.find('.caps-mark--err').exists()).toBe(true);
+    expect(qqRow.find('.caps-mark--err').text()).toContain('失败');
+
+    await qqRow.trigger('click');
+    const banner = wrapper.find('.plugin-mount-error');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain('装配失败');
+    expect(banner.text()).toContain('command not found');
+  });
+
+  it('配置来源层：技术信息里显示 plugins.toml 的哪一层；缺省说明未声明', async () => {
+    state.plugins = state.plugins.map((p) =>
+      p.id === 'echo-agent.adapter.qq' ? { ...p, config_origin: 'base.toml · layer 0' } : p,
+    );
+    const wrapper = await openCategory('插件');
+    const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
+    await qqRow.trigger('click');
+    // 技术信息默认折叠 → 展开
+    const infoTitle = wrapper
+      .findAll('.detail-section__title')
+      .find((t) => t.text().includes('技术信息'))!;
+    await infoTitle.trigger('click');
+    const source = wrapper.find('.skill-source');
+    expect(source.text()).toContain('配置来源');
+    expect(source.text()).toContain('base.toml · layer 0');
+  });
+
   it('插件详情：四分区 + 成员 chips + 启停影响文案', async () => {
     const wrapper = await openCategory('插件');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;

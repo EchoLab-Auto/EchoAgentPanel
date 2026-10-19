@@ -297,6 +297,20 @@ export interface PluginInfo {
   core?: string | null;
   /** 所属包 id（横跨 plugin+tool+skill 的组合标签；未声明 = 插件 id） */
   package?: string;
+  /**
+   * 挂载失败原因（Core 的 `PluginDescriptor::error`）。
+   *
+   * 区分「用户主动禁用」与「装配失败被跳过」——两者 `enabled` 都是 false，
+   * 但后者需要人去看原因。旧 Core 不发该字段。
+   */
+  error?: string | null;
+  /**
+   * 声明该插件的**配置层**（`plugins.toml` / `base.toml · layer 0`）。
+   *
+   * 空串/缺失 = 配置未提及（编译内置的缺省行为）。回答「这行为什么长这样、
+   * 要去哪一层改它」——与 Core 的 `dump-config` 同源。
+   */
+  config_origin?: string;
 }
 
 export interface ApiProfileInfo {
@@ -480,6 +494,7 @@ export type BackendCommand =
   | { DeleteSkill: { name: string } }
   | 'RequestPluginsList'
   | { TogglePlugin: { id: string; enabled: boolean } }
+  | { RestartPlugin: { id: string } }
   | 'RequestTeamsList'
   | { ToggleTeam: { id: string; enabled: boolean } }
   | {
