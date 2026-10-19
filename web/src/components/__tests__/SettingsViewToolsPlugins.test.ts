@@ -496,6 +496,54 @@ describe('SettingsView 插件工作台', () => {
     expect(source.text()).toContain('base.toml · layer 0');
   });
 
+  it('来源维度：builtin=false 出「外部来源」徽标（与运行位置分组正交）', async () => {
+    // 数据插件：manifest 来自插件目录（builtin=false）但实现在进程内。
+    // 分组按运行位置 → 留在「内部插件」组；来源徽标要能看出它不随二进制发布。
+    state.plugins = [
+      ...state.plugins,
+      {
+        id: 'data.plugin',
+        name: '目录数据插件',
+        version: '1',
+        kind: 'tool',
+        description: '从 plugin.toml 发现',
+        entry: '',
+        author: '',
+        enabled: true,
+        builtin: false,
+        runtime: 'in_process',
+        package: 'data.plugin',
+      },
+    ] as typeof state.plugins;
+    const wrapper = await openCategory('插件');
+    const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
+    expect(groups).toContain('内部插件'); // 分组仍按运行位置
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('目录数据插件'))!;
+    expect(row.text()).toContain('外部来源'); // 但来源可见
+
+    await row.trigger('click');
+    const infoTitle = wrapper
+      .findAll('.detail-section__title')
+      .find((t) => t.text().includes('技术信息'))!;
+    await infoTitle.trigger('click');
+    // 详情里同一维度也要能读到（builtin=false → 外部来源）。
+    expect(wrapper.find('.skill-source').text()).toContain('外部来源');
+  });
+
+  it('内置插件的技术信息显示「随二进制发布」', async () => {
+    const wrapper = await openCategory('插件');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
+    await row.trigger('click');
+    const infoTitle = wrapper
+      .findAll('.detail-section__title')
+      .find((t) => t.text().includes('技术信息'))!;
+    await infoTitle.trigger('click');
+    const text = wrapper.find('.skill-source').text();
+    expect(text).toContain('随二进制发布');
+    // 内置插件不出「外部来源」徽标（不占视觉）。
+    expect(row.text()).not.toContain('外部来源');
+  });
+
   it('插件详情：四分区 + 成员 chips + 启停影响文案', async () => {
     const wrapper = await openCategory('插件');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;

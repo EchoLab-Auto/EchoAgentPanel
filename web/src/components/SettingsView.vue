@@ -803,6 +803,22 @@ function pluginSource(p: PluginInfo): 'builtin' | 'external' {
 }
 const PLUGIN_SOURCE_LABELS = { builtin: '内部插件', external: '外部插件' } as const;
 
+/**
+ * 插件的**来源**（manifest 从哪来），与 [`pluginSource`]（实现在哪跑）正交。
+ *
+ * 分组仍按运行位置（用户对「外部插件」的预期是「不在 Core 进程内」），
+ * 但来源也要能看到——否则 `builtin = false` + `in_process` 的**数据插件**
+ * （插件目录发现的 `plugin.toml`）会被分组吞掉，看不出它其实不随二进制发布。
+ */
+function pluginOrigin(p: PluginInfo): 'shipped' | 'configured' {
+  return p.builtin === false ? 'configured' : 'shipped';
+}
+const PLUGIN_ORIGIN_LABELS = { shipped: '随二进制发布', configured: '外部来源' } as const;
+/** 来源徽标（只在「外部来源」时显示——默认情况不必占视觉）。 */
+function pluginOriginBadge(p: PluginInfo): string {
+  return pluginOrigin(p) === 'configured' ? PLUGIN_ORIGIN_LABELS.configured : '';
+}
+
 /** 实现是否跑在独立子进程（=`外部插件`；判定见 [`pluginSource`]）。 */
 function pluginIsSubprocess(p: PluginInfo): boolean { return pluginSource(p) === 'external'; }
 const PLUGIN_RUNTIME_LABELS = { subprocess: '独立进程', in_process: '进程内' } as const;
@@ -2119,6 +2135,13 @@ watch(
                         模式
                       </span>
                       <span
+                        v-if="pluginOriginBadge(p)"
+                        class="caps-mark caps-mark--git"
+                        title="来源：不是编译进本二进制的插件（plugins.toml 条目或插件目录发现）"
+                      >
+                        {{ pluginOriginBadge(p) }}
+                      </span>
+                      <span
                         v-if="pluginMountError(p)"
                         class="caps-mark caps-mark--err caps-mark--icon"
                         :title="`装配失败：${pluginMountError(p)}`"
@@ -2885,6 +2908,10 @@ watch(
                 <div class="skill-source__row">
                   <span class="muted">运行形态</span>
                   <code>{{ pluginRuntimeLabel(selectedPlugin) }}</code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">来源</span>
+                  <code>{{ PLUGIN_ORIGIN_LABELS[pluginOrigin(selectedPlugin)] }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">Author</span>
