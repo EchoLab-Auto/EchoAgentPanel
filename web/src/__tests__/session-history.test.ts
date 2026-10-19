@@ -164,6 +164,16 @@ describe('会话历史通道（RequestSessionHistory → SessionHistory）', () 
     // 原快照未被改写（补丁不得回写 state.sessionHistory 里的对象）。
     expect(state.sessionHistory[KEY].messages[1].tool?.output).toBeNull();
     expect(state.sessionHistory[KEY].messages[1].tool?.status).toBe('running');
+    // **写时复制契约**（2026-10 P0）：`sessionMessagesFor` 不再逐条深拷贝
+    // （每次 delta 白花 O(历史) 次分配），数组是浅拷贝、元素与快照共享；
+    // 因此"补丁换对象"是防止污染快照的**唯一**保障——未补丁的条目仍共享
+    // 引用（零成本），被补丁的条目必须是新对象。
+    expect(merged[1]).not.toBe(state.sessionHistory[KEY].messages[1]);
+    expect(merged[0]).toBe(state.sessionHistory[KEY].messages[0]);
+    // 幂等：重复合并仍得到同样的补丁结果，且快照依旧干净。
+    const again = sessionMessagesFor(state, 's1', 't');
+    expect(again[1].tool?.output).toBe('done');
+    expect(state.sessionHistory[KEY].messages[1].tool?.output).toBeNull();
   });
 
   it('d) 无快照：退回窗口过滤（现行为）', () => {

@@ -340,7 +340,13 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   const hist = state.sessionHistory[key];
   const windowMsgs = state.trunk.filter((m) => m.sessionId === sessionId);
   if (!hist) return windowMsgs;
-  const out = hist.messages.map((m) => ({ ...m })); // 浅拷贝：补丁不得污染快照
+  // **写时复制**（2026-10 P0 性能）：此前是 `hist.messages.map(m => ({...m}))`
+  // ——每次求值都给**全量历史**逐条建对象。而本函数在每个流式 delta 都会被
+  // 调用（ChatView 的 messages computed 依赖它），实测 2000 条历史时这部分
+  // 每次白花 ~3 ms 与 2000 次分配（窗口化后渲染只用尾部 200 条，99% 的拷贝
+  // 是纯浪费）。改为：数组浅拷贝（O(n) 指针、零对象分配）+ 只有**被补丁的
+  // 那一条**才复制对象（见 patchToolMessage）。语义不变：快照对象绝不原地改。
+  const out = hist.messages.slice();
   // 插入游标（2026-10）：`state.trunk` 的顺序就是真实时序（实时投影按到达
   // 顺序 push，Core 的 timeline 也是同一顺序），所以合并必须**按它落位**，
   // 不能把"没匹配到快照的条目"一律追加到末尾。

@@ -31,6 +31,21 @@ const { t } = useLocale();
 
 const isUser = computed(() => props.message.role === 'user');
 
+/**
+ * 流式期间走纯文本（2026-10 P0 性能止血）。
+ *
+ * `MarkdownLazy` 底层的 `MarkdownRenderer` 对 `content` 是 `watch → doRender`
+ * 全量重跑：`marked.parse` + DOMPurify + `v-html` 整段替换（`useMarkdownToc`
+ * 还会再 `marked.lexer` 一次）。成本随正文长度线性增长，而流式每条 delta
+ * 都会触发一次 —— 一次回答的总成本是 **O(deltas × 长度)**。实测单次 delta
+ * 的 flush 成本：900 字 1.3 ms / 4.2 K 2.7 ms / 16.6 K 7.8 ms / 41.5 K
+ * 16.9 ms / 83 K **33.3 ms**（4 万字回答 ≈ 累计 1.5–2 s 主线程）。
+ *
+ * 改为"流式中纯文本、终值一次 Markdown"，总成本降到 O(长度)；副产品是
+ * 文本立即可见（不必等 Markdown 成型），观感更快。
+ */
+const streamingPlain = computed(() => !isUser.value && props.message.streaming === true);
+
 /** 来源标签（多实例场景）：实例 · 群名 · 用户名。 */
 const sourceLabel = computed(() => {
   const source = props.message.source;
@@ -78,7 +93,10 @@ const timeLabel = computed(() => {
       <ChatCopyButton class="msg-item__copy" :text="message.content" />
     </div>
     <div class="msg-item__content">
-      <MarkdownLazy v-if="!isUser" :content="message.content" />
+      <!-- 流式中走纯文本（2026-10 P0）：Markdown 渲染器对每条 delta 全量
+           重解析（O(deltas × 长度)），终值时一次成型（O(长度)）。 -->
+      <span v-if="streamingPlain" class="msg-item__stream">{{ message.content }}</span>
+      <MarkdownLazy v-else-if="!isUser" :content="message.content" />
       <template v-else>{{ message.content }}</template>
     </div>
   </div>

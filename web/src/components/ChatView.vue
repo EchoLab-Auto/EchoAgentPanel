@@ -507,22 +507,68 @@ function reasoningSessionRunning(sessionId: string | undefined): boolean {
   return phase === 'thinking' || phase === 'tool' || phase === 'subagent';
 }
 
+// ── 渲染窗口（2026-10 P0 性能止血）────────────────────────────────────
+//
+// 消息列表此前**全量**适配 + 全量 `v-for`（无虚拟滚动 / 无窗口）：会话多长
+// DOM 就有多大、"越用越卡"。实测（本机 CDP，1600×1000，1× CPU）：
+//
+// | 显示行数 | 单次 delta 全链路 | 一次回答（120 delta）掉帧 | DOM 节点 |
+// | --- | --- | --- | --- |
+// | 300   | 3.9 ms  | 1 / 119（60fps）  | 3.7 K |
+// | 1000  | 12.6 ms | 23 / 119          | 11.5 K |
+// | 2000  | 23.1 ms | **117 / 119（30fps）** | 22.8 K |
+// | 2000（4× CPU） | — | 118 / 119（7.5fps） | 22.8 K |
+//
+// 只适配 + 渲染尾部 `WINDOW_INITIAL` 条，更早的按需扩窗（`WINDOW_STEP`）。
+// **切片必须在适配之前**：`toChatMessage` / 缓存快照判等是 O(条数) 的，
+// 放在切片后（而不是在 messageRows 里切）才能让每次 delta 的成本只与
+// **窗口大小**相关，与历史长度无关。
+//
+// 为什么不做虚拟滚动：变量高度（Markdown / 图片 / 代码块 / 可展开工具卡）
+// 的虚拟滚动要重做吸底、锚点跳转、Ctrl+F、入场动画；实测收益等价而风险
+// 高得多（另见 document/design/panel-performance-audit.md 的 P2 结论）。
+const WINDOW_INITIAL = 200;
+const WINDOW_STEP = 200;
+const renderWindow = ref(WINDOW_INITIAL);
+
+// 切会话 / 切 agent：回到"最新一屏"（旧窗口大小不透传，避免无谓的长列表）。
+watch(
+  [() => props.sessionId, () => props.activeTeamId],
+  () => {
+    renderWindow.value = WINDOW_INITIAL;
+  },
+);
+
 // 按会话过滤：全局视图显示全部；具体会话只显示归属该会话的消息。
 //
+// 单独一层：它是**合并历史快照 ⊕ 窗口增量**的唯一入口（见
+// state.ts::sessionMessagesFor），一次变更只求值一次，供窗口切片与
+// 「加载更早」的计数共用。
+const sourceMessages = computed(() =>
+  props.sessionId === 'global'
+    ? state.trunk
+    : sessionMessagesFor(state, props.sessionId, props.activeTeamId ?? null),
+);
+
+/** 未渲染的历史条数（>0 时显示「加载更早」入口）。 */
+const hiddenMessageCount = computed(() =>
+  Math.max(0, sourceMessages.value.length - Math.min(sourceMessages.value.length, renderWindow.value)),
+);
+
 // **渲染对象复用**（2026-10 性能修复，见 chat-message-cache.ts）：数据链
 // （sessionMessagesFor 的浅拷贝 + toChatMessage）每次都产出全新对象，若直接
 // 用它做 v-for 的 :message，任意一条变化都会让 1000+ 个 MessageItem 全部
 // re-render。实测 1024 条消息下每次 delta 白花 143.8 ms（FPS 11.7 @4× CPU）。
 // 现在按 key 缓存：渲染相关字段未变的条目沿用上次的对象引用，子组件 props
 // 恒等 → Vue 跳过；只有真正变化的那一条重建。
+//
+// 窗口化之后只适配尾部窗口（见上）：缓存里也就只有窗口内的 key 存活。
 const messages = computed<ChatMessage[]>(() => {
-  const list =
-    props.sessionId === 'global'
-      ? state.trunk
-      : sessionMessagesFor(state, props.sessionId, props.activeTeamId ?? null);
-  const out: ChatMessage[] = new Array(list.length);
+  const list = sourceMessages.value;
+  const start = Math.max(0, list.length - renderWindow.value);
+  const out: ChatMessage[] = new Array(list.length - start);
   const alive = new Set<string>();
-  for (let i = 0; i < list.length; i++) {
+  for (let i = start; i < list.length; i++) {
     const m = list[i];
     alive.add(m.key);
     // 推理行走原路径：animate 由 claimReasoningAnimation 有状态地决定，
@@ -538,17 +584,17 @@ const messages = computed<ChatMessage[]>(() => {
         time: m.time,
         sessionRunning: reasoningSessionRunning(m.sessionId),
       });
-      out[i] = cm;
+      out[i - start] = cm;
       continue;
     }
     const cached = reuseChatMessage(m);
     if (cached) {
-      out[i] = cached;
+      out[i - start] = cached;
       continue;
     }
     const cm = toChatMessage(m);
     rememberChatMessage(m, cm);
-    out[i] = cm;
+    out[i - start] = cm;
   }
   // 丢弃已不在列表里的 key（会话切换 / FIFO 淘汰），防无界增长。
   retainChatMessages(alive);
@@ -598,7 +644,30 @@ function subagentTaskLabel(input: string): string | undefined {
   const line = task.replace(/\s+/g, ' ').trim();
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
 }
+/**
+ * 工作行对象缓存（2026-10 P0 性能止血）：`messageRows` 是**数组级** computed
+ * ——任意一条消息变化（流式 delta 每几十毫秒一次）都会让它整体重算，于是
+ * 每次都要对**全部**消息重跑 `workRowOf`（每条工作行还要 `formatTime` +
+ * `JSON.parse` 子代理参数）。实测 2000 行时这一块占单次 delta 的 19%
+ * （另 44% 是 Intl，见 `chat-adapter.ts::formatTime` 的 memo）。
+ *
+ * 未变消息的渲染对象已被 `chat-message-cache` 复用（**引用恒等**），因此可以
+ * 直接用它做 WeakMap 键：只有真正变化的那一条会重建 WorkRunItem。
+ * 用 WeakMap 而非 Map：消息被 FIFO 淘汰后条目随对象一起回收，无需手工清理。
+ * 推理行走原路径（`messages` 刻意不缓存其渲染对象，见 chat-message-cache
+ * 模块注释）→ 每次都是新对象 → 不命中，行为与之前一致。
+ */
+const workRowCache = new WeakMap<ChatMessageWithImages, WorkRunItem | null>();
+
 const workRowOf = (m: ChatMessageWithImages): WorkRunItem | null => {
+  const cached = workRowCache.get(m);
+  if (cached !== undefined) return cached;
+  const built = buildWorkRow(m);
+  workRowCache.set(m, built);
+  return built;
+};
+
+const buildWorkRow = (m: ChatMessageWithImages): WorkRunItem | null => {
   // 思考（推理）：面板扩展角色（库 ChatRole 无该角色，宽松比较后收窄）
   // ——与工具同列 chip，点击展开正文。
   if ((m.role as string) === 'reasoning') {
@@ -662,6 +731,15 @@ const messageRows = computed<ChatRow[]>(() => {
 
 function rowKey(row: ChatRow): string {
   return row.kind === 'work-group' ? row.key : String(row.message.id);
+}
+
+/** 「加载更早」：扩窗 + 保持视觉位置（按"距底部距离"补偿，前插场景等价）。 */
+async function loadEarlier(): Promise<void> {
+  const list = listRef.value;
+  const fromBottom = list ? list.scrollHeight - list.scrollTop : 0;
+  renderWindow.value += WINDOW_STEP;
+  await nextTick();
+  if (list) list.scrollTop = list.scrollHeight - fromBottom;
 }
 /** 吸底观察源：最后一条消息的尾部内容（滚动区内容同源）。 */
 function trayWatchSource(): unknown {
@@ -1023,6 +1101,18 @@ function mediaSrc(img: string): string {
           <span>正在加载时间线…</span>
         </template>
         <span v-else>{{ emptyText }}</span>
+      </div>
+      <!-- 渲染窗口入口（2026-10 P0）：消息只渲染尾部 200 行，更早的按需
+           扩窗——全量 v-for 是"越用越卡"的主因（见 setup 里的实测表）。 -->
+      <div v-if="hiddenMessageCount" class="chat-view__earlier">
+        <button
+          type="button"
+          class="chat-view__earlier-btn"
+          data-testid="chat-load-earlier"
+          @click="loadEarlier"
+        >
+          加载更早的消息（还有 {{ hiddenMessageCount }} 条）
+        </button>
       </div>
       <template v-for="row in messageRows" :key="rowKey(row)">
         <WorkRunGroup
@@ -1427,6 +1517,27 @@ function mediaSrc(img: string): string {
   flex-direction: column;
   align-items: center;
   gap: 12px;
+}
+
+/* 渲染窗口入口（2026-10 P0）：只渲染尾部 200 行，更早的按需扩窗。
+   轻量文字按钮——它不是主操作，不该抢视觉（与吸底/跳转钮的分量区分）。 */
+.chat-view__earlier {
+  display: flex;
+  justify-content: center;
+  padding: var(--nm-spacing-sm) 0;
+}
+.chat-view__earlier-btn {
+  border: none;
+  background: transparent;
+  color: var(--nm-text-secondary);
+  font-size: var(--nm-font-sm);
+  cursor: pointer;
+  padding: var(--nm-spacing-2xs) var(--nm-spacing-sm);
+  border-radius: var(--nm-border-radius-xs);
+}
+.chat-view__earlier-btn:hover {
+  color: var(--nm-text-primary);
+  background-color: var(--nm-surface-raised);
 }
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上；

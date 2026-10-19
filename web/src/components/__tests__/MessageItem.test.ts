@@ -113,4 +113,27 @@ describe('MessageItem 消息行', () => {
     expect(wrapper.text()).toContain('qq');
     expect(wrapper.text()).toContain('测试群');
   });
+
+  // ── 流式纯文本（2026-10 P0 性能止血）───────────────────────────────────
+  // 背景：MarkdownRenderer 对 content 是"每次变化全量重解析 + innerHTML 替换"，
+  // 一次回答的成本是 O(deltas × 长度)（实测 4 万字正文单次 delta 16.9 ms）。
+  // 现改为流式中纯文本、终值一次 Markdown（O(长度)）。锁定该分派。
+  it('流式中（streaming=true）：正文走纯文本，不挂 Markdown 渲染器', () => {
+    const wrapper = mountItem(message({ role: 'agent', content: '**正在输出**', streaming: true }));
+    // 原始 Markdown 标记原样显示（未解析）
+    expect(wrapper.find('.msg-item__stream').text()).toBe('**正在输出**');
+    expect(wrapper.find('.md-stub').exists()).toBe(false);
+  });
+
+  it('终值（streaming 非 true）：恢复 Markdown 渲染', () => {
+    const wrapper = mountItem(message({ role: 'agent', content: '**已完成**' }));
+    expect(wrapper.find('.md-stub').exists()).toBe(true);
+    expect(wrapper.find('.msg-item__stream').exists()).toBe(false);
+  });
+
+  it('user 消息即使带 streaming 标记也走纯文本分支（不受影响）', () => {
+    const wrapper = mountItem(message({ role: 'user', content: '你好', streaming: true }));
+    expect(wrapper.find('.msg-item__stream').exists()).toBe(false);
+    expect(wrapper.find('.md-stub').exists()).toBe(false);
+  });
 });

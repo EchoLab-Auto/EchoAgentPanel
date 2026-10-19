@@ -11,6 +11,7 @@ import ChatView from '../ChatView.vue';
 import { state, dispatch } from '../../store';
 import { displayContentOf } from '../../state_domains/timeline';
 import { resetReasoningAnimForTests } from '../../reasoning-anim';
+import type { DisplayMessage } from '../../state';
 
 // 会话历史补拉（RequestSessionHistory）断言用：拦截命令发送。importOriginal
 // 保证其余导出（startConnection 等）保持真实；本文件其余用例不触网。
@@ -634,6 +635,69 @@ describe('会话历史补拉（RequestSessionHistory，2026-10）', () => {
     const items = wrapper.findAll('.stub-item');
     expect(items.length).toBe(1);
     expect(items[0].text()).toContain('历史消息');
+    wrapper.unmount();
+  });
+});
+
+// ── 渲染窗口（2026-10 P0 性能止血）───────────────────────────────────────
+//
+// 背景：消息列表此前全量 v-for，会话多长 DOM 就有多大——实测 2000 行时一次
+// 流式 delta 全链路 23 ms、一次回答掉帧 117/119（30fps）；300 行时 1/119。
+// 现改为只渲染尾部 200 行，更早的按需扩窗。本组锁定三条不变量：
+//   ① 超过窗口的行**不渲染**（性能收益的唯一来源）；
+//   ② 未渲染行数 > 0 时提供「加载更早」入口，点击按步长扩窗；
+//   ③ 切会话把窗口复位（不把长窗口带到下一个会话）。
+describe('ChatView 渲染窗口（P0）', () => {
+  const stubs = { MessageItem: MessageItemStub, ChatComposer: ChatComposerStub };
+
+  beforeEach(() => {
+    state.connected = true;
+    state.trunk = [];
+    state.sessionHistory = {};
+    state.sessions = [];
+    state.activities = {};
+    state.activeRegion = null;
+    state.activeTeamId = null;
+  });
+
+  /** 灌 n 条 window 条目（实时投影路径：sessionMessagesFor 无快照时按其过滤）。 */
+  function seed(n: number, sessionId: string) {
+    const list: DisplayMessage[] = [];
+    for (let i = 0; i < n; i++) {
+      list.push({ key: `w-${i}`, role: 'backend', content: `m${i}`, sessionId, time: 1000 + i });
+    }
+    state.trunk = list;
+  }
+
+  it('超过 200 行只渲染尾部 200 行，并显示「加载更早」入口', () => {
+    seed(500, 'sess-window');
+    const wrapper = mount(ChatView, { props: { sessionId: 'sess-window' }, global: { stubs } });
+    const items = wrapper.findAll('.stub-item');
+    expect(items.length).toBe(200);
+    // 尾部窗口：最新一条在，最早的 300 条不在
+    expect(items[items.length - 1].text()).toBe('m499');
+    expect(items[0].text()).toBe('m300');
+    expect(wrapper.find('[data-testid="chat-load-earlier"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('点「加载更早」按 200 扩窗', async () => {
+    seed(500, 'sess-window-more');
+    const wrapper = mount(ChatView, { props: { sessionId: 'sess-window-more' }, global: { stubs } });
+    expect(wrapper.findAll('.stub-item').length).toBe(200);
+    await wrapper.find('[data-testid="chat-load-earlier"]').trigger('click');
+    await nextTick();
+    expect(wrapper.findAll('.stub-item').length).toBe(400);
+    // 仍差 100 行 → 入口继续在
+    expect(wrapper.find('[data-testid="chat-load-earlier"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('不足窗口时不显示入口（不引入无谓 UI）', () => {
+    seed(50, 'sess-window-small');
+    const wrapper = mount(ChatView, { props: { sessionId: 'sess-window-small' }, global: { stubs } });
+    expect(wrapper.findAll('.stub-item').length).toBe(50);
+    expect(wrapper.find('[data-testid="chat-load-earlier"]').exists()).toBe(false);
     wrapper.unmount();
   });
 });

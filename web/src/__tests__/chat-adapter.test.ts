@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { compactForDisplay } from '../chat-adapter';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { compactForDisplay, formatTime, resetTimeLabelCacheForTests } from '../chat-adapter';
 
 describe('compactForDisplay', () => {
   it('replaces attached data URI with a numbered placeholder', () => {
@@ -27,5 +27,27 @@ describe('compactForDisplay', () => {
     const two = `data:image/png;base64,${'B'.repeat(300)}`;
     const compacted = compactForDisplay(`{"images":["${one}","${two}"]}`, [one, two]);
     expect(compacted.indexOf('[图片#1]')).toBeLessThan(compacted.indexOf('[图片#2]'));
+  });
+});
+
+describe('formatTime memo（2026-10 P0 性能止血）', () => {
+  // 背景：ChatView 的 messageRows 每次重算都给每条工作行调一次 formatTime；
+  // 实测 toLocaleTimeString('zh-CN') 单次 51 µs、占 2000 行下单次流式 delta
+  // 的 44%。按秒 memo 后第二次起是纯 Map 命中。锁定"值正确 + 命中同一个值"。
+  beforeEach(() => resetTimeLabelCacheForTests());
+
+  it('returns zh-CN HH:mm:ss labels', () => {
+    const label = formatTime(1700000000);
+    expect(label).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+
+  it('same second → memoized string (identical value, no reformat)', () => {
+    const first = formatTime(1700000123);
+    const second = formatTime(1700000123);
+    expect(second).toBe(first);
+  });
+
+  it('different seconds stay distinct', () => {
+    expect(formatTime(1700000200)).not.toBe(formatTime(1700000201));
   });
 });

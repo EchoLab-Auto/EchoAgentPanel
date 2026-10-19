@@ -508,8 +508,16 @@ export function patchToolMessage(list: DisplayMessage[], incoming: DisplayMessag
   if (index < 0) return false;
   const existing = list[index]!;
   const tool = incoming.tool!;
-  existing.tool = tool.toolCallId ? { ...tool } : { ...tool, toolCallId: existing.tool?.toolCallId };
-  existing.content = incoming.content;
+  // 写时复制（2026-10 P0）：`list` 可能是 `hist.messages` 的浅拷贝数组
+  // （见 state.ts::sessionMessagesFor——那里为了性能不再逐条深拷贝），
+  // 元素对象与快照共享。补丁必须**换对象**，绝不能原地改快照条目
+  // （否则历史快照被污染，切会话/刷新后看到错误的工具状态）。
+  const patched: DisplayMessage = {
+    ...existing,
+    content: incoming.content,
+    tool: tool.toolCallId ? { ...tool } : { ...tool, toolCallId: existing.tool?.toolCallId },
+  };
+  list[index] = patched;
   return true;
 }
 

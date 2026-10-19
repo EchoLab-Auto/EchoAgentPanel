@@ -5,9 +5,35 @@ import type { ChatBranchEntry, ChatMessage, ChatToolCall } from '@echolab-auto/u
 import type { BranchMsg, DisplayMessage } from './state';
 import type { SubagentEventInfo } from './state_domains/timeline';
 
-/** 与库默认一致，但显式锁定 zh-CN（库默认用浏览器 locale）。 */
-export const formatTime = (seconds: number): string =>
-  new Date(seconds * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+/** 与库默认一致，但显式锁定 zh-CN（库默认用浏览器 locale）。
+ *
+ * **memo（2026-10 P0 性能止血）**：`ChatView` 的 `messageRows` 每次重算都会
+ * 给每条工作行调一次本函数。实测（CDP Profiler，2000 行消息、单次流式
+ * delta 24 ms）`new Date(..).toLocaleTimeString('zh-CN')` 单次 **51 µs**、
+ * 合计占 delta 耗时的 **44%**——比整个 vnode diff 还贵（Intl 格式化本身
+ * 就要建 locale 数据）。时间戳是秒级、且同一条消息在多次重算里恒等，按秒
+ * 缓存后第二次起是纯 `Map` 命中（<0.1 µs）。FIFO 上限防无界增长：命中率
+ * 靠"同一批消息被反复重算"，淘汰最早插入项不影响收益。
+ */
+const TIME_CACHE_MAX = 8192;
+const timeLabelCache = new Map<number, string>();
+
+export const formatTime = (seconds: number): string => {
+  const cached = timeLabelCache.get(seconds);
+  if (cached !== undefined) return cached;
+  const label = new Date(seconds * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+  if (timeLabelCache.size >= TIME_CACHE_MAX) {
+    const oldest = timeLabelCache.keys().next();
+    if (!oldest.done) timeLabelCache.delete(oldest.value);
+  }
+  timeLabelCache.set(seconds, label);
+  return label;
+};
+
+/** 测试辅助：清空时间标签缓存（模块级状态，跨用例隔离）。 */
+export function resetTimeLabelCacheForTests(): void {
+  timeLabelCache.clear();
+}
 
 /** 合并连续 reasoning 段（对齐 React 版 useBranchEntries；库的分支合并块不合并）。 */
 function mergeReasoning(msgs: BranchMsg[]): ChatBranchEntry[] {
