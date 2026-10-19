@@ -15,6 +15,9 @@ import { defineComponent, h } from 'vue';
 vi.mock('../connection', () => ({
   startConnection: vi.fn(),
   sendCommand: vi.fn(),
+  // App 拉时间线走统一入口 `requestTimeline`（2026-10 分页：全量带窗口上限、
+  // 增量原样请求）。mock 必须与真实导出对齐，否则调用处变成 undefined。
+  requestTimeline: vi.fn(),
 }));
 
 import App from '../App.vue';

@@ -400,6 +400,14 @@ export interface TimelineMessage {
   images?: string[];
   /** 条目级单调序号（新 core 提供；就地更新的工具条目带新 seq 重新投递） */
   seq?: number;
+  /**
+   * 位置序号（Core push 时分配，此后**永不改变**；0 = 旧条目/未赋值）。
+   *
+   * 与 `seq` 的分工：`seq` 服务增量同步（就地更新会推进它 → 非单调）；
+   * `ord` 服务分页锚点（严格随 push 递增、永不变更）。按 `ord` 定位才
+   * 既稳定又能二分——用 `seq` 会因非单调而漏条目。
+   */
+  ord?: number;
 }
 
 export interface ChecklistState {
@@ -518,7 +526,19 @@ export type BackendCommand =
   // 向上翻页取更早的时间线（2026-10 分页）。与 `RequestTrunkTimeline` 分开
   // 是因为语义不同：翻页只把更早的条目**前插**到已加载列表头部，不动同步
   // 游标；而 `TrunkTimeline.full` 的语义是"替换缓存"。
-  | { RequestTimelineEarlier: { team_id?: string | null; before_seq: number; limit?: number | null } }
+  | {
+      RequestTimelineEarlier: {
+        team_id?: string | null;
+        /**
+         * 已加载的**最老条目的 `ord`**（跳过它之后的条目不可靠——用 `ord`
+         * 是因为时间线的 `seq` 非单调：运行中的工具条目被就地更新时 `seq`
+         * 会被推进、位置不变；而"已加载条数"又会被分页期间的新增影响）。
+         * `ord` 只在 push 时分配、永不变更且严格递增 → 稳定锚点。
+         */
+        before_ord: number;
+        limit?: number | null;
+      };
+    }
   // 按会话派生显示历史（2026-10）：共享显示窗口（每人格 1024 条 FIFO）会淘汰
   // 无近期活动的会话条目——面板激活会话时改从事件日志派生完整历史（Core 响应
   // `SessionHistory`）。limit 缺省/null = Core 默认上限。

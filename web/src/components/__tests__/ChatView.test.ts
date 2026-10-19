@@ -829,11 +829,11 @@ describe('ChatView 时间线翻页接线', () => {
   it('本地渲染完 + 时间线 has_more → 点「加载更早」发 RequestTimelineEarlier（锚点=最老条目 seq）', async () => {
     // 灌 5 条（全在渲染窗口内），并标记 Core 侧还有更早的
     state.trunk = [
-      { key: 'g1', role: 'backend', content: 'a', sessionId: 'global', time: 1000, seq: 201 },
-      { key: 'g2', role: 'backend', content: 'b', sessionId: 'global', time: 1001, seq: 202 },
-      { key: 'g3', role: 'backend', content: 'c', sessionId: 'global', time: 1002, seq: 203 },
-      { key: 'g4', role: 'backend', content: 'd', sessionId: 'global', time: 1003, seq: 204 },
-      { key: 'g5', role: 'backend', content: 'e', sessionId: 'global', time: 1004, seq: 205 },
+      { key: 'g1', role: 'backend', content: 'a', sessionId: 'global', time: 1000, seq: 201, ord: 401 },
+      { key: 'g2', role: 'backend', content: 'b', sessionId: 'global', time: 1001, seq: 202, ord: 402 },
+      { key: 'g3', role: 'backend', content: 'c', sessionId: 'global', time: 1002, seq: 203, ord: 403 },
+      { key: 'g4', role: 'backend', content: 'd', sessionId: 'global', time: 1003, seq: 204, ord: 404 },
+      { key: 'g5', role: 'backend', content: 'e', sessionId: 'global', time: 1004, seq: 205, ord: 405 },
     ];
     state.trunkTeamId = teamKey(null, null);
     state.timelineHasMore[teamKey(null, null)] = true;
@@ -852,7 +852,9 @@ describe('ChatView 时间线翻页接线', () => {
     expect(calls.length).toBe(1);
     expect(calls[0].RequestTimelineEarlier).toEqual({
       team_id: null,
-      before_seq: 201, // 最老条目的 seq
+      // 锚点 = 已加载**最老条目的 ord**（不是 seq：seq 因就地更新而乱序；
+      // 也不是条数：分页期间新增会让"从尾部数 N 条"错位）
+      before_ord: 401,
       limit: 400, // 一页 = 渲染窗口的两倍（少往返）
     });
     wrapper.unmount();

@@ -53,6 +53,36 @@ const PENDING_LIMIT = 128;
  */
 export const TIMELINE_INITIAL_WINDOW = 200;
 
+/**
+ * 请求时间线（**唯一入口**：全量/增量的窗口策略只在这里决定）。
+ *
+ * `sinceSeq > 0` = 增量补齐：必须**原样**请求缺口，不能带窗口（截断会让
+ * 已加载列表与游标不一致，下次增量就会重复拉整段）。
+ * `sinceSeq === 0` = 全量首屏：带 `limit: TIMELINE_INITIAL_WINDOW`，只取最新
+ * 一屏，更早的内容由 `RequestTimelineEarlier` 向上翻页（渲染窗口本来就只画
+ * 尾部 200 行，收全 1024 条是纯浪费）。
+ *
+ * 集中成一处的原因：此前 `RequestTrunkTimeline` 在 6 个调用点各拼一次参数
+ * （connection 引导、App 的 team 切换/兜底/core 解析），漏一个就会走"全量
+ * 收 1024 条"的老路径——分页对用户而言就像没生效。
+ */
+export function requestTimeline(
+  teamId: string | null,
+  sinceSeq: number,
+  core?: string,
+): void {
+  sendCommand(
+    {
+      RequestTrunkTimeline: {
+        team_id: teamId,
+        since_seq: sinceSeq,
+        limit: sinceSeq === 0 ? TIMELINE_INITIAL_WINDOW : undefined,
+      },
+    },
+    core,
+  );
+}
+
 /** 断线重连退避上限：可见时 3s（尽快恢复），不可见时 30s（省电/省资源）。 */
 export const RETRY_CAP_VISIBLE_MS = 3_000;
 export const RETRY_CAP_HIDDEN_MS = 30_000;
@@ -151,14 +181,7 @@ export function startConnection(): void {
       }
       if (savedTeam) {
         const cachedSeq = state.teamTimelines[teamKey(savedCore, savedTeam)]?.seq ?? 0;
-        sendCommand({
-          RequestTrunkTimeline: {
-            team_id: savedTeam,
-            since_seq: cachedSeq,
-            // 全量才限窗（增量是缺口补齐，截断会让游标与内容不一致）。
-            limit: cachedSeq === 0 ? TIMELINE_INITIAL_WINDOW : undefined,
-          },
-        });
+        requestTimeline(savedTeam, cachedSeq);
       }
       // 补发握手期暂存的命令（见 pendingCommands 注释）：**重新解析**
       // 目标 core 再加壳发送——入队时的路由可能基于不完整的 teams/会话表。
@@ -502,10 +525,8 @@ function requestTimelineResync(core: string | null): void {
   lastResyncAtMs = now;
   const region = core ?? state.activeRegion;
   const sinceSeq = state.teamTimelines[teamKey(region, state.activeTeamId)]?.seq ?? 0;
-  sendCommand(
-    { RequestTrunkTimeline: { team_id: state.activeTeamId, since_seq: sinceSeq } },
-    core ?? undefined,
-  );
+  // 走统一入口（增量路径不加窗口；core 显式指定以定向补拉）。
+  requestTimeline(state.activeTeamId, sinceSeq, core ?? undefined);
 }
 
 /** 面板访问令牌：URL ?token= 播种一次后存 localStorage；fetch 经

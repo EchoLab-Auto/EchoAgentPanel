@@ -234,6 +234,14 @@ export interface DisplayMessage {
   /** 流式归属分支（对账用；终值替换后清除）。 */
   streamBranch?: string;
   /**
+   * 位置序号（`TimelineMessage.ord`；2026-10 分页锚点）。
+   *
+   * 与 `seq` 的分工：`seq` 服务增量同步（就地更新会推进它 → 非单调）；
+   * `ord` 严格随 push 递增且**永不变更**，因此是唯一稳定的翻页锚点。
+   * `undefined`/0 = 旧版 Core 或未赋值（此时不翻页）。
+   */
+  ord?: number;
+  /**
    * 条目身份（Core 信封层的 `entry` 字段；2026-10 条目身份化 P1）。
    *
    * 语义：同一条逻辑条目的**所有事件**共享同一个 id——一段流式输出的全部

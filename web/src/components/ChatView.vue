@@ -821,13 +821,15 @@ async function loadEarlier(): Promise<void> {
       return;
     }
     if (olderInTimeline.value) {
-      // 锚点 = 已加载的最老条目（seq 缺失 = 无法定位，退回不翻）。
-      const beforeSeq = sourceMessages.value[0]?.seq ?? 0;
-      if (beforeSeq > 0) {
+      // 锚点 = 已加载的**最老条目的 ord**（不是 seq、也不是条数）：
+      // seq 会因就地更新而乱序，条数会被分页期间的新增打乱——只有 ord
+      // 严格递增且永不变更，翻页才不漏条目。
+      const anchorOrd = sourceMessages.value[0]?.ord ?? 0;
+      if (anchorOrd > 0) {
         sendCommand({
           RequestTimelineEarlier: {
             team_id: props.activeTeamId ?? null,
-            before_seq: beforeSeq,
+            before_ord: anchorOrd,
             limit: WINDOW_STEP * 2,
           },
         });

@@ -12,7 +12,7 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import { state } from './store';
 import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';
-import { requestActiveRegionManagement, sendCommand, startConnection } from './connection';
+import { requestActiveRegionManagement, requestTimeline, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
 import { loopModeOf } from './protocol';
 import { currentTeam, teamPluginEnabled } from './capabilities';
@@ -183,11 +183,11 @@ function onTeamSelect(next: string | null, core?: string | null) {
     // （否则切换回来后增量同步会把缓存里已有的实时消息再投递一遍）。
     state.trunk = [...cached.msgs];
     state.trunkTeamId = tk;
-    sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
+    requestTimeline(next, cached.seq);
   } else {
     state.trunk = [];
     state.trunkTeamId = tk;
-    sendCommand({ RequestTrunkTimeline: { team_id: next } });
+    requestTimeline(next, 0);
   }
   // 用户**主动**切 agent：落到该 agent 自己的 active 投影（per-persona 状态，
   // 不是"另一个窗口的选择"，故此处用 localLanding 是合理的）。
@@ -526,11 +526,11 @@ function resetToFirstTeam() {
     // 落到实时视图）。
     state.trunk = [...cached.msgs];
     state.trunkTeamId = tk;
-    sendCommand({ RequestTrunkTimeline: { team_id: next, since_seq: cached.seq } });
+    requestTimeline(next, cached.seq);
   } else {
     state.trunk = [];
     state.trunkTeamId = tk;
-    sendCommand({ RequestTrunkTimeline: { team_id: next } });
+    requestTimeline(next, 0);
   }
   // 自动兜底（当前 agent 从列表消失 / 未选中）：**不能用 localLanding**——
   // 同 global 兜底的理由，它会把本窗口带到他人刚激活的工作区。回中立默认会话。
@@ -572,9 +572,9 @@ watch(
         resolvedTimelineKey = key;
         const cached = state.teamTimelines[key];
         if (cached) {
-          sendCommand({ RequestTrunkTimeline: { team_id: picked.id, since_seq: cached.seq } });
+          requestTimeline(picked.id, cached.seq);
         } else {
-          sendCommand({ RequestTrunkTimeline: { team_id: picked.id } });
+          requestTimeline(picked.id, 0);
         }
       }
       return;
