@@ -24,7 +24,7 @@ import { checklistsForSession, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
-import { checklistKey, sessionKey } from '../keys';
+import { checklistKey, sessionKey, teamKey } from '../keys';
 import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
@@ -569,8 +569,25 @@ const olderInCore = computed(() => {
   return hist ? hist.total > hist.messages.length : false;
 });
 
-/** 「加载更早」入口是否显示。 */
-const showEarlier = computed(() => hiddenMessageCount.value > 0 || olderInCore.value);
+/**
+ * Core 的时间线缓冲区里还有更早的条目（`TrunkTimeline.has_more`；2026-10 分页）。
+ *
+ * 首屏只收最新 `TIMELINE_INITIAL_WINDOW` 条（Core 侧 1024 条上限、压缩后约
+ * 0.6 MB），更早的内容由「加载更早」按 `RequestTimelineEarlier` 向上翻页。
+ *
+ * 只对**当前查看的 team**生效：`timelineHasMore` 按 `teamKey(core, team)` 存，
+ * 与 `teamTimelines` 同键。
+ */
+const olderInTimeline = computed(() => {
+  if (!state.connected) return false;
+  const key = teamKey(state.activeRegion, props.activeTeamId ?? null);
+  return state.timelineHasMore[key] === true;
+});
+
+/** 「加载更早」入口是否显示（本地未渲染 ∪ 会话历史未拉完 ∪ 时间线未翻完）。 */
+const showEarlier = computed(
+  () => hiddenMessageCount.value > 0 || olderInCore.value || olderInTimeline.value,
+);
 
 /** 入口文案：本地还有就报数，只有远端有就只说"更早"。 */
 const earlierLabel = computed(() =>
@@ -793,11 +810,30 @@ function rowKey(row: ChatRow): string {
 async function loadEarlier(): Promise<void> {
   const list = listRef.value;
   const fromBottom = list ? list.scrollHeight - list.scrollTop : 0;
-  // 已加载的都渲染完了还要更早 → 向 Core 多拉一档（渐进式历史）。
-  // 此时先不扩窗：新条目到达后 `hiddenMessageCount` 自然 > 0，入口仍在。
-  if (renderWindow.value >= sourceMessages.value.length && props.sessionId !== 'global') {
-    historyLimit.value += HISTORY_STEP;
-    return;
+  // 本地已加载的都渲染完，但更早的内容还在 Core：
+  // 1) 会话历史未拉完（`SessionHistory.total > 已加载`）→ 多拉一档；
+  // 2) 否则（全局视图 / 历史已到顶）→ 按最老条目的 seq 向上翻时间线页。
+  // 两条路径都**先不扩窗**：新条目到达后 `hiddenMessageCount` 自然 > 0，
+  // 入口仍在，用户可继续点（手感一致）。
+  if (renderWindow.value >= sourceMessages.value.length) {
+    if (olderInCore.value) {
+      historyLimit.value += HISTORY_STEP;
+      return;
+    }
+    if (olderInTimeline.value) {
+      // 锚点 = 已加载的最老条目（seq 缺失 = 无法定位，退回不翻）。
+      const beforeSeq = sourceMessages.value[0]?.seq ?? 0;
+      if (beforeSeq > 0) {
+        sendCommand({
+          RequestTimelineEarlier: {
+            team_id: props.activeTeamId ?? null,
+            before_seq: beforeSeq,
+            limit: WINDOW_STEP * 2,
+          },
+        });
+      }
+      return;
+    }
   }
   renderWindow.value += WINDOW_STEP;
   const restore = () => {

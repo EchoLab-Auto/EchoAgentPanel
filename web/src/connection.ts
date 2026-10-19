@@ -41,6 +41,18 @@ const pendingCommands: BackendCommand[] = [];
 /** 队列上限：握手期正常只有个位数条；上限只用于防御性封顶。 */
 const PENDING_LIMIT = 128;
 
+/**
+ * 首屏时间线窗口：一次只收最新 N 条（2026-10 分页）。
+ *
+ * 时间线上限 1024 条、压缩后约 0.6 MB——一次收完既拖慢首帧，也让"只想看最后
+ * 一屏"的场景白付传输与解析。渲染窗口本来就是尾部 200 行（`ChatView` 的
+ * `WINDOW_INITIAL`），因此首屏也只要 200 条，更早的内容按需向上翻页。
+ *
+ * 只在**全量**路径生效（`since_seq === 0`）：增量是缺口补齐，截断会让游标与
+ * 实际内容不一致。
+ */
+export const TIMELINE_INITIAL_WINDOW = 200;
+
 /** 断线重连退避上限：可见时 3s（尽快恢复），不可见时 30s（省电/省资源）。 */
 export const RETRY_CAP_VISIBLE_MS = 3_000;
 export const RETRY_CAP_HIDDEN_MS = 30_000;
@@ -139,7 +151,14 @@ export function startConnection(): void {
       }
       if (savedTeam) {
         const cachedSeq = state.teamTimelines[teamKey(savedCore, savedTeam)]?.seq ?? 0;
-        sendCommand({ RequestTrunkTimeline: { team_id: savedTeam, since_seq: cachedSeq } });
+        sendCommand({
+          RequestTrunkTimeline: {
+            team_id: savedTeam,
+            since_seq: cachedSeq,
+            // 全量才限窗（增量是缺口补齐，截断会让游标与内容不一致）。
+            limit: cachedSeq === 0 ? TIMELINE_INITIAL_WINDOW : undefined,
+          },
+        });
       }
       // 补发握手期暂存的命令（见 pendingCommands 注释）：**重新解析**
       // 目标 core 再加壳发送——入队时的路由可能基于不完整的 teams/会话表。

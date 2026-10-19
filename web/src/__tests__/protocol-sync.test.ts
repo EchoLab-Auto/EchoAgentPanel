@@ -75,8 +75,11 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     //   FriendList；Core 侧同批直接删除，两端镜像一致）。
     // → 52（2026-10 会话历史通道：+SessionHistory——共享显示窗口 FIFO 淘汰
     //   后按会话派生完整历史，`RequestSessionHistory` → `SessionHistory`）。
+    // → 53（2026-10 时间线分页：+TimelineEarlier——`RequestTimelineEarlier`
+    //   向上翻页，把更早的一页**前插**到已加载列表头部；与 `TrunkTimeline`
+    //   分开是因为后者 `full` 的语义是"替换缓存"）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(52);
+    expect(variants.size).toBe(53);
   });
 
   it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {

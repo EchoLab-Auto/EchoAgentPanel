@@ -12,6 +12,7 @@ import { state, dispatch } from '../../store';
 import { displayContentOf } from '../../state_domains/timeline';
 import { resetReasoningAnimForTests } from '../../reasoning-anim';
 import type { DisplayMessage } from '../../state';
+import { teamKey } from '../../keys';
 
 // 会话历史补拉（RequestSessionHistory）断言用：拦截命令发送。importOriginal
 // 保证其余导出（startConnection 等）保持真实；本文件其余用例不触网。
@@ -794,3 +795,101 @@ describe('ChatView 渐进式历史', () => {
     wrapper.unmount();
   });
 });
+// ── 时间线分页接线（2026-10）──────────────────────────────────────────────
+//
+// 首屏只收最新 200 条（`TIMELINE_INITIAL_WINDOW`），更早的内容由「加载更早」
+// 按 `RequestTimelineEarlier` 向上翻页。本组锁的是**触发条件**：
+// 本地渲染完 + 会话历史已到顶 + 时间线 has_more → 发翻页请求（带正确锚点）。
+describe('ChatView 时间线翻页接线', () => {
+  const stubs = { MessageItem: MessageItemStub, ChatComposer: ChatComposerStub };
+  const sendMock = vi.mocked(sendCommand);
+
+  beforeEach(() => {
+    sendMock.mockClear();
+    state.connected = true;
+    state.trunk = [];
+    state.sessionHistory = {};
+    state.teamTimelines = {};
+    state.timelineHasMore = {};
+    state.trunkTeamId = null;
+    state.teams = [];
+    state.sessions = [];
+    state.activities = {};
+    state.activeRegion = null;
+    state.activeTeamId = null;
+    state.knownCores = new Set();
+  });
+
+  function earlierCalls() {
+    return sendMock.mock.calls
+      .map(([command]) => command as { RequestTimelineEarlier?: { before_seq?: number; limit?: number } })
+      .filter((payload) => payload?.RequestTimelineEarlier);
+  }
+
+  it('本地渲染完 + 时间线 has_more → 点「加载更早」发 RequestTimelineEarlier（锚点=最老条目 seq）', async () => {
+    // 灌 5 条（全在渲染窗口内），并标记 Core 侧还有更早的
+    state.trunk = [
+      { key: 'g1', role: 'backend', content: 'a', sessionId: 'global', time: 1000, seq: 201 },
+      { key: 'g2', role: 'backend', content: 'b', sessionId: 'global', time: 1001, seq: 202 },
+      { key: 'g3', role: 'backend', content: 'c', sessionId: 'global', time: 1002, seq: 203 },
+      { key: 'g4', role: 'backend', content: 'd', sessionId: 'global', time: 1003, seq: 204 },
+      { key: 'g5', role: 'backend', content: 'e', sessionId: 'global', time: 1004, seq: 205 },
+    ];
+    state.trunkTeamId = teamKey(null, null);
+    state.timelineHasMore[teamKey(null, null)] = true;
+
+    const wrapper = mount(ChatView, { props: { sessionId: 'global' }, global: { stubs } });
+    await nextTick();
+    expect(wrapper.findAll('.stub-item').length).toBe(5);
+
+    // 入口显示（本地无未渲染，但 Core 侧还有）
+    const btn = wrapper.find('[data-testid="chat-load-earlier"]');
+    expect(btn.exists()).toBe(true);
+
+    await btn.trigger('click');
+    await nextTick();
+    const calls = earlierCalls();
+    expect(calls.length).toBe(1);
+    expect(calls[0].RequestTimelineEarlier).toEqual({
+      team_id: null,
+      before_seq: 201, // 最老条目的 seq
+      limit: 400, // 一页 = 渲染窗口的两倍（少往返）
+    });
+    wrapper.unmount();
+  });
+
+  it('时间线已翻到底（has_more=false）→ 入口不显示、不发请求', async () => {
+    state.trunk = [
+      { key: 'g1', role: 'backend', content: 'a', sessionId: 'global', time: 1000, seq: 201 },
+    ];
+    state.trunkTeamId = teamKey(null, null);
+    state.timelineHasMore[teamKey(null, null)] = false;
+
+    const wrapper = mount(ChatView, { props: { sessionId: 'global' }, global: { stubs } });
+    await nextTick();
+    expect(wrapper.find('[data-testid="chat-load-earlier"]').exists()).toBe(false);
+    expect(earlierCalls().length).toBe(0);
+    wrapper.unmount();
+  });
+
+  it('本地还有未渲染的行时优先本地扩窗（不发翻页请求）', async () => {
+    const list: DisplayMessage[] = [];
+    for (let i = 0; i < 260; i++) {
+      list.push({ key: `w${i}`, role: 'backend', content: `m${i}`, sessionId: 'global', time: 1000 + i, seq: 300 + i });
+    }
+    state.trunk = list;
+    state.trunkTeamId = teamKey(null, null);
+    state.timelineHasMore[teamKey(null, null)] = true;
+
+    const wrapper = mount(ChatView, { props: { sessionId: 'global' }, global: { stubs } });
+    await nextTick();
+    expect(wrapper.findAll('.stub-item').length).toBe(200);
+    await wrapper.find('[data-testid="chat-load-earlier"]').trigger('click');
+    await nextTick();
+    await nextTick();
+    expect(wrapper.findAll('.stub-item').length).toBe(260); // 本地扩窗
+    expect(earlierCalls().length).toBe(0); // 未发翻页请求
+    wrapper.unmount();
+  });
+});
+

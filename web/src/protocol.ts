@@ -507,7 +507,18 @@ export type BackendCommand =
   | { CompactHistory: { team_id?: string | null; keep_recent?: number } }
   | 'RequestState'
   | { RequestContext: { team_id?: string | null; session_id?: string | null } }
-  | { RequestTrunkTimeline: { team_id?: string | null; since_seq?: number } }
+  | {
+      RequestTrunkTimeline: {
+        team_id?: string | null;
+        since_seq?: number;
+        /** 首屏窗口上限（只回最新 N 条）；缺省/null = 不限（旧行为）。 */
+        limit?: number | null;
+      };
+    }
+  // 向上翻页取更早的时间线（2026-10 分页）。与 `RequestTrunkTimeline` 分开
+  // 是因为语义不同：翻页只把更早的条目**前插**到已加载列表头部，不动同步
+  // 游标；而 `TrunkTimeline.full` 的语义是"替换缓存"。
+  | { RequestTimelineEarlier: { team_id?: string | null; before_seq: number; limit?: number | null } }
   // 按会话派生显示历史（2026-10）：共享显示窗口（每人格 1024 条 FIFO）会淘汰
   // 无近期活动的会话条目——面板激活会话时改从事件日志派生完整历史（Core 响应
   // `SessionHistory`）。limit 缺省/null = Core 默认上限。
@@ -667,7 +678,19 @@ export type BackendEvent =
         limit_tokens: number;
       };
     }
-  | { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean } }
+  | {
+      TrunkTimeline: {
+        messages: TimelineMessage[];
+        seq?: number;
+        team_id?: string | null;
+        full?: boolean;
+        /** 快照是否被窗口上限截断（还有更早的可翻页）。缺省 false。 */
+        has_more?: boolean;
+      };
+    }
+  // 更早的一页时间线（`RequestTimelineEarlier` 响应；2026-10 分页）：
+  // 前端把 messages **前插**到已加载列表头部，不动同步游标。
+  | { TimelineEarlier: { team_id?: string | null; messages: TimelineMessage[]; has_more?: boolean } }
   // 按会话派生的显示历史（`RequestSessionHistory` 响应；2026-10）：
   // messages = 事件日志派生的完整历史；total = 总条目数；truncated = limit 截断；
   // max_seq = 派生时快照水位（合并窗口增量用，见 state.ts::sessionMessagesFor）。

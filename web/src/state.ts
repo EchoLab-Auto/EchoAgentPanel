@@ -753,6 +753,17 @@ export interface AppState {
    * 「还在加载」与「确实无消息」。
    */
   timelineArrivedOnce: boolean;
+  /**
+   * 当前 team 的时间线**是否还有更早的条目**（`TrunkTimeline.has_more`；
+   * 2026-10 分页）。
+   *
+   * 语义：首屏只取最新 N 条（`RequestTrunkTimeline { limit }`），更早的内容
+   * 按 `RequestTimelineEarlier` 向上翻。翻到底（`has_more: false`）后前端不再
+   * 请求，避免无意义的空往返。
+   *
+   * 键 = `teamKey(core, team_id)`（与 `teamTimelines` 一致）。
+   */
+  timelineHasMore: Record<string, boolean>;
   sessions: (SessionInfo & { core?: string | null })[];
   trunk: DisplayMessage[];
   activities: Record<string, AgentActivity>;
@@ -911,6 +922,7 @@ export function initialState(): AppState {
   return {
     connected: false,
     timelineArrivedOnce: false,
+    timelineHasMore: {},
     sessions: [],
     trunk: [],
     activities: {},
@@ -1375,7 +1387,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       return state;
     }
     case 'TrunkTimeline': {
-      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean; core?: string | null } }).TrunkTimeline;
+      const e = (event as { TrunkTimeline: { messages: TimelineMessage[]; seq?: number; team_id?: string | null; full?: boolean; has_more?: boolean; core?: string | null } }).TrunkTimeline;
       // 多上游：同名 team 跨 core 时只接受当前 activeRegion 的响应——
       // 广播请求（TeamsList 尚未到达时）会让多个 core 各回一份，key 相同
       // 会互相覆盖/串显。core 未标注（单上游/旧 core）时不过滤。
@@ -1429,12 +1441,62 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       // 全量（首载/full 标志/seq 回退/ClearHistory 等）：重建对应缓存。
       const converted = toDisplayMessages(e.messages);
       state.teamTimelines[key] = { seq, msgs: converted };
+      // 分页水位（2026-10）：本次全量是否被窗口上限截断。缺字段（旧版 Core）
+      // 按 false 处理——旧 Core 本来就回全部条目，不需要翻页。
+      state.timelineHasMore[key] = e.has_more === true;
       // 仅当响应对应的正是当前查看的 team 时才替换实时视图；其他 team 的
       // 兜底响应只更新缓存。trunk 与缓存解除数组别名（[...converted]），
       // 否则实时推送会污染缓存、切换回来后经增量再投递一次（重复）。
       if (key === teamKey(state.activeRegion, state.activeTeamId)) {
         state.trunkTeamId = key;
         state.trunk = [...converted];
+      }
+      return state;
+    }
+    case 'TimelineEarlier': {
+      // 更早的一页时间线（2026-10 分页）：**前插**到已加载列表头部，不动
+      // 同步游标（`teamTimelines[key].seq` 仍指最新进度）。与 `TrunkTimeline`
+      // 分开处理的原因：后者的 `full` 语义是"替换缓存"，混在一起前端很难
+      // 判断该替换还是该前插。
+      const e = (event as {
+        TimelineEarlier: {
+          team_id?: string | null;
+          messages: TimelineMessage[];
+          has_more?: boolean;
+          core?: string | null;
+        };
+      }).TimelineEarlier;
+      if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) {
+        return state;
+      }
+      const key = teamKey(evtCore(e), e.team_id ?? null);
+      state.timelineHasMore[key] = e.has_more === true;
+      if (!e.messages.length) return state;
+
+      const incoming = toDisplayMessages(e.messages);
+      // 只前插**比已加载最老条目更早**的（防重复：同一页被重复请求/重连重放）。
+      // `seq === 0` 的旧版条目无法按 seq 比较，按"位置更早"直接收（它们本来
+      // 就只出现在时间线头部）。
+      const prepend = (list: DisplayMessage[]): DisplayMessage[] => {
+        const oldestSeq = list[0]?.seq ?? 0;
+        const seen = new Set(list.map((m) => m.key));
+        const fresh = incoming.filter((m) => {
+          const seq = m.seq ?? 0;
+          const older = seq === 0 || oldestSeq === 0 || seq < oldestSeq;
+          return older && !seen.has(m.key);
+        });
+        if (!fresh.length) return list;
+        // 解除数组别名（与全量分支同一约定）：新数组，避免与缓存互相污染。
+        return [...fresh, ...list];
+      };
+
+      const cached = state.teamTimelines[key];
+      if (cached) {
+        cached.msgs = prepend(cached.msgs);
+      }
+      // 实时视图：仅当该 team 正是当前查看的 team（否则只更新缓存）。
+      if (state.trunkTeamId === key) {
+        state.trunk = prepend(state.trunk);
       }
       return state;
     }
