@@ -1554,6 +1554,19 @@ function pluginIsExternalEntry(p: PluginInfo): boolean {
 function pluginStateIsError(p: PluginInfo): boolean {
   return (p.state ?? '').trim() === 'failed';
 }
+/**
+ * 启动命令的展示文本：`命令 + 参数`（参数为空时只有命令）。
+ *
+ * 用途是排查「命令拼错 / 路径不存在 / 参数漏了」——与 `error` 一起看。
+ * 命令来自 `plugins.toml`，Panel 只展示不执行。
+ */
+function pluginLaunchCommand(p: PluginInfo): string {
+  const command = (p.command ?? '').trim();
+  if (!command) return '';
+  const args = p.args ?? [];
+  return args.length > 0 ? `${command} ${args.join(' ')}` : command;
+}
+
 /** 是否刚从崩溃里恢复过（有重启次数才显示，常态不占视觉）。 */
 function pluginRestartNote(p: PluginInfo): string {
   const restarts = p.restarts ?? 0;
@@ -2989,6 +3002,18 @@ watch(
                   <code v-if="pluginConfigOrigin(selectedPlugin)">{{ pluginConfigOrigin(selectedPlugin) }}</code>
                   <code v-else class="muted">未在配置中声明（缺省内置行为）</code>
                 </div>
+                <div v-if="selectedPlugin.source_path" class="skill-source__row">
+                  <span class="muted">定义文件</span>
+                  <code class="plugin-def-path">{{ selectedPlugin.source_path }}</code>
+                </div>
+                <div v-if="pluginLaunchCommand(selectedPlugin)" class="skill-source__row">
+                  <span class="muted">启动命令</span>
+                  <code class="plugin-def-path">{{ pluginLaunchCommand(selectedPlugin) }}</code>
+                </div>
+                <div v-if="(selectedPlugin.env_keys ?? []).length" class="skill-source__row">
+                  <span class="muted">环境变量</span>
+                  <code class="plugin-def-path">{{ (selectedPlugin.env_keys ?? []).join('、') }}</code>
+                </div>
               </div>
             </div>
           </div>
@@ -3743,6 +3768,10 @@ watch(
   border-radius: 10px;
   background: color-mix(in srgb, var(--panel-err) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--panel-err) 28%, transparent);
+}
+/* 定义文件 / 启动命令：长路径允许折行（不撑破详情栏） */
+.plugin-def-path {
+  word-break: break-all;
 }
 .plugin-mount-error strong {
   display: block;

@@ -323,6 +323,17 @@ export interface PluginInfo {
   restarts?: number;
   /** 连接代际（每次就绪自增；子进程插件）。 */
   generation?: number;
+  /**
+   * 插件**定义文件**路径（`plugins.toml` / 数据插件的 `plugin.toml`）；
+   * 空 = 编译内置（没有外部定义文件）。
+   */
+  source_path?: string;
+  /** 子进程启动命令（空 = 进程内实现）。 */
+  command?: string;
+  /** 启动参数。 */
+  args?: string[];
+  /** 环境变量**键名**（值 Core 不下发——常含 token / 密钥）。 */
+  env_keys?: string[];
 }
 
 export interface ApiProfileInfo {

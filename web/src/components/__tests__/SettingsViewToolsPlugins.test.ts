@@ -607,6 +607,61 @@ describe('SettingsView 插件工作台', () => {
     expect(impact).not.toContain('重启 Core 后生效');
   });
 
+  it('技术信息：定义文件 / 启动命令 / 环境变量键名（排查「为什么不起来」）', async () => {
+    state.plugins = [
+      ...state.plugins,
+      {
+        id: 'example-ext',
+        name: '示例外部插件',
+        version: '1',
+        kind: 'tool',
+        description: 'plugins.toml 的 stdio 条目',
+        entry: 'example-ext',
+        author: '',
+        enabled: true,
+        builtin: false,
+        runtime: 'subprocess',
+        package: 'example-ext',
+        state: 'failed',
+        error: 'spawn failed: No such file or directory',
+        source_path: '/home/me/.config/echo-agent-core/plugins.toml',
+        command: '/opt/plugins/example',
+        args: ['--mode', 'fast'],
+        env_keys: ['EXAMPLE_TOKEN', 'EXAMPLE_HOME'],
+      },
+    ] as typeof state.plugins;
+    const wrapper = await openCategory('插件');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('示例外部插件'))!;
+    await row.trigger('click');
+    const infoTitle = wrapper
+      .findAll('.detail-section__title')
+      .find((t) => t.text().includes('技术信息'))!;
+    await infoTitle.trigger('click');
+    const text = wrapper.find('.skill-source').text();
+    expect(text).toContain('定义文件');
+    expect(text).toContain('/home/me/.config/echo-agent-core/plugins.toml');
+    expect(text).toContain('启动命令');
+    // 命令与参数拼在一起，便于对照报错里的路径。
+    expect(text).toContain('/opt/plugins/example --mode fast');
+    expect(text).toContain('环境变量');
+    expect(text).toContain('EXAMPLE_TOKEN');
+    // 值不下发：断言页面里没有形如 KEY=VALUE 的拼接。
+    expect(text).not.toContain('EXAMPLE_TOKEN=');
+  });
+
+  it('内置插件不显示定义文件/启动命令（没有外部定义）', async () => {
+    const wrapper = await openCategory('插件');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
+    await row.trigger('click');
+    const infoTitle = wrapper
+      .findAll('.detail-section__title')
+      .find((t) => t.text().includes('技术信息'))!;
+    await infoTitle.trigger('click');
+    const text = wrapper.find('.skill-source').text();
+    expect(text).not.toContain('定义文件');
+    expect(text).not.toContain('启动命令');
+  });
+
   it('插件详情：四分区 + 成员 chips + 启停影响文案', async () => {
     const wrapper = await openCategory('插件');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
