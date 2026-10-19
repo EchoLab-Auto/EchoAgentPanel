@@ -62,8 +62,30 @@ export function appendStreamDelta(
   sessionId: string,
   branch: string,
   delta: string,
+  entry?: string,
 ) {
   const want = branch ?? '';
+  // 1) 条目身份精确命中（2026-10 条目身份化）：同一段流式输出的所有增量与
+  //    它的终值共享同一个 `entry`，因此这里既不需要遍历，也不依赖
+  //    (branch, 会话) 的启发式。旧版 Core 不下发 entry → 走下面的回退路径。
+  if (entry) {
+    for (let i = state.trunk.length - 1; i >= 0; i--) {
+      const msg = state.trunk[i];
+      if (msg.entry === entry && msg.streamState === 'streaming') {
+        msg.content += delta;
+        return;
+      }
+    }
+    pushTo(state, role, delta, Math.floor(Date.now() / 1000), {
+      sessionId,
+      animate: false,
+      streamState: 'streaming',
+      streamBranch: want,
+      entry,
+    });
+    return;
+  }
+  // 2) 回退（旧版 Core）：按 (role, session, branch) 找当前流式行。
   for (let i = state.trunk.length - 1; i >= 0; i--) {
     const msg = state.trunk[i];
     if (
@@ -95,6 +117,7 @@ export function settleStream(
   sessionId: string,
   branch: string | null | undefined,
   fullText: string,
+  entry?: string,
 ): boolean {
   const want = branch ?? '';
   const settle = (msg: DisplayMessage) => {
@@ -102,7 +125,22 @@ export function settleStream(
     msg.streamState = undefined;
     msg.streamBranch = undefined;
   };
-  // 1) 精确分支匹配。
+  // 0) 条目身份精确命中（2026-10 条目身份化）：终值与它的增量共享 entry，
+  //    因此"终值落在哪一行"是**确定**的——不再需要「分支缺失取最新流式行」
+  //    这种在并行多分支/交错输出下会配错行的推断。
+  if (entry) {
+    for (let i = state.trunk.length - 1; i >= 0; i--) {
+      const msg = state.trunk[i];
+      if (msg.entry === entry && msg.streamState === 'streaming') {
+        settle(msg);
+        return true;
+      }
+    }
+    // 命不中说明该条目的流式行已不在窗口内（被 FIFO 挤出 / 中途接入）——
+    // 返回 false 让调用方走"整段 push"路径，与旧行为一致。
+    return false;
+  }
+  // 1) 精确分支匹配（旧版 Core 回退）。
   for (let i = state.trunk.length - 1; i >= 0; i--) {
     const msg = state.trunk[i];
     if (msg.role !== role || msg.sessionId !== sessionId || msg.streamState !== 'streaming') {
@@ -279,9 +317,32 @@ function findRunningTool(
  * id 恒由 core 随 ToolCall/ToolResult 提供；缺失/失配时按名字兜底（见
  * `findRunningTool`）。
  * timedOut（外圈超时守卫中止）与 error: 前缀一样渲染为失败。 */
-export function finishToolMessage(state: AppState, toolName: string, result: string, toolCallId?: string, timedOut?: boolean, elapsedMs?: number) {
+export function finishToolMessage(
+  state: AppState,
+  toolName: string,
+  result: string,
+  toolCallId?: string,
+  timedOut?: boolean,
+  elapsedMs?: number,
+  entry?: string,
+) {
   const failed = timedOut === true || result.trimStart().startsWith('error:');
-  const target = findRunningTool(state.trunk, toolName, toolCallId);
+  // 1) 条目身份精确命中（2026-10 条目身份化）：`ToolCall` 与 `ToolResult`
+  //    共享同一个 entry，配对是**确定**的——不再需要「tool_call_id 优先、
+  //    缺失时按工具名猜最后一个 running」的兜底（那套在并行同名调用下会配错）。
+  //    旧版 Core 不下发 entry → 走下面的 findRunningTool 回退。
+  let target: DisplayMessage | null = null;
+  if (entry) {
+    for (let i = state.trunk.length - 1; i >= 0; i--) {
+      const msg = state.trunk[i];
+      if (msg.entry === entry && msg.role === 'tool') {
+        target = msg;
+        break;
+      }
+    }
+  } else {
+    target = findRunningTool(state.trunk, toolName, toolCallId);
+  }
   if (target && target.tool) {
     target.tool.output = bounded(result, 4000);
     target.tool.status = failed ? 'failed' : 'succeeded';
@@ -293,6 +354,7 @@ export function finishToolMessage(state: AppState, toolName: string, result: str
   }
   // No running entry (e.g. restored timeline): append a completed entry.
   pushTo(state, 'tool', toolName, Math.floor(Date.now() / 1000), {
+    entry,
     tool: {
       name: toolName,
       input: '',

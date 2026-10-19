@@ -26,7 +26,7 @@ function learnRegion(core: string | null, nodeId: unknown, regionName: unknown):
   state.regions[core] = { id, name };
 }
 
-export function dispatch(event: BackendEvent, core: string | null = null): void {
+export function dispatch(event: BackendEvent, core: string | null = null, entry?: string): void {
   // 请求-响应跟踪：响应事件到达即销账（各视图加载态，见 pending.ts）。
   // 带 core 传入，多上游下只销目标 core 相同的登记。
   resolvePendingEvent(event, core);
@@ -74,5 +74,5 @@ export function dispatch(event: BackendEvent, core: string | null = null): void 
       }
     }
   }
-  reduce(state, event);
+  reduce(state, event, entry);
 }

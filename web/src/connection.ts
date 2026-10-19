@@ -157,13 +157,13 @@ export function startConnection(): void {
       lastFrameAt = Date.now();
       // 多上游信封（聚合视图，2026-10）：`{core: "<上游名>", frame: <WsMessage>}`。
       // 单上游时中继不加壳，parseEvent 直接命中。
-      const { core, event, seq } = parseFrame(String(message.data));
+      const { core, event, seq, entry } = parseFrame(String(message.data));
       if (event) {
         // 事件信封只用来登记"已知区域"。activeRegion（当前运行区域）是
         // **派生量**——由选中的 agent / 会话决定（App.vue 的 teams watcher
         // 与 onSessionPick），绝不随事件流漂移。
         if (core) state.knownCores.add(core);
-        dispatch(event, core);
+        dispatch(event, core, entry ?? undefined);
       }
       // 事件流连续性校验（2026-10，见 event-seq.ts）：序号跳号 = 中间有帧
       // 没到。先 dispatch（让本帧先落地、游标更准），再按游标补拉。
@@ -287,6 +287,7 @@ function parseFrame(text: string): {
   core: string | null;
   event: ReturnType<typeof parseEvent>;
   seq: number | null;
+  entry: string | null;
 } {
   try {
     const parsed = JSON.parse(text) as { core?: unknown; frame?: unknown };
@@ -295,12 +296,33 @@ function parseFrame(text: string): {
         core: parsed.core,
         event: parseEvent(JSON.stringify(parsed.frame)),
         seq: seqOf(parsed.frame),
+        entry: entryOf(parsed.frame),
       };
     }
   } catch {
     // 非信封：按单上游原格式解析
   }
-  return { core: null, event: parseEvent(text), seq: seqOf(text) };
+  return { core: null, event: parseEvent(text), seq: seqOf(text), entry: entryOf(text) };
+}
+
+/**
+ * 从事件帧里取**条目身份**（Core 信封层的顶层 `entry` 字段，见 Core 的
+ * `entry_identity` 模块）。
+ *
+ * 语义：同一条逻辑条目的所有事件共享同一个 id（一段流式输出的全部增量与
+ * 它的终值同 id，工具调用与它的结果同 id），Panel 据此精确对齐实时行与
+ * 时间线权威条目，不必再靠「同角色 + 同时间 + 内容前缀」猜。
+ *
+ * 旧版 Core 不下发 → `null`，所有消费点都有回退路径（灰度双读）。
+ */
+function entryOf(frame: unknown): string | null {
+  try {
+    const value = typeof frame === 'string' ? (JSON.parse(frame) as unknown) : frame;
+    const entry = (value as { entry?: unknown } | null)?.entry;
+    return typeof entry === 'string' && entry ? entry : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

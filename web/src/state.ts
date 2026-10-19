@@ -233,6 +233,16 @@ export interface DisplayMessage {
   streamState?: 'streaming' | 'frozen';
   /** 流式归属分支（对账用；终值替换后清除）。 */
   streamBranch?: string;
+  /**
+   * 条目身份（Core 信封层的 `entry` 字段；2026-10 条目身份化 P1）。
+   *
+   * 语义：同一条逻辑条目的**所有事件**共享同一个 id——一段流式输出的全部
+   * 增量与它的终值同 id，工具调用与它的结果同 id。因此 Panel 可以**精确**
+   * 命中"这条事件属于哪一行"，不必再靠「同角色 + 同时间 + 内容前缀」猜。
+   *
+   * `undefined` = 旧版 Core 没下发（回退现有判据）或该事件无身份概念。
+   */
+  entry?: string;
   source?: {
     instance_name: string;
     platform: string;
@@ -894,7 +904,7 @@ export function initialState(): AppState {
   };
 }
 
-export function reduce(state: AppState, event: BackendEvent): AppState {
+export function reduce(state: AppState, event: BackendEvent, entry?: string): AppState {
   switch (Object.keys(event)[0]) {
     case 'InstanceStateChanged': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
@@ -1117,7 +1127,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { AgentContentDelta: { session_id: string; branch_id: string; delta: string; team_id?: string | null } }).AgentContentDelta;
       // 流式正文增量：实时追加到流式行（终值 AgentOutput 到达时全量对账）。
       if (e.delta && belongsToActiveTeam(state, e.team_id, evtCore(e))) {
-        appendStreamDelta(state, 'backend', e.session_id, e.branch_id, e.delta);
+        appendStreamDelta(state, 'backend', e.session_id, e.branch_id, e.delta, entry);
       }
       return state;
     }
@@ -1125,7 +1135,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       const e = (event as { AgentReasoningDelta: { session_id: string; branch_id: string; delta: string; team_id?: string | null } }).AgentReasoningDelta;
       // 流式推理增量：实时追加到流式行（终值 AgentReasoning 到达时全量对账）。
       if (e.delta && belongsToActiveTeam(state, e.team_id, evtCore(e))) {
-        appendStreamDelta(state, 'reasoning', e.session_id, e.branch_id, e.delta);
+        appendStreamDelta(state, 'reasoning', e.session_id, e.branch_id, e.delta, entry);
       }
       return state;
     }
@@ -1226,6 +1236,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
           pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
             sessionId: e.session_id,
             animate: true,
+            entry, // 条目身份（旧版 Core 为 undefined → 不写字段）
             tool: {
               name: e.tool_name,
               input: summarizeArguments(e.arguments),
@@ -1256,7 +1267,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
       // 工具结果实时回填主时间线（与 ToolCall 精确配对）；分支 tab 同步更新。
       const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
-        finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out, e.elapsed_ms);
+        finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out, e.elapsed_ms, entry);
       }
       if (tab) {
         const failed = e.timed_out === true || e.result.trimStart().startsWith('error:');
@@ -1396,7 +1407,7 @@ export function reduce(state: AppState, event: BackendEvent): AppState {
         // 正式回答实时进主时间线（推理已按序穿插，无需再附加尾巴）。
         // 流式对账：全量替换流式行（branch_id 缺失=后端路径时取最新流式
         // 行）；无流式行（非流式路径）→ 既有整段 + 入场动画。
-        if (!settleStream(state, 'backend', e.session_id, e.branch_id ?? null, e.content)) {
+        if (!settleStream(state, 'backend', e.session_id, e.branch_id ?? null, e.content, entry)) {
           pushTo(state, 'backend', e.content, Math.floor(Date.now() / 1000), {
             sessionId: e.session_id,
             animate: true,
