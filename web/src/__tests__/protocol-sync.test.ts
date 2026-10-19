@@ -78,8 +78,11 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // → 53（2026-10 时间线分页：+TimelineEarlier——`RequestTimelineEarlier`
     //   向上翻页，把更早的一页**前插**到已加载列表头部；与 `TrunkTimeline`
     //   分开是因为后者 `full` 的语义是"替换缓存"）。
+    // → 54（2026-10 插件操作回执：+PluginOpResult——`TogglePlugin` /
+    //   `RestartPlugin` 的成功与失败此前都走 `Error`，面板只能靠文案猜；
+    //   现在 `ok` 是字段，toast 按它分流）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(53);
+    expect(variants.size).toBe(54);
   });
 
   it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {

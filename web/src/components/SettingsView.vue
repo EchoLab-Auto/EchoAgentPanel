@@ -962,6 +962,13 @@ const pluginImpactText = computed(() => {
   if (pluginProtected(p)) {
     return '「管理面」插件承载 Panel ↔ Core 的 management 通道：禁用即断连自锁（无法经界面恢复），Core 侧拒绝经 TogglePlugin 禁用。确需禁用请编辑 core.toml 的 disabled_plugins 后重启 Core。';
   }
+  // 外部条目（`plugins.toml` 的 stdio 插件）优先判：它的启停语义是
+  // 「真的起停子进程」，与门控/通道/名义挂载三类都不同。
+  if (pluginIsExternalEntry(p)) {
+    const members = pluginMembers(p);
+    const tools = members.tools.length;
+    return `外部插件（独立进程）：启停**立即生效**——禁用会排空并退出该插件进程${tools > 0 ? `，其 ${tools} 个工具随即不可用` : ''}；启用会重新拉起并握手。同时写入 disabled_plugins，重启 Core 后保持当前状态。`;
+  }
   const sem = pluginSemantic(p);
   if (sem === 'gated') {
     const members = pluginMembers(p);
@@ -1512,6 +1519,46 @@ function pluginConfigOrigin(p: PluginInfo): string {
 /** 挂载失败原因（与「用户主动禁用」区分开：两者 enabled 都是 false）。 */
 function pluginMountError(p: PluginInfo): string {
   return (p.error ?? '').trim();
+}
+
+/**
+ * 子进程运行态（`state`）的人读标签与色调。
+ *
+ * 空 = 进程内实现（没有独立生命周期）；只有 `plugins.toml` 的外部条目与
+ * 实例门控壳才有这个字段。它描述的是**进程**，与 `enabled`（用户开关）
+ * 正交——`ready` + `enabled=false` 是「开着但被停」，`failed` 是「起不来」。
+ */
+const PLUGIN_RUNTIME_STATE_LABELS: Record<string, string> = {
+  pending: '启动中',
+  ready: '运行中',
+  draining: '停止中',
+  stopped: '已停止',
+  failed: '失败',
+};
+function pluginStateLabel(p: PluginInfo): string {
+  const state = (p.state ?? '').trim();
+  return PLUGIN_RUNTIME_STATE_LABELS[state] ?? '';
+}
+/**
+ * 是不是 `plugins.toml` 的**外部条目**（stdio 子进程插件）。
+ *
+ * 判据与 Core 的 `PluginHost::is_external_entry` 一致：`subprocess` 且
+ * `builtin = false`。实例门控壳是 `subprocess + builtin`（manifest 编译在
+ * Core 里），不算——它有自己的启停通道。
+ */
+function pluginIsExternalEntry(p: PluginInfo): boolean {
+  return p.runtime === 'subprocess' && p.builtin === false;
+}
+
+/** 运行态是否处于故障（决定徽标用红还是中性色）。 */
+function pluginStateIsError(p: PluginInfo): boolean {
+  return (p.state ?? '').trim() === 'failed';
+}
+/** 是否刚从崩溃里恢复过（有重启次数才显示，常态不占视觉）。 */
+function pluginRestartNote(p: PluginInfo): string {
+  const restarts = p.restarts ?? 0;
+  if (restarts <= 0) return '';
+  return `已自动重启 ${restarts} 次`;
 }
 
 // ── 工具启停 ──
@@ -2133,6 +2180,14 @@ watch(
                       </span>
                       <span v-else-if="pluginSemantic(p) === 'mode'" class="caps-mark caps-mark--system" title="互斥模式插件">
                         模式
+                      </span>
+                      <span
+                        v-if="pluginStateLabel(p) && p.state !== 'ready'"
+                        class="caps-mark caps-mark--icon"
+                        :class="pluginStateIsError(p) ? 'caps-mark--err' : 'caps-mark--system'"
+                        :title="`子进程运行态：${pluginStateLabel(p)}${pluginRestartNote(p) ? ' · ' + pluginRestartNote(p) : ''}`"
+                      >
+                        {{ pluginStateLabel(p) }}
                       </span>
                       <span
                         v-if="pluginOriginBadge(p)"
@@ -2912,6 +2967,18 @@ watch(
                 <div class="skill-source__row">
                   <span class="muted">来源</span>
                   <code>{{ PLUGIN_ORIGIN_LABELS[pluginOrigin(selectedPlugin)] }}</code>
+                </div>
+                <div v-if="pluginStateLabel(selectedPlugin)" class="skill-source__row">
+                  <span class="muted">运行态</span>
+                  <code>
+                    {{ pluginStateLabel(selectedPlugin) }}
+                    <template v-if="pluginRestartNote(selectedPlugin)">
+                      · {{ pluginRestartNote(selectedPlugin) }}
+                    </template>
+                    <template v-if="selectedPlugin.generation">
+                      · 代际 {{ selectedPlugin.generation }}
+                    </template>
+                  </code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">Author</span>

@@ -1927,6 +1927,15 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       pushToast(state, e.message, e.success ? 'success' : 'error');
       return state;
     }
+    case 'PluginOpResult': {
+      const e = (
+        event as { PluginOpResult: { id: string; op: string; ok: boolean; message: string } }
+      ).PluginOpResult;
+      // 结构化回执：成功/失败分开渲染。此前两者都走 `Error`，面板只能靠
+      // 文案猜——「已启用」与「启用失败」在 UI 上是同一种提示。
+      pushToast(state, e.message, e.ok ? 'success' : 'error');
+      return state;
+    }
     case 'Error': {
       const e = (event as { Error: { session_id: string | null; message: string } }).Error;
       // 流式：错误中断当前步——冻结该会话流式行（保留已显示的部分文本）。

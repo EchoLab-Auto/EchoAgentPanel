@@ -311,6 +311,18 @@ export interface PluginInfo {
    * 要去哪一层改它」——与 Core 的 `dump-config` 同源。
    */
   config_origin?: string;
+  /**
+   * 运行态（子进程插件）：`pending` / `ready` / `draining` / `stopped` /
+   * `failed`。空/缺失 = 进程内实现（没有独立生命周期）。
+   *
+   * 与 `enabled` 正交：`enabled = true` + `state = 'failed'` 是「配置开了、
+   * 进程起不来」——和「用户关掉了」完全不同，不能混为一谈。
+   */
+  state?: string;
+  /** 崩溃后已自动重启次数（子进程插件）。 */
+  restarts?: number;
+  /** 连接代际（每次就绪自增；子进程插件）。 */
+  generation?: number;
 }
 
 export interface ApiProfileInfo {
@@ -792,6 +804,15 @@ export type BackendEvent =
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
   | { PluginsList: { plugins: PluginInfo[] } }
+  | {
+      PluginOpResult: {
+        id: string;
+        /** `enable` / `disable` / `restart`。 */
+        op: string;
+        ok: boolean;
+        message: string;
+      };
+    }
   | { TeamsList: { teams: TeamInfo[] } }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }

@@ -544,6 +544,69 @@ describe('SettingsView 插件工作台', () => {
     expect(row.text()).not.toContain('外部来源');
   });
 
+  it('运行态：failed 出红色「失败」徽标，技术信息显示状态与重启次数', async () => {
+    state.plugins = [
+      ...state.plugins.map((p) =>
+        p.id === 'echo-agent.adapter.qq'
+          ? { ...p, state: 'failed', restarts: 3, generation: 9 }
+          : p,
+      ),
+    ];
+    const wrapper = await openCategory('插件');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
+    const badge = row.find('.caps-mark--err');
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toContain('失败');
+
+    await row.trigger('click');
+    const infoTitle = wrapper
+      .findAll('.detail-section__title')
+      .find((t) => t.text().includes('技术信息'))!;
+    await infoTitle.trigger('click');
+    const text = wrapper.find('.skill-source').text();
+    expect(text).toContain('运行态');
+    expect(text).toContain('失败');
+    expect(text).toContain('已自动重启 3 次');
+    expect(text).toContain('代际 9');
+  });
+
+  it('运行态 ready 不在行卡上喊（只有异常态才出徽标）', async () => {
+    state.plugins = [
+      ...state.plugins.map((p) =>
+        p.id === 'echo-agent.adapter.qq' ? { ...p, state: 'ready', generation: 1 } : p,
+      ),
+    ];
+    const wrapper = await openCategory('插件');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
+    expect(row.text()).not.toContain('运行中');
+  });
+
+  it('外部条目：启停影响文案说「立即生效」（真的起停子进程）', async () => {
+    state.plugins = [
+      ...state.plugins,
+      {
+        id: 'example-ext',
+        name: '示例外部插件',
+        version: '1',
+        kind: 'tool',
+        description: 'plugins.toml 的 stdio 条目',
+        entry: 'example-ext',
+        author: '',
+        enabled: true,
+        builtin: false,
+        runtime: 'subprocess',
+        package: 'example-ext',
+        state: 'ready',
+      },
+    ] as typeof state.plugins;
+    const wrapper = await openCategory('插件');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('示例外部插件'))!;
+    await row.trigger('click');
+    const impact = wrapper.find('.plugin-impact').text();
+    expect(impact).toContain('立即生效');
+    expect(impact).not.toContain('重启 Core 后生效');
+  });
+
   it('插件详情：四分区 + 成员 chips + 启停影响文案', async () => {
     const wrapper = await openCategory('插件');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
