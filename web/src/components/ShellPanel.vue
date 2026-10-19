@@ -135,6 +135,9 @@ watch(shellTailSignature, () => {
         <div v-if="!(state.shellTerminals[terminalKey] ?? []).length" class="shell-terminal__hint">
           输入命令后回车执行…
         </div>
+        <!-- 条数与单条输出长度由 state 侧限幅（SHELL_ENTRIES_LIMIT /
+             SHELL_OUTPUT_TAIL）：FIFO 只留最近 200 条、每条只留尾部 64KB，
+             因此这里的 v-for 天然有界，不需要虚拟滚动。 -->
         <div
           v-for="entry in state.shellTerminals[terminalKey] ?? []"
           :key="entry.seq"

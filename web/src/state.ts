@@ -719,6 +719,24 @@ export interface UpstreamSshStatus {
   local_port: number | null;
 }
 
+/// 每个 shell 会话保留的命令条数上限（FIFO 淘汰最旧）。
+export const SHELL_ENTRIES_LIMIT = 200;
+
+/// 单条命令累积输出的**尾部长**上限（超出则丢头部）。
+///
+/// 为什么按"尾部"截断：终端视图贴底跟随（`ShellPanel` 自动滚到底），用户看的
+/// 永远是最后若干屏；`cat 一个大文件` 或长跑构建日志会让 `output` 无界增长
+/// （每条 chunk 都 `+=` 进 reactive 图，且整段渲染进 `<pre>`），是"开久了卡"
+/// 的一个真实来源。
+export const SHELL_OUTPUT_TAIL = 64 * 1024;
+
+/** 追加一段输出，只保留尾部 [`SHELL_OUTPUT_TAIL`] 个字符（超限时加省略标记）。 */
+export function appendBoundedOutput(current: string, chunk: string): string {
+  const next = current + chunk;
+  if (next.length <= SHELL_OUTPUT_TAIL) return next;
+  return `…（较早的输出已省略）\n${next.slice(next.length - SHELL_OUTPUT_TAIL)}`;
+}
+
 /// 一个"运行区域"（= 一个承载 agent 的 Core）。
 export interface RegionInfo {
   /// 区域 id（= Core 的 NodeId；未学习到 NodeId 时退化为上游名）。
@@ -1761,6 +1779,12 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       const e = (event as { ShellExecStarted: { session_id: string; seq: number; command: string; core?: string | null } }).ShellExecStarted;
       const entries = (state.shellTerminals[sessionKey(evtCore(e), e.session_id)] ??= []);
       entries.push({ seq: e.seq, command: e.command, status: 'running', output: '' });
+      // 条数上限（2026-10 内存治理）：一个常驻 shell 会跑成百上千条命令，
+      // 每条都留着**完整输出**——终端视图只显示尾部，旧的既占内存又拖慢渲染
+      // （`ShellPanel` 对每条 entry 都渲染一个 <pre>）。按 FIFO 只留最近 N 条。
+      if (entries.length > SHELL_ENTRIES_LIMIT) {
+        entries.splice(0, entries.length - SHELL_ENTRIES_LIMIT);
+      }
       return state;
     }
     case 'ShellExecOutput': {
@@ -1768,7 +1792,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       const entries = state.shellTerminals[sessionKey(evtCore(e), e.session_id)];
       if (!entries) return state;
       const entry = entries.find((t) => t.seq === e.seq);
-      if (entry) entry.output += e.chunk;
+      if (entry) entry.output = appendBoundedOutput(entry.output, e.chunk);
       return state;
     }
     case 'ShellExecDone': {

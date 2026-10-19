@@ -18,7 +18,13 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
-import { SESSION_HISTORY_LIMIT, SESSIONS_LIMIT, BROWSE_CACHE_LIMIT } from '../state';
+import {
+  SESSION_HISTORY_LIMIT,
+  SESSIONS_LIMIT,
+  BROWSE_CACHE_LIMIT,
+  SHELL_ENTRIES_LIMIT,
+  SHELL_OUTPUT_TAIL,
+} from '../state';
 import { checklistKey } from '../keys';
 
 function historyEvent(sessionId: string, count = 2) {
@@ -45,6 +51,7 @@ beforeEach(() => {
   state.sessionHistory = {};
   state.sessions = [];
   state.browseDirectories = {};
+  state.shellTerminals = {};
   state.activeRegion = null;
   state.activeTeamId = 't';
 });
@@ -118,5 +125,47 @@ describe('browseDirectories 有界', () => {
       expect(Object.keys(state.browseDirectories).length).toBeLessThanOrEqual(BROWSE_CACHE_LIMIT);
     }
     expect(Object.keys(state.browseDirectories).length).toBe(BROWSE_CACHE_LIMIT);
+  });
+});
+
+describe('shell 终端有界（命令条数 + 单条输出尾部）', () => {
+  const sid = 'sh-1';
+
+  function started(seq: number) {
+    return { ShellExecStarted: { session_id: sid, seq, command: `cmd ${seq}` } };
+  }
+  function chunk(seq: number, text: string) {
+    return { ShellExecOutput: { session_id: sid, seq, chunk: text } };
+  }
+
+  it(`每个会话最多保留 ${SHELL_ENTRIES_LIMIT} 条命令（FIFO 淘汰最旧）`, () => {
+    for (let i = 1; i <= SHELL_ENTRIES_LIMIT + 20; i++) {
+      dispatch(started(i) as never);
+    }
+    const entries = state.shellTerminals[Object.keys(state.shellTerminals)[0]!]!;
+    expect(entries.length).toBe(SHELL_ENTRIES_LIMIT);
+    // 最旧的被淘汰、最新的在
+    expect(entries[0]!.seq).toBe(21);
+    expect(entries[entries.length - 1]!.seq).toBe(SHELL_ENTRIES_LIMIT + 20);
+  });
+
+  it('单条输出只保留尾部（超出上限时丢头部并标注）', () => {
+    dispatch(started(1) as never);
+    // 分块灌超过上限的输出
+    const piece = 'x'.repeat(8 * 1024);
+    for (let i = 0; i < 12; i++) dispatch(chunk(1, piece) as never);
+    const entry = state.shellTerminals[Object.keys(state.shellTerminals)[0]!]![0]!;
+    expect(entry.output.length).toBeLessThanOrEqual(SHELL_OUTPUT_TAIL + 64);
+    expect(entry.output).toContain('较早的输出已省略');
+    // 尾部内容仍完整（最后一段 chunk 原样在末尾）
+    expect(entry.output.endsWith(piece)).toBe(true);
+  });
+
+  it('未超限时输出原样累积（不做无谓改写）', () => {
+    dispatch(started(1) as never);
+    dispatch(chunk(1, 'hello ') as never);
+    dispatch(chunk(1, 'world') as never);
+    const entry = state.shellTerminals[Object.keys(state.shellTerminals)[0]!]![0]!;
+    expect(entry.output).toBe('hello world');
   });
 });
