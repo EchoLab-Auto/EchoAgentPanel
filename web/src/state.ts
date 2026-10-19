@@ -7,7 +7,7 @@ import {
   startReplyBranch,
   completeReplyBranch,
 } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessage, findToolEntryIndex, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
+import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessageAt, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 import { instanceOpKey, settleInstanceOp } from './instanceOps';
 import { settleInstanceOpsOfCore } from './pending';
@@ -346,40 +346,72 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   // 每次白花 ~3 ms 与 2000 次分配（窗口化后渲染只用尾部 200 条，99% 的拷贝
   // 是纯浪费）。改为：数组浅拷贝（O(n) 指针、零对象分配）+ 只有**被补丁的
   // 那一条**才复制对象（见 patchToolMessage）。语义不变：快照对象绝不原地改。
+  // 合并（2026-10 重写为两阶段）：**先判定归属，再一次性构建结果**。
+  //
+  // 为什么不能"边匹配边 splice"：`out.splice(cursor, 0, w)` 会改变后续元素的
+  // 下标，而索引里存的是下标——插入一条之后，已建好的索引全部偏移（实测
+  // 症状：hist 里的 backend 被判定为"未覆盖"，同一条回答显示两遍）。
+  // 原线性实现每次现扫所以不受影响，必须换成"下标只在快照原始坐标里用"。
+  //
+  // ## 语义（与原实现逐条等价）
+  //
+  // `state.trunk` 的顺序就是真实时序（实时投影按到达顺序 push，Core 的
+  // timeline 也是同一顺序），所以合并必须**按它落位**，不能把"没匹配到快照
+  // 的条目"一律追加到末尾——旧版 Core 的历史派生不含推理（`history.rs`：
+  // 活链路的 `AssistantMessage.reasoning_content` 恒为 `None`），一律 append
+  // 的结果就是"历史回合的思考全堆到正文后面"，刷新才消失。
+  //
+  // 1. 工具行命中快照 → 就地修补（同一行，不新增）；
+  // 2. 其它条目命中快照 → 视为已覆盖，不新增；
+  // 3. 水位线内（seq ≤ baseSeq）但判据没命中 → 视为已覆盖（快照被瘦身）；
+  //    **推理例外**（两侧都可能被 elide，宁可多显示一条也不丢）；
+  // 4. 其余 = 新条目 → 按 trunk 顺序落在"它前面那条已匹配条目"之后。
   const out = hist.messages.slice();
-  // 插入游标（2026-10）：`state.trunk` 的顺序就是真实时序（实时投影按到达
-  // 顺序 push，Core 的 timeline 也是同一顺序），所以合并必须**按它落位**，
-  // 不能把"没匹配到快照的条目"一律追加到末尾。
-  //
-  // 为什么这条是必需的：**旧版 Core** 的历史派生不含推理（`history.rs`：
-  // 活链路的 `AssistantMessage.reasoning_content` 恒为 `None`，推理只存在于
-  // 实时 timeline）。推理在快照里找不到对应条目，一律 append 的结果就是
-  // "历史回合的思考全堆到正文后面"，刷新才消失。
-  //
-  // 新版 Core（2026-10 根治）把每段推理落成 `SessionEvent::Reasoning`，
-  // 派生结果**包含**推理且顺序正确；此时匹配分支会命中并只前移游标。
-  // 两条路径共用同一套落位逻辑，不需要按 Core 版本分支。
-  let cursor = 0;
+  // **匹配索引**：此前是「每条窗口消息 × 全表线性扫」——实测 3000 条历史 +
+  // 1024 条实时窗口时单次 delta **622 ms**（Profiler：55.7% 是 reactive
+  // Proxy get，35% 是匹配循环本身）。索引把每次匹配变成一次 Map 查表。
+  // 索引只依赖快照的 (role, time) 与工具 call id——补丁（换对象、就地修补）
+  // 后都不变，建一次即可用到底（且下标始终是**快照原始坐标**，不受输出偏移
+  // 影响，这正是改成两阶段的原因）。
+  const index = buildSnapshotIndex(out);
+  const result: DisplayMessage[] = [];
+  // 快照下标 → result 下标（补丁要用；-1 = 尚未输出）
+  const resultOf = new Int32Array(out.length).fill(-1);
+  let snap = 0; // 下一个待输出的快照条目下标
+  let cursorEstablished = false;
+
+  /** 把快照里 [snap, upto] 的条目都输出（跳过被覆盖的那条本身）。 */
+  const flushThrough = (upto: number) => {
+    while (snap <= upto) {
+      resultOf[snap] = result.length;
+      result.push(out[snap]!);
+      snap += 1;
+    }
+  };
+
   for (const w of windowMsgs) {
     const seq = w.seq ?? 0;
     const withinWatermark = seq > 0 && seq <= hist.baseSeq;
-    // 1) 工具行：就��修补（同一行，不新增），游标移到它之后。
-    const toolIndex = findToolEntryIndex(out, w);
+    // 1) 工具行：就地修补（同一行，不新增）。
+    const toolIndex = findToolEntryInIndex(out, w, index);
     if (toolIndex >= 0) {
-      patchToolMessage(out, w);
-      cursor = Math.max(cursor, toolIndex + 1);
+      patchToolMessageAt(out, toolIndex, w);
+      if (resultOf[toolIndex]! < 0) flushThrough(toolIndex); // 该条尚未输出则先铺到它
+      result[resultOf[toolIndex]!] = out[toolIndex]!;
+      cursorEstablished = true;
       continue;
     }
-    // 2) 快照里已有对应条目 → 只前移游标。
+    // 2) 快照里已有对应条目 → 只前移输出位置。
     //    水位线内的条目要求**完全相等**：它们自带权威身份，用前缀兼容判据
     //    会把内容更全的新条目误判成重复而吞掉（漏显示回答）。
     // 推理不参与 strict：线上瘦身（elide_reasoning_for_wire）会让历史里的
     // 全文与 timeline 里的截断文本无法"完全相等"，strict 会把同一条判成
     // 两条 → 重复显示。
     const strict = withinWatermark && w.role !== 'reasoning';
-    const coveredIndex = indexCoveredBySnapshot(out, w, strict);
+    const coveredIndex = coveredInIndex(out, w, strict, index);
     if (coveredIndex >= 0) {
-      cursor = Math.max(cursor, coveredIndex + 1);
+      flushThrough(coveredIndex);
+      cursorEstablished = true;
       continue;
     }
     // 3) 水位线内（非推理）但内容判据没命中 → 视为已覆盖（快照被瘦身/截断）。
@@ -388,13 +420,19 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
     //    只留 240 字 + 标记），内容判据仍可能落空——宁可多显示一条，也不能
     //    把推理整条丢掉。
     if (withinWatermark && w.role !== 'reasoning') continue;
-    // 4) 新条目：插到游标处。游标还没建立（trunk 缺少前驱条目，例如已滚出
-    //    窗口）时用时间兜底；时间也缺失则退回追加。
-    if (cursor === 0) cursor = timeInsertIndex(out, w);
-    out.splice(cursor, 0, w);
-    cursor += 1;
+    // 4) 新条目：落在当前输出位置。
+    //    游标还没建立（trunk 缺少前驱条目，例如已滚出窗口）时用**时间**兜底
+    //    ——在尚未输出的快照条目里找第一条更晚的，把它之前的先铺出去。
+    if (!cursorEstablished) {
+      const anchor = timeInsertIndexFrom(out, w, snap);
+      flushThrough(anchor - 1);
+      cursorEstablished = true;
+    }
+    result.push(w);
   }
-  return out;
+  // 收尾：剩余快照条目按原序输出。
+  flushThrough(out.length - 1);
+  return result;
 }
 
 /** Core `elide_reasoning_for_wire` 写入的截断标记（`{head}…\n（较早的推理已截断：原文 N 字）`）。 */
@@ -423,6 +461,77 @@ function stripWireElision(text: string): string {
 }
 
 /**
+ * 快照匹配索引（2026-10 P0 第二批性能）。
+ *
+ * 建一次 O(n)，之后每次匹配 O(候选数)。三类键与两个匹配函数的判据**一一
+ * 对应**（只加不换语义）：
+ * - `byRoleTime`：`indexCoveredBySnapshot` 的第一道筛（`role` + `time` 相等）；
+ * - `byToolCallId`：`findToolEntryIndex` 的 id 精确分支；
+ * - `byToolNameRunning`：`findToolEntryIndex` 的无 id 名字兜底分支。
+ *
+ * 为什么存「下标列表」而不是单值：`byRoleTime` 的候选可能多条（同一秒内
+ * 同角色多条消息是常态——一回合的工具行时间戳来自 carry-forward），必须按
+ * 原顺序逐个判定内容。
+ */
+interface SnapshotIndex {
+  byRoleTime: Map<string, number[]>;
+  byToolCallId: Map<string, number>;
+  /** 工具名 → 最后一个 `running` 工具行的下标（名字兜底用）。 */
+  byToolNameRunning: Map<string, number>;
+}
+
+const roleTimeKey = (role: string, time: number): string => `${role}|${time}`;
+
+function buildSnapshotIndex(list: DisplayMessage[]): SnapshotIndex {
+  const index: SnapshotIndex = {
+    byRoleTime: new Map(),
+    byToolCallId: new Map(),
+    byToolNameRunning: new Map(),
+  };
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i]!;
+    const key = roleTimeKey(m.role, m.time);
+    const bucket = index.byRoleTime.get(key);
+    if (bucket) bucket.push(i);
+    else index.byRoleTime.set(key, [i]);
+    const tool = m.tool;
+    if (tool) {
+      // 存**最后一个**：原判据自后向前找（后到的是同一 call 的最新态）。
+      if (tool.toolCallId) index.byToolCallId.set(tool.toolCallId, i);
+      if (tool.status === 'running') index.byToolNameRunning.set(tool.name, i);
+    }
+  }
+  return index;
+}
+
+/**
+ * 按索引定位工具行（语义同 `findToolEntryIndex`）：
+ * - 有 `toolCallId` → 精确命中（不要求 output 非空）；
+ * - 无 id 且是完成态增量 → 按工具名找**最后一个 running**；
+ * - 无 id 且是运行中 → 不修补（避免抹掉 startedAtMs 让计时跳变）。
+ */
+function findToolEntryInIndex(
+  list: DisplayMessage[],
+  incoming: DisplayMessage,
+  index: SnapshotIndex,
+): number {
+  const tool = incoming.tool;
+  if (!tool) return -1;
+  if (tool.toolCallId) {
+    const hit = index.byToolCallId.get(tool.toolCallId);
+    // 索引命中的下标必须仍然指向同一条（补丁会换对象，但 call id 不变）。
+    return hit !== undefined && list[hit]?.role === 'tool' ? hit : -1;
+  }
+  if (tool.output == null) return -1;
+  const hit = index.byToolNameRunning.get(tool.name);
+  if (hit === undefined) return -1;
+  const existing = list[hit];
+  if (!existing || existing.role !== 'tool' || existing.tool?.name !== tool.name) return -1;
+  if (existing.tool.status !== 'running') return -1;
+  return hit;
+}
+
+/**
  * 实时条目是否已包含在历史快照里（去重用）。
  *
  * 为什么需要：`SessionHistory` 由 Core 从**事件日志**派生，因此包含当前回合
@@ -434,54 +543,67 @@ function stripWireElision(text: string): string {
  *
  * 判据刻意保守：必须**同角色 + 同时间 + 内容兼容**才判为重复。宁可重复显示
  * 也不丢内容——漏显示一条回答远比多显示一节严重。
+ *
+ * （匹配走 (role, time) 索引，见 `coveredInIndex`；单条判据见 `coveredBy`。）
  */
-function indexCoveredBySnapshot(
+function coveredInIndex(
   snapshot: DisplayMessage[],
   live: DisplayMessage,
-  strict = false,
+  strict: boolean,
+  index: SnapshotIndex,
 ): number {
-  for (let i = 0; i < snapshot.length; i++) {
+  const bucket = index.byRoleTime.get(roleTimeKey(live.role, live.time));
+  if (!bucket) return -1;
+  for (const i of bucket) {
     const h = snapshot[i]!;
-    if (h.role !== live.role || h.time !== live.time) continue;
-    if (h.content === live.content) return i;
-    if (strict) continue; // 水位线内的条目只认完全相等（见调用处注释）
-    // 推理：线上会被瘦身（前 40 条保留全文，更早的截成 240 字 + 标记），
-    // 所以两侧可能是"全文 vs 截断"——剥掉标记后按前缀判等。
-    if (live.role === 'reasoning' && reasoningCompatible(h.content, live.content)) return i;
-    // 流式副本可能只是终值的前缀（快照是终值、实时行还在增长），或反过来。
-    if (
-      live.role === 'backend' &&
-      (h.content.startsWith(live.content) || live.content.startsWith(h.content))
-    ) {
-      return i;
-    }
-    // 工具行：同名的快照条目已给出完成态（output 非空）→ 实时副本是重复的。
-    if (
-      live.role === 'tool' &&
-      h.tool &&
-      live.tool &&
-      h.tool.name === live.tool.name &&
-      h.tool.output != null
-    ) {
-      return i;
-    }
+    if (h.role !== live.role || h.time !== live.time) continue; // 下标被补丁换过
+    if (coveredBy(h, live, strict)) return i;
   }
   return -1;
 }
 
 /**
- * 按时间找插入位置：第一个 `time` 比它大的条目之前。
+ * 单条候选的"是否已覆盖"判据（`coveredInIndex` 内部使用）。
+ */
+function coveredBy(h: DisplayMessage, live: DisplayMessage, strict: boolean): boolean {
+  if (h.content === live.content) return true;
+  if (strict) return false; // 水位线内的条目只认完全相等（见调用处注释）
+  // 推理：线上会被瘦身（前 40 条保留全文，更早的截成 240 字 + 标记），
+  // 所以两侧可能是"全文 vs 截断"——剥掉标记后按前缀判等。
+  if (live.role === 'reasoning' && reasoningCompatible(h.content, live.content)) return true;
+  // 流式副本可能只是终值的前缀（快照是终值、实时行还在增长），或反过来。
+  if (
+    live.role === 'backend' &&
+    (h.content.startsWith(live.content) || live.content.startsWith(h.content))
+  ) {
+    return true;
+  }
+  // 工具行：同名的快照条目已给出完成态（output 非空）→ 实时副本是重复的。
+  if (
+    live.role === 'tool' &&
+    h.tool != null &&
+    live.tool != null &&
+    h.tool.name === live.tool.name &&
+    h.tool.output != null
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 按时间找插入位置（从 `from` 起第一个 `time` 比它大的条目之前）。
  *
  * 只在"trunk 缺少前驱条目"时兜底用（例如前一条已被 FIFO 窗口挤出）。
  * 时间缺失（0）时返回末尾——宁可追加，也不把无时间戳的条目插到开头。
  *
  * 注意 hist 里的 backend 条目时间来自 Core 的 carry-forward（沿用最近一条
  * 带时间事件），可能比真实产出时间**偏早**；所以时间只作兜底，主路径是
- * trunk 顺序（见 `sessionMessagesFor` 的 cursor）。
+ * trunk 顺序（见 `sessionMessagesFor` 的落位逻辑）。
  */
-function timeInsertIndex(list: DisplayMessage[], w: DisplayMessage): number {
+function timeInsertIndexFrom(list: DisplayMessage[], w: DisplayMessage, from: number): number {
   if (!(w.time > 0)) return list.length;
-  for (let i = 0; i < list.length; i++) {
+  for (let i = from; i < list.length; i++) {
     if (list[i]!.time > w.time) return i;
   }
   return list.length;
