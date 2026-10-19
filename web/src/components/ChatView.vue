@@ -733,13 +733,30 @@ function rowKey(row: ChatRow): string {
   return row.kind === 'work-group' ? row.key : String(row.message.id);
 }
 
-/** 「加载更早」：扩窗 + 保持视觉位置（按"距底部距离"补偿，前插场景等价）。 */
+/**
+ * 「加载更早」：扩窗 + 保持视觉位置。
+ *
+ * 补偿基准用**距底部距离**（前插场景下等价于"当前视野不动"，且对浏览器
+ * 自带 scroll anchoring 幂等——它若已补偿，这里再设一次结果不变）。
+ *
+ * **多次补偿**（2026-10 实测）：前插的 200 行里含延迟加载的 Markdown
+ * chunk 与图片，其高度在插入后还会变化（一次补偿会残留 ~100 px 偏移）。
+ * 因此在 nextTick / 下一帧 / 300 ms 后各补偿一次——每次都按**最新**
+ * scrollHeight 重算，收敛且互不叠加（只改 scrollTop，不改高度）。
+ */
 async function loadEarlier(): Promise<void> {
   const list = listRef.value;
   const fromBottom = list ? list.scrollHeight - list.scrollTop : 0;
   renderWindow.value += WINDOW_STEP;
+  const restore = () => {
+    if (list) list.scrollTop = list.scrollHeight - fromBottom;
+  };
   await nextTick();
-  if (list) list.scrollTop = list.scrollHeight - fromBottom;
+  restore();
+  requestAnimationFrame(() => {
+    restore();
+    window.setTimeout(restore, 300);
+  });
 }
 /** 吸底观察源：最后一条消息的尾部内容（滚动区内容同源）。 */
 function trayWatchSource(): unknown {
