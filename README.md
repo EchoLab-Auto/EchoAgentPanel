@@ -143,13 +143,15 @@ echo-agent-panel
 
 - `document/panel/panel.md` — Panel 前端（仓库布局、中继模型、状态管理与数据流）
 - `document/panel/panel-interaction.md` — 交互定义总入口（模块树与索引）
-- `document/panel/panel-layout.md` — 布局与导航（视图层级、外壳、侧边栏、连接生命周期、多窗口语义）
+- `document/panel/panel-desktop-layout.md` — 电脑端布局（外壳几何、层叠秩序、双侧边栏、卡片、连接生命周期）
+- `document/panel/panel-mobile-layout.md` — 移动端布局（<768px：顶栏与视图菜单、入口行横滚提示、卡片 Sheet、软键盘与安全区）
 - `document/panel/panel-chat.md` — 会话视图（消息列表、工具卡、推理块、输入区）
 - `document/panel/panel-modals.md` — 模态与覆盖层
-- `document/panel/panel-settings.md` — 设置视图（API、资源工作区、技能安装、插件工作台、Core 连接与联邦、日志）
+- `document/panel/panel-settings.md` — 设置视图外壳（八分类菜单、资源工作区通用契约、界面元素树）+ 七篇分类子文档：
+  `panel-settings-api` / `-skills` / `-tools` / `-plugins` / `-agents` / `-cores` / `-logs`
+  （API 设置、技能与 Git 安装、工具、插件工作台、智能体、Core 连接与联邦、日志与系统）
 - `document/panel/panel-instance-tasks.md` — 实例弹层（描述符驱动，与平台无关）、任务弹层、Shell 视图、HTTP 通道
 - `document/panel/panel-system.md` — 系统交互（Toast、键盘、常量速查）
-- `document/panel/panel-mobile.md` — 移动端适配
 - `document/protocol/protocol.md` — 线协议与数据流（命令/事件、时间线同步、事件流连续性）
 - `document/ops/ops-deploy.md` — Panel 安装 / 更新 / 卸载（与 Core 同篇）
 
