@@ -499,11 +499,7 @@ pub async fn probe_pump(state: AppState) {
 /// 序号来自 Core 的 `serialize_event_sequenced`（顶层 `"seq":N`）。提取它
 /// 是为了做中继侧的**丢帧诊断**——本函数是中继唯一解析帧的地方，复用同一次
 /// `serde_json` 解析、不额外增加开销（多上游模式此前就已解析过）。
-fn decode_core_frame(
-    upstream_name: &str,
-    text: &str,
-    wrap: bool,
-) -> Option<(String, Option<u64>)> {
+fn decode_core_frame(upstream_name: &str, text: &str, wrap: bool) -> Option<(String, Option<u64>)> {
     if !wrap {
         // 单上游：原样透传（非 JSON 帧也照旧发）。序号取不到就返回 None，
         // 不影响转发。
@@ -1388,7 +1384,8 @@ mod tests {
     #[test]
     fn decode_passthrough_extracts_seq() {
         let text = r#"{"type":"event","payload":{"AgentThinking":{"session_id":"s"}},"seq":42}"#;
-        let (out, seq) = decode_core_frame("core", text, false).expect("single upstream always forwards");
+        let (out, seq) =
+            decode_core_frame("core", text, false).expect("single upstream always forwards");
         assert_eq!(out, text, "单上游必须原样透传");
         assert_eq!(seq, Some(42));
     }

@@ -39,20 +39,22 @@ async fn push_core(listener: TcpListener, frames: Vec<String>) {
 async fn spawn_panel(core_url: String) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let app = Router::new().route("/ws", get(ws_handler)).with_state(AppState::new(
-        echo_web_server::upstreams::UpstreamRegistry::new(
-            vec![echo_web_server::upstreams::UpstreamConfig::direct(
-                "core", core_url, "",
-            )],
-            None,
-        ),
-        "/nonexistent".into(),
-        "/nonexistent-media".into(),
-        "".into(),
-        echo_web_server::ssh::SshTunnels::new(
-            std::env::temp_dir().join("echo-panel-test-tunnels"),
-        ),
-    ));
+    let app = Router::new()
+        .route("/ws", get(ws_handler))
+        .with_state(AppState::new(
+            echo_web_server::upstreams::UpstreamRegistry::new(
+                vec![echo_web_server::upstreams::UpstreamConfig::direct(
+                    "core", core_url, "",
+                )],
+                None,
+            ),
+            "/nonexistent".into(),
+            "/nonexistent-media".into(),
+            "".into(),
+            echo_web_server::ssh::SshTunnels::new(
+                std::env::temp_dir().join("echo-panel-test-tunnels"),
+            ),
+        ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -100,7 +102,8 @@ async fn collect_frames(frames: Vec<String>) -> Vec<Option<String>> {
     // 先发一条命令触发链路建立（relay 是懒连接的? —— 不是，但保持对称）。
     let mut got = Vec::new();
     for _ in 0..expected {
-        match tokio::time::timeout(std::time::Duration::from_secs(5), next_event(&mut browser)).await
+        match tokio::time::timeout(std::time::Duration::from_secs(5), next_event(&mut browser))
+            .await
         {
             Ok(Some(text)) => got.push(Some(text)),
             _ => got.push(None),
