@@ -110,20 +110,46 @@ npm run build         # vue-tsc + vite 生产构建（视图与弹层按 import(
 
 ## 安装（Linux，用户级）
 
-```bash
-./scripts/install.sh          # 先 --dry-run 查看路径
-```
-
-安装器构建 Rust 后端与 Vue 3 前端，装到 `~/.local/libexec/echo-agent-panel/`，
-启动器到 `~/.local/bin/echo-agent-panel`，配置种子到
-`~/.config/echo-agent-panel/panel.toml`。启动：
+**一键安装（curl | bash，无需先 clone）**：
 
 ```bash
-echo-agent-panel
-# 打开 http://<你的服务器IP>:8080（地址取决于 [server] bind_address）
+curl -fsSL https://raw.githubusercontent.com/EchoLab-Auto/EchoAgentPanel/main/scripts/install.sh | bash
 ```
 
-卸载：`./scripts/uninstall.sh`（保留 `panel.toml`；`--purge` 连配置一起删）。
+（引导脚本会浅克隆仓库到临时目录、接力完整安装流程。国内 / 受限网络可指定
+镜像或 SSH：）
+
+```bash
+ECHO_GITHUB_PROXY=https://gh-proxy.com curl -fsSL <同上地址> | bash
+ECHO_REPOSITORY_URL=git@github.com:EchoLab-Auto/EchoAgentPanel.git curl -fsSL <同上地址> | bash
+```
+
+**已 clone 仓库时**：
+
+```bash
+./scripts/install.sh --dry-run     # 先看路径与依赖是否齐全（不改系统）
+./scripts/install.sh               # 正式安装
+```
+
+安装器会**自动安装缺失的前置依赖**（git / C 工具链 / Node.js + npm 走系统包
+管理器；Rust 走 rustup 用户级安装，无需 root），装不上时列出缺什么并给出
+手动安装指引。`--no-deps` 只检查不安装。
+
+产物位置：后端与前端静态文件到 `~/.local/libexec/echo-agent-panel/`，启动器
+到 `~/.local/bin/echo-agent-panel`，配置种子到
+`~/.config/echo-agent-panel/panel.toml`。
+
+启动后打开 `http://<你的服务器IP>:8080`（地址取决于 `[server] bind_address`）。
+
+**一键卸载**（保留 `panel.toml`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EchoLab-Auto/EchoAgentPanel/main/scripts/uninstall.sh | bash
+# 连配置一起删：… | bash -s -- --purge
+# 已 clone：./scripts/uninstall.sh [--purge] [--dry-run]
+```
+
+卸载只影响 Panel；**Core 不受影响**（用 EchoAgentCore 的 `scripts/uninstall.sh`）。
 
 ## 配置
 

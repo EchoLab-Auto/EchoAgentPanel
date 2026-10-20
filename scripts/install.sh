@@ -1,7 +1,83 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+# BASH_SOURCE 兜底（同 Core）：sh/dash 或管道执行时它不可用——退回 $0；
+# 两者都没有（纯 stdin）时 PROJECT_ROOT 定位到当前目录、不是 git 检出，
+# 于是走下面的 bootstrap 分支重新克隆（按设计）。
+_SCRIPT_PATH="${BASH_SOURCE[0]:-${0:-}}"
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$_SCRIPT_PATH")/.." 2>/dev/null && pwd -P || pwd -P)
+
+# ── curl|bash 一键安装引导（2026-10）─────────────────────────────────
+# 用法：curl -fsSL <raw-url>/scripts/install.sh | bash
+#
+# 通过管道运行时脚本不在 git 检出里（`$BASH_SOURCE` 为空 → PROJECT_ROOT 是
+# 当前目录）：先把仓库浅克隆到临时目录，再 exec 克隆里的 install.sh 接力。
+# 之后流程与本地运行**完全一致**——无需两套脚本、两个 URL。
+#
+# `--help` 单独短路：不想为了看帮助而先下载仓库。
+if [[ ! -d "$PROJECT_ROOT/.git" ]] && [[ -z "${ECHO_PANEL_BOOTSTRAPPED:-}" ]]; then
+    for arg in "$@"; do
+        case "$arg" in
+            -h|--help)
+                # usage() 在本块之后才定义，这里只给最必要的一句 + 提示重跑。
+                echo "EchoAgentPanel installer"
+                echo
+                echo "  在 git 检出内运行：scripts/install.sh --help   （查看完整选项）"
+                echo "  或先下载后运行："
+                echo "    curl -fsSL <raw-url>/scripts/install.sh -o /tmp/install.sh"
+                echo "    bash /tmp/install.sh --help"
+                exit 0
+                ;;
+        esac
+    done
+
+    DEFAULT_PANEL_REPO="https://github.com/EchoLab-Auto/EchoAgentPanel.git"
+    # `--repository <url>` 也要影响 bootstrap 的那次 clone，否则用户指定的
+    # 仓库要等接力后才生效——白克隆一次默认仓库（受限网络下就是白等）。
+    bootstrap_repo=${ECHO_REPOSITORY_URL:-$DEFAULT_PANEL_REPO}
+    prev=""
+    for arg in "$@"; do
+        if [[ "$prev" == "--repository" ]]; then
+            bootstrap_repo=$arg
+            break
+        fi
+        prev=$arg
+    done
+    echo "==> curl|bash bootstrap: cloning $bootstrap_repo"
+    if ! command -v git >/dev/null 2>&1; then
+        echo "error: bootstrap 需要 git" >&2
+        echo "      先安装 git（Debian/Ubuntu: sudo apt-get install -y git），或直接下载脚本：" >&2
+        echo "      curl -fsSL <raw-url>/scripts/install.sh -o /tmp/install.sh && bash /tmp/install.sh" >&2
+        exit 1
+    fi
+    BOOTSTRAP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/echo-panel-bootstrap.XXXXXX")
+    trap 'rm -rf "$BOOTSTRAP_DIR"' EXIT
+    # 国内 / 受限网络：ECHO_GITHUB_PROXY 给 https://github.com/* 套一层前缀
+    # （与 EchoAgentCore 同名同义，如 https://gh-proxy.com/）。先试镜像，
+    # 失败自动退回直连，不改变既有行为。
+    clone_url=$bootstrap_repo
+    if [[ -n "${ECHO_GITHUB_PROXY:-}" && "$bootstrap_repo" == https://github.com/* ]]; then
+        echo "==> Using GitHub mirror: $ECHO_GITHUB_PROXY"
+        clone_url="${ECHO_GITHUB_PROXY%/}/${bootstrap_repo}"
+        if ! git clone --depth 1 "$clone_url" "$BOOTSTRAP_DIR/repo"; then
+            echo "warning: mirror clone failed; retrying without mirror" >&2
+            rm -rf -- "$BOOTSTRAP_DIR/repo"
+            clone_url=$bootstrap_repo
+        fi
+    fi
+    if [[ ! -d "$BOOTSTRAP_DIR/repo/.git" ]]; then
+        git clone --depth 1 "$clone_url" "$BOOTSTRAP_DIR/repo" || {
+            echo "error: 克隆失败——检查网络，或用 ECHO_REPOSITORY_URL 指定可达仓库" >&2
+            echo "      国内 / 慢网络可直接用镜像或 SSH：" >&2
+            echo "        ECHO_GITHUB_PROXY=https://gh-proxy.com curl … | bash" >&2
+            echo "        ECHO_REPOSITORY_URL=git@github.com:EchoLab-Auto/EchoAgentPanel.git curl … | bash" >&2
+            exit 1
+        }
+    fi
+    export ECHO_PANEL_BOOTSTRAPPED=1
+    exec bash "$BOOTSTRAP_DIR/repo/scripts/install.sh" "$@"
+fi
+
 PREFIX=${ECHO_PREFIX:-"$HOME/.local"}
 CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
 DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
@@ -19,6 +95,7 @@ STATUS_FILE="$STATE_DIR/update-status"
 REPOSITORY_URL=${ECHO_REPOSITORY_URL:-}
 START_SERVICE=1
 DRY_RUN=0
+NO_DEPS=0
 
 usage() {
     cat <<'EOF'
@@ -35,8 +112,16 @@ be useful.
 Options:
   --repository <url>  Upstream Git repository stored in the managed checkout
   --no-start          Install and enable units without starting the Panel
+  --no-deps           Only check prerequisites, never try to install them
   --dry-run           Print resolved paths without changing the system
   -h, --help          Show this help
+
+Prerequisites (auto-installed when missing and a package manager + sudo/root
+are available; --no-deps disables that): git, a C toolchain, pkg-config,
+Rust (cargo, via rustup), Node.js + npm.
+
+One-liner (no clone needed):
+  curl -fsSL https://raw.githubusercontent.com/EchoLab-Auto/EchoAgentPanel/main/scripts/install.sh | bash
 EOF
 }
 
@@ -52,6 +137,10 @@ while (($#)); do
             ;;
         --no-start)
             START_SERVICE=0
+            shift
+            ;;
+        --no-deps)
+            NO_DEPS=1
             shift
             ;;
         --dry-run)
@@ -83,7 +172,123 @@ fi
 BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null || true)
 BRANCH=${BRANCH:-main}
 
+# dry-run 必须无副作用：自动安装会改系统，所以预览时强制只查不装。
 if ((DRY_RUN)); then
+    NO_DEPS=1
+fi
+
+# ── 前置依赖：检查 + 自动安装（2026-10）────────────────────────────
+# 干净机器上"一键安装"卡在缺 npm / cargo 是最常见的失败；这里先尝试装，
+# 装不上再报错并给出可操作的提示。--no-deps 只检查不安装（CI / 受限环境）。
+installer_sudo() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        printf ''
+    elif command -v sudo >/dev/null 2>&1; then
+        printf 'sudo'
+    else
+        return 1
+    fi
+}
+
+pkg_install() {
+    local sudo_prefix
+    if ! sudo_prefix=$(installer_sudo); then
+        echo "warning: 需要 root 或 sudo 才能自动安装 $*；请手动安装" >&2
+        return 1
+    fi
+    echo "==> Installing via the system package manager: $*"
+    if command -v apt-get >/dev/null 2>&1; then
+        $sudo_prefix apt-get update -qq &&
+            DEBIAN_FRONTEND=noninteractive $sudo_prefix apt-get install -y "$@"
+    elif command -v dnf >/dev/null 2>&1; then
+        $sudo_prefix dnf install -y "$@"
+    elif command -v yum >/dev/null 2>&1; then
+        $sudo_prefix yum install -y "$@"
+    elif command -v pacman >/dev/null 2>&1; then
+        $sudo_prefix pacman -Sy --noconfirm --needed "$@"
+    elif command -v zypper >/dev/null 2>&1; then
+        $sudo_prefix zypper --non-interactive install "$@"
+    else
+        echo "warning: 未找到可识别的包管理器（apt-get/dnf/yum/pacman/zypper）" >&2
+        return 1
+    fi
+}
+
+# `cargo` 走官方 rustup（用户级，无需 root）。装到 ~/.cargo/bin 后补进 PATH。
+ensure_rust() {
+    if command -v cargo >/dev/null 2>&1; then
+        return 0
+    fi
+    if ((NO_DEPS)); then
+        echo "error: cargo 缺失（--no-deps 已禁用自动安装）" >&2
+        echo "  手动安装：https://rustup.rs" >&2
+        return 1
+    fi
+    echo "==> Installing the Rust toolchain via rustup (no root needed)"
+    local rustup_init
+    rustup_init=$(mktemp "${TMPDIR:-/tmp}/rustup-init.XXXXXX")
+    if ! curl -fsSL "${RUSTUP_INIT_URL:-https://sh.rustup.rs}" -o "$rustup_init"; then
+        echo "error: 下载 rustup-init 失败——请检查网络后用 https://rustup.rs 手动安装" >&2
+        rm -f "$rustup_init"
+        return 1
+    fi
+    if ! sh "$rustup_init" -y --profile minimal --default-toolchain stable; then
+        rm -f "$rustup_init"
+        echo "error: rustup 安装失败" >&2
+        return 1
+    fi
+    rm -f "$rustup_init"
+    if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+    command -v cargo >/dev/null 2>&1
+}
+
+# 系统命令：包名在发行版间不同，这里只给最常见的映射，失败时退回软链检查。
+ensure_system_command() {
+    local command=$1
+    command -v "$command" >/dev/null 2>&1 && return 0
+    if ((NO_DEPS)); then
+        return 1
+    fi
+    case "$command" in
+        git) pkg_install git ;;
+        flock) pkg_install util-linux ;;
+        install|cp|stat|sed) pkg_install coreutils sed ;;
+        curl) pkg_install curl ;;
+        node|npm) pkg_install nodejs npm ;;
+        *) return 1 ;;
+    esac
+    command -v "$command" >/dev/null 2>&1
+}
+
+echo "==> Checking prerequisites"
+missing=()
+for command in git install sed systemctl flock cp stat curl npm node; do
+    if ! ensure_system_command "$command"; then
+        missing+=("$command")
+    fi
+done
+if ! ensure_rust; then
+    missing+=("cargo")
+fi
+if ((${#missing[@]})) && ((DRY_RUN == 0)); then
+    echo "error: 缺少必需命令：${missing[*]}" >&2
+    echo "      自动安装未成功（无包管理器 / 无 sudo / 网络受限）。手动安装后重跑：" >&2
+    echo "      · Rust:  https://rustup.rs" >&2
+    echo "      · Node:  https://nodejs.org（需要 18+）" >&2
+    echo "      · git / util-linux / coreutils: 用你的包管理器" >&2
+    exit 1
+fi
+
+if ((DRY_RUN)); then
+    # dry-run 绝不动系统：上面的依赖检查已经在 --dry-run 下强制只查不装
+    # （见 NO_DEPS 的赋值处），这里只把结果报出来。
+    if ((${#missing[@]})); then
+        prereq="MISSING: ${missing[*]}"
+    else
+        prereq="all found"
+    fi
     cat <<EOF
 EchoAgentPanel install plan
   project:    $PROJECT_ROOT
@@ -97,16 +302,10 @@ EchoAgentPanel install plan
   repository: $REPOSITORY_URL
   branch:     $BRANCH
   start:      $START_SERVICE
+  prereqs:    $prereq
 EOF
     exit 0
 fi
-
-for command in cargo git install sed systemctl flock cp stat npm node; do
-    if ! command -v "$command" >/dev/null 2>&1; then
-        echo "error: required command not found: $command" >&2
-        exit 1
-    fi
-done
 
 if [[ "$(uname -s)" != "Linux" ]]; then
     echo "error: the service installer currently supports Linux/systemd only" >&2

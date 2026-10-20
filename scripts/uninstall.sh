@@ -1,7 +1,63 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+# BASH_SOURCE 兜底（同 install.sh）：管道执行时它不可用，退回 $0；两者都
+# 没有时定位到当前目录，走下面的 bootstrap 分支（按设计）。
+_SCRIPT_PATH="${BASH_SOURCE[0]:-${0:-}}"
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$_SCRIPT_PATH")/.." 2>/dev/null && pwd -P || pwd -P)
+
+# ── curl|bash 一键卸载引导（2026-10）─────────────────────────────────
+# 用法：curl -fsSL <raw-url>/scripts/uninstall.sh | bash [-s -- --purge]
+#
+# 卸载不需要被卸仓库的源码，但需要**这份脚本本身**（删哪些路径、怎么停服务
+# 的清单都在这里）。管道运行时不在 git 检出里 → 浅克隆到临时目录接力，
+# 与 install.sh 同款；`--help` 短路以免为了看帮助先下载仓库。
+if [[ ! -d "$PROJECT_ROOT/.git" ]] && [[ -z "${ECHO_PANEL_BOOTSTRAPPED:-}" ]]; then
+    for arg in "$@"; do
+        case "$arg" in
+            -h|--help)
+                echo "EchoAgentPanel uninstaller"
+                echo
+                echo "  在 git 检出内运行：scripts/uninstall.sh --help   （查看完整选项）"
+                echo "  或先下载后运行："
+                echo "    curl -fsSL <raw-url>/scripts/uninstall.sh -o /tmp/uninstall.sh"
+                echo "    bash /tmp/uninstall.sh --help"
+                exit 0
+                ;;
+        esac
+    done
+
+    DEFAULT_PANEL_REPO="https://github.com/EchoLab-Auto/EchoAgentPanel.git"
+    bootstrap_repo=${ECHO_REPOSITORY_URL:-$DEFAULT_PANEL_REPO}
+    echo "==> curl|bash bootstrap: cloning $bootstrap_repo (for uninstall assets)"
+    if ! command -v git >/dev/null 2>&1; then
+        echo "error: bootstrap 需要 git" >&2
+        echo "      或直接下载脚本后运行：" >&2
+        echo "      curl -fsSL <raw-url>/scripts/uninstall.sh -o /tmp/uninstall.sh && bash /tmp/uninstall.sh" >&2
+        exit 1
+    fi
+    BOOTSTRAP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/echo-panel-uninstall.XXXXXX")
+    trap 'rm -rf "$BOOTSTRAP_DIR"' EXIT
+    clone_url=$bootstrap_repo
+    if [[ -n "${ECHO_GITHUB_PROXY:-}" && "$bootstrap_repo" == https://github.com/* ]]; then
+        echo "==> Using GitHub mirror: $ECHO_GITHUB_PROXY"
+        clone_url="${ECHO_GITHUB_PROXY%/}/${bootstrap_repo}"
+        if ! git clone --depth 1 "$clone_url" "$BOOTSTRAP_DIR/repo"; then
+            echo "warning: mirror clone failed; retrying without mirror" >&2
+            rm -rf -- "$BOOTSTRAP_DIR/repo"
+            clone_url=$bootstrap_repo
+        fi
+    fi
+    if [[ ! -d "$BOOTSTRAP_DIR/repo/.git" ]]; then
+        git clone --depth 1 "$clone_url" "$BOOTSTRAP_DIR/repo" || {
+            echo "error: 克隆失败——检查网络，或用 ECHO_REPOSITORY_URL 指定可达仓库" >&2
+            exit 1
+        }
+    fi
+    export ECHO_PANEL_BOOTSTRAPPED=1
+    exec bash "$BOOTSTRAP_DIR/repo/scripts/uninstall.sh" "$@"
+fi
+
 PREFIX=${ECHO_PREFIX:-"$HOME/.local"}
 CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
 DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
