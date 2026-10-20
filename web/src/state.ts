@@ -753,6 +753,33 @@ export interface RegionInfo {
   name: string;
 }
 
+/**
+ * 一条**插件事件**（Core 的 `PluginEvent`；前端只做展示，不解释语义）。
+ *
+ * `name` / `payload` 是插件与 Core 之间的约定（`plugin.mounted` 之类由
+ * Core 自己发）。保留 `core` 让多上游时能区分是哪个 Core 报的。
+ */
+export interface PluginEventEntry {
+  /** 来源插件 id（Core 自身发出的为空串）。 */
+  plugin: string;
+  /** 事件名（点分小写约定）。 */
+  name: string;
+  /** 载荷（自由 JSON；展示时按需 stringify）。 */
+  payload?: unknown;
+  /** 服务端毫秒时间戳。 */
+  at_ms?: number;
+  /** 来自哪个 Core（多上游聚合时区分来源；空 = 当前默认）。 */
+  core?: string;
+}
+
+/**
+ * 保留的插件事件条数上限。
+ *
+ * 200 条够看到"启动时谁挂上了 + 最近发生了什么"，同时不会让状态快照变得
+ * 臃肿（插件事件是高频观测数据，不设上限会无限增长）。
+ */
+export const PLUGIN_EVENT_CAP = 200;
+
 export interface AppState {
   connected: boolean;
   /**
@@ -867,6 +894,13 @@ export interface AppState {
   plugins: PluginInfo[];
   /** 各 Core 节点的插件列表。 */
   pluginsByCore: Record<string, PluginInfo[]>;
+  /**
+   * 最近的**插件事件**（`PluginEvent`；滚动保留 [`PLUGIN_EVENT_CAP`] 条）。
+   *
+   * 用途是排查与观测：谁挂上了、谁发了什么通知。不做领域语义解释——
+   * `name`/`payload` 是插件与 Core 的约定，前端只当活动日志。
+   */
+  pluginEvents: PluginEventEntry[];
   /** Team 成员列表（多 agent） */
   teams: TeamInfo[];
   /** 工作区会话列表（workspace 插件；当前加载归属的 team 见 workspaceTeamId） */
@@ -957,6 +991,7 @@ export function initialState(): AppState {
     skills: [],
     tools: [],
     plugins: [],
+    pluginEvents: [],
     pluginsByCore: {},
     teams: [],
     workspaceSessions: [],
@@ -1779,6 +1814,29 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       const plugins = (e.plugins ?? []).map((p) => ({ ...p, builtin: p.builtin ?? true, core }));
       state.pluginsByCore[core] = plugins;
       if (managementCoreCurrent(state, core || null)) state.plugins = plugins;
+      return state;
+    }
+    case 'PluginEvent': {
+      const e = (
+        event as {
+          PluginEvent: {
+            plugin?: string;
+            name: string;
+            payload?: unknown;
+            at_ms?: number;
+          };
+        }
+      ).PluginEvent;
+      const core = payloadCore(event) ?? '';
+      const entry: PluginEventEntry = {
+        plugin: e.plugin ?? '',
+        name: e.name,
+        payload: e.payload,
+        at_ms: e.at_ms,
+        core,
+      };
+      // 滚动保留（新的在前）：只留最近 PLUGIN_EVENT_CAP 条。
+      state.pluginEvents = [entry, ...state.pluginEvents].slice(0, PLUGIN_EVENT_CAP);
       return state;
     }
     case 'TeamsList': {

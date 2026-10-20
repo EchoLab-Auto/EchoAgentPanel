@@ -81,8 +81,11 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // → 54（2026-10 插件操作回执：+PluginOpResult——`TogglePlugin` /
     //   `RestartPlugin` 的成功与失败此前都走 `Error`，面板只能靠文案猜；
     //   现在 `ok` 是字段，toast 按它分流）。
+    // → 56（2026-11 插件事件通道：+PluginEvent——plugin-framework v0.7 的
+    //   `MountContext::emit` 出口 + 注册表自己的 `plugin.mounted` /
+    //   `plugin.unmounted`；前端只做活动日志，不解释词汇）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(54);
+    expect(variants.size).toBe(56);
   });
 
   it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {

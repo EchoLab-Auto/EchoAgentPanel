@@ -40,7 +40,7 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import PanelIcon from './PanelIcon.vue';
 import { confirmDialog } from '../confirm';
 import { state } from '../store';
-import { regionLabel } from '../state';
+import { regionLabel, type PluginEventEntry } from '../state';
 import { moveAgentToRegion } from '../agent-placement';
 import {
   PACKAGE_DISPLAY_NAMES,
@@ -1519,6 +1519,51 @@ function pluginConfigOrigin(p: PluginInfo): string {
 /** 挂载失败原因（与「用户主动禁用」区分开：两者 enabled 都是 false）。 */
 function pluginMountError(p: PluginInfo): string {
   return (p.error ?? '').trim();
+}
+
+/**
+ * 本插件要求的 **服务键**（`Ctx` 命名空间）；空串 = 无要求（旧 Core 也不发）。
+ *
+ * 用途不是装饰：挂载前 Core 会逐个校验这些键是否已注册，缺失即拒绝挂载
+ * 并落进 `error`。所以这一行是 `error` 的**前置解释**——看到
+ * 「缺 loop 服务」时，这里能看出它本来就要求 `loop`。
+ */
+function pluginRequiredServices(p: PluginInfo): string {
+  return (p.required_services ?? []).filter(Boolean).join('、');
+}
+
+/** 软依赖（`Inject::optional`）：缺失不阻止挂载，只影响插件能做到什么。 */
+function pluginOptionalServices(p: PluginInfo): string {
+  return (p.optional_services ?? []).filter(Boolean).join('、');
+}
+
+/**
+ * 此刻**还缺**的硬依赖；非空 = 这个插件在等（Core 会自动追平）。
+ *
+ * 与 `error` 分开显示：`error` 是挂载失败的原因，这里是"还没轮到的原因"。
+ */
+function pluginPendingServices(p: PluginInfo): string {
+  return (p.pending_services ?? []).filter(Boolean).join('、');
+}
+
+/**
+ * 插件订阅的事件名（`Contribution::Events` 的进程内等价物）。
+ *
+ * 空 = 不订阅。想确认"这个插件到底会对什么有反应"时看这一行；实际收到的
+ * 事件见 [`pluginRecentEvents`]。
+ */
+function pluginSubscribedEvents(p: PluginInfo): string {
+  return (p.subscribed_events ?? []).filter(Boolean).join('、');
+}
+
+/**
+ * 该插件最近发出的**插件事件**（来自 `state.pluginEvents`，最多 5 条）。
+ *
+ * 只按 `plugin` 过滤——Core 自己的 lifecycle 事件（`plugin.mounted`）的
+ * `plugin` 字段是空串，归到"宿主"名下，不混进某个插件的记录里。
+ */
+function pluginRecentEvents(p: PluginInfo): PluginEventEntry[] {
+  return state.pluginEvents.filter((e) => e.plugin === p.id).slice(0, 5);
 }
 
 /**
@@ -3013,6 +3058,29 @@ watch(
                 <div v-if="(selectedPlugin.env_keys ?? []).length" class="skill-source__row">
                   <span class="muted">环境变量</span>
                   <code class="plugin-def-path">{{ (selectedPlugin.env_keys ?? []).join('、') }}</code>
+                </div>
+                <div v-if="pluginRequiredServices(selectedPlugin)" class="skill-source__row">
+                  <span class="muted">依赖服务</span>
+                  <code class="plugin-def-path">{{ pluginRequiredServices(selectedPlugin) }}</code>
+                </div>
+                <div v-if="pluginOptionalServices(selectedPlugin)" class="skill-source__row">
+                  <span class="muted">可选依赖</span>
+                  <code class="plugin-def-path">{{ pluginOptionalServices(selectedPlugin) }}</code>
+                </div>
+                <div v-if="pluginPendingServices(selectedPlugin)" class="skill-source__row">
+                  <span class="muted">等待依赖</span>
+                  <code class="plugin-def-path">{{ pluginPendingServices(selectedPlugin) }}</code>
+                  <span class="muted">（依赖到位后自动挂载）</span>
+                </div>
+                <div v-if="pluginSubscribedEvents(selectedPlugin)" class="skill-source__row">
+                  <span class="muted">订阅事件</span>
+                  <code class="plugin-def-path">{{ pluginSubscribedEvents(selectedPlugin) }}</code>
+                </div>
+                <div v-if="pluginRecentEvents(selectedPlugin).length" class="skill-source__row">
+                  <span class="muted">最近事件</span>
+                  <code class="plugin-def-path">
+                    {{ pluginRecentEvents(selectedPlugin).map((e) => e.name).join('、') }}
+                  </code>
                 </div>
               </div>
             </div>

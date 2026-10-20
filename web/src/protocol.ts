@@ -334,6 +334,25 @@ export interface PluginInfo {
   args?: string[];
   /** 环境变量**键名**（值 Core 不下发——常含 token / 密钥）。 */
   env_keys?: string[];
+  /**
+   * 本插件**要求的服务键**（`Inject::required`；空/缺失 = 无要求）。
+   *
+   * 与 `error` 配合回答「这个插件为什么不挂载」：Core 在挂载前逐个校验
+   * 服务键是否已注册，缺失即拒绝挂载（mount 副作用不会发生）。旧 Core
+   * 不发该字段，故为可选。
+   */
+  required_services?: string[];
+  /** 本插件的**软依赖**（`Inject::optional`；缺失不阻止挂载）。 */
+  optional_services?: string[];
+  /**
+   * 眼下**还缺**的硬依赖（空/缺失 = 不缺）。
+   *
+   * 与 `error` 的区别：`error` 是「上次挂载尝试的结果」，这里是「此刻的
+   * 事实」——Core 的 `reconcile` 会在依赖到位后自动挂上并清空它。
+   */
+  pending_services?: string[];
+  /** 订阅的事件名（`Contribution::Events` 的进程内等价物；空 = 不订阅）。 */
+  subscribed_events?: string[];
 }
 
 export interface ApiProfileInfo {
@@ -815,6 +834,21 @@ export type BackendEvent =
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
   | { PluginsList: { plugins: PluginInfo[] } }
+  // **插件事件**（plugin-framework v0.7 的事件通道）：插件运行期 `emit` 的
+  // 东西 + 注册表自己的 `plugin.mounted` / `plugin.unmounted`。`name` /
+  // `payload` 是插件与 Core 自行约定的词汇，前端**不解释**、只当活动日志
+  // 展示（新增插件事件不必改前端）。注释放在联合分支**之外**：本文件的
+  // 变体提取按 `| { Name:` 的形状解析，块注释夹在中间会让它漏数。
+  | {
+      PluginEvent: {
+        /** 来源插件 id（Core 自身发出的为空串）。 */
+        plugin: string;
+        name: string;
+        payload?: unknown;
+        /** 服务端毫秒时间戳（排序用，不信任客户端时钟）。 */
+        at_ms?: number;
+      };
+    }
   | {
       PluginOpResult: {
         id: string;
