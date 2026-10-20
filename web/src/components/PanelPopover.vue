@@ -57,9 +57,43 @@ function updatePosition() {
 function requestClose() {
   if (props.modelValue) emit('update:modelValue', false);
 }
+
+/**
+ * ui-frame 浮层的根类名：这些浮层由面板内控件 teleport 到 body，DOM 上
+ * **不在** `.panel-popover` 里，但语义上属于面板内容。
+ *
+ * 为什么必须排除：`pointerdown` 在捕获阶段先于选项自身的 `click` 派发；
+ * 若把浮层内的按下当成"点了面板外"，面板会在选项 click 之前卸载整个
+ * 面板（`v-if` 拆掉 slot 内容）→ 选项连 click 都收不到，表现为"下拉点
+ * 不动 / 面板一闪就关"。2026-10 报障：会话弹层右侧「会话级 API」下拉选
+ * 不了模型（SessionSwitcher 的 NeumorphismSelect 正是 teleport 浮层；
+ * DirectoryPicker 的位置切换同理）。
+ */
+const FLOATING_LAYER_SELECTOR = [
+  '.nm-select__dropdown',
+  '.nm-autocomplete__dropdown',
+  '.nm-menu__submenu',
+  '.nm-popover-wrapper',
+  '.nm-tooltip-wrapper',
+  '.nm-toast',
+].join(',');
+
+/** 事件目标是否落在 ui-frame 的 teleport 浮层内（视同面板内部）。 */
+function isInsideFloatingLayer(target: Node): boolean {
+  const el = target.nodeType === Node.ELEMENT_NODE
+    ? (target as Element)
+    : (target.parentElement as Element | null);
+  return !!el?.closest?.(FLOATING_LAYER_SELECTOR);
+}
+
 function onPointerDown(event: PointerEvent) {
   const target = event.target as Node | null;
-  if (target && (panelRef.value?.contains(target) || props.anchor?.contains(target))) return;
+  if (
+    target
+    && (panelRef.value?.contains(target)
+      || props.anchor?.contains(target)
+      || isInsideFloatingLayer(target))
+  ) return;
   requestClose();
 }
 function onKeydown(event: KeyboardEvent) {
@@ -88,7 +122,7 @@ function detach() {
 }
 
 watch(() => props.modelValue, async (open, wasOpen) => {
-  if (wasOpen === undefined || open === wasOpen) return;
+  if (open === wasOpen) return;
   if (open) {
     updatePosition();
     attach();
@@ -96,7 +130,9 @@ watch(() => props.modelValue, async (open, wasOpen) => {
     observe();
     panelRef.value?.focus({ preventScroll: true });
     emit('open');
-  } else {
+  } else if (wasOpen !== undefined) {
+    // 首帧（immediate，wasOpen === undefined）本就关闭 → 不重复 detach、
+    // 也不去抢 anchor 的焦点。
     detach();
     props.anchor?.focus({ preventScroll: true });
     emit('close');
