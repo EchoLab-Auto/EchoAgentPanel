@@ -1938,8 +1938,13 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     }
     case 'Error': {
       const e = (event as { Error: { session_id: string | null; message: string } }).Error;
+      // 会话级 API 切换回执（Core `SetSessionApi` / `ClearSessionApi` 用
+      // `Error{session_id}` 回报结果，见 `agent/commands.rs`）：这是**操作
+      // 结果**而非会话错误——不能冻结流式行/收尾工具行，否则用户在回合
+      // 进行中切换模型会把正在输出的回答"冻住"（2026-10）。
+      const apiKind = sessionApiNoticeKind(e.message);
       // 流式：错误中断当前步——冻结该会话流式行（保留已显示的部分文本）。
-      if (e.session_id) {
+      if (e.session_id && !apiKind) {
         freezeStreams(state, e.session_id);
         // 错误同样中断本轮：残留 running 工具行一并收尾（否则永久读秒）。
         settleRunningTools(state, e.session_id);
@@ -1952,7 +1957,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       if (!e.session_id && isWorkspaceActivationNotice(e.message) && !hasRecentLocalActivateIntent()) {
         return state;
       }
-      pushToast(state, e.message, 'info');
+      pushToast(state, e.message, apiKind ?? 'info');
       return state;
     }
     default:
@@ -2104,6 +2109,29 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
  */
 function isWorkspaceActivationNotice(message: string): boolean {
   return message.startsWith('已激活工作区会话') || message.startsWith('已取消工作区会话激活');
+}
+
+/**
+ * 是否为「会话级 API 切换」的操作回执（Core 侧 `agent/commands.rs` 的
+ * `SetSessionApi` / `ClearSessionApi`，两者都用 `BackendEvent::Error` 回报）。
+ *
+ * 返回值即 toast 语气：切换成功 → success；profile 不存在/构建失败 → error；
+ * 不是这类回执 → undefined（按普通 info 处理）。
+ *
+ * 文案（Core 原文）：
+ * - `会话 {id} 已切换到 API: {profile}`
+ * - `会话 {id} 已恢复跟随 persona 级配置`
+ * - `会话 {id} 切换 API 失败（profile 不存在或构建失败）`
+ */
+function sessionApiNoticeKind(
+  message: string,
+): 'success' | 'error' | undefined {
+  if (!message.startsWith('会话 ')) return undefined;
+  if (message.includes('切换 API 失败')) return 'error';
+  if (message.includes('已切换到 API: ') || message.includes('已恢复跟随 persona 级配置')) {
+    return 'success';
+  }
+  return undefined;
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {

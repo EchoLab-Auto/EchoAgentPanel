@@ -210,4 +210,31 @@ describe('取消/错误冻结', () => {
     expect(outputs()[0].streamState).toBe('frozen');
     expect(outputs()[0].content).toBe('写到一半');
   });
+
+  it('会话级 API 切换回执（Core 走 Error 事件）不冻结流式行、按成功提示', () => {
+    // Core `SetSessionApi` 用 `Error{session_id}` 回报结果（agent/commands.rs）：
+    // 用户在回合进行中切换模型，回答不能因此被"冻住"（2026-10）。
+    dispatch(contentDelta('还在输出'));
+    const before = state.toasts.length;
+    dispatch({
+      Error: { session_id: SID, message: `会话 ${SID} 已切换到 API: kimi` },
+    } as unknown as BackendEvent);
+
+    expect(outputs()[0].streamState).toBe('streaming');
+    expect(outputs()[0].content).toBe('还在输出');
+    const toast = state.toasts[state.toasts.length - 1];
+    expect(state.toasts.length).toBe(before + 1);
+    expect(toast!.kind).toBe('success');
+  });
+
+  it('会话级 API 切换失败回执：红字提示但同样不打断流式', () => {
+    dispatch(contentDelta('半截话'));
+    dispatch({
+      Error: { session_id: SID, message: `会话 ${SID} 切换 API 失败（profile 不存在或构建失败）` },
+    } as unknown as BackendEvent);
+
+    expect(outputs()[0].streamState).toBe('streaming');
+    const toast = state.toasts[state.toasts.length - 1];
+    expect(toast!.kind).toBe('error');
+  });
 });
