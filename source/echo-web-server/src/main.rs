@@ -176,15 +176,37 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing(logging: &echo_web_server::config::LoggingSection) -> Result<()> {
+    install_panic_hook();
+    // 面板只有 stdout/journald 一个出口：`log_file` 在 Panel 侧尚未实现
+    // 轮转写入（Core 有）。配了却静默失效最坑排障，所以明确提示一次。
+    if !logging.log_file.is_empty() {
+        eprintln!(
+            "warning: [logging].log_file = \"{}\" is not supported by panel; \
+             logs go to stdout/journald (use `journalctl --user -u echo-agent-panel`)",
+            logging.log_file
+        );
+    }
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&logging.level));
+    // ANSI 只在真正的终端上开：journald / 重定向到文件时着色只会把结构化
+    // 字段拆成转义序列（`grep error=` 直接失效）。
     let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_target(false);
+        .with_target(false)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()));
     match logging.format.as_str() {
         "json" => builder.json().try_init(),
         _ => builder.try_init(),
     }
     .map_err(|error| anyhow::anyhow!("failed to init tracing: {error}"))?;
     Ok(())
+}
+
+/// panic 兜底：panic 先转一条 `ERROR` 事件再走默认钩子（保留 stderr 追溯）。
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(panic = %info, "panic caught by logging hook");
+        default_hook(info);
+    }));
 }
