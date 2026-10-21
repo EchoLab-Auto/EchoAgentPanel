@@ -301,14 +301,23 @@ impl UpstreamRegistry {
         &self,
         keep_urls: &std::collections::HashSet<String>,
         keep_names: &std::collections::HashSet<String>,
+        drop_names: &std::collections::HashSet<String>,
     ) -> Vec<String> {
         let mut removed = Vec::new();
         {
             let mut inner = self.inner.write().await;
             let backup = inner.clone();
             inner.retain(|u| {
+                let lower = u.name.to_lowercase();
+                // ① 确认重复（2026-10）：同一台机器的另一个地址。这类条目在
+                //    `keep_urls` 里是有主的（目录确实还提到那个地址），只按
+                //    地址/名字判定永远清不掉，必须显式点名删除。
+                if u.is_discovered() && drop_names.contains(&lower) {
+                    removed.push(u.name.clone());
+                    return false;
+                }
                 let alive = keep_urls.contains(u.url.trim_end_matches('/'))
-                    || keep_names.contains(&u.name.to_lowercase());
+                    || keep_names.contains(&lower);
                 let drop = u.is_discovered() && !alive;
                 if drop {
                     removed.push(u.name.clone());
@@ -751,9 +760,54 @@ mod tests {
         let mut keep_urls = std::collections::HashSet::new();
         keep_urls.insert("ws://stays:1".to_string());
         let keep_names = std::collections::HashSet::new();
-        let removed = reg.remove_discovered(&keep_urls, &keep_names).await;
+        let drop_names = std::collections::HashSet::new();
+        let removed = reg
+            .remove_discovered(&keep_urls, &keep_names, &drop_names)
+            .await;
         assert_eq!(removed, vec!["gone".to_string()]);
         let names: Vec<String> = reg.list().await.into_iter().map(|u| u.name).collect();
         assert_eq!(names, vec!["manual".to_string(), "stays".to_string()]);
+    }
+
+    /// 身份去重（2026-10）：`drop_names` 点名的派生条目**无视 keep 规则**删除
+    /// ——同一台机器的另一个地址会被"目录里确实提到"保住，只靠 keep 集合永远
+    /// 清不掉。人工条目即使被点名也必须留下（点了也不许动）。
+    #[tokio::test]
+    async fn duplicate_discovered_entries_are_dropped_even_when_kept() {
+        let reg = UpstreamRegistry::new(
+            vec![UpstreamConfig::direct("core", "ws://127.0.0.1:3132", "t")],
+            None,
+        );
+        reg.set_panel_key("panel-key-1");
+        for name in ["node-self", "unique"] {
+            reg.upsert(UpstreamConfig {
+                name: name.into(),
+                url: format!("ws://{name}:3132"),
+                access_token: String::new(),
+                ssh: None,
+                source: "discovered".into(),
+            })
+            .await
+            .unwrap();
+        }
+        // 两个派生条目都在目录里（所以 keep 集合会保住它们）——这正是线上故障
+        // 的形状：重复条目永远清不掉。
+        let keep_urls: std::collections::HashSet<String> =
+            ["ws://node-self:3132", "ws://unique:3132"]
+                .into_iter()
+                .map(String::from)
+                .collect();
+        let keep_names: std::collections::HashSet<String> =
+            ["node-self", "unique"].into_iter().map(String::from).collect();
+        // 前端认出 node-self 就是 core（同一 node_id），并要求删掉它；
+        // 顺带把人工条目 "core" 也点名（必须被忽略）。
+        let drop_names: std::collections::HashSet<String> =
+            ["node-self", "core"].into_iter().map(String::from).collect();
+        let removed = reg
+            .remove_discovered(&keep_urls, &keep_names, &drop_names)
+            .await;
+        assert_eq!(removed, vec!["node-self".to_string()]);
+        let names: Vec<String> = reg.list().await.into_iter().map(|u| u.name).collect();
+        assert_eq!(names, vec!["core".to_string(), "unique".to_string()]);
     }
 }

@@ -234,20 +234,30 @@ pub async fn panel_identity(State(state): State<AppState>) -> impl IntoResponse 
     })
 }
 
-/// `POST /api/upstreams/prune` — 目录收敛：删掉不再被目录提到的**派生**接入点。
+/// `POST /api/upstreams/prune` — 目录收敛：删掉不再被目录提到的**派生**接入点，
+/// 以及**同一台机器的重复条目**。
 ///
-/// 请求体给出"当前仍然存在"的地址与名字集合（由前端汇总各 Core 的目录得到）。
-/// 后端只在这一条安全边界内行动：
+/// 请求体给出"当前仍然存在"的地址与名字集合（由前端汇总各 Core 的目录得到），
+/// 外加"确认重复"的名字集合。后端只在这一条安全边界内行动：
 ///
 /// - **只删 `source = "discovered"` 的条目**——人工配置的一条都不动；
 /// - 判据是地址或名字任一对得上就保留（邻居改别名后地址不变，反之亦然）；
-/// - 请求体为空/非法 → 400，不做任何删除（宁可留旧条目，也不清空用户配置）。
+/// - `drop_names` 内的条目**无视保留规则一律删除**（2026-10 身份去重：同一台
+///   机器有多个地址时，地址会被"目录里确实提到"保住，只靠 keep 集合永远清
+///   不掉；判重跑在前端的 `node_id` 识别里，后端只执行）；
+/// - 请求体三项全空/非法 → 400，不做任何删除（宁可留旧条目，也不清空配置）。
 #[derive(serde::Deserialize)]
 pub struct PruneBody {
     #[serde(default)]
     pub keep_urls: Vec<String>,
     #[serde(default)]
     pub keep_names: Vec<String>,
+    /// 确认重复、应当移除的派生接入点名（大小写不敏感）。
+    ///
+    /// 只对 `source = "discovered"` 生效——这类条目本来就由 Panel 自动管理，
+    /// 人工条目永远不会出现在这里（前端也不会把它们放进来）。
+    #[serde(default)]
+    pub drop_names: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -262,10 +272,10 @@ pub async fn prune_upstreams(
 ) -> impl IntoResponse {
     // 空集合 = "全网什么都没有"——这大概率是调用方的 bug 或网络抖动，
     // 不能据此清空所有派生接入点（fail-closed）。
-    if body.keep_urls.is_empty() && body.keep_names.is_empty() {
+    if body.keep_urls.is_empty() && body.keep_names.is_empty() && body.drop_names.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            "keep_urls / keep_names 不能同时为空（拒绝清空全部派生接入点）",
+            "keep_urls / keep_names / drop_names 不能全为空（拒绝清空全部派生接入点）",
         )
             .into_response();
     }
@@ -279,10 +289,19 @@ pub async fn prune_upstreams(
         .into_iter()
         .map(|n| n.trim().to_lowercase())
         .collect();
-    let removed = state.registry.remove_discovered(&keep_urls, &keep_names).await;
+    let drop_names: std::collections::HashSet<String> = body
+        .drop_names
+        .into_iter()
+        .map(|n| n.trim().to_lowercase())
+        .filter(|n| !n.is_empty())
+        .collect();
+    let removed = state
+        .registry
+        .remove_discovered(&keep_urls, &keep_names, &drop_names)
+        .await;
     for name in &removed {
         state.tunnels.remove(name).await;
-        warn!(upstream = %name, "discovered upstream pruned (no longer in federation directory)");
+        warn!(upstream = %name, "discovered upstream pruned (stale or duplicate of a manual upstream)");
     }
     Json(PruneResult { removed }).into_response()
 }
