@@ -46,6 +46,9 @@ pub struct UpstreamStatus {
     /// SSH 接入详情（`access = "ssh"` 时非空；**凭据不回传**——
     /// password/passphrase 仅以 `password_set` 标记存在与否）。
     pub ssh: Option<SshStatusView>,
+    /// 来源（P2 自动发现）：`manual`（人工配置）/ `discovered`（目录派生）。
+    /// 前端据此打「自动」徽标，并在删除时区分确认文案。
+    pub source: String,
 }
 
 /// SSH 接入的状态视图（脱敏）。
@@ -128,6 +131,11 @@ pub async fn list_upstreams(State(state): State<AppState>) -> impl IntoResponse 
             } else {
                 "direct".into()
             },
+            source: if u.is_discovered() {
+                "discovered".into()
+            } else {
+                "manual".into()
+            },
             name: u.name,
             url: sanitize_url(&u.url),
             ssh,
@@ -167,6 +175,10 @@ pub struct UpsertBody {
     /// 留空 = 保留旧值）。
     #[serde(default)]
     pub ssh: Option<SshConfig>,
+    /// 来源（P2 自动发现）：`discovered` = 由 Core 的节点目录派生。
+    /// 缺省/`manual` = 人工配置（不能覆盖同名的人工条目，反之亦然）。
+    #[serde(default)]
+    pub source: String,
 }
 
 pub async fn upsert_upstream(
@@ -180,6 +192,7 @@ pub async fn upsert_upstream(
             url: body.url,
             access_token: body.access_token,
             ssh: body.ssh,
+            source: body.source,
         })
         .await
     {
@@ -198,6 +211,80 @@ pub async fn upsert_upstream(
         }
         Err(message) => (StatusCode::BAD_REQUEST, message).into_response(),
     }
+}
+
+/// `GET /api/panel-identity` — Panel 身份与自动发现能力的**只读视图**。
+///
+/// 前端在发起发现前先问一次：`{discover: true}` 才去 POST 派生接入点。
+/// **不回传密钥明文**（`panel_key_set` 只表明有没有），与令牌类字段同一条
+/// 纪律：能连上的人不需要看见凭据，需要配的人自己在配置文件里填。
+#[derive(serde::Serialize)]
+pub struct PanelIdentityView {
+    /// 是否配置了 Panel 身份密钥。
+    pub panel_key_set: bool,
+    /// 是否启用自动发现（`panel_key_set && [federation] discover`）。
+    pub discover: bool,
+}
+
+pub async fn panel_identity(State(state): State<AppState>) -> impl IntoResponse {
+    let panel_key_set = !state.registry.panel_key().is_empty();
+    Json(PanelIdentityView {
+        panel_key_set,
+        discover: state.registry.can_discover(),
+    })
+}
+
+/// `POST /api/upstreams/prune` — 目录收敛：删掉不再被目录提到的**派生**接入点。
+///
+/// 请求体给出"当前仍然存在"的地址与名字集合（由前端汇总各 Core 的目录得到）。
+/// 后端只在这一条安全边界内行动：
+///
+/// - **只删 `source = "discovered"` 的条目**——人工配置的一条都不动；
+/// - 判据是地址或名字任一对得上就保留（邻居改别名后地址不变，反之亦然）；
+/// - 请求体为空/非法 → 400，不做任何删除（宁可留旧条目，也不清空用户配置）。
+#[derive(serde::Deserialize)]
+pub struct PruneBody {
+    #[serde(default)]
+    pub keep_urls: Vec<String>,
+    #[serde(default)]
+    pub keep_names: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct PruneResult {
+    /// 被移除的派生接入点名（空 = 无需清理）。
+    pub removed: Vec<String>,
+}
+
+pub async fn prune_upstreams(
+    State(state): State<AppState>,
+    Json(body): Json<PruneBody>,
+) -> impl IntoResponse {
+    // 空集合 = "全网什么都没有"——这大概率是调用方的 bug 或网络抖动，
+    // 不能据此清空所有派生接入点（fail-closed）。
+    if body.keep_urls.is_empty() && body.keep_names.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "keep_urls / keep_names 不能同时为空（拒绝清空全部派生接入点）",
+        )
+            .into_response();
+    }
+    let keep_urls: std::collections::HashSet<String> = body
+        .keep_urls
+        .into_iter()
+        .map(|u| u.trim().trim_end_matches('/').to_string())
+        .collect();
+    let keep_names: std::collections::HashSet<String> = body
+        .keep_names
+        .into_iter()
+        .map(|n| n.trim().to_lowercase())
+        .collect();
+    let removed = state.registry.remove_discovered(&keep_urls, &keep_names).await;
+    for name in &removed {
+        state.tunnels.remove(name).await;
+        warn!(upstream = %name, "discovered upstream pruned (no longer in federation directory)");
+    }
+    Json(PruneResult { removed }).into_response()
 }
 
 pub async fn delete_upstream(
@@ -225,6 +312,14 @@ pub fn routes() -> axum::Router<AppState> {
         .route(
             "/api/upstreams/{name}",
             axum::routing::delete(delete_upstream),
+        )
+        .route(
+            "/api/panel-identity",
+            axum::routing::get(panel_identity),
+        )
+        .route(
+            "/api/upstreams/prune",
+            axum::routing::post(prune_upstreams),
         )
 }
 

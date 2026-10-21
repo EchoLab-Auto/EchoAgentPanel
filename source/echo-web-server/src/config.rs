@@ -133,15 +133,52 @@ pub struct UpstreamSection {
     /// SSH 接入参数（出现该段即"接入方式 = SSH"，`url` 被忽略）。
     #[serde(default)]
     pub ssh: Option<crate::ssh::SshConfig>,
+    /// 该接入点的来源（P2 自动发现，2026-11）：`manual`（默认，人工配置）
+    /// 或 `discovered`（由 Core 的 `FederationDirectory` 派生）。
+    ///
+    /// 为什么要在配置里留标记：自动派生的条目必须能被**安全移除**（邻居
+    /// 从目录里消失后清理），而人工配置的一条都不能自动删。凭"最近是否
+    /// 见过"推断不够——重启后面板会把人工条目误判成派生。
+    #[serde(default)]
+    pub source: String,
 }
 
 /// Panel 侧配置：日志、HTTP 服务与 Core 连接。
+/// `[federation]` 段（P2 自动发现，2026-11）。
+///
+/// 只放**Panel 自己的**联邦身份，不放拓扑：拓扑从 Core 的目录事件派生。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PanelFederationSection {
+    /// **Panel 身份密钥**（Core 侧 `[federation] panel_keys` 之一）。
+    ///
+    /// 自动发现的接入点用这一把密钥连入（而不是各节点的
+    /// `management_access_token`）——这正是"一个 Panel 接入全网"的凭据面。
+    /// 空 = 不做自动发现（只用手工接入点）。
+    pub panel_key: String,
+    /// 是否启用自动发现（默认 true；有 `panel_key` 时才真正生效）。
+    ///
+    /// 关掉它 = 保持"只连我配的那几台"的旧行为（多上游手工维护）。
+    pub discover: bool,
+}
+
+impl Default for PanelFederationSection {
+    fn default() -> Self {
+        Self {
+            panel_key: String::new(),
+            discover: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct PanelConfig {
     pub logging: LoggingSection,
     pub server: ServerSection,
     pub core: CoreSection,
+    /// 联邦（Panel 身份密钥 + 自动发现开关）。
+    pub federation: PanelFederationSection,
     /// 多上游列表（`[[cores]]`）。
     pub cores: Vec<UpstreamSection>,
     /// `cores` 键是否在配置中出现过（serde 捕获——区分「未配置」与
@@ -163,6 +200,7 @@ impl PanelConfig {
             url: self.core.connect_url.clone(),
             access_token: self.core.access_token.clone(),
             ssh: None,
+            source: String::new(),
         }]
     }
 }

@@ -74,6 +74,7 @@ async fn main() -> Result<()> {
             url,
             access_token: cfg.core.access_token.clone(),
             ssh: None,
+            source: String::new(),
         }],
         None => {
             // 启动物化校验：空名/非法名拒绝、重名去重（保留首条）——
@@ -95,6 +96,7 @@ async fn main() -> Result<()> {
                         url: u.url,
                         access_token: u.access_token,
                         ssh: u.ssh,
+                        source: u.source,
                     })
                 })
                 .collect()
@@ -119,6 +121,23 @@ async fn main() -> Result<()> {
         Some(config_path_for_persist)
     };
     let registry = echo_web_server::upstreams::UpstreamRegistry::new(initial, persist_path);
+    // Panel 身份密钥（P2，2026-11）：自动发现的接入点用它作 Bearer——
+    // 与 Core 侧 `[federation] panel_keys` 对应。未配置 = 不做自动发现
+    // （保持"只连我配的那几台"的旧行为）。
+    registry.set_discover(cfg.federation.discover);
+    if !cfg.federation.panel_key.is_empty() {
+        registry.set_panel_key(cfg.federation.panel_key.clone());
+        info!(
+            discover = registry.can_discover(),
+            "panel identity key configured — discovered upstreams will authenticate as Panel"
+        );
+    } else if cfg.federation.discover {
+        info!(
+            "no [federation] panel_key configured — auto-discovery stays off \
+             (configure the same key as Core's [federation] panel_keys to let one \
+             panel see the whole federation)"
+        );
+    }
 
     // SSH 接入（2026-10）：为每个 SSH 上游预建隧道——本地转发端口即时
     // 可拨（中继异步重连），SSH 建连/认证在后台进行，状态经健康表/管理

@@ -121,6 +121,7 @@ async fn ssh_upstream_without_tunnel_returns_404() {
             url: String::new(),
             access_token: String::new(),
             ssh: Some(ssh),
+            source: String::new(),
         }],
     )
     .await;

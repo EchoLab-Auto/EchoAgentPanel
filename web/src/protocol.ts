@@ -45,6 +45,40 @@ export interface FederationStatus {
   node_name?: string | null;
   listen: string;
   peers: FederationPeerInfo[];
+  /** 本节点是否接受**联邦级 Panel 身份**（P1，2026-11；旧 Core 缺失 =
+   *  不支持，按未开放展示）。 */
+  panel_ready?: boolean;
+  /** 授予 Panel 身份的级别：off / readonly / operate / admin。 */
+  panel_access?: string;
+}
+
+/** 联邦节点目录里的一个邻居（`FederationDirectory.nodes[]`，P2 2026-11）。 */
+export interface FederatedNodeInfo {
+  /** 该节点在本机（应答 Core）配置里的 peer 名。 */
+  name: string;
+  /** 对端 node_id（从未连上过时为空串）。 */
+  node_id?: string;
+  node_name?: string | null;
+  /** 应答 Core 视角的拨号地址（可能是内网/VPN——Panel 未必可达）。 */
+  url?: string;
+  /** 对端最近宣告的可拨地址（握手学到；Panel **优先用它**试连）。 */
+  advertise?: string | null;
+  online?: boolean;
+  /** 对端是否开放 Panel 身份（来自 Hello 能力声明）。 */
+  panel_ready?: boolean;
+}
+
+/** 联邦节点目录（`RequestFederationDirectory` 响应；P2 自动发现）。
+ *
+ *  只含**直接邻居**：拓扑由 Panel 汇总多个节点的目录得到（联邦不做 gossip）。
+ *  Panel 拿到后逐个用 Panel 身份密钥试连，成功即纳入聚合视图。 */
+export interface FederationDirectory {
+  node_id: string;
+  node_name?: string | null;
+  listen?: string;
+  panel_ready?: boolean;
+  panel_access?: string;
+  nodes: FederatedNodeInfo[];
 }
 
 export interface InstanceStatus {
@@ -658,6 +692,8 @@ export type BackendCommand =
   | { SaveFederationPeer: { peer: FederationPeerInfo } }
   | { DeleteFederationPeer: { name: string } }
   | 'RequestFederationStatus'
+  /** 联邦节点目录（P2 自动发现）：本机身份 + 直接邻居地址清单。 */
+  | 'RequestFederationDirectory'
   | 'RequestFederationInvite';
 
 // ── BackendEvent（外部标签枚举）────────────────────────────────────────────
@@ -734,8 +770,14 @@ export type BackendEvent =
         node_name?: string | null;
         listen: string;
         peers: FederationPeerInfo[];
+        /** 本节点是否接受联邦级 Panel 身份（P1；旧 Core 缺失）。 */
+        panel_ready?: boolean;
+        /** 授予 Panel 身份的级别（off/readonly/operate/admin）。 */
+        panel_access?: string;
       };
     }
+  /** 联邦节点目录（P2 自动发现；只含应答节点的**直接邻居**）。 */
+  | { FederationDirectory: FederationDirectory }
   | {
       SelfUpdateStatus: {
         state: string;

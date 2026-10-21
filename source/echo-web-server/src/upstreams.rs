@@ -33,9 +33,24 @@ pub struct UpstreamConfig {
     /// 中继拨号本地隧道端口。`None` = 直连。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh: Option<SshConfig>,
+    /// 来源（P2 自动发现，2026-11）：`""`/`manual` = 人工配置；
+    /// `discovered` = 由 Core 的 `FederationDirectory` 派生。
+    ///
+    /// 派生条目的两条特殊语义：
+    /// 1. **凭据来自 Panel 身份**——创建时若未给 token，自动填
+    ///    `[federation] panel_key`（不是任何节点的管理令牌）；
+    /// 2. **可被自动撤销**——人工条目永不被自动删/覆盖（见 `upsert` 的冲突
+    ///    规则与 `remove_discovered`）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
 }
 
 impl UpstreamConfig {
+    /// 是否自动发现派生（人工条目一律 false）。
+    pub fn is_discovered(&self) -> bool {
+        self.source == "discovered"
+    }
+
     /// 直连上游。
     pub fn direct(
         name: impl Into<String>,
@@ -47,6 +62,7 @@ impl UpstreamConfig {
             url: url.into(),
             access_token: access_token.into(),
             ssh: None,
+            source: String::new(),
         }
     }
 
@@ -75,6 +91,18 @@ pub struct UpstreamRegistry {
     /// 持久化路径（None = 不持久化——测试/纯内存形态）。
     persist: Option<PathBuf>,
     events: broadcast::Sender<UpstreamEvent>,
+    /// **Panel 身份密钥**（P2，2026-11；`[federation] panel_key`）。
+    ///
+    /// 自动发现的接入点创建时用它作 Bearer（而不是任何节点的管理令牌）。
+    /// 单独放注册表而不是塞进每个 `UpstreamConfig`：这是**一份**身份，
+    /// 轮换时只改一处（下次发现即用新密钥重建链路）。
+    panel_key: std::sync::RwLock<String>,
+    /// 是否启用自动发现（`[federation] discover`，默认 true）。
+    ///
+    /// 与 `panel_key` 分开：密钥是**凭据**，开关是**意愿**。运维可能想保留
+    /// 密钥（手工加派生条目时也用得上）但暂时关掉自动派生——例如目标节点
+    /// 正在滚动升级。
+    discover: std::sync::atomic::AtomicBool,
 }
 
 impl UpstreamRegistry {
@@ -84,7 +112,35 @@ impl UpstreamRegistry {
             inner: RwLock::new(initial),
             persist,
             events,
+            panel_key: std::sync::RwLock::new(String::new()),
+            discover: std::sync::atomic::AtomicBool::new(true),
         })
+    }
+
+    /// 设置 Panel 身份密钥（启动装配期一次；轮换时可再调）。
+    pub fn set_panel_key(&self, key: impl Into<String>) {
+        if let Ok(mut slot) = self.panel_key.write() {
+            *slot = key.into().trim().to_string();
+        }
+    }
+
+    /// 当前 Panel 身份密钥（空 = 不做自动发现）。
+    pub fn panel_key(&self) -> String {
+        self.panel_key
+            .read()
+            .map(|slot| slot.clone())
+            .unwrap_or_default()
+    }
+
+    /// 设置自动发现开关（`[federation] discover`）。
+    pub fn set_discover(&self, enabled: bool) {
+        self.discover
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 是否启用自动发现（有身份密钥才谈得上"用同一把密钥接全网"）。
+    pub fn can_discover(&self) -> bool {
+        self.discover.load(std::sync::atomic::Ordering::Relaxed) && !self.panel_key().is_empty()
     }
 
     /// 当前上游集合快照。
@@ -119,11 +175,31 @@ impl UpstreamRegistry {
         if let Some(ssh) = &config.ssh {
             ssh.validate()?;
         }
+        let discovered = config.is_discovered();
+        // 派生条目：凭据来自 **Panel 身份密钥**（不是任何节点的管理令牌）。
+        // 空密钥时不建条目——否则会留下一条"永远 401"的僵尸接入点，比不发现
+        // 更糟（用户以为连上了）。
+        let mut token = config.access_token;
+        if discovered && token.is_empty() {
+            token = self.panel_key();
+            if token.is_empty() {
+                return Err(
+                    "自动发现的接入点需要 [federation] panel_key（Panel 身份密钥）；\
+                     当前未配置，已跳过该节点"
+                        .into(),
+                );
+            }
+        }
         let config = UpstreamConfig {
             name,
-            access_token: config.access_token,
+            access_token: token,
             url,
             ssh: config.ssh,
+            source: if discovered {
+                "discovered".to_string()
+            } else {
+                String::new()
+            },
         };
         let effective = {
             let mut inner = self.inner.write().await;
@@ -133,6 +209,17 @@ impl UpstreamRegistry {
             let mut effective = config.clone();
             match inner.iter_mut().find(|u| u.name == config.name) {
                 Some(existing) => {
+                    // **人工优先**（P2）：自动发现不得覆盖/降级人工配置的接入点。
+                    // 否则用户手填的地址/令牌会被目录派生的一条悄悄改掉——那
+                    // 是最难排查的一类"配置自己变了"。
+                    if existing.is_discovered() != discovered {
+                        return Err(format!(
+                            "上游 `{}` 已由{}配置，忽略本次{}写入",
+                            existing.name,
+                            if existing.is_discovered() { "自动发现" } else { "手工" },
+                            if discovered { "自动发现" } else { "手工" }
+                        ));
+                    }
                     // token 留空 = 保留旧值（编辑场景）。
                     if effective.access_token.is_empty() {
                         effective.access_token = existing.access_token.clone();
@@ -190,6 +277,53 @@ impl UpstreamRegistry {
         Ok(removed)
     }
 
+    /// 清理**不再出现在目录里**的派生接入点（P2，2026-11）。
+    ///
+    /// 存活判据是**地址或名字任一对得上**：
+    /// - `keep_urls`：目录里当前仍被提到的可拨地址（首选判据——派生条目的
+    ///   名字是 Panel 本地派生的，邻居改别名后会变，但地址不会）；
+    /// - `keep_names`：邻居名/node_name 的小写集合（兜底：邻居宣告地址变了
+    ///   但身份没变）。
+    ///
+    /// 人工条目**永不**受影响（`source` 不是 `discovered` 的一律保留）——
+    /// 这是自动清理的安全边界：网络抖动导致目录少报一台时，只丢派生条目，
+    /// 用户手配的永远在。
+    ///
+    /// 返回被移除的名字（用于日志与前端提示）。
+    pub async fn remove_discovered(
+        &self,
+        keep_urls: &std::collections::HashSet<String>,
+        keep_names: &std::collections::HashSet<String>,
+    ) -> Vec<String> {
+        let mut removed = Vec::new();
+        {
+            let mut inner = self.inner.write().await;
+            let backup = inner.clone();
+            inner.retain(|u| {
+                let alive = keep_urls.contains(u.url.trim_end_matches('/'))
+                    || keep_names.contains(&u.name.to_lowercase());
+                let drop = u.is_discovered() && !alive;
+                if drop {
+                    removed.push(u.name.clone());
+                }
+                !drop
+            });
+            if removed.is_empty() {
+                return removed;
+            }
+            if let Err(error) = self.persist_locked(&inner) {
+                // 持久化失败：回滚内存（与 upsert 同一条纪律），并放弃本次清理。
+                *inner = backup;
+                tracing::warn!(error = %error, "清理派生接入点失败（已回滚）");
+                return Vec::new();
+            }
+        }
+        for name in &removed {
+            let _ = self.events.send(UpstreamEvent::Removed { name: name.clone() });
+        }
+        removed
+    }
+
     /// 原子写回配置文件（整树操作，只重建 `cores` 数组，其余段原样）。
     fn persist_locked(&self, inner: &[UpstreamConfig]) -> Result<(), String> {
         let Some(path) = self.persist.as_deref() else {
@@ -230,6 +364,14 @@ fn persist_to_file(path: &Path, upstreams: &[UpstreamConfig]) -> Result<(), Stri
                 }
                 if let Some(ssh) = &u.ssh {
                     t.insert("ssh".into(), toml::Value::Table(ssh_to_table(ssh)));
+                }
+                // 来源标记：`discovered` 必须落盘，否则重启后派生条目会
+                // 变成"人工条目"，既不会被清理、也会挡住后续自动发现。
+                if u.is_discovered() {
+                    t.insert(
+                        "source".into(),
+                        toml::Value::String("discovered".into()),
+                    );
                 }
                 toml::Value::Table(t)
             })
@@ -353,6 +495,7 @@ mod tests {
                 url: String::new(),
                 access_token: "tok".into(),
                 ssh: Some(SshConfig::default()),
+                source: String::new(),
             })
             .await
             .is_err());
@@ -370,6 +513,7 @@ mod tests {
             url: String::new(),
             access_token: "tok".into(),
             ssh: Some(ssh.clone()),
+            source: String::new(),
         })
         .await
         .unwrap();
@@ -403,6 +547,7 @@ mod tests {
             url: String::new(),
             access_token: String::new(),
             ssh: Some(edited),
+            source: String::new(),
         })
         .await
         .unwrap();
@@ -430,6 +575,7 @@ mod tests {
             url: String::new(),
             access_token: String::new(),
             ssh: Some(ssh),
+            source: String::new(),
         })
         .await
         .unwrap();
@@ -486,5 +632,121 @@ mod tests {
         );
         assert_eq!(root["core"]["connect_url"].as_str().unwrap(), "ws://x:1");
         std::fs::remove_file(&path).ok();
+    }
+
+    // ── P2 自动发现（2026-11）────────────────────────────────────────────
+
+    /// 派生接入点的凭据来自 **Panel 身份密钥**，不是任何人的管理令牌。
+    #[tokio::test]
+    async fn discovered_upstream_uses_panel_identity_key() {
+        let path = temp_path("discovered-token");
+        let reg = UpstreamRegistry::new(vec![], Some(path.clone()));
+        reg.set_panel_key("panel-key-1");
+        assert!(reg.can_discover());
+
+        let effective = reg
+            .upsert(UpstreamConfig {
+                name: "gpu-box".into(),
+                url: "ws://10.0.0.9:3132".into(),
+                access_token: String::new(), // 调用方不给凭据 → 用 Panel 身份
+                ssh: None,
+                source: "discovered".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(effective.access_token, "panel-key-1");
+        assert!(effective.is_discovered());
+
+        // 落盘带来源标记（重启后仍能被识别为派生、可清理）。
+        let text = std::fs::read_to_string(&path).unwrap();
+        let root: toml::Table = toml::from_str(&text).unwrap();
+        let entry = &root["cores"].as_array().unwrap()[0];
+        assert_eq!(entry["source"].as_str(), Some("discovered"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// 没有 Panel 身份密钥时**不建**派生条目（否则是一条永远 401 的僵尸）。
+    #[tokio::test]
+    async fn discovered_upstream_requires_panel_key() {
+        let reg = UpstreamRegistry::new(vec![], None);
+        assert!(!reg.can_discover());
+        let err = reg
+            .upsert(UpstreamConfig {
+                name: "gpu-box".into(),
+                url: "ws://10.0.0.9:3132".into(),
+                access_token: String::new(),
+                ssh: None,
+                source: "discovered".into(),
+            })
+            .await
+            .expect_err("no panel key must refuse discovered upstream");
+        assert!(err.contains("panel_key"), "{err}");
+        assert!(reg.list().await.is_empty(), "失败的写入不得留下条目");
+    }
+
+    /// **人工优先**：自动发现不得覆盖人工条目；人工也不得把派生条目"洗白"
+    /// （两个方向都拒绝，避免"配置自己变了"）。
+    #[tokio::test]
+    async fn discovered_and_manual_never_overwrite_each_other() {
+        let reg = UpstreamRegistry::new(vec![UpstreamConfig::direct("a", "ws://x:1", "tok")], None);
+        reg.set_panel_key("panel-key-1");
+
+        // 派生 → 已存在的人工条目：拒绝。
+        let err = reg
+            .upsert(UpstreamConfig {
+                name: "a".into(),
+                url: "ws://other:1".into(),
+                access_token: String::new(),
+                ssh: None,
+                source: "discovered".into(),
+            })
+            .await
+            .expect_err("discovered must not overwrite manual");
+        assert!(err.contains("手工"), "{err}");
+        assert_eq!(reg.list().await[0].url, "ws://x:1", "人工地址必须原样保留");
+
+        // 反向：手工写入同名派生条目 → 同样拒绝（否则清理逻辑会误删用户刚配的）。
+        let discovered = reg
+            .upsert(UpstreamConfig {
+                name: "b".into(),
+                url: "ws://y:1".into(),
+                access_token: String::new(),
+                ssh: None,
+                source: "discovered".into(),
+            })
+            .await
+            .unwrap();
+        assert!(discovered.is_discovered());
+        let err = reg
+            .upsert(UpstreamConfig::direct("b", "ws://y:2", "tok"))
+            .await
+            .expect_err("manual must not silently take over a discovered entry");
+        assert!(err.contains("自动发现"), "{err}");
+    }
+
+    /// 清理只影响派生条目：`keep` 之外的人工条目必须活着。
+    #[tokio::test]
+    async fn discovered_cleanup_never_touches_manual_entries() {
+        let reg = UpstreamRegistry::new(vec![UpstreamConfig::direct("manual", "ws://m:1", "t")], None);
+        reg.set_panel_key("panel-key-1");
+        for name in ["gone", "stays"] {
+            reg.upsert(UpstreamConfig {
+                name: name.into(),
+                url: format!("ws://{name}:1"),
+                access_token: String::new(),
+                ssh: None,
+                source: "discovered".into(),
+            })
+            .await
+            .unwrap();
+        }
+        // 存活判据：地址（首选）或名字。
+        let mut keep_urls = std::collections::HashSet::new();
+        keep_urls.insert("ws://stays:1".to_string());
+        let keep_names = std::collections::HashSet::new();
+        let removed = reg.remove_discovered(&keep_urls, &keep_names).await;
+        assert_eq!(removed, vec!["gone".to_string()]);
+        let names: Vec<String> = reg.list().await.into_iter().map(|u| u.name).collect();
+        assert_eq!(names, vec!["manual".to_string(), "stays".to_string()]);
     }
 }

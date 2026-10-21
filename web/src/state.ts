@@ -296,8 +296,13 @@ export type AgentPhase = 'thinking' | 'tool' | 'subagent' | 'completed' | 'faile
  * 此前定义在 state.ts，federation 事件联合类型引用不到）。
  * re-export 保持既有 `import type { FederationPeerInfo } from '../state'`
  * 调用点（FederationSettings 等）零改动。 */
-export type { FederationPeerInfo, FederationStatus } from './protocol';
-import type { FederationStatus } from './protocol';
+export type {
+  FederatedNodeInfo,
+  FederationDirectory,
+  FederationPeerInfo,
+  FederationStatus,
+} from './protocol';
+import type { FederationDirectory, FederationStatus } from './protocol';
 
 export interface AgentActivity {
   phase: AgentPhase;
@@ -710,6 +715,9 @@ export interface UpstreamStatus {
   auth: 'ok' | 'failed' | 'unknown';
   last_error: string | null;
   last_checked: number;
+  /// 来源（P2 自动发现）：`manual` = 人工配置，`discovered` = 由联邦节点
+  /// 目录派生（删除后若仍在联邦中会被下一个巡检周期重新发现）。
+  source?: 'manual' | 'discovered';
 }
 
 /// SSH 接入的运行状态（面板「Core 连接」页展示隧道阶段与失败原因）。
@@ -816,6 +824,15 @@ export interface AppState {
   federationInvite: string | null;
   /// 各 Core 最近生成的邀请串（键 = 上游名；`''` = 单上游）。
   federationInvites: Record<string, string>;
+  /// **联邦节点目录**（P2 自动发现；键 = 应答 Core 的上游名）。
+  ///
+  /// 每个条目是"该节点知道哪些邻居"——Panel 把所有条目并起来算全网拓扑与
+  /// 待补接入点（联邦不做 gossip，汇总在客户端）。保留原始快照而不是只留
+  /// 派生结果：UI 要展示"谁说的、什么时候说的"，排障时这是第一现场。
+  federationDirectories: Record<string, FederationDirectory>;
+  /// 各 Core 的目录快照到达时刻（unix ms；用于 UI 显示"已知 N 秒前"与
+  /// 判断是否需要重新拉取）。
+  federationDirectoryAt: Record<string, number>;
   knownCores: Set<string>;
   /// 上游 Core 连接状态（`/api/upstreams` 周期轮询；连接状态卡逐 core 展示）。
   upstreams: UpstreamStatus[];
@@ -973,6 +990,8 @@ export function initialState(): AppState {
     selfUpdateStatus: null,
     federationInvite: null,
     federationInvites: {},
+    federationDirectories: {},
+    federationDirectoryAt: {},
     knownCores: new Set(),
     upstreams: [],
     regions: {},
@@ -1191,6 +1210,15 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       state.federations[payloadCore(event) ?? ''] = e;
       // 单值字段仍服务"运行区域相关"视图（自更新/调度/目录浏览等）。
       if (managementCoreCurrent(state, payloadCore(event))) state.federation = e;
+      return state;
+    }
+    case 'FederationDirectory': {
+      const e = (event as { FederationDirectory: FederationDirectory }).FederationDirectory;
+      // 按应答 core 归档（与 Federations 同口径）：拓扑 = 各节点目录的并集，
+      // 单条目录只是"这一台知道的邻居"。
+      const core = payloadCore(event) ?? '';
+      state.federationDirectories[core] = e;
+      state.federationDirectoryAt[core] = Date.now();
       return state;
     }
     case 'FederationInvite': {
@@ -2157,6 +2185,9 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   for (const key of Object.keys(state.instanceUiByKey)) {
     if (key.startsWith(prefix)) delete state.instanceUiByKey[key];
   }
+  // 联邦目录快照（P2）：随 core 一起清——留着会让拓扑继续引用已移除节点。
+  delete state.federationDirectories[core];
+  delete state.federationDirectoryAt[core];
 }
 
 /**

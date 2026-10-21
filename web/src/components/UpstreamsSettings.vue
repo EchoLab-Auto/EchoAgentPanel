@@ -347,6 +347,15 @@ onMounted(() => {
           <div class="up-item-name">
             {{ u.name }}
             <NeumorphismTag v-if="u.access === 'ssh'" variant="default" size="small">SSH</NeumorphismTag>
+            <!-- 自动发现（P2）：由联邦节点目录派生，不是人工配置。
+                 标签的意义是"我知道它从哪来"——删掉它不会影响真实节点，
+                 下一个巡检周期若它仍在联邦里会被重新发现。 -->
+            <NeumorphismTag
+              v-if="u.source === 'discovered'"
+              variant="success"
+              size="small"
+              title="由联邦节点目录自动发现（删除后若仍在联邦中会被重新发现）"
+            >自动</NeumorphismTag>
           </div>
           <div class="up-item-url">{{ addressOf(u) }}</div>
           <!-- 健康详情（2026-10 连通性/认证可视性）：固定高度+占位，
