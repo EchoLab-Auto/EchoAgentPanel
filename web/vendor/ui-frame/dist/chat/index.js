@@ -1,5 +1,5 @@
 import { defineComponent as C, computed as u, openBlock as o, createElementBlock as d, normalizeClass as k, renderSlot as m, createBlock as b, withCtx as V, createTextVNode as N, toDisplayString as z, createCommentVNode as f, createElementVNode as v, createVNode as y, unref as c, ref as O, withModifiers as K } from "vue";
-import { N as R } from "../chunks/NeumorphismTextarea-D4alPN-q.js";
+import { N as R } from "../chunks/NeumorphismTextarea-BPesp-1r.js";
 import { N as L } from "../chunks/NeumorphismButton-CTLPjGe-.js";
 import { useLocale as S } from "../composables/useLocale.js";
 import { useChatInput as E } from "../composables/useChatInput.js";

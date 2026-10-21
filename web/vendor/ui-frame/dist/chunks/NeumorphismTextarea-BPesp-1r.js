@@ -29,8 +29,8 @@ import '../NeumorphismTextarea.css';const J = ["id", "value", "placeholder", "di
     showCount: { type: Boolean, default: !1 }
   },
   emits: ["update:modelValue", "focus", "blur", "input", "change", "keydown", "enter"],
-  setup(a, { emit: b }) {
-    const l = a, o = b, n = I(), v = i(() => {
+  setup(a, { emit: v }) {
+    const l = a, o = v, n = I(), b = i(() => {
       const e = {};
       for (const t of Object.keys(n))
         t !== "class" && t !== "style" && (e[t] = n[t]);
@@ -105,7 +105,7 @@ import '../NeumorphismTextarea.css';const J = ["id", "value", "placeholder", "di
           inputmode: a.inputmode,
           "aria-invalid": !!a.error,
           "aria-errormessage": r(f) ? `${r(s)}-error` : void 0
-        }, v.value, {
+        }, b.value, {
           onInput: F,
           onChange: R,
           onFocus: t[0] || (t[0] = (m) => r(B)(m, o)),
@@ -122,7 +122,7 @@ import '../NeumorphismTextarea.css';const J = ["id", "value", "placeholder", "di
       ])
     ], 6));
   }
-}), te = /* @__PURE__ */ G(W, [["__scopeId", "data-v-a9b21db2"]]);
+}), te = /* @__PURE__ */ G(W, [["__scopeId", "data-v-793135c3"]]);
 export {
   te as N
 };

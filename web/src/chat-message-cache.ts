@@ -15,7 +15,7 @@
 //! `messages` 里 1000+ 个元素的引用全变 → 所有 `MessageItem` 的 `:message`
 //! prop 都「变了」→ Vue 逐个子组件 re-render，而实际 DOM 几乎不需要改。
 //!
-//! 实测（1024 条消息，4× CPU 节流，见 `document/design/panel-performance-audit.md`）：
+//! 实测（1024 条消息，4× CPU 节流）：
 //!
 //! | 实验 | 单次 delta 耗时 |
 //! | --- | --- |

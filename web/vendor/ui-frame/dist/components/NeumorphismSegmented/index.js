@@ -1,4 +1,4 @@
-import { N as f } from "../../chunks/NeumorphismSegmented-D9q1A1Xr.js";
+import { N as f } from "../../chunks/NeumorphismSegmented-DUFOQtRa.js";
 export {
   f as default
 };

@@ -9,6 +9,12 @@
     <!-- PWA / 头显独立应用运行（XR 巨幕模式）：manifest + 图标 + 主题色。
          maskable 图标供 Android 系（PICO 等）桌面/窗口自适应裁切。 -->
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- iOS「添加到主屏幕」独立应用：旧 iOS 只认 apple-mobile-web-app-capable
+         （不读 manifest.display），缺它时从主屏打开仍带 Safari 地址栏。
+         status-bar-style 保持 default：black-translucent 会让状态栏文字恒为
+         白色，亮色主题的浅灰顶栏上不可读。 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="theme-color" content="#e0e0e0" media="(prefers-color-scheme: light)" />

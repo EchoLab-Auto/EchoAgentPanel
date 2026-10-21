@@ -130,7 +130,7 @@ import '../NeumorphismDrawer.css';const Q = ["aria-labelledby", "aria-label"], U
       })
     ]));
   }
-}), ie = /* @__PURE__ */ J(ee, [["__scopeId", "data-v-0ca610fb"]]);
+}), ie = /* @__PURE__ */ J(ee, [["__scopeId", "data-v-00425a52"]]);
 export {
   ie as N
 };

@@ -259,21 +259,31 @@ function setLoopMode(value: string | number | (string | number)[] | undefined) {
 
 function save() {
   if (!name.value.trim()) return;
-  sendCommand({
-    SaveTeam: {
-      id: props.team.id,
-      name: name.value.trim(),
-      description: description.value.trim(),
-      system_prompt: systemPrompt.value,
-      enabled: enabled.value,
-      disabled_tools: disabledTools.value,
-      disabled_skills: disabledSkills.value,
-      enabled_plugins: enabledPlugins.value,
-      enabled_tools: enabledTools.value,
-      enabled_skills: enabledSkills.value,
-      api_profile: apiProfile.value || null,
+  // 按 (core, id) 定向：`SaveTeam` 的 payload 没有 team_id，`resolveTargetCore`
+  // 的人格守卫（只看 team_id/session_id）识别不到归属——不显式带 core 就会落到
+  // activeRegion，改的可能是另一台机器上同 id 的 agent（2026-10 多 Core 修复）。
+  sendCommand(
+    {
+      SaveTeam: {
+        id: props.team.id,
+        name: name.value.trim(),
+        description: description.value.trim(),
+        system_prompt: systemPrompt.value,
+        enabled: enabled.value,
+        disabled_tools: disabledTools.value,
+        disabled_skills: disabledSkills.value,
+        enabled_plugins: enabledPlugins.value,
+        enabled_tools: enabledTools.value,
+        enabled_skills: enabledSkills.value,
+        // 本弹层不编辑这两项，但 `SaveTeam` 是整对象覆盖：不透传就会被清成
+        // "继承全局"（per-persona token 预算丢失）。
+        memory_limit_tokens: props.team.memory_limit_tokens ?? null,
+        context_window_tokens: props.team.context_window_tokens ?? null,
+        api_profile: apiProfile.value || null,
+      },
     },
-  });
+    props.team.core ?? undefined,
+  );
   emit('close');
 }
 </script>

@@ -7,28 +7,32 @@ import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import { sessionKey } from '../keys';
+import { regionLabel } from '../state';
 import LoadHint from './LoadHint.vue';
 
-/** 详情视图（2026-09-19 起）：`sessionId` 必填，只展示该会话的终端。
- *  会话列表在右侧边栏「Shell」卡（ShellList），点「详情」进入本视图。 */
-const props = defineProps<{ sessionId: string }>();
+/** 详情视图（2026-09-19 起）：`sessionId` + 所属 `core` 必填，只展示该会话的终端。
+ *  会话列表在右侧边栏「Shell」卡（ShellList），点「详情」进入本视图。
+ *
+ *  `core` 是会话的**真实归属**（`sh-{seq}` 在每个 core 上从 1 起重复，光凭 id
+ *  无法区分）。以前的实现只按 activeRegion 定位：打开 A 的 `sh-1` 后切到 B，
+ *  同一面板会显示 B 的 `sh-1`，且在这里执行的命令打到 B——用户以为还在 A。 */
+const props = defineProps<{ sessionId: string; core?: string | null }>();
 const emit = defineEmits<{ back: [] }>();
 
-// 会话 id 是 per-core 的 `sh-{seq}`：按 (activeRegion, session_id) 精确定位。
+/** 本次查看的目标 core：显式传入优先，缺省（旧调用点）回落 activeRegion。 */
+const targetCore = computed(() => props.core ?? state.activeRegion ?? null);
+/** 多区域部署时才显示区域徽标。 */
+const showRegion = computed(() => state.upstreams.length > 1 || state.knownCores.size > 1);
+
+// 会话 id 是 per-core 的 `sh-{seq}`：按 (core, session_id) 精确定位。
 const session = computed(
   () =>
     state.shellSessions.find(
-      (s) =>
-        s.session_id === props.sessionId &&
-        (state.activeRegion == null || (s.core ?? null) === state.activeRegion),
+      (s) => s.session_id === props.sessionId && (s.core ?? null) === targetCore.value,
     ) ?? null,
 );
-/** 终端条目的复合键（找不到会话时按当前 core + 请求 id 兜底）。 */
-const terminalKey = computed(() =>
-  session.value
-    ? sessionKey(session.value.core, session.value.session_id)
-    : sessionKey(state.activeRegion, props.sessionId),
-);
+/** 终端条目的复合键（找不到会话时按目标 core + 请求 id 兜底）。 */
+const terminalKey = computed(() => sessionKey(targetCore.value, props.sessionId));
 
 const inputBySession = ref<Record<string, string>>({});
 const terminalEls = ref<Record<string, HTMLElement | null>>({});
@@ -46,14 +50,18 @@ onMounted(() => {
 });
 onUnmounted(() => releasePending('shell:panel:sessions'));
 
+// 命令一律按**目标 core** 定向：`ShellExec/ShellStop` 的 payload 只有
+// `session_id`，而 `coreForCommand` 只查聊天会话表（shell id 永远查不到），
+// 不带 targetCore 就只能落到 activeRegion——切过区域后命令会打进别的机器
+// 的同号 shell（2026-10 多 Core 交互修复）。
 function stopSession(sessionId: string) {
-  sendCommand({ ShellStop: { session_id: sessionId } });
+  sendCommand({ ShellStop: { session_id: sessionId } }, targetCore.value ?? undefined);
 }
 
 function execCommand(sessionId: string) {
   const cmd = (inputBySession.value[sessionId] ?? '').trim();
   if (!cmd) return;
-  sendCommand({ ShellExec: { session_id: sessionId, command: cmd } });
+  sendCommand({ ShellExec: { session_id: sessionId, command: cmd } }, targetCore.value ?? undefined);
   inputBySession.value[sessionId] = '';
 }
 
@@ -104,7 +112,12 @@ watch(shellTailSignature, () => {
     <!-- 头部：返回 + 会话信息 -->
     <div class="shell-head">
       <div class="shell-head__text">
-        <h2>Shell · {{ session?.session_id ?? props.sessionId }}</h2>
+        <h2>
+          Shell · {{ session?.session_id ?? props.sessionId }}
+          <span v-if="showRegion" class="shell-head__core" :title="`所属区域：${regionLabel(state, targetCore)}`">
+            {{ regionLabel(state, targetCore) }}
+          </span>
+        </h2>
         <p class="shell-head__sub">
           {{ session?.workdir ?? '' }} ·
           {{ session ? `${fmtTime(session.created_at_ms)} · ${session.exec_count} 条命令` : '会话不存在或已停止' }}
@@ -187,7 +200,16 @@ watch(shellTailSignature, () => {
   gap: 12px;
   flex-wrap: wrap;
 }
-.shell-head h2 { margin: 0; font-size: 15px; }
+.shell-head h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+/* 区域徽标：这个终端在哪台机器上（多上游时才知道命令打去了哪里） */
+.shell-head__core {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 5px;
+  color: var(--nm-text-secondary);
+  background: color-mix(in srgb, var(--nm-text-primary) 8%, transparent);
+}
 .shell-head__sub { margin: 2px 0 0; font-size: 11px; color: var(--nm-text-secondary); }
 .shell-head__actions { display: flex; align-items: center; gap: 8px; }
 .shell-workdir {

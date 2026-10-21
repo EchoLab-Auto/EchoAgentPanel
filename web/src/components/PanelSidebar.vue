@@ -46,7 +46,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   selectBranch: [id: string];
   manageWorkspace: [];
-  openShellDetail: [sessionId: string];
+  openShellDetail: [sessionId: string, core: string | null];
   /** 卡片换列（拖动或头部按钮）——由视图层做提示/持久化外的后续动作。 */
   relocate: [id: string, side: RailSide];
 }>();
@@ -87,7 +87,7 @@ function truncateTask(task: string): string {
       </div>
     </template>
     <template #shell>
-      <ShellList :team-id="teamId" @open-detail="(id) => emit('openShellDetail', id)" />
+      <ShellList :team-id="teamId" @open-detail="(id, core) => emit('openShellDetail', id, core)" />
     </template>
     <template #branches>
       <div v-if="Object.keys(state.branchTabs).length === 0" class="muted">

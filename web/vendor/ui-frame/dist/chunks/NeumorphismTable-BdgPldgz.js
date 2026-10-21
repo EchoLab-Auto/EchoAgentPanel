@@ -1,4 +1,4 @@
-import { defineComponent as P, computed as i, openBlock as s, createElementBlock as a, normalizeClass as f, createElementVNode as c, createVNode as g, unref as n, createCommentVNode as b, Fragment as k, renderList as S, withKeys as z, withModifiers as Q, normalizeStyle as A, renderSlot as h, createTextVNode as B, toDisplayString as y } from "vue";
+import { defineComponent as P, computed as i, openBlock as s, createElementBlock as a, normalizeClass as f, createElementVNode as c, createVNode as g, unref as n, createCommentVNode as m, Fragment as k, renderList as S, withKeys as z, withModifiers as Q, normalizeStyle as A, renderSlot as h, createTextVNode as B, toDisplayString as y } from "vue";
 import { useTable as U } from "../composables/useTable.js";
 import { useConfig as X } from "../composables/useConfig.js";
 import { useLocale as Y } from "../composables/useLocale.js";
@@ -18,10 +18,10 @@ import '../NeumorphismTable.css';const te = { class: "nm-table__wrapper" }, le =
 }, de = { class: "nm-table__body" }, re = ["onClick"], ce = {
   key: 0,
   class: "nm-table__td nm-table__td--selection"
-}, be = {
+}, me = {
   key: 0,
   class: "nm-table__empty"
-}, me = { class: "nm-table__empty-text" }, ue = {
+}, be = { class: "nm-table__empty-text" }, ue = {
   key: 1,
   class: "nm-table__loading"
 }, _e = { class: "nm-table__loading-text" }, he = /* @__PURE__ */ P({
@@ -113,7 +113,7 @@ import '../NeumorphismTable.css';const te = { class: "nm-table__wrapper" }, le =
                   indeterminate: n(j),
                   onChange: q
                 }, null, 8, ["model-value", "indeterminate"])
-              ])) : b("", !0),
+              ])) : m("", !0),
               (s(!0), a(k, null, S(n(C), (t) => (s(), a("th", {
                 key: t.key,
                 class: f(["nm-table__th", {
@@ -123,10 +123,10 @@ import '../NeumorphismTable.css';const te = { class: "nm-table__wrapper" }, le =
                 style: A([J(t), { textAlign: t.align }]),
                 tabindex: t.sortable ? 0 : void 0,
                 "aria-sort": t.sortable ? n(_).key === t.key ? n(_).direction === "ascend" ? "ascending" : "descending" : "none" : void 0,
-                onClick: (m) => t.sortable ? p(t.key) : void 0,
+                onClick: (b) => t.sortable ? p(t.key) : void 0,
                 onKeydown: [
-                  z((m) => t.sortable ? p(t.key) : void 0, ["enter"]),
-                  z(Q((m) => t.sortable ? p(t.key) : void 0, ["prevent"]), ["space"])
+                  z((b) => t.sortable ? p(t.key) : void 0, ["enter"]),
+                  z(Q((b) => t.sortable ? p(t.key) : void 0, ["prevent"]), ["space"])
                 ]
               }, [
                 c("span", oe, [
@@ -138,14 +138,14 @@ import '../NeumorphismTable.css';const te = { class: "nm-table__wrapper" }, le =
                       name: "chevron-up",
                       size: "xs"
                     })
-                  ])) : b("", !0)
+                  ])) : m("", !0)
                 ])
               ], 46, ne))), 128))
             ])
-          ])) : b("", !0),
+          ])) : m("", !0),
           c("tbody", de, [
-            (s(!0), a(k, null, S(n(x), (t, m) => (s(), a("tr", {
-              key: String(t[d.rowKey] ?? m),
+            (s(!0), a(k, null, S(n(x), (t, b) => (s(), a("tr", {
+              key: String(t[d.rowKey] ?? b),
               class: f(["nm-table__tr", {
                 "nm-table__tr--selected": n($)(String(t[d.rowKey] ?? "")),
                 "nm-table__tr--clickable": d.selectable === "single"
@@ -157,7 +157,7 @@ import '../NeumorphismTable.css';const te = { class: "nm-table__wrapper" }, le =
                   "model-value": n($)(String(t[d.rowKey] ?? "")),
                   onChange: (r) => N(t)
                 }, null, 8, ["model-value", "onChange"])
-              ])) : b("", !0),
+              ])) : m("", !0),
               (s(!0), a(k, null, S(n(C), (r) => (s(), a("td", {
                 key: r.key,
                 class: "nm-table__td",
@@ -167,7 +167,7 @@ import '../NeumorphismTable.css';const te = { class: "nm-table__wrapper" }, le =
                   row: t,
                   column: r,
                   value: t[r.key],
-                  index: m
+                  index: b
                 }, () => [
                   B(y(G(t, r)), 1)
                 ], !0)
@@ -175,21 +175,21 @@ import '../NeumorphismTable.css';const te = { class: "nm-table__wrapper" }, le =
             ], 10, re))), 128))
           ])
         ]),
-        n(x).length === 0 && !d.loading ? (s(), a("div", be, [
+        n(x).length === 0 && !d.loading ? (s(), a("div", me, [
           h(e.$slots, "empty", {}, () => [
-            c("span", me, y(D.value), 1)
+            c("span", be, y(D.value), 1)
           ], !0)
-        ])) : b("", !0),
+        ])) : m("", !0),
         d.loading ? (s(), a("div", ue, [
           h(e.$slots, "loading", {}, () => [
             o[0] || (o[0] = c("span", { class: "nm-table__loading-spinner" }, null, -1)),
             c("span", _e, y(n(K)("tableLoading")), 1)
           ], !0)
-        ])) : b("", !0)
+        ])) : m("", !0)
       ])
     ], 2));
   }
-}), Ke = /* @__PURE__ */ ee(he, [["__scopeId", "data-v-f0b44180"]]);
+}), Ke = /* @__PURE__ */ ee(he, [["__scopeId", "data-v-425f703d"]]);
 export {
   Ke as N
 };

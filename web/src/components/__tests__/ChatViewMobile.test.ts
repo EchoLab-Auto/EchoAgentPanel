@@ -105,16 +105,75 @@ describe('ChatView 竖屏移动端', () => {
       .map((m) => m[1])
       .join('\n');
     expect(entryRules).toMatch(/overflow-x:\s*auto/);
-    expect(entryRules).toMatch(/right:\s*8px/);
+    // 右界 8px 且让开横屏刘海（max(8px, env(safe-area-inset-right, 0px))）
+    expect(entryRules).toMatch(/right:\s*max\(8px,\s*env\(safe-area-inset-right/);
     expect(entryRules).toMatch(/v-bind\(keyboardInsetPx\)/);
+    // 输入区贴底后不再叠加 safe-area（safe-area 已不参与纵向布局）
+    expect(entryRules, '入口行纵向只跟 entryBottom + 键盘').toMatch(
+      /bottom: calc\(v-bind\(entryBottom\) \+ v-bind\(keyboardInsetPx\)\)/,
+    );
     // 输入区：安全区 + 键盘偏移 + 16px 防 iOS 聚焦缩放
     // （.chat-composer-float 同样有桌面/移动多个块，合并断言）
     const composerRules = [...styleBlock.matchAll(/\.chat-composer-float \{([\s\S]*?)\}/g)]
       .map((m) => m[1])
       .join('\n');
-    expect(composerRules).toMatch(/env\(safe-area-inset-bottom/);
-    expect(composerRules).toMatch(/v-bind\(keyboardInsetPx\)/);
+    // 等间隙：左右与底部共用同一个 --composer-inset（这是"角部间隙恒定"的前提）
+    expect(composerRules, '左右/底部留白必须同源').toMatch(/--composer-inset: 14px/);
+    expect(composerRules).toMatch(/left: max\(var\(--composer-inset\)/);
+    expect(composerRules).toMatch(/right: max\(var\(--composer-inset\)/);
+    expect(composerRules).toMatch(
+      /bottom: calc\(var\(--composer-inset\) \+ v-bind\(keyboardInsetPx\)\)/,
+    );
     expect(styleBlock).toMatch(/font-size:\s*16px/);
+    // 圆角同心（移动口径，2026-10 二次修订）：同心关系只有一条——
+    //   内层圆角 = 外框圆角 − padding − border
+    // 由根变量 --composer-inner-radius 派生，内外各自不再写死数值。
+    // （外框半径本身是「设备圆角 − 留白」再按半高封顶，那属于视觉上限，
+    //   不是同心关系；详见 ChatView.vue 内注释里的两处几何硬约束。）
+    const mobileStyle = styleBlock.slice(styleBlock.indexOf('@media (max-width: 767.98px)'));
+    // 外框形状：移动端不再用 border-radius（圆弧贴不住超椭圆屏角，实测波动
+    // 2.3px），改由 JS 算 clip-path；四层（发光/描边/玻璃）共用同一条轮廓。
+    expect(mobileStyle, '移动端轮廓改由 clip-path 提供').not.toMatch(
+      /--composer-radius: clamp\(/,
+    );
+    expect(styleBlock, '外框消费 clip 变量').toMatch(
+      /\.chat-composer-float__surface \{[^}]*clip-path: var\(--composer-clip, none\)/,
+    );
+    expect(styleBlock, '玻璃层消费内轮廓（内缩 1px 空出描边）').toMatch(
+      /\.chat-composer-float__glass \{[^}]*clip-path: var\(--composer-clip-inner, none\)/,
+    );
+    // 发光必须画在未被裁剪的父层上（clip-path 会裁掉 box-shadow），
+    // 且该层不能挂 backdrop-filter（filter 祖先会让毛玻璃失效）
+    expect(styleBlock, '发光层用 blur 而非 box-shadow').toMatch(
+      /\.chat-composer-float__halo \{[^}]*filter: blur\(/,
+    );
+    const haloRules = styleBlock.match(/\.chat-composer-float__halo \{[\s\S]*?\}/)?.[0] ?? '';
+    expect(haloRules, '发光层不得带 backdrop-filter').not.toMatch(/backdrop-filter/);
+    // 内层一律消费派生变量（含 border 补偿）
+    expect(styleBlock, '同心派生量必须减掉 padding 与 border').toMatch(
+      /--composer-inner-radius: max\(\s*0px,\s*calc\(var\(--composer-corner-r\) - var\(--composer-padding\) - var\(--composer-border\)\)\s*\)/,
+    );
+    // 贴角半径：JS 写成「屏角 − 留白」；桌面兜底等于外框半径
+    expect(styleBlock, '贴角半径默认回落外框半径').toMatch(
+      /--composer-corner-r: var\(--composer-radius\)/,
+    );
+    // 源码里必须真的调用了轮廓计算（否则 clip 变量永远 none）
+    expect(raw, '移动端必须调用 composerOutline').toMatch(/composerOutline\(\{/);
+    expect(raw).toMatch(/--composer-clip-inner/);
+    expect(raw, '读屏角/留白变量作为输入').toMatch(/'--panel-display-radius'/);
+    expect(raw).toMatch(/'--composer-inset'/);
+    expect(mobileStyle, '内框/按钮 = 外框 − padding − border（同心）').toMatch(
+      /\.nm-textarea\.nm-textarea\) \{\s*border-radius: var\(--composer-inner-radius\)/,
+    );
+    expect(mobileStyle).toMatch(
+      /\.chat-view__send\) \{\s*border-radius: var\(--composer-inner-radius\) !important/,
+    );
+    // 桌面口径：外框 24px / padding 12px / border 1px → 内层 11px
+    expect(styleBlock).toMatch(/--composer-radius: 24px/);
+    expect(styleBlock).toMatch(/--composer-padding: 12px/);
+    expect(styleBlock).toMatch(/--composer-border: 1px/);
+    // 输入行控件高度跟随字号：字号一变，取消/附件/发送同步重算（不写死 42px）
+    expect(mobileStyle).toMatch(/--chat-field-font: 16px/);
   });
 
   it('软键盘适配：visualViewport 监听在源码中挂载/清理', () => {

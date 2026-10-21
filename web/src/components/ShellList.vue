@@ -7,6 +7,7 @@ import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButt
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
 import { sessionKey } from '../keys';
+import { regionLabel } from '../state';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 
@@ -14,12 +15,20 @@ import LoadHint from './LoadHint.vue';
  *  不串显其他 agent（去主智能体：team_id 必填）。 */
 const props = defineProps<{ teamId: string | null }>();
 
-const emit = defineEmits<{ openDetail: [sessionId: string] }>();
+/**
+ * 打开详情的意图：会话 id 是 per-core 的 `sh-{seq}`，**必须连 core 一起带出去**
+ * ——只传 id 的话详情面板只能按 activeRegion 猜，切区域后会把 A 的 `sh-1`
+ * 当成 B 的 `sh-1`（在"以为在 B"的终端里执行的命令实际打在 A 上）。
+ */
+const emit = defineEmits<{ openDetail: [sessionId: string, core: string | null] }>();
 
 const teamKey = computed(() => props.teamId ?? state.teams[0]?.id ?? null);
 
 /** 本 agent 的会话（事件按 team_id 过滤）。注：核心服务代理处理的会话
- *（无 persona 归属）team_id 为空，此类会话对所有 agent 可见（不过滤）。 */
+ *（无 persona 归属）team_id 为空，此类会话对所有 agent 可见（不过滤）。
+ *
+ * 区域维度：列表按 activeRegion 过滤（= 当前区域的后台 shell）；每行自带
+ * `core`，详情/停止/执行一律按**行自身的 core** 定向。 */
 const sessions = computed(() =>
   state.shellSessions.filter(
     (s) =>
@@ -28,10 +37,17 @@ const sessions = computed(() =>
   ),
 );
 
+/** 多区域部署时才显示行内区域徽标（单上游不占视觉）。 */
+const showRegion = computed(() => state.upstreams.length > 1 || state.knownCores.size > 1);
+
 const { phase: listPhase } = usePending('shell:sessions');
 
 function refresh() {
   sendPending({ RequestShellSessions: { team_id: teamKey.value } }, 'shell:sessions');
+}
+/** 新建 shell：显式定向当前运行区域（不依赖 resolveTargetCore 的隐式兜底）。 */
+function startShell() {
+  sendCommand({ ShellStart: { workdir: null } }, state.activeRegion ?? undefined);
 }
 // 断连守卫（2026-10 审计修复）：未连接时登记 pending 会 20s 后假"超时"，
 // 且重连后不补拉。挂载/team 变化仅在已连接时发起；由 connected 监听补拉。
@@ -49,13 +65,12 @@ watch(teamKey, () => {
   if (state.connected) refresh();
 });
 onUnmounted(() => releasePending('shell:sessions'));
-
 </script>
 
 <template>
   <div class="shell-list">
     <div class="shell-list__actions">
-      <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="sendCommand({ ShellStart: { workdir: null } })">
+      <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="startShell">
         新建
       </NeumorphismButton>
       <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="refresh">
@@ -69,13 +84,20 @@ onUnmounted(() => releasePending('shell:sessions'));
     <div v-for="session in sessions" :key="sessionKey(session.core, session.session_id)" class="shell-row">
       <span class="shell-row__dot" />
       <span class="shell-row__id">{{ session.session_id }}</span>
+      <span
+        v-if="showRegion && session.core"
+        class="shell-row__core"
+        :title="`所属区域：${regionLabel(state, session.core)}`"
+      >
+        {{ regionLabel(state, session.core) }}
+      </span>
       <span class="shell-row__meta" :title="session.workdir">
         {{ session.workdir }} · {{ session.exec_count }} 条
       </span>
       <NeumorphismButton
         size="small"
         variant="glass"
-        @click="emit('openDetail', session.session_id)"
+        @click="emit('openDetail', session.session_id, session.core ?? null)"
       >
         详情
       </NeumorphismButton>
@@ -116,6 +138,14 @@ onUnmounted(() => releasePending('shell:sessions'));
 .shell-row__id {
   font-family: var(--nm-font-mono, monospace);
   color: var(--nm-text-primary);
+}
+.shell-row__core {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  color: var(--nm-text-secondary);
+  background: color-mix(in srgb, var(--nm-text-primary) 8%, transparent);
 }
 .shell-row__meta {
   flex: 1;

@@ -705,6 +705,16 @@ const pluginSearch = ref('');
 const pluginFilter = ref<PluginFilter>('all');
 const pluginGroupBy = ref<'source' | 'semantic' | 'kind' | 'flat'>('source');
 const pluginCore = ref<string | null>(state.activeRegion);
+// 跟随运行区域（2026-10 多 Core）：选择器初值在挂载时快照，设置页开着期间
+// activeRegion 被 TeamsList 校正 / 上游增删改变时不跟随 → 插件面板停在旧 core，
+// 与同页其他分类指向不同机器（用户以为改的是"当前这台"）。
+watch(
+  () => state.activeRegion,
+  (next) => {
+    pluginCore.value = next;
+    selectedPlugin.value = null;
+  },
+);
 /** 可选的管理节点：上游名 ∪ 人格归属 core ∪ 已知的 pluginsByCore 键。 */
 const pluginCoreOptions = computed(() => {
   const ids = new Set<string>();
@@ -1006,11 +1016,46 @@ const hasWorkbench = computed(
     activeCategory.value === 'tool' ||
     activeCategory.value === 'plugin',
 );
-
-// 智能体平铺列表：一律平等，按 id 排序（去主智能体 2026-09）
-const teamList = computed(() =>
-  [...state.teams].sort((a, b) => a.id.localeCompare(b.id, 'en')),
+// ── 运行区域（多 Core）：「每个区域至少保留一个」判据 ──
+/**
+ * 可选运行区域 = 已配置上游 ∪ 当前运行区域 ∪ 已有 agent 的归属（同一口径
+ * pluginCoreOptions）：上游列表尚未轮询到时也不至于给出空选项。
+ */
+const regionOptions = computed(() => {
+  const ids = new Set(state.upstreams.map((u) => u.name));
+  if (state.activeRegion) ids.add(state.activeRegion);
+  for (const t of state.teams) if (t.core) ids.add(t.core);
+  return [...ids].sort((a, b) => a.localeCompare(b, 'en'));
+});
+/** 是否多区域部署（决定「运行区域」选择器/徽标是否出现；单上游一律不显示）。 */
+const multiRegion = computed(
+  () => regionOptions.value.length > 1 || state.knownCores.size > 1,
 );
+/**
+ * 同一区域（core）上的智能体数。
+ *
+ * 「至少保留一个」的判定必须按**该智能体所在区域**统计：一旦按合并后的
+ * `state.teams.length` 判，`A 有 2 个 + B 有 1 个 = 3` 会让 B 的唯一一个也
+ * 被允许删除——而区域只能靠"选中 agent"切换，B 删空后再无入口，整台机器
+ * 从 UI 上失联。
+ */
+function teamsInCore(core: string | null | undefined): number {
+  return state.teams.filter((t) => (t.core ?? null) === (core ?? null)).length;
+}
+
+// 智能体平铺列表：一律平等（去主智能体 2026-09）。排序键是 **(id, 区域)**：
+// 多 Core 下同一个 id 可以在多台机器上各有一份，按 id 主序让它们相邻出现，
+// 否则看起来就是"同一个名字错行显示了两次"（2026-10 多 Core 交互修复）。
+const teamList = computed(() =>
+  [...state.teams].sort(
+    (a, b) =>
+      a.id.localeCompare(b.id, 'en') || (a.core ?? '').localeCompare(b.core ?? '', 'en'),
+  ),
+);
+/** 列表行是否显示区域徽标（多区域部署 + 该条有归属；单上游不占视觉）。 */
+function showTeamRegion(core: string | null | undefined): boolean {
+  return multiRegion.value && !!core;
+}
 
 // ── 条目选中 ──
 async function selectSkillItem(s: SkillInfo) {
@@ -1117,6 +1162,15 @@ const teamFormDescription = ref('');
 const teamFormPrompt = ref('');
 const teamFormEnabled = ref(true);
 const teamEditing = ref(false);
+/**
+ * 该智能体的**运行区域**（= 它所在的上游 Core 名；null = 单上游/未标注）。
+ *
+ * 多 Core 下这是「命令发到哪台机器」的唯一显式依据：SaveTeam / DeleteTeam /
+ * ToggleTeam 全部按它定向投递。此前三者都不带目标 core，一律落在 activeRegion
+ * ——在设置页编辑 B 机器上的智能体，命令实际发进 A；A 上没有该 id 时还会
+ * **凭空新建一份同名副本**（2026-10 多 Core 交互修复）。
+ */
+const teamFormCore = ref<string | null>(null);
 
 // ── 运行区域（Plan B）：agent 自带区域，Panel 统一管理/迁移 ──
 /** 可迁移到的其他区域（= 已配置上游，排除该 agent 当前所在区域）。 */
@@ -1125,6 +1179,7 @@ const otherRegions = computed(() =>
     .map((u) => u.name)
     .filter((name) => name !== (selectedTeam.value?.core ?? null)),
 );
+/** 详情页「迁移到其他区域」下拉的选中值（空 = 取第一个可选区域）。 */
 const moveTargetRegion = ref('');
 async function doMoveRegion() {
   const team = selectedTeam.value;
@@ -1155,10 +1210,23 @@ const teamFormIsEdit = ref(false);
 // ── 脏检查（与技能工作台同构；2026-10 巡检补齐）──
 // 此前 team 编辑无任何脏保护：点另一条、点「新建智能体」、切分类都会静默
 // 丢弃未保存的表单改动（技能工作台早有 skillFormDirty + 切换确认）。
+/**
+ * 表单里**没有输入控件、但必须原样透传**的 persona 字段。
+ *
+ * `SaveTeam` 是整对象覆盖：Core 侧 `process_commands::save_team` 直接用命令
+ * 字段构造 `AgentProfile`，缺省即 `None`。表单不含这三项时，每次在设置页
+ * 保存都会把「配置 Agent」弹层里设好的 API 供应商清成"跟随全局"，并把
+ * per-persona 的 token 预算清空（2026-10 多 Core 交互修复）。
+ */
+const teamFormApiProfile = ref<string | null>(null);
+const teamFormMemoryLimit = ref<number | null>(null);
+const teamFormContextWindow = ref<number | null>(null);
+
 function teamSnapshotOf(): string {
   return [
     teamFormId.value,
     teamFormName.value,
+    teamFormCore.value ?? '',
     teamFormDescription.value,
     teamFormPrompt.value,
     teamFormEnabled.value ? '1' : '0',
@@ -1317,13 +1385,15 @@ const teamSections = [
 // 默认展开前两个分区；能力分区从摘要行按需展开（避免超长滚动）。
 const teamSectionOpen = ref<string[]>(['basic', 'prompt']);
 
-/** 分区摘要：基础（启用态 + 循环模式） */
-const teamBasicSummary = computed(
-  () =>
-    `${teamFormEnabled.value ? '启用' : '禁用'} · ${
-      teamLoopMode.value === 'parallel' ? '并行多会话' : '单会话'
-    }`,
-);
+/** 分区摘要：基础（启用态 + 循环模式 + 运行区域） */
+const teamBasicSummary = computed(() => {
+  const base = `${teamFormEnabled.value ? '启用' : '禁用'} · ${
+    teamLoopMode.value === 'parallel' ? '并行多会话' : '单会话'
+  }`;
+  // 多区域部署下把区域并进摘要：「这个 agent 在哪台机器上」是一等信息，
+  // 不该只藏在折叠分区里的选择器里（列表行同样带徽标，见 teamList 渲染）。
+  return multiRegion.value ? `${base} · ${regionLabel(state, teamFormCore.value)}` : base;
+});
 /** 分区摘要：提示词（自定义/继承 + 系统技能数） */
 const teamPromptSummary = computed(() => {
   const prompt = teamFormPrompt.value.trim() ? '自定义提示词' : '继承全局';
@@ -1374,6 +1444,9 @@ async function startTeamCreate() {
   teamFormIsEdit.value = false;
   teamFormId.value = '';
   teamFormName.value = '';
+  // 新建默认落在**当前运行区域**（用户此刻所在的机器）；多区域下可用
+  // 表单里的「运行区域」直接改成别的机器，无需"先建再迁"两步。
+  teamFormCore.value = state.activeRegion;
   teamFormDescription.value = '';
   teamFormPrompt.value = '';
   teamFormEnabled.value = true;
@@ -1383,6 +1456,9 @@ async function startTeamCreate() {
   teamFormEnabledTools.value = [];
   teamFormEnabledSkills.value = [];
   teamFormSystemSkills.value = [];
+  teamFormApiProfile.value = null;
+  teamFormMemoryLimit.value = null;
+  teamFormContextWindow.value = null;
   selectedTeam.value = null;
   teamFormSnapshot.value = teamSnapshotOf();
 }
@@ -1392,6 +1468,9 @@ function startTeamEdit(agent: TeamInfo) {
   teamFormIsEdit.value = true;
   teamFormId.value = agent.id;
   teamFormName.value = agent.name;
+  // 区域钉到**该条目自己的归属**：编辑 B 机器上的 agent 时命令必须发给 B，
+  // 不能跟着 activeRegion（A）走（否则写到 A，甚至凭空新建同名副本）。
+  teamFormCore.value = agent.core ?? null;
   teamFormDescription.value = agent.description;
   teamFormPrompt.value = agent.system_prompt ?? '';
   teamFormEnabled.value = agent.enabled;
@@ -1401,6 +1480,9 @@ function startTeamEdit(agent: TeamInfo) {
   teamFormEnabledTools.value = agent.enabled_tools ?? [];
   teamFormEnabledSkills.value = agent.enabled_skills ?? [];
   teamFormSystemSkills.value = agent.system_skills ?? [];
+  teamFormApiProfile.value = agent.api_profile ?? null;
+  teamFormMemoryLimit.value = agent.memory_limit_tokens ?? null;
+  teamFormContextWindow.value = agent.context_window_tokens ?? null;
   teamFormSnapshot.value = teamSnapshotOf();
 }
 
@@ -1409,10 +1491,14 @@ function cancelTeamEdit() {
   teamFormSnapshot.value = '';
 }
 
-function saveTeam() {
-  const id = teamFormId.value.trim() || teamFormName.value.trim();
-  if (!id || !teamFormName.value.trim()) return;
-  sendCommand({
+/**
+ * 表单 → `SaveTeam` 命令体（两个投递路径共用：就地保存 / 跨区域迁移）。
+ *
+ * 必须**带全字段**：Core 侧按命令字段整对象重建 `AgentProfile`，漏掉的字段
+ * 会被当成"清空"（api_profile → 跟随全局、token 预算 → 继承全局）。
+ */
+function teamSaveCommand(id: string) {
+  return {
     SaveTeam: {
       id,
       name: teamFormName.value.trim() || id,
@@ -1425,26 +1511,63 @@ function saveTeam() {
       enabled_tools: teamFormEnabledTools.value,
       enabled_skills: teamFormEnabledSkills.value,
       system_skills: teamFormSystemSkills.value,
+      memory_limit_tokens: teamFormMemoryLimit.value,
+      context_window_tokens: teamFormContextWindow.value,
+      api_profile: teamFormApiProfile.value,
     },
-  });
+  };
+}
+
+async function saveTeam() {
+  const id = teamFormId.value.trim() || teamFormName.value.trim();
+  if (!id || !teamFormName.value.trim()) return;
+  const target = teamFormCore.value;
+  const from = selectedTeam.value?.core ?? null;
+  // 编辑时改了运行区域 = 迁移（目标区域保存表单内容 + 源区域删除）。与详情页
+  // 的「迁移」按钮同语义，区别是这里带上未保存的表单改动，不用先存一遍再搬。
+  const moving = teamFormIsEdit.value && !!selectedTeam.value && (target ?? null) !== from;
+  if (moving) {
+    const ok = await confirmDialog(
+      `把「${teamFormName.value.trim() || id}」的运行区域从「${regionLabel(state, from)}」` +
+        `改为「${regionLabel(state, target)}」？\n\n` +
+        `· 在目标区域创建/更新该智能体（保存当前表单内容）\n` +
+        `· 从「${regionLabel(state, from)}」删除\n\n` +
+        `注意：会话历史仍留在原区域，不会随迁移搬走。`,
+      { title: '迁移运行区域', danger: true, confirmText: '迁移并保存' },
+    );
+    if (!ok) return;
+    sendCommand(teamSaveCommand(id), target ?? undefined);
+    sendCommand({ DeleteTeam: { id } }, from ?? undefined);
+    selectedTeam.value = null;
+  } else {
+    sendCommand(teamSaveCommand(id), target ?? undefined);
+  }
   teamEditing.value = false;
   teamFormSnapshot.value = '';
 }
 
 async function deleteTeam(team: TeamInfo) {
-  // 去主智能体（2026-09）：没有受保护的"主 Agent"，唯一约束是至少保留一个。
-  if (state.teams.length <= 1) {
-    addToast({ message: '至少保留一个智能体，不能删除最后一个。', type: 'warning', duration: 5000 });
+  // 去主智能体（2026-09）：没有受保护的"主 Agent"；唯一约束是**每个区域**
+  // 至少保留一个（见 teamsInCore 的注释：按合并总数判会让某台机器被删空，
+  // 之后再无入口切过去）。
+  if (teamsInCore(team.core) <= 1) {
+    addToast({
+      message: `「${regionLabel(state, team.core)}」至少保留一个智能体，不能删除该区域最后一个。`,
+      type: 'warning',
+      duration: 5000,
+    });
     return;
   }
   if (
     !(await confirmDialog(
-      `确定删除智能体「${team.name}」？该成员的记忆与系统提示词将被移除，此操作不可恢复。`,
+      `确定删除智能体「${team.name}」（${regionLabel(state, team.core)}）？该成员的记忆与系统提示词将被移除，此操作不可恢复。`,
       { title: '删除智能体', danger: true, confirmText: '删除' },
     ))
   )
     return;
-  sendCommand({ DeleteTeam: { id: team.id } });
+  // 定向到该条目自己的区域：不带 core 会落到 activeRegion，删掉的是另一台
+  // 机器上同 id 的那份。
+  sendCommand({ DeleteTeam: { id: team.id } }, team.core ?? undefined);
   selectedTeam.value = null;
   teamEditing.value = false;
   teamFormSnapshot.value = '';
@@ -1852,7 +1975,15 @@ watch(
 watch(
   () => state.teams,
   () => {
-    if (selectedTeam.value && !state.teams.some((t) => t.id === selectedTeam.value!.id)) {
+    if (!selectedTeam.value) return;
+    const cur = selectedTeam.value;
+    // 身份是 (core, id)：只按 id 校验会让"另一台机器上同 id 的条目"顶替
+    // 当前选中项——后续编辑/删除继续打向正确的 core 才对，选中项必须是
+    // 同一台机器上的那一条（2026-10 多 Core 交互修复）。
+    const kept = state.teams.some(
+      (t) => t.id === cur.id && (t.core ?? null) === (cur.core ?? null),
+    );
+    if (!kept) {
       selectedTeam.value = null;
       teamEditing.value = false;
     }
@@ -2314,12 +2445,19 @@ watch(
             <LoadHint :phase="teamPhase" label="智能体清单" @retry="refreshTeams" />
             <div
               v-for="t in teamList"
-              :key="t.id"
+              :key="`${t.core ?? ''}:${t.id}`"
               class="caps-list-item"
-              :class="{ 'caps-list-item--active': selectedTeam?.id === t.id }"
+              :class="{
+                'caps-list-item--active':
+                  selectedTeam?.id === t.id &&
+                  (selectedTeam?.core ?? null) === (t.core ?? null),
+              }"
               @click="selectTeamItem(t)"
             >
               <span class="caps-list-item__name">{{ t.name }}</span>
+              <span v-if="showTeamRegion(t.core)" class="caps-mark" :title="`运行区域：${regionLabel(state, t.core)}`">
+                {{ regionLabel(state, t.core) }}
+              </span>
               <span v-if="!t.enabled" class="muted caps-list-item__flag">已禁用</span>
             </div>
             <div v-if="teamList.length === 0 && teamPhase === 'idle'" class="muted caps-list-empty">（暂无智能体）</div>
@@ -2605,7 +2743,7 @@ watch(
                   编辑
                 </NeumorphismButton>
                 <NeumorphismButton
-                  v-if="state.teams.length > 1"
+                  v-if="teamsInCore(selectedTeam.core) > 1"
                   size="small"
                   variant="glass"
                   @click="deleteTeam(selectedTeam!)"
@@ -2625,7 +2763,12 @@ watch(
               <NeumorphismSwitch
                 :model-value="selectedTeam.enabled"
                 size="small"
-                @change="sendCommand({ ToggleTeam: { id: selectedTeam!.id, enabled: $event } })"
+                @change="
+                  sendCommand(
+                    { ToggleTeam: { id: selectedTeam!.id, enabled: $event } },
+                    selectedTeam!.core ?? undefined,
+                  )
+                "
               />
             </div>
             <p class="muted">{{ selectedTeam.description || '（无描述）' }}</p>
@@ -2728,6 +2871,21 @@ watch(
                   </NeumorphismFormItem>
                   <NeumorphismFormItem label="名称" required name="name" :rules="teamFormRules.name">
                     <NeumorphismInput v-model="teamFormName" placeholder="写作助理" />
+                  </NeumorphismFormItem>
+                  <!-- 运行区域（多 Core）：决定这个 agent 建在/跑在哪台机器上。
+                       新建时默认当前区域，可直接改成别的机器（无需"先建再迁"）；
+                       编辑时改它 = 保存后迁到目标区域（见 saveTeam）。 -->
+                  <NeumorphismFormItem v-if="multiRegion" label="运行区域">
+                    <NeumorphismSelect
+                      :model-value="teamFormCore ?? regionOptions[0] ?? ''"
+                      :options="regionOptions.map((r) => ({ label: regionLabel(state, r), value: r }))"
+                      size="small"
+                      aria-label="运行区域"
+                      @update:model-value="teamFormCore = String($event ?? '') || null"
+                    />
+                    <p class="muted caps-hint">
+                      该智能体的配置与运行都在这个 Core 上；改动已有智能体的区域 = 保存时迁移（会话历史留在原区域）。
+                    </p>
                   </NeumorphismFormItem>
                   <NeumorphismFormItem label="描述" name="description">
                     <NeumorphismInput v-model="teamFormDescription" placeholder="专注文档写作" />
@@ -2875,7 +3033,7 @@ watch(
                   {{ teamFormDirty ? '● 有未保存的更改' : '○ 无更改' }}
                 </span>
                 <NeumorphismButton
-                  v-if="teamFormIsEdit && selectedTeam && state.teams.length > 1"
+                  v-if="teamFormIsEdit && selectedTeam && teamsInCore(selectedTeam.core) > 1"
                   variant="glass"
                   class="caps-delete-btn"
                   @click="deleteTeam(selectedTeam)"
@@ -4238,6 +4396,35 @@ watch(
     flex-wrap: wrap;
     gap: 8px;
     padding: 10px 12px;
+  }
+
+  /* 筛选条（2026-10 修复）：桌面是 flex-wrap 的搜索框 + chips + 分组段选，
+     窄屏上三者各自换行 —— 技能分类实测吃掉 **359px**（可视区 686px 的 52%），
+     列表只剩 230px、几乎看不到行。窄屏改两行固定形态：搜索独占一行、
+     chips 单行横向滚动、分组段选靠右；总高压到 ~86px。 */
+  .caps-filters {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 10px;
+  }
+  .caps-filters__search {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+  .caps-filters__chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 1px;
+  }
+  .caps-filters__chips::-webkit-scrollbar {
+    display: none;
+  }
+  .caps-chip {
+    flex: 0 0 auto;
+    min-height: 32px;
   }
   .caps-mobile-back {
     order: -1;

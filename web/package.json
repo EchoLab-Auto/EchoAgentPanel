@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:styles": "node scripts/lint-styles.mjs",
+    "layout:mobile": "node scripts/mobile-layout-check.mjs",
     "ui-frame:status": "node scripts/use-ui-frame.mjs status",
     "ui-frame:local": "node scripts/use-ui-frame.mjs local",
     "ui-frame:npm": "node scripts/use-ui-frame.mjs npm",

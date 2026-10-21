@@ -73,14 +73,22 @@ describe('移动端外壳布局契约（固定视口 vs 库"整页滚动"模式�
     expect(mobileSegment()).toMatch(/html,\s*body,\s*#app\s*\{[^}]*height:\s*100dvh/);
   });
 
-  it('顶栏右组全按钮可达：全屏隐藏（类匹配）+ 品牌可收缩 + header-left 放开收缩', () => {
+  it('顶栏右组全按钮可达：全屏收窄不隐藏（类匹配）+ 品牌可收缩 + header-left 放开收缩', () => {
     // 2026-10 修复：<768px 时右组固定宽 ~354px，375px 屏上「主题切换」被推出
-    // 屏外不可达。三层收敛——全屏隐藏（-60px）、品牌省略号、内边距收紧。
+    // 屏外不可达。三层收敛——全屏收窄、品牌省略号、内边距收紧。
+    //
+    // 2026-10-20 修订：全屏按钮**不再隐藏**。原先整段 display:none 的理由是
+    // 「iOS Safari 不支持元素全屏」，但这把一家限制当成了所有移动端的限制
+    // （Android Chrome / 微信 / WebView 都支持，且手机上去掉地址栏有实感）。
+    // 现在改为 compact 图标态（约 34px，替原来 60px 的文本按钮），位置在
+    // 「卡片」左侧；能力检测与提示在组件内（FullscreenToggleButton.vue）。
     const seg = mobileSegment();
 
-    // ① 全屏隐藏：选择器与类名是一对——类必须真的落在组件根按钮上，
+    // ① 全屏收窄：选择器与类名是一对——类必须真的落在组件根按钮上，
     //    否则规则空转（此前即此症状：全屏按钮在手机上占 60px 并溢出）。
-    expect(seg).toMatch(/\.topbar-actions \.fullscreen-toggle\s*\{[^}]*display:\s*none/);
+    expect(seg).not.toMatch(/\.topbar-actions \.fullscreen-toggle\s*\{[^}]*display:\s*none/);
+    const compact = ruleBody(seg, '#app .topbar-actions .fullscreen-toggle--compact');
+    expect(compact, '窄屏必须把全屏按钮收成图标态（min-width 34px）').toMatch(/min-width:\s*34px/);
     const fsb = readFileSync(
       join(here, '..', '..', 'src', 'components', 'FullscreenToggleButton.vue'),
       'utf-8',
@@ -88,6 +96,7 @@ describe('移动端外壳布局契约（固定视口 vs 库"整页滚动"模式�
     expect(fsb, 'FullscreenToggleButton 根按钮必须携带 fullscreen-toggle 类').toMatch(
       /class="fullscreen-toggle"/,
     );
+    expect(fsb, 'compact 态需独立类名供窄屏样式匹配').toMatch(/fullscreen-toggle--compact/);
 
     // ② 品牌可收缩 + 省略号（不把右侧按钮挤出屏幕）
     const brand = ruleBody(seg, '.brand');

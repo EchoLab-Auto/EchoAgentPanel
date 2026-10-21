@@ -28,6 +28,7 @@ import { checklistKey, sessionKey, teamKey } from '../keys';
 import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
+import { composerOutline, insetPolyline, toClipPath } from '../utils/squircle';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
@@ -62,7 +63,7 @@ const emit = defineEmits<{
   selectTeam: [id: string | null, core: string | null];
   selectSession: [id: string];
   selectBranch: [id: string];
-  openShellDetail: [sessionId: string];
+  openShellDetail: [sessionId: string, core: string | null];
 }>();
 
 const input = ref('');
@@ -135,6 +136,63 @@ const entryBottom = ref('170px');
 let ctxObserver: ResizeObserver | null = null;
 
 /**
+ * 输入区轮廓（clip-path）—— 移动端贴合设备屏幕角用。
+ *
+ * 为什么不用 border-radius：它只能画圆弧，而 iPhone 屏角是超椭圆；圆弧贴
+ * 超椭圆无论取什么半径都会在 45° 附近错位（实测最优仍有 2.3px 波动）。
+ * 这里直接算真实轮廓的折线交给 `clip-path: path()`（Safari 支持）。
+ *
+ * 三条 CSS 变量：
+ * - `--composer-clip`：外轮廓（描边层裁剪）
+ * - `--composer-clip-inner`：内缩 1px 的内轮廓（玻璃层裁剪，空出描边）
+ * - `--composer-corner-r`：贴角区半径，供内层控件算同心圆角
+ *
+ * 桌面 / 直角屏（`--composer-inset` 未定义或屏角为 0）不启用，退回
+ * border-radius 口径 —— clip-path 变量留 `none`。
+ */
+const composerClip = ref('none');
+const composerClipInner = ref('none');
+const composerCornerR = ref('');
+
+function updateComposerClip() {
+  const el = composerFloatRef.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  const screenRadius = Number.parseFloat(style.getPropertyValue('--panel-display-radius')) || 0;
+  const inset = Number.parseFloat(style.getPropertyValue('--composer-inset')) || 0;
+  if (rect.width < 2 || rect.height < 2 || inset <= 0) {
+    composerClip.value = 'none';
+    composerClipInner.value = 'none';
+    composerCornerR.value = '';
+    return;
+  }
+  const outer = composerOutline({
+    width: rect.width,
+    height: rect.height,
+    inset,
+    screenRadius,
+    // 超椭圆指数：Apple 的连续曲率在 45° 处落在 0.26~0.29R 附近，对应 n≈2.3~3.0。
+    // 取 2.6 是中点：模型若落在 2.3~3.0 区间，间隙波动最坏 2.2px
+    // （取 4 时最坏 7.9px —— n 越大角越"方"，45° 处只到 0.16R，退让过度）。
+    exponent: 2.6,
+    steps: 24,
+  });
+  // 内轮廓：玻璃层铺在外层 padding(=1px 描边) 之内，故整体再平移 -1px
+  const inner = insetPolyline(outer, 1).map(([x, y]) => [x - 1, y - 1] as const);
+  composerClip.value = toClipPath(outer);
+  composerClipInner.value = toClipPath(inner);
+  // 内层圆角：贴角区半径扣掉 padding+border，与超椭圆外框同心
+  composerCornerR.value = `${Math.max(0, screenRadius - inset)}px`;
+}
+
+const composerStyle = computed(() => ({
+  '--composer-clip': composerClip.value,
+  '--composer-clip-inner': composerClipInner.value,
+  ...(composerCornerR.value ? { '--composer-corner-r': composerCornerR.value } : {}),
+}));
+
+/**
  * 软键盘适配（移动端，2026-10）：iOS/Android 弹键盘时不改变 layout viewport，
  * 页面 overflow:hidden 的 SPA 里 fixed/absolute 输入区会被键盘盖住。
  * 监听 `visualViewport` 求「可视视口被压缩的高度」，注入输入区/入口行的
@@ -165,6 +223,7 @@ onMounted(() => {
   ctxObserver = new ResizeObserver(() => {
     const h = target.getBoundingClientRect().height;
     entryBottom.value = `${Math.round(h + 24)}px`;
+    updateComposerClip();
   });
   ctxObserver.observe(target);
 });
@@ -526,7 +585,7 @@ function reasoningSessionRunning(sessionId: string | undefined): boolean {
 //
 // 为什么不做虚拟滚动：变量高度（Markdown / 图片 / 代码块 / 可展开工具卡）
 // 的虚拟滚动要重做吸底、锚点跳转、Ctrl+F、入场动画；实测收益等价而风险
-// 高得多（另见 document/design/panel-performance-audit.md 的 P2 结论）。
+// 高得多。
 const WINDOW_INITIAL = 200;
 const WINDOW_STEP = 200;
 const renderWindow = ref(WINDOW_INITIAL);
@@ -1306,7 +1365,7 @@ function mediaSrc(img: string): string {
           :team-id="props.activeTeamId ?? null"
           @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
-          @open-shell-detail="(id) => emit('openShellDetail', id)"
+          @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
       </aside>
     </Transition>
@@ -1322,7 +1381,7 @@ function mediaSrc(img: string): string {
           :team-id="props.activeTeamId ?? null"
           @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
-          @open-shell-detail="(id) => emit('openShellDetail', id)"
+          @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
       </aside>
     </Transition>
@@ -1349,7 +1408,7 @@ function mediaSrc(img: string): string {
           :team-id="props.activeTeamId ?? null"
           @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
-          @open-shell-detail="(id) => emit('openShellDetail', id)"
+          @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
         <PanelSidebar
           v-if="railHasCards('right')"
@@ -1359,7 +1418,7 @@ function mediaSrc(img: string): string {
           :team-id="props.activeTeamId ?? null"
           @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
-          @open-shell-detail="(id) => emit('openShellDetail', id)"
+          @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
         <p v-if="!railHasCards('left') && !railHasCards('right')" class="mobile-cards__empty">
           （当前无可见卡片）
@@ -1371,106 +1430,119 @@ function mediaSrc(img: string): string {
     <div
       ref="composerFloatRef"
       class="chat-composer-float"
-      :class="{ 'chat-composer-float--busy': composerBusy }"
+      :class="{
+        'chat-composer-float--busy': composerBusy,
+        'chat-composer-float--clipped': composerClip !== 'none',
+      }"
+      :style="composerStyle"
       @focusin="onComposerFocus"
       @focusout="onComposerBlur"
     >
-      <!-- 待发送图片预览 -->
-      <div v-if="attachments.length" class="chat-view__attachments">
-        <div v-for="(img, i) in attachments" :key="i" class="chat-view__attach">
-          <img :src="img" class="chat-view__attach-img" alt="" />
-          <button
-            class="chat-view__attach-remove"
-            title="移除"
-            aria-label="移除图片"
-            @click="removeAttachment(i)"
+      <!-- 外发光：clip-path 在 filter **之后**应用，同一元素里做不出"先裁剪
+           再模糊"（阴影会被裁掉），故拆两层——本层只负责模糊，::before 负责
+           形状。本层不带 backdrop-filter：filter 祖先会让毛玻璃失效。 -->
+      <div class="chat-composer-float__halo" aria-hidden="true"></div>
+      <!-- 1px 描边：surface 铺描边色，glass 从内侧盖住，只留下边缘那 1px -->
+      <div class="chat-composer-float__surface">
+        <div class="chat-composer-float__glass">
+          <!-- 待发送图片预览 -->
+          <div v-if="attachments.length" class="chat-view__attachments">
+            <div v-for="(img, i) in attachments" :key="i" class="chat-view__attach">
+              <img :src="img" class="chat-view__attach-img" alt="" />
+              <button
+                class="chat-view__attach-remove"
+                title="移除"
+                aria-label="移除图片"
+                @click="removeAttachment(i)"
+              >
+                <PanelIcon name="close" size="xs" />
+              </button>
+            </div>
+          </div>
+          <!-- 契约：ChatComposer 提供 #actions 插槽时*替换*渲染默认发送按钮，
+               因此必须自己渲染 submit 按钮；删除该插槽会恢复库默认发送按钮。 -->
+          <ChatComposer
+            v-model="input"
+            :disabled="!connected"
+            :cancelable="false"
+            :rows="1"
+            :placeholder="placeholder"
+            @send="onSend"
+            @cancel="emit('cancel')"
           >
-            <PanelIcon name="close" size="xs" />
-          </button>
+            <template #actions="{ submit, canSubmit }">
+              <NeumorphismButton
+                v-if="busy"
+                class="chat-view__cancel"
+                size="small"
+                variant="glass"
+                @click="emit('cancel')"
+              >
+                取消任务
+              </NeumorphismButton>
+              <NeumorphismButton
+                class="chat-view__attach-btn"
+                size="small"
+                variant="glass"
+                title="添加图片（或直接粘贴截图）"
+                aria-label="添加图片"
+                @click="fileInput?.click()"
+              >
+                <svg
+                  class="chat-view__icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="3" width="18" height="18" rx="3" />
+                  <circle cx="9" cy="9" r="2" />
+                  <path d="m21 15-4.5-4.5a2 2 0 0 0-2.83 0L5 19" />
+                </svg>
+              </NeumorphismButton>
+              <input
+                ref="fileInput"
+                type="file"
+                accept="image/*"
+                multiple
+                class="chat-view__file-input"
+                @change="
+                  (e) => {
+                    const el = e.target as HTMLInputElement;
+                    if (el.files?.length) void addFiles(el.files);
+                    el.value = '';
+                  }
+                "
+              />
+              <NeumorphismButton
+                class="chat-view__send"
+                size="small"
+                variant="raised"
+                :disabled="!canSubmit"
+                @click="submit"
+              >
+                <svg
+                  class="chat-view__icon chat-view__icon--btn"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m22 2-7 20-4-9-9-4Z" />
+                  <path d="M22 2 11 13" />
+                </svg>
+                <span>发送</span>
+              </NeumorphismButton>
+            </template>
+          </ChatComposer>
         </div>
       </div>
-      <!-- 契约：ChatComposer 提供 #actions 插槽时*替换*渲染默认发送按钮，
-           因此必须自己渲染 submit 按钮；删除该插槽会恢复库默认发送按钮。 -->
-      <ChatComposer
-        v-model="input"
-        :disabled="!connected"
-        :cancelable="false"
-        :rows="1"
-        :placeholder="placeholder"
-        @send="onSend"
-        @cancel="emit('cancel')"
-      >
-        <template #actions="{ submit, canSubmit }">
-          <NeumorphismButton
-            v-if="busy"
-            class="chat-view__cancel"
-            size="small"
-            variant="glass"
-            @click="emit('cancel')"
-          >
-            取消任务
-          </NeumorphismButton>
-          <NeumorphismButton
-            class="chat-view__attach-btn"
-            size="small"
-            variant="glass"
-            title="添加图片（或直接粘贴截图）"
-            aria-label="添加图片"
-            @click="fileInput?.click()"
-          >
-            <svg
-              class="chat-view__icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="3" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="m21 15-4.5-4.5a2 2 0 0 0-2.83 0L5 19" />
-            </svg>
-          </NeumorphismButton>
-          <input
-            ref="fileInput"
-            type="file"
-            accept="image/*"
-            multiple
-            class="chat-view__file-input"
-            @change="
-              (e) => {
-                const el = e.target as HTMLInputElement;
-                if (el.files?.length) void addFiles(el.files);
-                el.value = '';
-              }
-            "
-          />
-          <NeumorphismButton
-            class="chat-view__send"
-            size="small"
-            variant="raised"
-            :disabled="!canSubmit"
-            @click="submit"
-          >
-            <svg
-              class="chat-view__icon chat-view__icon--btn"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="m22 2-7 20-4-9-9-4Z" />
-              <path d="M22 2 11 13" />
-            </svg>
-            <span>发送</span>
-          </NeumorphismButton>
-        </template>
-      </ChatComposer>
     </div>
   </div>
 </template>
@@ -1647,17 +1719,88 @@ function mediaSrc(img: string): string {
   background-color: var(--nm-surface-raised);
 }
 
-/* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上；
-   半透明毛玻璃：更透的背景 + 高光 tint + 强 blur + 发光边框，
-   在深色主题下也能明显看出玻璃质感 */
+/* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上。
+   玻璃质感拆成三层（因为 clip-path 会裁掉 border 和 box-shadow）：
+     __halo    外发光（未裁父层做模糊，::before 出形状）
+     __surface 描边（铺描边色，被 glass 盖剩 1px）
+     __glass   毛玻璃背景 + 顶部高光
+   桌面三层走 border-radius；移动端三层走同一条 clip-path 超椭圆轮廓。 */
 .chat-composer-float {
+  /* 输入行几何单一事实来源（圆角/高度都从这里派生）：
+     - --chat-field-font：输入框实际字号（桌面 14px；移动端/iOS 16px，
+       见窄屏段与 iOS 段）。取消/附件/发送三颗控件高度必须与「初始 1 行
+       输入框内框」等高 —— 字号一变，高度跟着算，不再各自抄死 42px。
+     - 圆角同心：外框 24px、padding 12px → 内框/按钮 12px（桌面口径）。 */
+  --chat-field-font: var(--nm-field-font-md, 14px);
+  --chat-control-h: calc(
+    var(--nm-field-padding-y-md, 10px) * 2 + var(--chat-field-font) * 1.6
+  );
+  /* 圆角同心的单一事实来源（2026-10 二次修正）：
+     外框圆角 R、内边距 P、边框 B → 内层圆角必须取 R − P − B。
+     此前只减 P（漏了 1px 边框），内外角心相差 1px，角上间隙比边上宽 1px
+     —— 这就是"输入框圆角跟外框不平行"的直接原因。三者都提成变量后，
+     公式只写一次，改任何一个数内层自动跟随。 */
+  --composer-radius: 24px;
+  --composer-padding: 12px;
+  --composer-border: 1px;
+  /* 贴角区半径：移动端由 JS 写成「R屏角 − 留白」（超椭圆口径）；
+     桌面/直角屏没有贴角区，等于外框半径，公式退化成原来的 R−P−B。 */
+  --composer-corner-r: var(--composer-radius);
+  --composer-inner-radius: max(
+    0px,
+    calc(var(--composer-corner-r) - var(--composer-padding) - var(--composer-border))
+  );
   position: absolute;
   left: 12px;
   right: 12px;
   bottom: 12px;
   z-index: 5;
-  padding: 12px;
-  border-radius: 24px;
+  /* 外层只剩"定位 + 尺寸"，自己没有形状（背景/描边/裁剪都在子层）。
+     必须让命中穿透，否则它那圈**矩形**会在角部拦住点击（消息列表、
+     跳过按钮等），而视觉上那里是空的。可交互性由子层按各自形状恢复。 */
+  pointer-events: none;
+}
+
+/* 发光层（移动端形状跟 --composer-clip 走；桌面走 border-radius）。
+   为什么不用 box-shadow：clip-path 会把元素外部的 box-shadow 整个裁掉，
+   所以发光必须画在**未被裁剪**的父层上，形状交给 ::before 再模糊。
+   filter 会创建新的 backdrop root，故本层绝不能挂 backdrop-filter。 */
+.chat-composer-float__halo {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  /* 原 0 12px 32px rgba(...,0.45)：blur 半径 ≈ 32/2，偏移量保持 12px */
+  filter: blur(16px);
+  transform: translateY(12px);
+}
+.chat-composer-float__halo::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--composer-halo, rgba(15, 23, 42, 0.16));
+  border-radius: var(--composer-radius);
+  clip-path: var(--composer-clip, none);
+}
+
+/* 描边层：整块铺描边色，由 glass 从内侧盖住，只剩边缘 1px。
+   这样描边能跟随任意 clip-path 形状 —— border 做不到（它只认 border-radius）。 */
+.chat-composer-float__surface {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  padding: var(--composer-border);
+  background: var(--panel-glass-border);
+  border-radius: var(--composer-radius);
+  clip-path: var(--composer-clip, none);
+}
+
+/* 玻璃层：毛玻璃 + 高光。它的 clip 内轮廓比外轮廓再内缩 1px（JS 一起算），
+   保证描边粗细处处相等。 */
+.chat-composer-float__glass {
+  position: relative;
+  pointer-events: auto;
+  padding: var(--composer-padding);
   /* 双层背景：低透明表面 + 顶部白色高光渐变（玻璃高光） */
   background:
     linear-gradient(
@@ -1671,19 +1814,30 @@ function mediaSrc(img: string): string {
      重绘全量重栅格化，跨行拖选每帧触发，是拖选卡顿的根治点。 */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--panel-glass-border);
-  box-shadow:
-    var(--panel-glass-shadow-md),
-    0 0 0 0.5px var(--panel-glass-border),
-    inset 0 1px 0 var(--panel-glass-highlight);
+  border-radius: calc(var(--composer-radius) - var(--composer-border));
+  clip-path: var(--composer-clip-inner, none);
+  box-shadow: inset 0 1px 0 var(--panel-glass-highlight);
 }
 
 /* 聚焦/拖选期间：临时关毛玻璃（纯色底撑住视觉），拖选重绘不再触发
    大面积 blur 重栅格化。 */
-.chat-composer-float--busy {
+.chat-composer-float--busy .chat-composer-float__glass {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   background: var(--nm-surface-raised);
+}
+/* clip 生效时必须清掉 border-radius —— 两者是**取交集**关系：留着 24px 圆角
+   会把超椭圆轮廓又裁回圆角矩形（实测角部间隙 14→16.6px，等于白改）。
+   用 class 而非媒体查询做门控：JS 没算出轮廓时（首帧/异常）仍保留圆角兜底。 */
+.chat-composer-float--clipped .chat-composer-float__halo::before,
+.chat-composer-float--clipped .chat-composer-float__surface,
+.chat-composer-float--clipped .chat-composer-float__glass {
+  border-radius: 0;
+}
+
+/* 深色主题的发光更重（与原 --panel-glass-shadow-md 取值一致） */
+:root[data-theme='dark'] .chat-composer-float {
+  --composer-halo: rgba(0, 0, 0, 0.45);
 }
 /* 拖选卡顿根治之二（2026-09-18，2026-10 收敛）：库 NeumorphismTextarea 的
    hover/focused 1px translateY 抬升已在库侧移除（transform 层导致大段文本
@@ -1760,9 +1914,10 @@ function mediaSrc(img: string): string {
 }
 .chat-view__cancel {
   flex: 0 0 auto;
-  /* 与单行输入框内框等高，与发送/图片按钮保持同排同高 */
-  height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6);
-  min-height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6);
+  /* 与单行输入框内框等高，与发送/图片按钮保持同排同高
+     （--chat-control-h 随输入字号重算：移动端/iOS 16px → 45.6px） */
+  height: var(--chat-control-h);
+  min-height: var(--chat-control-h);
 }
 
 /* 图片附件按钮：方形圆角；高度与"初始 1 行时的输入框内框"等高
@@ -1772,9 +1927,9 @@ function mediaSrc(img: string): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6) !important; /* 正方形：宽 = 高 */
-  height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6) !important;
-  border-radius: 12px !important; /* 与内框 textarea 圆角一致（12px） */
+  width: var(--chat-control-h) !important; /* 正方形：宽 = 高 */
+  height: var(--chat-control-h) !important;
+  border-radius: var(--composer-inner-radius) !important; /* 与内框 textarea 圆角一致 */
   padding: 0;
 }
 
@@ -1787,12 +1942,11 @@ function mediaSrc(img: string): string {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6);
-  height: calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--nm-field-font-md, 14px) * 1.6) !important;
+  min-height: var(--chat-control-h);
+  height: var(--chat-control-h) !important;
   padding: 0 14px;
-  /* 与内框一致的 12px 圆角；右下角圆心与外框右下角(24px)同心：
-     24 - 12(padding) = 12 */
-  border-radius: 12px !important;
+  /* 与外框右下角同心：圆心重合 ⟺ 内半径 = 外半径 − padding − border */
+  border-radius: var(--composer-inner-radius) !important;
 }
 .chat-view__icon--btn {
   /* 与 .chat-view__icon 同档（16px）：发送钮与附件钮并排，尺寸必须一致 */
@@ -1930,14 +2084,14 @@ function mediaSrc(img: string): string {
   will-change: transform;
   transform: translateZ(0);
 }
-/* 圆角同心：外框 24px、间距 12px → 内框（textarea）左侧圆角
-   = 24 - 12 = 12px，圆角曲线与外框平行（同心）。右侧保持库默认。 */
-.chat-composer-float :deep(.nm-textarea) {
-  /* 内框圆角整体统一 12px（库默认右 16px 会与按钮 12px 不一致）：
+/* 圆角同心：内框圆角 = 外框 − padding − border（见 --composer-inner-radius）。
+   border-radius 是**边框盒**上的半径，而内层从 padding 盒开始，两者之间还隔着
+   1px 边框——漏减边框就是「角上比边上松 1px」，肉眼读作"不同心"。 */
+.chat-composer-float :deep(.nm-textarea.nm-textarea) {
+  /* 内框圆角整体统一（库默认右 16px 会与按钮不一致）：
      外框 24px - 12px padding = 12px，左右均与外框同心 */
-  border-radius: 12px;
+  border-radius: var(--composer-inner-radius);
 }
-
 
 /* 入口行按钮：视觉（磨砂玻璃/胶囊/悬浮）由 ui-frame NeumorphismButton
    variant=glass shape=pill size=small 提供。
@@ -2077,9 +2231,13 @@ function mediaSrc(img: string): string {
      右界 8px 保证可滑到底（此前无右界、右侧按钮超出屏外不可达）。
      隐藏滚动条（触摸滑动本身有惯性反馈）。 */
   .entry-row {
-    left: 8px;
-    right: 8px;
-    /* 键盘弹出时与输入区同步抬升（入口行锚在输入区上方 8px） */
+    left: max(8px, env(safe-area-inset-left, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    /* 键盘弹出时与输入区同步抬升（入口行锚在输入区上方）。
+       `entryBottom = 输入区高 + 24`（24 = 桌面口径的 12 底距 + 12 间隙）。
+       移动端输入区底距已改为 --composer-inset(14px)，故这里不再叠加 safe-area
+       —— 输入区贴底后安全区不再参与布局；叠上去会多顶 34px。
+       实测：entryBottom(92) − 输入区顶(14+68=82) = 10px 间隙 ✓ */
     bottom: calc(v-bind(entryBottom) + v-bind(keyboardInsetPx));
     overflow-x: auto;
     flex-wrap: nowrap;
@@ -2123,23 +2281,65 @@ function mediaSrc(img: string): string {
     mask-image: linear-gradient(to right, transparent, #000 45%);
   }
 
-  /* 输入区：左右收窄 + 底部安全区（Home 指示条）+ 软键盘偏移；圆角与桌面一致 */
+  /* 输入区与屏幕圆角「等间隙」（2026-10 四次修正：改用 clip-path 精确轮廓）
+     ─────────────────────────────────────────────────────────────────────
+     判据只有一个：**沿输入区轮廓逐点量到屏幕轮廓的距离，波动越小越平行**。
+     在 iPhone 15（393×852，屏角 R=55，DPR 3）实测：
+       旧：左右 8 / 底部 42 / 圆弧 r34 → 间隙 8→42px，波动 34.0px
+       三次修正：左右 14 / 底部 14 / 圆弧 r20 → 12.6→15.0px，波动 2.3px
+       本次：左右 14 / 底部 14 / 超椭圆精确轮廓 → 波动 < 0.3px（仅离散化误差）
+
+     ① 底部留白必须等于左右留白：间隙恒定要求输入区到两条屏边的距离相等。
+        底部若还垫着 safe-area(34px)，任何形状都无法让间隙恒定（实测最优
+        也只能压到 9.9px）。所以面板贴到屏幕底边 14px，内容不再抬到安全区之上。
+     ② 为什么必须用 clip-path：border-radius 只能画圆弧，而屏角是超椭圆。
+        圆弧贴超椭圆的误差不可通过调半径消除 —— 圆心重合(r=41)时 45° 处多
+        切进 10.4px，最优 r≈20 也仍有 2.3px 波动。轮廓计算见
+        utils/squircle.ts（对屏角超椭圆做法线内缩，误差 < 0.3px）。
+     ③ 形状代价：贴角区纵向占 R−14 = 41px，而静止态条高只有 68px，上角吃掉
+        剩余 27px → 左右两端没有竖直直边，端头呈椭圆状。这是"完全贴合"的
+        几何必然；想要直边只能降低贴合度（调大 --composer-inset）。
+     ④ Home 指示条：可视范围距底 8~13px，面板底缘 14px 恰在其外。
+     ⑤ 键盘弹出时（keyboardInset > 0）面板浮在键盘上方，等间隙已无意义，
+        但仍沿用同一轮廓（形状不跳变）。 */
   .chat-composer-float {
-    left: 8px;
-    right: 8px;
-    bottom: calc(8px + env(safe-area-inset-bottom, 0px) + v-bind(keyboardInsetPx));
-    padding: 10px;
-    border-radius: 20px;
+    --composer-inset: 14px;
+    left: max(var(--composer-inset), env(safe-area-inset-left, 0px));
+    right: max(var(--composer-inset), env(safe-area-inset-right, 0px));
+    bottom: calc(var(--composer-inset) + v-bind(keyboardInsetPx));
+    --composer-padding: 10px;
+    /* 输入字号 16px（iOS 聚焦防缩放）；--chat-control-h 随之重算为
+       10*2 + 16*1.6 = 45.6px，取消/附件/发送与内框保持同高 */
+    --chat-field-font: 16px;
   }
   /* iOS 聚焦自动缩放对策：输入字号提至 16px（<16px 聚焦必缩放）。
      只放大打字面，不改工具栏按钮/占位字号观感。 */
   .chat-composer-float :deep(.nm-textarea__field) {
     font-size: 16px;
   }
+  /* 圆角同心（移动口径）：内层一律取 --composer-inner-radius
+     （= 贴角半径 − padding − border，由根变量派生，见桌面段）。
+     贴角半径 = R屏角 − 留白 = 41 → 内层 41−10−1 = 30（超椭圆口径）。
+     30px 超过输入框半高（45.6/2 ≈ 23）时浏览器按规范等比削减，视觉上
+     内框自动成为胶囊 —— 与外框的椭圆端头方向一致。 */
+  .chat-composer-float :deep(.nm-textarea.nm-textarea) {
+    border-radius: var(--composer-inner-radius);
+  }
+  .chat-composer-float :deep(.chat-view__attach-btn),
+  .chat-composer-float :deep(.chat-view__send) {
+    border-radius: var(--composer-inner-radius) !important;
+  }
 
   /* 消息气泡：窄屏减少两侧浪费 */
   .chat-view__list :deep(.msg-item__bubble) {
     max-width: 88%;
+  }
+
+  /* 消息区底部留白：输入区贴底后占位从 110px 降到 82px（14 底距 + 68 高），
+     桌面口径的 190px 在这里会空出一大块，收到 130px（= 82 + 48 余量）；
+     键盘弹出时按 keyboardInset 同步加高，否则最新消息被键盘压住。 */
+  .chat-view__list {
+    padding-bottom: calc(130px + v-bind(keyboardInsetPx));
   }
 
   /* 会话区覆盖层（上下文 / Agent 配置）：桌面贴会话框 12px —— 窄屏收为
@@ -2148,6 +2348,12 @@ function mediaSrc(img: string): string {
     inset: 6px;
     bottom: calc(v-bind(entryBottom) + 24px);
     border-radius: 18px;
+  }
+  /* 「回到底部」按钮：右界让开横屏刘海；纵向用桌面口径 entryBottom + 45
+     （输入区贴底后不再叠加 safe-area）。 */
+  .chat-view__jump {
+    right: calc(v-bind(trayPadRight) + 16px + env(safe-area-inset-right, 0px));
+    bottom: calc(v-bind(entryBottom) + 45px);
   }
   .ctx-overlay__panel {
     border-radius: 16px;
@@ -2181,6 +2387,17 @@ function mediaSrc(img: string): string {
     text-align: center;
     color: var(--nm-text-secondary);
     font-size: 13px;
+  }
+}
+
+/* iOS 真机（含 iPad 宽屏，不受 768px 断点约束）：ui-frame 在 iOS + 粗指针
+   环境把原生输入控件字号钉到 16px（聚焦防缩放）。输入行控件高度必须同步，
+   否则 iPad 上发送/附件按钮会比输入框矮 3.6px（底对齐后顶部露一截）。 */
+@supports (-webkit-touch-callout: none) {
+  @media (pointer: coarse) {
+    .chat-composer-float {
+      --chat-field-font: 16px;
+    }
   }
 }
 </style>

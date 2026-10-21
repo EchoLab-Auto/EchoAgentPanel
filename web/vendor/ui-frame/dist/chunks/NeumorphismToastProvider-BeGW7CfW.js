@@ -1,4 +1,4 @@
-import { defineComponent as P, computed as s, provide as S, onMounted as $, onBeforeUnmount as A, openBlock as t, createBlock as r, Teleport as V, createElementVNode as i, toDisplayString as y, normalizeStyle as Z, normalizeClass as g, createVNode as f, TransitionGroup as M, withCtx as j, createElementBlock as h, Fragment as D, renderList as F, unref as u, renderSlot as G, createCommentVNode as K } from "vue";
+import { defineComponent as P, computed as s, provide as S, onMounted as $, onBeforeUnmount as A, openBlock as t, createBlock as r, Teleport as V, createElementVNode as i, toDisplayString as y, normalizeStyle as Z, normalizeClass as f, createVNode as g, TransitionGroup as M, withCtx as j, createElementBlock as h, Fragment as D, renderList as F, unref as u, renderSlot as G, createCommentVNode as K } from "vue";
 import { useToast as U, ToastInjectionKey as q } from "../composables/useToast.js";
 import { useLocale as H } from "../composables/useLocale.js";
 import { u as J } from "./createComponent-jnXBYqCm.js";
@@ -53,10 +53,10 @@ import '../NeumorphismToastProvider.css';const R = {
     return (e, a) => (t(), r(V, { to: "body" }, [
       i("div", R, y(E.value), 1),
       i("div", {
-        class: g(B.value),
+        class: f(B.value),
         style: Z({ zIndex: T.value })
       }, [
-        f(M, { name: "nm-toast-list" }, {
+        g(M, { name: "nm-toast-list" }, {
           default: j(() => [
             (t(!0), h(D, null, F(u(n), (o) => G(e.$slots, "toast-item", {
               key: o.id,
@@ -64,7 +64,7 @@ import '../NeumorphismToastProvider.css';const R = {
               remove: () => u(c)(o.id)
             }, () => [
               i("div", {
-                class: g(["nm-toast", [`nm-toast--${o.type}`, { "nm-toast--leaving": o.leaving }]]),
+                class: f(["nm-toast", [`nm-toast--${o.type}`, { "nm-toast--leaving": o.leaving }]]),
                 role: o.type === "error" || o.type === "warning" ? "alert" : "status"
               }, [
                 i("span", X, [
@@ -94,7 +94,7 @@ import '../NeumorphismToastProvider.css';const R = {
                   type: "button",
                   onClick: (te) => u(c)(o.id)
                 }, [
-                  f(l, {
+                  g(l, {
                     name: "close",
                     size: "sm"
                   })
@@ -107,7 +107,7 @@ import '../NeumorphismToastProvider.css';const R = {
       ], 6)
     ]));
   }
-}), me = /* @__PURE__ */ Q(oe, [["__scopeId", "data-v-27787ab6"]]);
+}), me = /* @__PURE__ */ Q(oe, [["__scopeId", "data-v-1af9e09a"]]);
 export {
   me as N
 };

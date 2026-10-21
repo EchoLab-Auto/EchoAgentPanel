@@ -157,7 +157,7 @@ import '../NeumorphismModal.css';const te = ["aria-labelledby", "aria-label"], n
       })
     ]));
   }
-}), ye = /* @__PURE__ */ ae(ie, [["__scopeId", "data-v-d41fd722"]]);
+}), ye = /* @__PURE__ */ ae(ie, [["__scopeId", "data-v-fb33698b"]]);
 export {
   ye as N
 };

@@ -689,6 +689,57 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   设备圆角（2026-10）：屏幕四角的物理圆角，供「贴着屏幕边缘的浮层」做
+   同心圆角用。浏览器**没有**读取它的 API（CSS Round Display 的
+   `device-radius` 未实现，`env()` 也没有对应变量），只能按机型量值近似。
+   桌面/无圆角屏（iPhone SE）为 0 —— 公式里配合 `clamp(下限 …)` 自动退回
+   设计值，不会算出非法负圆角。
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --panel-display-radius: 0px;
+}
+@media (max-width: 767.98px) {
+  :root {
+    /* iPhone 12–16 系列（含 Pro）：显示圆角 ≈ 55pt（CSS px 同值）。
+       量值来源：Apple 营销图按 1170/1179/1290 宽像素反算 + 社区几何测量；
+       Android 多在 28–40、iPhone SE 为 0（直角屏）、iPad ≈ 18。
+       为什么统一按 55 近似而不按机型判定：误差方向是安全的 —— 使用方
+       （如输入区）都拿它减去边缘留白后再 `clamp()` 封顶，值偏大只会贴到上限，
+       不会算出比设计值更小的圆角；而按机型判定需要读屏幕圆角（浏览器没有
+       这个 API），用 `env(safe-area-inset-top)` 反推则要引入魔法系数，
+       不如一个诚实的常数 + 可覆盖的变量。需要精确值就在具体机型上覆盖它。 */
+    --panel-display-radius: 55px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   连续曲率角（iPhone 原生角，opt-in，2026-10）
+   ───────────────────────────────────────────────────────────────────────
+   Apple 的 UI 圆角不是圆弧，是**曲率连续的超椭圆**（squircle）：
+   直边与角的交界处没有曲率突变点，所以看起来"更软"、也更像物理圆角。
+   CSS 用 `corner-shape` 表达这一族曲线，`superellipse(k)` 的数学指数 p = 2^k。
+
+   取值（像素级实测推导，见 ui-frame/tokens.scss 同名注释）：
+     外层 p = 2.5  → superellipse(1.32)：45° 处比圆弧浅 17%
+     内层 q = 2.9  → superellipse(1.54)：超椭圆的等距偏移不留在族内，
+                     同指数嵌套时角部间隙会松 24%；抬到 2.9 后
+                     R/d ∈ [1.5, 4] 全程间隙偏差 ≤5.4%（≈0.5px）
+
+   **为什么默认关闭**：浏览器支持度还不够。
+     · Chrome / Edge / Android Chrome 139+ ✅
+     · Safari（含 iOS）稳定版 ❌ —— MDN BCD 里 `corner-shape` 的 safari
+       支持状态是 "preview"（仅 Safari Technology Preview）
+     在 iOS Safari 上这段声明会被整条丢弃、自动回落为圆弧，
+     也就是说**开了也不会让 iPhone 上的观感变化**，反而让 Chrome 与
+     Safari 出现跨浏览器视觉差异。确认目标机型都支持后再打开：
+       <html data-corners="continuous">
+   ═══════════════════════════════════════════════════════════════════════ */
+html[data-corners='continuous'] {
+  --nm-corner-shape: superellipse(1.32);
+  --nm-corner-shape-nested: superellipse(1.54);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    竖屏移动端自适应（2026-10，断点 768px）
    ───────────────────────────────────────────────────────────────────────
    口径与 ui-frame 的 useTouchDevice().isMobile（innerWidth < 768）严格一致：
@@ -755,7 +806,15 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
      （2026-10 修复：此前右组固定宽 ~354px，375px 屏上「主题切换」被推出
      屏外不可达；三层收敛：隐藏全屏（-60px）→ 品牌变省略号 → 间距/内边距
      收紧。320px 也可全放下，品牌在超窄屏收为 0。） */
-  .nm-layout__header {
+  /* 特异性（2026-10 修复）：库的 `.nm-layout__header[data-v-*]{padding:0 var(...)}`
+     是 (0,2,0)，裸 `.nm-layout__header` 只有 (0,1,0) —— 实测整段被压掉
+     （padTop 仍 0px、padLeft 仍 16px），刘海屏上顶栏按钮有 41px 落在状态栏里。
+     加 #app 前缀提到 (1,2,0) 才真正生效。 */
+  #app .nm-layout__header {
+    /* 高度也要一起加：库是 `height: 56px` 定高，只加 padding-top 会把内容盒
+       压到 9px —— 44px 的 ☰ 按钮反而溢出到会话区上（实测 viewBtn 29.5..73.5
+       vs 顶栏 0..56）。高度与内边距同步加安全区，顶栏整体下移而不是被压扁。 */
+    height: calc(56px + env(safe-area-inset-top, 0px));
     padding-top: env(safe-area-inset-top);
     padding-left: max(12px, env(safe-area-inset-left, 0px));
     padding-right: max(12px, env(safe-area-inset-right, 0px));
@@ -810,10 +869,15 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
     gap: 4px;
     flex-wrap: nowrap;
   }
-  /* 全屏按钮：触摸端意义低（iOS Safari 不支持元素全屏），隐藏省空间。
-     匹配 .fullscreen-toggle —— 类由 FullscreenToggleButton.vue 根按钮自带。 */
-  .topbar-actions .fullscreen-toggle {
-    display: none;
+  /* 全屏按钮（2026-10 改为移动端可用，用图标省宽度）：
+     此前整段 display:none，把 iOS Safari 的限制当成了所有移动端的限制；实际
+     Android Chrome / 微信 / WebView 都支持元素全屏。现在只收窄：图标 16px +
+     左右 8px 内边距 → 约 34px 宽（文本按钮 ~60px），375px 顶栏放得下三个按钮。
+     触控高度由上方 `pointer: coarse` 段的 min-height: 44px 兜住。 */
+  #app .topbar-actions .fullscreen-toggle--compact {
+    padding-left: 8px;
+    padding-right: 8px;
+    min-width: 34px;
   }
   /* 移动端卡片抽屉入口（顶栏，App.vue 按 isMobile 渲染） */
   .mobile-cards-btn {

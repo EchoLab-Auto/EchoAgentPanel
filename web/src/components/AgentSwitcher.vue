@@ -4,8 +4,9 @@
 //! 数据来自 state.teams（Core TeamsList 事件）；activeTeamId 为空时
 //! 显示第一个 team（Core 的 default_id = 配置的第一个 team）。
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
+import PanelPopover from './PanelPopover.vue';
 import { state } from '../store';
 import { regionLabel } from '../state';
 
@@ -13,7 +14,8 @@ const props = defineProps<{ activeTeamId: string | null }>();
 const emit = defineEmits<{ select: [id: string | null, core: string | null] }>();
 
 const open = ref(false);
-const rootRef = ref<HTMLElement | null>(null);
+/** 卡片按钮 = 弹层锚点（PanelPopover 按它的 rect 定位，移动端则贴底全宽）。 */
+const cardRef = ref<HTMLButtonElement | null>(null);
 
 // 当前展示的 Agent：优先 (activeTeamId, activeRegion) 匹配；为空时取
 // 第一个 team（默认）。同名 team 跨 core 时用 core 消歧。
@@ -72,22 +74,16 @@ function select(id: string, core: string | null) {
   emit('select', id, core);
 }
 
-// 点击卡片外部关闭菜单
-function onClickOutside(e: MouseEvent) {
-  if (open.value && rootRef.value && !rootRef.value.contains(e.target as Node)) {
-    open.value = false;
-  }
-}
-onMounted(() => document.addEventListener('click', onClickOutside));
-onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
+// 外部点击 / Escape 的关闭统一交给 PanelPopover（pointerdown 捕获 + keydown），
+// 不再自挂 document 监听：两套监听会互相抢先，表现为"点外面关不掉"或"选项点不动"。
 </script>
 
 <template>
-  <div ref="rootRef" class="agent-switcher">
+  <div class="agent-switcher">
     <!-- Agent 卡片：头像 + 名字 + 下拉三角 -->
     <button
+      ref="cardRef"
       class="agent-card"
-      :class="{ 'agent-card--open': open }"
       :disabled="!current"
       :title="current ? current.description || '切换 Agent' : '未配置 Agent'"
       @click="open = !open"
@@ -125,36 +121,48 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
       </svg>
     </button>
 
-    <!-- 上拉 Agent 列表：从卡片上方弹出 -->
-    <div v-if="open && current" class="agent-menu">
-      <div v-if="state.teams.length === 0" class="agent-menu__empty">（未配置 Team 成员）</div>
-      <div
-        v-for="team in state.teams"
-        :key="`${team.core ?? ''}:${team.id}`"
-        class="agent-menu__item"
-        :class="{ 'agent-menu__item--active': isActive(team) }"
-        @click="select(team.id, team.core ?? null)"
-      >
-        <span
-          class="agent-card__avatar agent-menu__avatar"
-          :class="{ 'agent-card__avatar--off': !team.enabled }"
-          :style="{ background: avatarColor(team.name) }"
+    <!-- Agent 列表：交给 PanelPopover（Teleport 到 body + 固定定位）。
+         为什么不用就地 absolute 弹层（2026-10 修复）：入口行在窄屏是横向滚动
+         容器（`overflow-x: auto`），CSS 规定此时 `overflow-y` 由 visible 计算为
+         auto —— 向上弹出的菜单整个落在容器裁剪区外，移动端点了卡片**什么都看
+         不到**（实测 375×812：菜单 y=466..632、entry-row top=640，elementFromPoint
+         命中消息区）。Teleport 出去后不再受任何祖先裁剪，桌面/移动同一套。 -->
+    <PanelPopover
+      v-model="open"
+      :anchor="cardRef"
+      width="360px"
+      max-height="52vh"
+    >
+      <div class="agent-menu">
+        <div v-if="state.teams.length === 0" class="agent-menu__empty">（未配置 Team 成员）</div>
+        <div
+          v-for="team in state.teams"
+          :key="`${team.core ?? ''}:${team.id}`"
+          class="agent-menu__item"
+          :class="{ 'agent-menu__item--active': isActive(team) }"
+          @click="select(team.id, team.core ?? null)"
         >
-          {{ avatarText(team.name) }}
-        </span>
-        <span class="agent-menu__name">{{ team.name }}</span>
-        <span v-if="showRegion(team.core)" class="agent-menu__core">
-          {{ regionLabel(state, team.core) }}
-        </span>
-        <span v-if="teamModel(team)" class="agent-menu__model" :title="teamModel(team)!">
-          {{ teamModel(team) }}
-        </span>
-        <NeumorphismStatusDot
-          :status="team.enabled ? 'online' : 'offline'"
-          size="small"
-        />
+          <span
+            class="agent-card__avatar agent-menu__avatar"
+            :class="{ 'agent-card__avatar--off': !team.enabled }"
+            :style="{ background: avatarColor(team.name) }"
+          >
+            {{ avatarText(team.name) }}
+          </span>
+          <span class="agent-menu__name">{{ team.name }}</span>
+          <span v-if="showRegion(team.core)" class="agent-menu__core">
+            {{ regionLabel(state, team.core) }}
+          </span>
+          <span v-if="teamModel(team)" class="agent-menu__model" :title="teamModel(team)!">
+            {{ teamModel(team) }}
+          </span>
+          <NeumorphismStatusDot
+            :status="team.enabled ? 'online' : 'offline'"
+            size="small"
+          />
+        </div>
       </div>
-    </div>
+    </PanelPopover>
   </div>
 </template>
 
@@ -238,21 +246,12 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
 }
 
 /* 上拉菜单：毛玻璃面板，位于卡片上方（卡片贴屏幕底部，向下会溢出视口） */
+/* 列表本体只负责排布：背景/边框/阴影/定位/滚动全部由 PanelPopover 承担
+   （Teleport 到 body，不再被入口行这个横向滚动容器裁剪）。 */
 .agent-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 30;
-  min-width: 220px;
-  max-height: min(60vh, calc(100vh - 200px));
-  overflow-y: auto;
-  padding: 6px;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--nm-surface-raised) 85%, transparent);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid var(--panel-glass-border);
-  box-shadow: var(--panel-glass-shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .agent-menu__empty {
@@ -320,5 +319,25 @@ onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
   white-space: nowrap;
   font-size: 11px;
   color: var(--nm-text-secondary);
+}
+
+/* 窄屏收敛（2026-10 修复）：卡片曾是 213.9px / 359px 入口行（60%），
+   把「会话 / 任务 / 模型」等按钮全挤进横滚。区域徽标信息冗余（菜单里每条
+   仍带），移动端隐藏；名字与模型名收紧后卡片 ≈120px，入口行一屏能露出
+   前 3 个按钮。 */
+@media (max-width: 767.98px) {
+  .agent-card {
+    gap: 6px;
+    padding: 0 8px 0 3px;
+  }
+  .agent-card__name {
+    max-width: 84px;
+  }
+  .agent-card__model {
+    max-width: 64px;
+  }
+  .agent-card__region {
+    display: none;
+  }
 }
 </style>

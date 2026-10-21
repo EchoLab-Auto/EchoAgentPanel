@@ -509,7 +509,7 @@ import '../NeumorphismSelect.css';const ml = { class: "nm-select__wrapper" }, pl
       }, null, 8, ["id", "message"])
     ]));
   }
-}), ql = /* @__PURE__ */ vl(Ll, [["__scopeId", "data-v-b2838ff6"]]);
+}), ql = /* @__PURE__ */ vl(Ll, [["__scopeId", "data-v-39984d16"]]);
 export {
   ql as N
 };

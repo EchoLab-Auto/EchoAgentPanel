@@ -74,9 +74,16 @@ type View = 'chat' | 'settings' | 'shell';
 const view = ref<View>(loadView());
 /** Shell 详情视图的目标会话（右侧边栏「详情」按钮设置；null = 无目标） */
 const shellDetailId = ref<string | null>(null);
+/**
+ * 该详情会话的**所属 core**。`sh-{seq}` 在每个 core 上从 1 起重复，只带 id
+ * 会让详情面板按 activeRegion 猜——切过区域就会显示/操作另一台机器的同号
+ * shell（2026-10 多 Core 交互修复）。
+ */
+const shellDetailCore = ref<string | null>(null);
 
-function openShellDetail(sessionId: string) {
+function openShellDetail(sessionId: string, core: string | null = null) {
   shellDetailId.value = sessionId;
+  shellDetailCore.value = core;
   setView('shell');
 }
 /**
@@ -89,18 +96,23 @@ function openShellDetail(sessionId: string) {
  * 兜底策略：切到 shell 且当前没有目标会话时，取当前 core 下的第一个 shell 会话；
  * 一个都没有（用户还没开过 Shell）则渲染空态提示，而不是静默空白。
  */
-const shellFallbackId = computed<string | null>(() => {
+const shellFallback = computed<{ id: string; core: string | null } | null>(() => {
   const list = state.shellSessions;
   if (!list.length) return null;
   const region = state.activeRegion;
   const pick =
     region == null ? list[0] : list.find((s) => (s.core ?? null) === region) ?? list[0];
-  return pick?.session_id ?? null;
+  return pick ? { id: pick.session_id, core: pick.core ?? null } : null;
 });
+const shellFallbackId = computed<string | null>(() => shellFallback.value?.id ?? null);
 
 /** Shell 视图实际渲染的会话：显式详情优先，否则用兜底。 */
 const shellViewId = computed(
   () => shellDetailId.value ?? (view.value === 'shell' ? shellFallbackId.value : null),
+);
+/** 实际渲染会话的归属 core（显式详情带着自己的 core；兜底取兜底那条的）。 */
+const shellViewCore = computed<string | null>(() =>
+  shellDetailId.value ? shellDetailCore.value : (shellFallback.value?.core ?? null),
 );
 
 watch(
@@ -110,7 +122,8 @@ watch(
     // 下次进来仍是上次看的那条（除非它已经不在了）。
     if (next !== 'shell') return;
     if (shellDetailId.value) return;
-    shellDetailId.value = shellFallbackId.value;
+    shellDetailId.value = shellFallback.value?.id ?? null;
+    shellDetailCore.value = shellFallback.value?.core ?? null;
   },
 );
 
@@ -669,6 +682,10 @@ watch(
               设置
             </NeumorphismButton>
           </template>
+          <!-- 全屏（移动端 2026-10 改为图标按钮，且在「卡片」左侧——用户要求）：
+               放这里而不是「卡片」之后，DOM 顺序即视觉顺序；桌面端卡片按钮
+               v-if 为假，故桌面仍是「聊天/设置 → 全屏 → 主题」原序。 -->
+          <FullscreenToggleButton :compact="isMobile" />
           <!-- 卡片抽屉入口（仅移动端且会话视图；抽屉本体在 ChatView 内，
                state 经 mobile-sheets.ts 的互斥 sheet 开关通信） -->
           <NeumorphismButton
@@ -681,7 +698,6 @@ watch(
           >
             卡片
           </NeumorphismButton>
-          <FullscreenToggleButton />
           <ThemeToggleButton />
         </div>
       </template>
@@ -716,6 +732,7 @@ watch(
         <ShellPanel
           v-if="view === 'shell' && shellViewId"
           :session-id="shellViewId"
+          :core="shellViewCore"
           @back="setView('chat')"
         />
         <!-- Shell 视图空态（v2）：用户还没开过任何 Shell 会话。此前这种情况是
