@@ -42,6 +42,17 @@ import { hasRecentLocalActivateIntent } from './workspace';
 export const TRUNK_SESSION_ID = 'trunk';
 
 /** 运行区域的展示名（缺省回落上游名）。 */
+/** failover 初始值（见 `failoverEnabled` 字段注释；放这里避免
+ *  `store` ↔ `failover` 循环 import）。 */
+function failover_enabled_initial(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    return window.localStorage.getItem('echo-failover-enable') !== '0';
+  } catch {
+    return true;
+  }
+}
+
 export function regionLabel(state: AppState, region: string | null | undefined): string {
   if (!region) return '本机';
   return state.regions[region]?.name || region;
@@ -950,6 +961,10 @@ export interface AppState {
    * null = 单上游裸帧 / 未标注。
    */
   activeRegion: string | null;
+  /// **主节点失效转移**开关（P3，2026-11）：`true`（默认）= primary 连续离线
+  /// 阈值后自动切到在线候选节点（语义是**换节点、换会话**，不是会话迁移）；
+  /// `false` = 只提示不切（原 `activeRegion` 不动，等它恢复）。
+  failoverEnabled: boolean;
   /** 后台 shell 会话列表（Shell 面板） */
   shellSessions: import('./protocol').ShellSessionInfo[];
   /** 每会话的终端条目（seq → entry），Shell 面板流式输出 */
@@ -1024,6 +1039,7 @@ export function initialState(): AppState {
     sessionApiOverrides: {},
     activeTeamId: null,
     activeRegion: null,
+    failoverEnabled: failover_enabled_initial(),
     shellSessions: [],
     shellTerminals: {},
     contexts: {},

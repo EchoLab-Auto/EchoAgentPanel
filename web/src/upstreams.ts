@@ -7,6 +7,7 @@
 import { state } from './store';
 import { panelFetch, sendCommand } from './connection';
 import { dropCoreInstanceChannel } from './instanceOps';
+import { evaluateFailover } from './failover';
 import { pruneDiscovered, runDiscovery } from './federation-directory';
 import type { UpstreamStatus } from './state';
 
@@ -40,6 +41,7 @@ export async function refreshUpstreams(): Promise<void> {
     // 已配置上游即"已知运行区域"：区域集合不依赖是否已收到事件，
     // 多区域判定（命令必须显式落到某个区域）从配置起就成立。
     for (const u of next) state.knownCores.add(u.name);
+    evaluateFailover(next);
     await discoverFromFederation(next);
   } catch {
     // Panel 后端不可达：保留上次快照。

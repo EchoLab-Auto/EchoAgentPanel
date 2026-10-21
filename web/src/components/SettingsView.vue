@@ -23,6 +23,7 @@ const props = defineProps<{
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import NeumorphismCheckbox from '@echolab-auto/ui-frame/components/NeumorphismCheckbox';
+import { failoverEnabled, setFailoverEnabled } from '../failover';
 import NeumorphismCollapse from '@echolab-auto/ui-frame/components/NeumorphismCollapse';
 import NeumorphismDivider from '@echolab-auto/ui-frame/components/NeumorphismDivider';
 import NeumorphismEmpty from '@echolab-auto/ui-frame/components/NeumorphismEmpty';
@@ -2142,6 +2143,19 @@ watch(
            （运行区域 peer 管理 + 邀请串配对）——连接管理统一入口。 -->
       <div v-else-if="activeCategory === 'cores'" class="caps-workspace">
         <div class="caps-detail-pane">
+          <!-- 失效转移（P3）：主节点连续离线时是否自动切到在线候选节点。
+               语义是**换节点、换会话**——旧节点上的会话不可达（它恢复后仍在，
+               不会自动切回）。 -->
+          <div class="caps-toggle-row">
+            <div>
+              <div class="caps-toggle-row__label">主节点失联时自动切换到在线节点</div>
+              <div class="caps-toggle-row__desc">连续离线约 24s 后切换；旧节点上的会话暂不可达（恢复后仍在，不自动切回）</div>
+            </div>
+            <NeumorphismCheckbox
+              :model-value="failoverEnabled()"
+              @update:model-value="setFailoverEnabled($event)"
+            />
+          </div>
           <UpstreamsSettings />
           <NeumorphismDivider class="cores-merged__sep" />
           <FederationSettings
@@ -4470,4 +4484,27 @@ watch(
     min-width: 0;
   }
 }
+/* 失效转移开关行（P3）：与上游列表同宽的设置行，不占视觉层级。 */
+.caps-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: var(--surface-2, #eceef3);
+}
+.caps-toggle-row__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1, #2f3545);
+}
+.caps-toggle-row__desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3, #7b8394);
+}
+
 </style>
+
