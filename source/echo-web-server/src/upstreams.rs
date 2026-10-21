@@ -250,6 +250,13 @@ impl UpstreamRegistry {
         let _ = self
             .events
             .send(UpstreamEvent::Upsert(Box::new(effective.clone())));
+        if effective.is_discovered() {
+            tracing::info!(
+                upstream = %effective.name,
+                url = %effective.url,
+                "discovered upstream added (Panel identity)"
+            );
+        }
         Ok(effective)
     }
 
