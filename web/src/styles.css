@@ -723,9 +723,11 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
      iPhone 17 Pro Max   1320        225.0     75.0   2.48
      iPhone Air          1260        223.0     74.3   2.48
 
-   换算回等效圆弧：16 → 54.0、16 Pro → 60.8、17 → 61.7、17 Pro Max → 62.0
-   —— 与流传值 55 / 62 自洽，两套数字只是口径差异，不是测量冲突。
-   注意 n ≈ 2.5，与 squircle.ts 里用的 2.6 只差 1%，模型误差 < 0.5px。
+   换算回等效圆弧（r_eq = R·(1−2^(−1/n))/(1−1/√2)）：16 → 54.4、16 Plus → 54.2、
+   16 Pro → 61.6、17 → 61.7、17 Pro Max → 62.4 —— 与流传值 55 / 62 自洽，
+   两套数字只是口径差异，不是测量冲突。
+   注意 n ≈ 2.5，与 squircle.ts 里原先用的 2.6 只差 1%，模型误差 < 0.5px。
+   重新测量的脚本：`scripts/measure-display-radius.py`（含素材下载地址与自检步骤）。
 
    ## 分档方式：逻辑视口宽度（3x 屏）
 
