@@ -6,11 +6,16 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+# 作用域相关的运行身份（见 echo-agent-panel.service.in 的同名占位）。
+# system 作用域下这里是 User=root：updater 最后要 `systemctl restart` 一个系统级
+# 单元，非 root 没这个权限（这也是 system 作用域不支持非 root 服务账号的原因）。
+@SCOPE_LINES@
 # cargo build --release + npm build can take minutes; the systemd default start
 # timeout (90s) would SIGTERM the updater mid-build and leave a stale state.
 TimeoutStartSec=1800
 WorkingDirectory=@SOURCE_DIR@
 ExecStart="@UPDATE_SCRIPT@" --source "@SOURCE_DIR@" --binary "@BINARY@" --status "@STATUS_FILE@" --static-dir "@STATIC_DIR@"
+@SCOPE_ENV@
 Environment="PATH=@SERVICE_PATH@"
 NoNewPrivileges=true
 PrivateTmp=true

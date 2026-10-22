@@ -15,6 +15,33 @@ DEFAULT_STATIC_DIR="$PREFIX/libexec/echo-agent-panel/web"
 DEFAULT_STATUS_FILE="$STATE_HOME/echo-agent-panel/update-status"
 DEFAULT_SOURCE_DIR="$DATA_HOME/echo-agent-panel/source"
 
+# ── 服务作用域 ──────────────────────────────────────────────────────────
+# 本脚本最后要 `systemctl restart` 正在运行的 Panel；unit 在哪个作用域决定了
+# 该敲 `systemctl` 还是 `systemctl --user`——两者是**两套互不可见的 manager**，
+# 敲错不报权限错误，只报"查无此单元"，于是重启静默失败、状态写 failed，看着
+# 像构建出错。
+#
+# 取值顺序：ECHO_SERVICE_SCOPE（install.sh 写进单元，唯一可信来源）>
+# 单元文件探测（手工在 shell 里跑本脚本时没有 env）> user（历史默认）。
+# 探测用**文件存在**而不是 is-active：服务停着时两个作用域都是 inactive。
+resolve_service_scope() {
+    case "${ECHO_SERVICE_SCOPE:-}" in
+        system) echo system; return ;;
+        user) echo user; return ;;
+    esac
+    if [[ -e /etc/systemd/system/echo-agent-panel.service ]]; then
+        echo system
+    else
+        echo user
+    fi
+}
+SERVICE_SCOPE=$(resolve_service_scope)
+if [[ "$SERVICE_SCOPE" == system ]]; then
+    SYSTEMCTL=(systemctl)
+else
+    SYSTEMCTL=(systemctl --user)
+fi
+
 SOURCE_DIR=""
 BINARY=""
 STATUS_FILE=""
@@ -211,7 +238,7 @@ rollback_installation() {
         rm -f "$REVISION_FILE" || true
     fi
     if (( ${panel_was_active:-0} )); then
-        systemctl --user restart echo-agent-panel.service >/dev/null 2>&1 || true
+        "${SYSTEMCTL[@]}" restart echo-agent-panel.service >/dev/null 2>&1 || true
     fi
 }
 
@@ -273,7 +300,7 @@ if [[ -f "$STATUS_FILE" ]] && grep -q '^state=running' "$STATUS_FILE" 2>/dev/nul
 fi
 installed=$(cat "$REVISION_FILE" 2>/dev/null || true)
 panel_was_active=0
-if systemctl --user is-active --quiet echo-agent-panel.service 2>/dev/null; then
+if "${SYSTEMCTL[@]}" is-active --quiet echo-agent-panel.service 2>/dev/null; then
     panel_was_active=1
 fi
 
@@ -376,13 +403,13 @@ prune_backups || true
 if ((panel_was_active)); then
     PHASE=restarting
     restart_failed=0
-    if ! systemctl --user restart echo-agent-panel.service; then
+    if ! "${SYSTEMCTL[@]}" restart echo-agent-panel.service; then
         restart_failed=1
     else
         healthy_checks=0
         for _ in {1..15}; do
             sleep 1
-            if systemctl --user is-active --quiet echo-agent-panel.service; then
+            if "${SYSTEMCTL[@]}" is-active --quiet echo-agent-panel.service; then
                 ((healthy_checks += 1))
                 if ((healthy_checks >= 3)); then
                     restart_failed=0

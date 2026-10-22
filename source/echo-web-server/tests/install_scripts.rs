@@ -164,7 +164,7 @@ fn installer_enables_linger_for_the_user_unit() {
     // 调用点必须在使用它的单元 enable 之后——顺序反了会在服务已启动后才
     // 补 linger，掩盖"装完就掉"的窗口。
     let enable_at = install
-        .find("systemctl --user enable echo-agent-panel.service")
+        .find("\"${SYSTEMCTL[@]}\" enable echo-agent-panel.service")
         .expect("install.sh 应 enable 单元");
     let linger_at = install
         .find("ensure_service_linger\n")
@@ -285,4 +285,109 @@ fn uninstaller_keeps_user_data_unless_purged() {
         purge_guard < whole_dir,
         "整体移除数据目录必须在 PURGE 分支内"
     );
+}
+
+/// `--scope` 在 Panel 侧同样是一等参数（与 Core 对称）。
+///
+/// 两边必须能装进**同一个**作用域：各自有独立的 updater 单元，单元名与生命
+/// 周期假设却一致；混装不报错，只在某次重启后表现为"core 起来了、panel 没起"。
+#[test]
+fn installer_supports_both_service_scopes() {
+    let install = read_script("install.sh");
+
+    assert!(
+        install.contains("--scope)") && install.contains("--scope=*)"),
+        "install.sh 应解析 --scope <user|system> 与 --scope=system"
+    );
+    assert!(
+        install.contains("user|system) ;;"),
+        "--scope 取值必须校验（拼错时 fail-closed）"
+    );
+    assert!(
+        install.contains("SYSTEMD_DIR=/etc/systemd/system"),
+        "system 作用域应写 /etc/systemd/system"
+    );
+    assert!(
+        install.contains("SYSTEMCTL=(systemctl --user)") && install.contains("SYSTEMCTL=(systemctl)"),
+        "两条作用域各有一套 systemctl 前缀"
+    );
+    for call in [
+        "\"${SYSTEMCTL[@]}\" enable echo-agent-panel.service",
+        "\"${SYSTEMCTL[@]}\" restart echo-agent-panel.service",
+        "\"${SYSTEMCTL[@]}\" is-active --quiet echo-agent-panel.service",
+    ] {
+        assert!(install.contains(call), "应经 SYSTEMCTL 数组调用：{call}");
+    }
+    assert!(
+        install.contains("ECHO_SKIP_LINGER"),
+        "system 作用域不得开 linger（与会话无关，开了只是常驻多余管理器）"
+    );
+    assert!(
+        install.contains("ECHO_SERVICE_SCOPE=$SERVICE_SCOPE"),
+        "单元里应注入 ECHO_SERVICE_SCOPE，供 update.sh 读取"
+    );
+    for placeholder in ["@SCOPE_LINES@", "@SCOPE_ENV@", "@WANTED_BY@"] {
+        assert!(install.contains(placeholder), "render_unit 应替换 {placeholder}");
+    }
+}
+
+/// Panel 的 install.sh 此前**从未**给 `panel_was_active` / `panel_was_enabled`
+/// 赋值，于是回滚分支里的 `${panel_was_enabled:-0}` 恒为 0：一次失败的重装会把
+/// Panel 留在「已禁用 + 已停止」，而且没有任何提示。这条测试钉住快照的存在。
+#[test]
+fn rollback_remembers_prior_service_state() {
+    let install = read_script("install.sh");
+    assert!(
+        install.contains("panel_was_active=0") && install.contains("panel_was_enabled=0"),
+        "回滚前必须记录服务原先的 active/enabled 状态"
+    );
+    let snapshot_at = install
+        .find("panel_was_active=0")
+        .expect("应有状态快照");
+    let rollback_at = install
+        .find("install_rollback()")
+        .expect("应有回滚函数");
+    assert!(
+        snapshot_at < rollback_at,
+        "状态快照必须在回滚函数定义/安装事务开始之前完成"
+    );
+}
+
+/// 单元模板要带作用域占位，否则 sed 静默替换不到、生成自相矛盾的单元。
+#[test]
+fn unit_templates_carry_scope_placeholders() {
+    for name in [
+        "packaging/systemd/echo-agent-panel.service.in",
+        "packaging/systemd/echo-agent-panel-update.service.in",
+    ] {
+        let path = repo_root().join(name);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        assert!(text.contains("@SCOPE_LINES@"), "{name} 缺少 @SCOPE_LINES@");
+        assert!(text.contains("@SCOPE_ENV@"), "{name} 缺少 @SCOPE_ENV@");
+    }
+    let panel = std::fs::read_to_string(
+        repo_root().join("packaging/systemd/echo-agent-panel.service.in"),
+    )
+    .expect("read panel unit template");
+    assert!(panel.contains("@WANTED_BY@"), "panel 单元模板应把 WantedBy 留给安装期决定");
+}
+
+/// updater 也要按作用域选 systemctl：它是 update 单元的主体，重启失败会被判
+/// 成"更新失败"，而实际上二进制已经换新了——状态与事实错位最难查。
+#[test]
+fn updater_respects_service_scope() {
+    let update = read_script("update.sh");
+    assert!(update.contains("resolve_service_scope"), "update.sh 应解析服务作用域");
+    assert!(update.contains("ECHO_SERVICE_SCOPE"), "应优先采用单元注入的作用域");
+    assert!(
+        update.contains("/etc/systemd/system/echo-agent-panel.service"),
+        "缺少环境变量时应按单元文件位置探测"
+    );
+    for call in [
+        "\"${SYSTEMCTL[@]}\" restart echo-agent-panel.service",
+        "\"${SYSTEMCTL[@]}\" is-active --quiet echo-agent-panel.service",
+    ] {
+        assert!(update.contains(call), "update.sh 应经 SYSTEMCTL 调用：{call}");
+    }
 }

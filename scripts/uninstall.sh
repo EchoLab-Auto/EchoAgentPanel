@@ -58,19 +58,44 @@ if [[ ! -d "$PROJECT_ROOT/.git" ]] && [[ -z "${ECHO_PANEL_BOOTSTRAPPED:-}" ]]; t
     exec bash "$BOOTSTRAP_DIR/repo/scripts/uninstall.sh" "$@"
 fi
 
-PREFIX=${ECHO_PREFIX:-"$HOME/.local"}
-CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
-DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
-STATE_HOME=${XDG_STATE_HOME:-"$HOME/.local/state"}
-CONFIG_DIR="$CONFIG_HOME/echo-agent-panel"
-DATA_DIR="$DATA_HOME/echo-agent-panel"
-STATE_DIR="$STATE_HOME/echo-agent-panel"
-LIBEXEC_DIR="$PREFIX/libexec/echo-agent-panel"
-BIN_DIR="$PREFIX/bin"
-SYSTEMD_DIR="$CONFIG_HOME/systemd/user"
-# system 作用域（多节点/服务器装法）：install.sh 只写 user 作用域，但存量机器
-# 可能是手工或旧脚本装的 system 单元（如 cloud-server-2）。只探测、不猜。
+# 路径按「装着这份安装的那个用户」推导（与 install.sh 的 derive_paths 同形）。
+# system 作用域下安装属于 root，卸载也要从 root 的家目录算——否则普通用户执行
+# `--scope system --dry-run` 会打印出调用者自己的路径，看着像要删错东西。
+derive_paths() {
+    local home=$1 use_xdg=$2
+    PREFIX=${ECHO_PREFIX:-"$home/.local"}
+    if ((use_xdg)); then
+        CONFIG_HOME=${XDG_CONFIG_HOME:-"$home/.config"}
+        DATA_HOME=${XDG_DATA_HOME:-"$home/.local/share"}
+        STATE_HOME=${XDG_STATE_HOME:-"$home/.local/state"}
+    else
+        CONFIG_HOME="$home/.config"
+        DATA_HOME="$home/.local/share"
+        STATE_HOME="$home/.local/state"
+    fi
+    CONFIG_DIR="$CONFIG_HOME/echo-agent-panel"
+    DATA_DIR="$DATA_HOME/echo-agent-panel"
+    STATE_DIR="$STATE_HOME/echo-agent-panel"
+    LIBEXEC_DIR="$PREFIX/libexec/echo-agent-panel"
+    BIN_DIR="$PREFIX/bin"
+    SYSTEMD_DIR="$CONFIG_HOME/systemd/user"
+}
+derive_paths "$HOME" 1
+# system 作用域（`install.sh --scope system` 的装法，以及存量手工装法）。两种都
+# 要清：只删自己那种、把另一种静默留下 = "卸载了却还在开机重启"。
 SYSTEM_UNIT_DIR=/etc/systemd/system
+
+# 本实例装在哪个作用域：显式 --scope > 环境变量 > 单元文件探测
+# （文件存在才算；服务停着时 is-active 两个作用域都是 inactive，探不出来）。
+SYSTEM_SCOPE_UNIT="$SYSTEM_UNIT_DIR/echo-agent-panel.service"
+SERVICE_SCOPE=${ECHO_SERVICE_SCOPE:-}
+if [[ -z "$SERVICE_SCOPE" ]]; then
+    if [[ -e "$SYSTEM_SCOPE_UNIT" ]]; then
+        SERVICE_SCOPE=system
+    else
+        SERVICE_SCOPE=user
+    fi
+fi
 
 PURGE=0
 DRY_RUN=0
@@ -95,6 +120,13 @@ The EchoAgentCore service is unaffected — uninstall it separately with
 EchoAgentCore's scripts/uninstall.sh.
 
 Options:
+  --scope <user|system> Which systemd scope the installation lives in
+                        (default: auto-detected from where the unit files are;
+                        ECHO_SERVICE_SCOPE is honoured too).
+
+                        `system` needs root and removes the units from
+                        /etc/systemd/system with plain `systemctl`.
+
   --purge            Also remove the config directory ($CONFIG_HOME/echo-agent-panel)
   --dry-run          Print resolved paths without changing the system
   --disable-linger   Also turn off linger for this user.
@@ -120,6 +152,14 @@ while (($#)); do
             DRY_RUN=1
             shift
             ;;
+        --scope)
+            SERVICE_SCOPE=${2:-}
+            shift 2
+            ;;
+        --scope=*)
+            SERVICE_SCOPE=${1#--scope=}
+            shift
+            ;;
         --disable-linger)
             DISABLE_LINGER=1
             shift
@@ -136,9 +176,30 @@ while (($#)); do
     esac
 done
 
-systemd_available=0
-if systemctl --user show-environment >/dev/null 2>&1; then
+case "$SERVICE_SCOPE" in
+    user|system) ;;
+    *)
+        echo "error: --scope must be 'user' or 'system' (got: '$SERVICE_SCOPE')" >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$SERVICE_SCOPE" == system ]]; then
+    SERVICE_HOME=$(getent passwd root 2>/dev/null | cut -d: -f6)
+    derive_paths "${SERVICE_HOME:-/root}" 0
+    # --dry-run 例外：只打印计划，不动系统，不必提权。
+    if ((EUID != 0)) && ((!DRY_RUN)); then
+        echo "error: --scope system requires root (units live in $SYSTEM_UNIT_DIR)" >&2
+        echo "       re-run as: sudo $0 --scope system" >&2
+        exit 1
+    fi
     systemd_available=1
+    [[ -x /run/systemd/system ]] || systemd_available=0
+else
+    systemd_available=0
+    if systemctl --user show-environment >/dev/null 2>&1; then
+        systemd_available=1
+    fi
 fi
 
 # ── 环境探测（dry-run 与真实卸载共用同一份判断）─────────────────────
@@ -169,18 +230,24 @@ linger_note() {
 }
 
 if ((DRY_RUN)); then
-    if ((systemd_available)); then
-        units="$SYSTEMD_DIR/echo-agent-panel.service (+ update unit)"
+    if [[ "$SERVICE_SCOPE" == system ]]; then
+        system_units="$SYSTEM_UNIT_DIR/{${USERS_INSTALLED_UNITS[*]}} (system scope)"
+        units="— (installed in system scope)"
     else
-        units="systemd user manager unavailable (units skipped)"
-    fi
-    if ((${#system_scope_units[@]})); then
-        system_units="$SYSTEM_UNIT_DIR/{${system_scope_units[*]}} (system scope)"
-    else
-        system_units="none"
+        if ((systemd_available)); then
+            units="$SYSTEMD_DIR/echo-agent-panel.service (+ update unit)"
+        else
+            units="systemd user manager unavailable (units skipped)"
+        fi
+        if ((${#system_scope_units[@]})); then
+            system_units="$SYSTEM_UNIT_DIR/{${system_scope_units[*]}} (leftover, system scope)"
+        else
+            system_units="none"
+        fi
     fi
     cat <<EOF
 EchoAgentPanel uninstall plan
+  scope:     $SERVICE_SCOPE
   service:   $units
   system:    $system_units
   launcher:  $BIN_DIR/echo-agent-panel
@@ -188,7 +255,7 @@ EchoAgentPanel uninstall plan
   data:      $DATA_DIR ($( ((PURGE)) && echo "will be removed" || echo "kept: media-cache — removed: source" ))
   state:     $STATE_DIR
   config:    $CONFIG_DIR ($( ((PURGE)) && echo "will be removed" || echo "kept — use --purge to remove" ))
-  linger:    $(linger_note)
+  linger:    $( [[ "$SERVICE_SCOPE" == system ]] && echo "not applicable (system scope)" || linger_note )
 EOF
     exit 0
 fi
@@ -210,11 +277,13 @@ remove_file() {
 }
 
 # ── user 作用域单元 ────────────────────────────────────────────────
-echo "==> Stopping Panel service"
-for unit in "${USERS_INSTALLED_UNITS[@]}"; do
-    systemctl --user stop "$unit" 2>/dev/null || true
-    systemctl --user disable "$unit" 2>/dev/null || true
-done
+if [[ "$SERVICE_SCOPE" == user ]]; then
+    echo "==> Stopping Panel service"
+    for unit in "${USERS_INSTALLED_UNITS[@]}"; do
+        systemctl --user stop "$unit" 2>/dev/null || true
+        systemctl --user disable "$unit" 2>/dev/null || true
+    done
+fi
 
 # ── system 作用域单元（存量服务器装法）────────────────────────────
 # 这里**不静默跳过**：留着它们，下次开机 systemd 会去拉起一个已经被删掉
@@ -247,10 +316,12 @@ if ((${#system_scope_units[@]})); then
     fi
 fi
 
-for unit in "${USERS_INSTALLED_UNITS[@]}"; do
-    remove_file "$SYSTEMD_DIR/$unit" "service unit"
-done
-systemctl --user daemon-reload 2>/dev/null || true
+if [[ "$SERVICE_SCOPE" == user ]]; then
+    for unit in "${USERS_INSTALLED_UNITS[@]}"; do
+        remove_file "$SYSTEMD_DIR/$unit" "service unit"
+    done
+    systemctl --user daemon-reload 2>/dev/null || true
+fi
 
 remove_file "$BIN_DIR/echo-agent-panel" "launcher"
 remove_dir "$LIBEXEC_DIR" "runtime libexec"
@@ -271,7 +342,11 @@ fi
 
 # ── linger ────────────────────────────────────────────────────────
 # 只在显式要求时关，且只操作本用户（install 用的也是 `id -un`）。
-if ((DISABLE_LINGER)); then
+# system 作用域与 linger 无关（单元挂 multi-user.target），此时既不改也不报告，
+# 免得"linger 仍开着"被读成"还有东西要清理"。
+if [[ "$SERVICE_SCOPE" == system ]]; then
+    :
+elif ((DISABLE_LINGER)); then
     if ((linger_on)); then
         echo "==> Disabling linger for $current_user"
         if loginctl disable-linger "$current_user" 2>/dev/null &&
