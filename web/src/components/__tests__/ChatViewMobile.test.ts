@@ -147,20 +147,27 @@ describe('ChatView 竖屏移动端', () => {
     expect(mobileStyle, '移动端轮廓改由 clip-path 提供').not.toMatch(
       /--composer-radius: clamp\(/,
     );
-    // 2026-10：外框 + 玻璃整体换成 ui-frame NeumorphismCard（glass 档），
-    // 超椭圆 clip 挂在卡片上（单层，不再有内轮廓——卡片自带 1px 内高光边）。
-    expect(
-      styleBlock,
-      '卡片消费 clip 变量（前缀类名压过卡片自己的 radius 档位）',
-    ).toMatch(
-      /\.chat-composer-float \.chat-composer-float__card \{[^}]*clip-path: var\(--composer-clip, none\)/,
-    );
-    // 结构性断言：模板里真的是卡片组件（否则样式对了也只是个空 div）
+    // 2026-10：外壳是 ui-frame NeumorphismCard，**轮廓也交给库**——
+    //   移动端走 `:clip-path`（设备屏角偏移曲线），桌面走 `:squircle`（等半径超椭圆）。
+    //   面板侧不再自己写 clip-path（卡片会读 border-radius 生成超椭圆）。
     expect(raw, '输入区外壳必须是 NeumorphismCard').toMatch(
-      /<NeumorphismCard[\s\S]{0,160}class="chat-composer-float__card"[\s\S]{0,80}glass/,
+      /<NeumorphismCard[\s\S]{0,200}class="chat-composer-float__card"[\s\S]{0,200}glass="float"/,
+    );
+    expect(raw, '移动端：轮廓以 clip-path prop 交给库卡片').toMatch(
+      /:clip-path="composerClip === 'none' \? undefined : composerClip"/,
+    );
+    expect(raw, '桌面/直角屏：走库的 squircle prop').toMatch(
+      /:squircle="composerClip === 'none' \? 2\.5 : false"/,
+    );
+    expect(styleBlock, '卡片样式不再自带 clip-path（归库）').not.toMatch(
+      /\.chat-composer-float \.chat-composer-float__card \{[^}]*clip-path:/,
     );
     expect(styleBlock, '卡片不得再手写毛玻璃背景').not.toMatch(
       /\.chat-composer-float__glass \{/,
+    );
+    // halo（投影补层）仍需要同一条轮廓，走 CSS 变量（它不是卡片）
+    expect(styleBlock, '投影补层复用同一轮廓变量').toMatch(
+      /\.chat-composer-float__halo::before \{[^}]*clip-path: var\(--composer-clip, none\)/,
     );
     // 悬浮（2026-10 用户要求「输入区换成悬浮」）：外壳走库的 float 档 ——
     // 向外环境投影（0 4px 16px + 0 2px 4px）由 `nm-card--glass-float` 提供，

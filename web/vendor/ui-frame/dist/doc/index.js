@@ -2,7 +2,7 @@ import { ref as X, computed as W, watch as me, onBeforeUnmount as Se, defineComp
 import { useTheme as ht } from "../composables/useTheme.js";
 import { N as Ze } from "../chunks/NeumorphismLayout-BD9_QR5T.js";
 import { N as te } from "../chunks/NeumorphismButton-C7gkn79g.js";
-import { N as ke } from "../chunks/NeumorphismCard-BgpR689L.js";
+import { N as ke } from "../chunks/NeumorphismCard-BMQk8hBJ.js";
 import { N as Je } from "../chunks/NeumorphismThemeToggle-DBfRRh5v.js";
 import { N as et } from "../chunks/NeumorphismTree-fQBHMCMo.js";
 import { N as tt } from "../chunks/NeumorphismDivider-BzjZ5AP8.js";

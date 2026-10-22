@@ -1513,9 +1513,17 @@ function mediaSrc(img: string): string {
            材质（半透明 + backdrop blur）+ 向外环境投影（`0 4px 16px` +
            `0 2px 4px`）都由库提供，视觉上是一块浮在消息之上的磨砂托盘。
            内层 __body 只做 padding 与内容排布。 -->
+      <!-- 轮廓交给库卡片（2026-10）：
+           · 移动端 → `clip-path`：设备屏角的**偏移曲线**（下角贴屏角、上角吃剩余
+             高度），由 composerOutline 算好后原样传入；
+            · 桌面/直角屏 → `squircle="2.5"`：卡片按自己生效的 border-radius 生成
+             等半径超椭圆（圆弧贴超椭圆会在 45° 附近错位）。
+           两者都由 ui-frame 落地，面板不再自己写 clip-path。 -->
       <NeumorphismCard
         class="chat-composer-float__card"
         glass="float"
+        :squircle="composerClip === 'none' ? 2.5 : false"
+        :clip-path="composerClip === 'none' ? undefined : composerClip"
         no-padding
       >
         <div class="chat-composer-float__body">
@@ -1912,8 +1920,9 @@ function mediaSrc(img: string): string {
   position: relative;
   z-index: 1;
   pointer-events: auto;
+  /* 圆角档位：桌面由卡片自己读它生成超椭圆（squircle prop），移动端被
+     clip-path 覆盖并由库把 border-radius 归零。 */
   border-radius: var(--composer-radius);
-  clip-path: var(--composer-clip, none);
   /* 性能（2026-09-18 起、2026-10 随卡片迁移沿用）：库默认 20px + saturate，
      输入区降到 10px 且不加 saturate —— 大面积 backdrop-filter 每次重绘全量
      重栅格化，跨行拖选每帧触发。用变量覆盖保持与卡片同一实现路径。 */
@@ -1936,7 +1945,6 @@ function mediaSrc(img: string): string {
 /* clip 生效时必须清掉 border-radius —— 两者是**取交集**关系：留着 24px 圆角
    会把超椭圆轮廓又裁回圆角矩形（实测角部间隙 14→16.6px，等于白改）。
    用 class 而非媒体查询做门控：JS 没算出轮廓时（首帧/异常）仍保留圆角兜底。 */
-.chat-composer-float--clipped .chat-composer-float__card,
 .chat-composer-float--clipped .chat-composer-float__halo::before {
   border-radius: 0;
 }

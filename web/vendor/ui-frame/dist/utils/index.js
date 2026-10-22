@@ -1,6 +1,7 @@
-import { G as A, g as G, n as I } from "../chunks/glass-BqY-XLAc.js";
+import { G as C, g as P, n as T } from "../chunks/glass-BqY-XLAc.js";
+import { p as A, a as G, s as I, b as v, c as E, d as M, e as q } from "../chunks/squircle-D5heR-hJ.js";
 const t = typeof window < "u", i = !t;
-function c(e) {
+function s(e) {
   return t ? window.matchMedia(e) : {
     matches: !1,
     media: e,
@@ -16,7 +17,7 @@ function c(e) {
     dispatchEvent: () => !1
   };
 }
-function u(e) {
+function c(e) {
   if (!t) return null;
   try {
     return localStorage.getItem(e);
@@ -24,14 +25,14 @@ function u(e) {
     return null;
   }
 }
-function s(e, n) {
+function l(e, n) {
   if (t)
     try {
       localStorage.setItem(e, n);
     } catch {
     }
 }
-function l(e) {
+function u(e) {
   if (t)
     try {
       localStorage.removeItem(e);
@@ -41,7 +42,7 @@ function l(e) {
 function f() {
   return t ? document : void 0;
 }
-function g() {
+function p() {
   return t ? window : void 0;
 }
 function m(e) {
@@ -49,16 +50,16 @@ function m(e) {
     getPropertyValue: () => ""
   };
 }
-function d(e = "nm") {
+function g(e = "nm") {
   return `${e}-${Math.random().toString(36).slice(2, 9)}`;
 }
-function p(e) {
+function d(e) {
   return e.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
-function S(e) {
+function h(e) {
   return e.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/[\s-]+/g, "-").replace(/^-+|-+$/g, "");
 }
-function y(e, n) {
+function S(e, n) {
   let r = null;
   const o = (...a) => {
     r && clearTimeout(r), r = setTimeout(() => e(...a), n);
@@ -67,25 +68,32 @@ function y(e, n) {
     r && (clearTimeout(r), r = null);
   }, o;
 }
-function h(e) {
+function y(e) {
   return e == null ? !0 : typeof e == "string" ? e.trim() === "" : Array.isArray(e) ? e.length === 0 : typeof e == "object" ? Object.keys(e).length === 0 : !1;
 }
 export {
-  A as GLASS_VARIANTS,
-  y as debounce,
-  p as escapeHtml,
-  d as generateId,
-  G as glassClassNames,
+  C as GLASS_VARIANTS,
+  S as debounce,
+  d as escapeHtml,
+  g as generateId,
+  P as glassClassNames,
   t as isBrowser,
-  h as isEmpty,
+  y as isEmpty,
   i as isServer,
-  I as normalizeGlass,
+  T as normalizeGlass,
+  A as pointsToClipPath,
+  G as pointsToPathData,
   f as safeDocument,
   m as safeGetComputedStyle,
-  u as safeLocalStorageGet,
-  l as safeLocalStorageRemove,
-  s as safeLocalStorageSet,
-  c as safeMatchMedia,
-  g as safeWindow,
-  S as slugify
+  c as safeLocalStorageGet,
+  u as safeLocalStorageRemove,
+  l as safeLocalStorageSet,
+  s as safeMatchMedia,
+  p as safeWindow,
+  I as sampleCornerOffset,
+  h as slugify,
+  v as squircleClipPath,
+  E as squirclePoints,
+  M as squirclePower,
+  q as superellipseCorner
 };

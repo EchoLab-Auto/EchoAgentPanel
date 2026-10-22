@@ -56,6 +56,28 @@ export interface NeumorphismCardProps {
      * 需置于有色背景 / 图片之上才能看到半透明与模糊效果。
      */
     glass?: boolean | CardGlass;
+    /**
+     * 超椭圆圆角（可选）：`true` = 默认指数 2.5；`number` = 自定义指数。
+     *
+     * 关闭（`false`，默认）时卡片的角是 CSS `border-radius` 的**圆弧**；
+     * 开启后改由 `clip-path: path()` 画超椭圆（连续曲率），曲线与设备屏幕角同族 ——
+     * 圆弧贴超椭圆会在 45° 附近错位（实测最优半径仍差 2.3px）。
+     *
+     * 半径取卡片**当前生效的** `border-radius`（即 `radius` prop / 全局配置 /
+     * 消费方 CSS 覆盖之后的值），所以「角形状」与「角大小」互不干扰。
+     * 注意：开启后 `border-radius` 会被置 0（clip 与圆角是取交集关系，留着会把
+     * 超椭圆又裁回圆角矩形）。
+     */
+    squircle?: boolean | number;
+    /**
+     * 自定义轮廓（任意 `clip-path` 值，典型如 `path("…")`）。给了就以它为准，
+     * `squircle` 与 `border-radius` 都让位（同样会把圆角置 0）。
+     *
+     * 用于「角形状无法用等半径超椭圆表达」的场景 —— 例如会话输入区要贴合设备
+     * 屏幕角：下角是屏幕超椭圆的**偏移曲线**、上角取剩余高度，四角并不对称，
+     * 由消费方用 `sampleCornerOffset()` 算好后传进来。
+     */
+    clipPath?: string;
 }
 declare function __VLS_template(): {
     header?(_: {}): any;
@@ -66,14 +88,20 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     hoverable: undefined;
     noPadding: boolean;
     glass: undefined;
+    squircle: boolean;
+    clipPath: undefined;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {}, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismCardProps>, {
     hoverable: undefined;
     noPadding: boolean;
     glass: undefined;
+    squircle: boolean;
+    clipPath: undefined;
 }>>> & Readonly<{}>, {
+    clipPath: string;
     glass: boolean | CardGlass;
     noPadding: boolean;
     hoverable: boolean | "bulge" | "sink";
+    squircle: boolean | number;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;

@@ -26,3 +26,5 @@ export declare function debounce<T extends (...args: unknown[]) => void>(fn: T, 
  * Check if value is empty (null, undefined, empty string, empty array, empty object)
  */
 export declare function isEmpty(value: unknown): boolean;
+export { squirclePower, superellipseCorner, squirclePoints, squircleClipPath, pointsToPathData, pointsToClipPath, sampleCornerOffset, } from './squircle';
+export type { SquirclePoint, SquircleOptions } from './squircle';
