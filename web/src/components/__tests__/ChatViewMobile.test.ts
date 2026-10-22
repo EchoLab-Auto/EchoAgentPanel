@@ -118,12 +118,17 @@ describe('ChatView 竖屏移动端', () => {
       .map((m) => m[1])
       .join('\n');
     // 等间隙：左右与底部共用同一个 --composer-inset（这是"角部间隙恒定"的前提）
-    // 2026-10：留白随屏幕圆角走（clamp(14px, R−58, 20px)）——iPhone 17 的
-    // R=74.5 下 14px 会让贴角区(60.5px)顶穿 68px 的条高，composerOutline 退化
-    // 成胶囊。断言"下限 14 + 随 R 增长 + 有上限"三条，而不是钉死一个常数，
-    // 否则每次重测屏角都要改测试。
+    // 2026-10：留白与屏角联动，且用**比例**约束而不是「R 减魔法数」——
+    // 贴角区高度 = R − inset 占单行静止条高的比例封顶 85%，上角恒得 15%。
+    // 断言三件事（而不是钉死一个数值，否则每次重测屏角都要改测试）：
+    //   ① 静止条高由 --chat-control-h + padding + border 派生（不写死 68）
+    //   ② inset 的 clamp 下限 14 / 上限 20，中间项随 --panel-display-radius 增长
+    //   ③ 系数 0.85 是把「贴角区 ≤ 85% 条高」翻译成 CSS 的那个常数
+    expect(composerRules, '静止条高必须派生而非写死').toMatch(
+      /--composer-rest-h:\s*calc\(\s*var\(--chat-control-h\)\s*\+\s*2\s*\*\s*var\(--composer-padding\)\s*\+\s*2\s*\*\s*var\(--composer-border\)\s*\)/,
+    );
     expect(composerRules, '左右/底部留白必须同源').toMatch(
-      /--composer-inset:\s*clamp\(\s*14px\s*,\s*calc\(\s*var\(--panel-display-radius\)\s*-\s*58px\s*\)\s*,\s*20px\s*\)/,
+      /--composer-inset:\s*clamp\(\s*14px\s*,\s*calc\(\s*var\(--panel-display-radius\)\s*-\s*0\.85\s*\*\s*var\(--composer-rest-h\)\s*\)\s*,\s*20px\s*\)/,
     );
     expect(composerRules).toMatch(/left: max\(var\(--composer-inset\)/);
     expect(composerRules).toMatch(/right: max\(var\(--composer-inset\)/);

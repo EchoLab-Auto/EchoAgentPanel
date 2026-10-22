@@ -743,9 +743,24 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 }
 @media (max-width: 767.98px) {
   :root {
-    /* 兜底：非 iPhone 的窄屏（Android 多在 28–40、iPad ≈ 18、iPhone SE 为 0）
-       保持历史常数 55 —— 只用于「不知道」（设备名读不到），已知机型见下方分档。 */
+    /* 兜底 A（低像素密度）：iPad 与 iPhone SE 这类 DPR < 2.5 的窄屏。
+       角真值：iPad ≈ 18–27、iPhone SE 为 0（直角屏），55 已经偏松 —— 安全方向。 */
     --panel-display-radius: 55px;
+  }
+}
+@media (max-width: 767.98px) and (min-resolution: 2.5dppx) {
+  :root {
+    /* 兜底 B（3x 屏、但宽度不在任何已知档）：**必须取偏大值**。
+
+       为什么不能沿用 55：iPhone 开「显示缩放（Display Zoom）」后逻辑视口变窄
+       （402 → 约 369~375），掉出所有精确档 → 落到这里。而物理屏角没变，
+       换算成 CSS 跨度反而**变大**（同一根角分到更少的 CSS 像素里：
+       224 设备px ÷ 3.2 ≈ 70 CSS px）。此时若填 55，模型角比真机小 15px，
+       输入框的角会伸到物理死弯之外被屏幕裁掉 —— 这是**唯一会切内容的危险方向**。
+
+       取 70：对 zoomed iPhone 把侵入从 ~26px 压到 ~2px；对 Android 3x 屏
+       （角真值 28–48）只是更松，安全。宁松勿紧是这个变量的唯一取舍原则。 */
+    --panel-display-radius: 70px;
   }
 }
 /* iPhone 12/13/14（390×844）：同族等比外推，未实测 */

@@ -72,6 +72,19 @@ const VIEWPORTS = [
     safe: { top: 62, bottom: 34, left: 0, right: 0 },
     displayRadius: 74.5,
   },
+  {
+    /**
+     * iPhone 开「显示缩放」后的形态（2026-10 新增）：逻辑视口变窄、
+     * DPR 变大（物理像素不变 → 同一根屏角分到更少的 CSS 像素里，
+     * 跨度反而从 74.5 涨到约 70）。这是**唯一会切进内容的危险方向**：
+     * 若这里退回兜底 55，输入框的角会伸到物理死弯之外被屏幕裁掉。
+     * styles.css 的「兜底 B」把 3x 未知宽度定在 70，这一档就是它的回归守卫。
+     */
+    name: '375×812 @3.2 (Display Zoom)',
+    width: 375, height: 812, dpr: 3.216,
+    safe: { top: 62, bottom: 34, left: 0, right: 0 },
+    displayRadius: 70,
+  },
 ];
 /**
  * 超椭圆指数：必须与 ChatView.vue 传给 `composerOutline` 的 exponent 一致，
@@ -175,12 +188,21 @@ const PROBE = `(() => {
   const clipEl = document.querySelector('.chat-composer-float__surface');
   const clipPath = clipEl ? getComputedStyle(clipEl).clipPath : null;
   /**
-   * 输入区下角与屏幕角的贴合度 —— 用命中测试取出真实轮廓，逐点量到屏幕
-   * 左下角超椭圆弧的距离，看波动。
+   * 输入区下角与屏幕角的贴合度 —— 用命中测试取出**真实渲染轮廓**，逐点量到
+   * 屏幕角超椭圆的距离。
    *
-   * 这是"贴合"唯一的可量化判据：偏移量本身（14px）不重要，**波动**才对应
-   * 肉眼看到的"不平行"。border-radius 时代最好的半径也有 2.3px 波动；
-   * 换成 clip-path 精确轮廓后应 < 1px。
+   * 这是"贴合"唯一的可量化判据：偏移量本身不重要，**波动**才对应肉眼看得到
+   * 的"不平行"。border-radius 时代最好的半径也有 2.3px 波动；换成 clip-path
+   * 精确轮廓后应 < 1px。
+   *
+   * 2026-10 补三处（kimi 复核指出的盲区）：
+   *   ① **左右都量**。此前只量左下角；镜像算错（w - (p[0]-inset)）或上角
+   *      不对称时，右侧坏了也不会红。现在两个角各出一份，断言取较差者。
+   *   ② **参考曲线补两端直边延长线**。只拿 0~90° 的弧去取最近点，落在角区
+   *      之外的采样点会把"沿边方向"的距离算进来 → 假波动（实测可为 5.6px）。
+   *      这里把弧延长成「左边直边 → 弧 → 底边直边」的折线。
+   *   ③ **min 单独上报**。间隙变小 = 切进物理死弯（内容被裁），是唯一危险的
+   *      方向；变大只是不贴。只看 spread 抓不到"整体向里陷"。
    */
   const outlineGap = (() => {
     const el = clipEl;
@@ -194,42 +216,74 @@ const PROBE = `(() => {
       const t = document.elementFromPoint(x, y);
       return !!(t && (t === el || el.contains(t)));
     };
-    // 屏幕左下角超椭圆（指数与 ChatView.vue 一致，由 PROBE 模板注入）
+    // 屏幕角超椭圆（指数与 ChatView.vue 一致，由 PROBE 模板注入）：
+    // 角在原点、y 向上；左侧直边 + 弧 + 底边直边，各延长 12px 兜住端点。
     const s = 2 / EXPONENT;
+    const EXT = 12;
     const arc = [];
+    for (let i = 0; i <= 600; i += 1) arc.push([R, -EXT + (i / 600) * EXT]); // 左边直边（向上延长）
     for (let i = 0; i <= 3000; i += 1) {
       const t = (i / 3000) * Math.PI / 2;
       arc.push([R - R * Math.cos(t) ** s, R - R * Math.sin(t) ** s]);
     }
-    let min = Infinity;
-    let max = -Infinity;
-    let n = 0;
-    for (let yy = b.bottom - touch; yy <= b.bottom - 0.5; yy += 1) {
-      // 该行最左命中 x（先粗扫再二分细化）
-      let lo = null;
-      for (let x = 0; x <= b.left + touch + 6; x += 0.5) {
-        if (inside(x, yy)) { lo = x; break; }
+    for (let i = 0; i <= 600; i += 1) arc.push([R + (i / 600) * EXT, R]);   // 底边直边（向右延长）
+
+    /** 量一侧：side = 'left' | 'right'（屏幕系 x 从该侧屏幕边缘算起） */
+    const measure = (side) => {
+      const vw = innerWidth;
+      let min = Infinity;
+      let max = -Infinity;
+      let n = 0;
+      for (let yy = b.bottom - touch; yy <= b.bottom - 0.5; yy += 1) {
+        // 该侧最外命中 x：先粗扫再二分细化
+        let edge = null;
+        if (side === 'left') {
+          for (let x = 0; x <= b.left + touch + 6; x += 0.5) {
+            if (inside(x, yy)) { edge = x; break; }
+          }
+        } else {
+          for (let x = vw - 0.5; x >= b.right - touch - 6; x -= 0.5) {
+            if (inside(x, yy)) { edge = x; break; }
+          }
+        }
+        if (edge === null) continue;
+        let a;
+        let hi;
+        if (side === 'left') { a = Math.max(0, edge - 0.5); hi = edge; }
+        else { a = Math.min(vw, edge + 0.5); hi = edge; }
+        for (let k = 0; k < 6; k += 1) {
+          const mid = (a + hi) / 2;
+          if (inside(mid, yy)) hi = mid; else a = mid;
+        }
+        const px = side === 'left' ? hi : vw - hi;   // 屏幕系 x（从该侧边缘算起）
+        const py = innerHeight - yy;                 // 屏幕系 y 向上
+        let best = Infinity;
+        for (const [ax, ay] of arc) {
+          const d = Math.hypot(px - ax, py - ay);
+          if (d < best) best = d;
+        }
+        min = Math.min(min, best);
+        max = Math.max(max, best);
+        n += 1;
       }
-      if (lo === null) continue;
-      let a = Math.max(0, lo - 0.5);
-      let hi = lo;
-      for (let k = 0; k < 6; k += 1) {
-        const mid = (a + hi) / 2;
-        if (inside(mid, yy)) hi = mid; else a = mid;
-      }
-      const py = innerHeight - yy; // 屏幕系 y 向上
-      let best = Infinity;
-      for (const [ax, ay] of arc) {
-        const d = Math.hypot(hi - ax, py - ay);
-        if (d < best) best = d;
-      }
-      min = Math.min(min, best);
-      max = Math.max(max, best);
-      n += 1;
-    }
-    return n > 4
-      ? { min: +min.toFixed(2), max: +max.toFixed(2), spread: +(max - min).toFixed(2), samples: n }
-      : null;
+      return n > 4
+        ? { min: +min.toFixed(2), max: +max.toFixed(2), spread: +(max - min).toFixed(2), samples: n }
+        : null;
+    };
+
+    const left = measure('left');
+    const right = measure('right');
+    if (!left && !right) return null;
+    // 汇总取较差者：任一侧退化都要能被看见
+    const pick = (k) => Math[k](left?.[k] ?? Infinity, right?.[k] ?? Infinity);
+    return {
+      min: pick('min'),
+      max: Math.max(left?.max ?? -Infinity, right?.max ?? -Infinity),
+      spread: Math.max(left?.spread ?? 0, right?.spread ?? 0),
+      samples: (left?.samples ?? 0) + (right?.samples ?? 0),
+      left,
+      right,
+    };
   })();
 
   /**
@@ -525,7 +579,35 @@ try {
       `${tag} 下角贴合屏幕角（间隙波动 < 1px）`,
       !!m.composer?.outlineGap && m.composer.outlineGap.spread < 1,
       m.composer?.outlineGap
-        ? `间隙 ${m.composer.outlineGap.min}~${m.composer.outlineGap.max}px，波动 ${m.composer.outlineGap.spread}px（${m.composer.outlineGap.samples} 行采样；圆弧时代最好 2.3px，最初 34px）`
+        ? `间隙 ${m.composer.outlineGap.min}~${m.composer.outlineGap.max}px，波动 ${m.composer.outlineGap.spread}px（${m.composer.outlineGap.samples} 行采样；左 ${JSON.stringify(m.composer.outlineGap.left)} 右 ${JSON.stringify(m.composer.outlineGap.right)}；圆弧时代最好 2.3px，最初 34px）`
+        : '采样失败',
+    );
+    /**
+     * 危险方向守卫（2026-10）：间隙**变小**意味着输入框的角切进了屏幕的
+     * 物理死弯——内容会被屏幕圆角裁掉，是唯一不可接受的失效。变大只是"不贴"。
+     * 只看 spread 抓不到这个：整体向里陷时 spread 可能仍然很小。
+     * 容差 1px：光栅化 + 亚像素插值的量级。
+     */
+    check(
+      `${tag} 间隙不小于声明留白（不切进物理死弯）`,
+      !!m.composer?.outlineGap
+        && m.composer.outlineGap.min >= (m.composer.leftInset ?? 0) - 1,
+      m.composer?.outlineGap
+        ? `min ${m.composer.outlineGap.min} ≥ 留白 ${m.composer.leftInset} − 1`
+        : '采样失败',
+    );
+    /**
+     * 左右对称：镜像计算（composerOutline 里的 w - (p0 - inset)）错了、
+     * 或上角 topRy 两侧不一致时，只有一侧会坏。分别断言两边波动。
+     */
+    check(
+      `${tag} 左右下角都贴合（两侧波动各 < 1px）`,
+      !!m.composer?.outlineGap?.left
+        && !!m.composer?.outlineGap?.right
+        && m.composer.outlineGap.left.spread < 1
+        && m.composer.outlineGap.right.spread < 1,
+      m.composer?.outlineGap
+        ? `左 ${m.composer.outlineGap.left?.spread}px / 右 ${m.composer.outlineGap.right?.spread}px`
         : '采样失败',
     );
     // 多行输入：形状不许跳变（上角半径锁定 + 下角仍贴合）
@@ -631,7 +713,7 @@ for (const c of checks) {
   // 贴合度是这套断言的**核心指标**（一个数字就能看出角是不是平行），
   // 通过时也把间隙区间/波动打出来 —— 否则回归只能靠"从 0.3 涨到 0.9
   // 但都 < 1px"这类不报错的方式溜过去。
-  const showDetail = !c.ok || /贴合|多行/.test(c.name);
+  const showDetail = !c.ok || /贴合|多行|间隙不小于|左右下角/.test(c.name);
   console.log(`${c.ok ? '✓' : '✗'} ${c.name}${showDetail ? `\n    → ${c.detail}` : ''}`);
   if (!c.ok) failed++;
 }

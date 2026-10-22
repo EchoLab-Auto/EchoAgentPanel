@@ -2345,16 +2345,29 @@ function mediaSrc(img: string): string {
      ⑤ 键盘弹出时（keyboardInset > 0）面板浮在键盘上方，等间隙已无意义，
         但仍沿用同一轮廓（形状不跳变）。 */
   .chat-composer-float {
-    /* 留白随屏幕圆角自动放大（2026-10 iPhone 17 重测后的联动）：
-       贴角区高度 = R(屏角) − inset，必须不超过输入框高 − 8 才有地方放上角，
-       否则 composerOutline 会退化成"四角同半径"的胶囊（实测 iPhone 17 上
-       间隙波动从 0.3px 炸到 17px）。R 从 55 涨到 74.5 后 14px 不再够用：
-       74.5 − 14 = 60.5 > 68 − 8 = 60。这里用公式让留白跟着 R 走 ——
-         R=55（375/320/兜底）→ 14px（原样，零回归）
-         R=65.5（393，iPhone 15/16）→ 14px
-         R=74.5（402/440，iPhone 16 Pro/17）→ 16.5px（上角 10px，1.5px 余量）
-       上限 20px：再大就只是无谓地缩窄输入框。 */
-    --composer-inset: clamp(14px, calc(var(--panel-display-radius) - 58px), 20px);
+    /* 留白与屏角联动：贴角区高度 = R − inset，占单行静止条高的比例必须封顶。
+
+       为什么要联动：贴角区（R−inset）纵向吃掉输入框的一部分，剩给上角的
+       「剩余高度」= 条高 − 贴角区。若让它吃掉太多，上角就只剩几像素，
+       两端变成畸形的尖椭圆端头。早期版本在这里还会整体退化成胶囊
+       （`composerOutline` 的悬崖分支）；dd266c4 之后已改成连续降级
+       （`fitRadius` 按面板高度收缩模型半径），所以这条 clamp 现在的真实作用
+       是**保住上角的可见高度**，不再是防崩溃。
+
+       比例取 85%：上角恒得静止条高的 15%（≈10px），与 R 无关 ——
+       这就是「比例约束」比「R 减魔法数 58」更稳的地方：字号/内边距一变，
+       静止条高跟着变，约束自动跟随；未来机型 R 继续涨也只需重测 R。
+
+       下限 14px / 上限 20px：下限是历史值（小角机型 R=55 时给出 14，
+       零回归）；上限避免 R 很大的机型把输入框压得过窄。 */
+    --composer-rest-h: calc(
+      var(--chat-control-h) + 2 * var(--composer-padding) + 2 * var(--composer-border)
+    );
+    --composer-inset: clamp(
+      14px,
+      calc(var(--panel-display-radius) - 0.85 * var(--composer-rest-h)),
+      20px
+    );
     left: max(var(--composer-inset), env(safe-area-inset-left, 0px));
     right: max(var(--composer-inset), env(safe-area-inset-right, 0px));
     bottom: calc(var(--composer-inset) + v-bind(keyboardInsetPx));
