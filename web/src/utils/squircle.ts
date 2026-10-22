@@ -96,7 +96,7 @@ function offsetOpen(pts: Point[], d: number, cx: number, cy: number): Point[] {
 export function screenCornerOffset(
   screenRadius: number,
   inset: number,
-  exponent = 2.6,
+  exponent = 2.5,
   steps = 28,
 ): Point[] {
   const R = screenRadius;
@@ -176,10 +176,23 @@ export interface ComposerOutlineOptions {
   inset: number;
   /** 设备屏幕圆角半径；0 = 直角屏（桌面 / iPhone SE） */
   screenRadius: number;
-  /** 超椭圆指数：2 = 圆弧，越大越"方"；iOS 屏角实测对应 2.3~3.0 */
+  /** 超椭圆指数：2 = 圆弧，越大越"方"；iOS 屏角实测 2.42~2.54（见 styles.css） */
   exponent?: number;
   /** 每角采样段数 */
   steps?: number;
+  /**
+   * 上角纵向半径的上限（省略 = 不设上限，吃掉全部剩余高度）。
+   *
+   * 为什么要设上限：上角取「剩余高度」是为了让左右边缘都是竖直切线（C1 连续），
+   * 但剩余高度随面板变高而增长 —— 多行输入时面板从 68px 长到 170px，上角会从
+   * 10px 一路长到 58px（实测 iPhone 17 视口：1 行 9.75 → 2 行 34.75 → 3 行 58.25），
+   * 等于每打一行，两端就从「尖椭圆端头」渐变到「四分之一圆」。这个形变不是
+   * 用户操作的对象，读起来像抖动。
+   *
+   * 传「静止态（单行）的剩余高度」即可锁住：面板长高时上角不再变大，中间那段
+   * 还原成竖直直边（本来就是更想要的样子，见文件头「想要可见直边只能降低贴合度」）。
+   */
+  topRyMax?: number;
 }
 
 /**
@@ -188,11 +201,25 @@ export interface ComposerOutlineOptions {
  * 上下角不等大：下角被"贴屏幕角"锁死为 R−d，上角吃掉剩余高度。
  */
 export function composerOutline(options: ComposerOutlineOptions): Point[] {
-  const { width: w, height: h, inset, screenRadius, exponent = 2.6, steps = 28 } = options;
+  const { width: w, height: h, inset, exponent = 2.5, steps = 28, topRyMax } = options;
   const s = powerOf(exponent);
+  /**
+   * 屏幕圆角**按面板高度收缩**（2026-10）。
+   *
+   * 贴角区纵向占 R−d；面板太矮时它放不下，此前直接退化成「四角同半径」的胶囊
+   * —— 一次 2px 的高度抖动就能让形状整体换掉（实测 iPhone 17 视口下间隙波动
+   * 从 0.3px 跳到 17px），是个悬崖。这里改成连续降级：面板矮到放不下时，把
+   * **建模的**屏幕圆角缩到刚好放得下（`R_eff = h − 8 + d`）。
+   *
+   * 代价只有「模型屏幕角比真机略紧」：R 差 1px 时 45° 处间隙偏差 ≈0.17px，
+   * 与"整个形状换掉"不是一个量级。d 与 R 由 CSS 联动（`R − 58px`）时
+   * R_eff = R 恒成立，这条路径平时根本走不到 —— 它是防抖动的兜底。
+   */
+  const fitRadius = Math.max(inset, Math.min(options.screenRadius, h - 8 + inset));
+  const screenRadius = fitRadius;
   const touch = screenRadius - inset;
-  // 贴角区比面板还高 → 偏移曲线放不下，退化为四角同半径超椭圆（胶囊）
-  const fits = screenRadius > 0 && touch > 0 && touch <= h - 8 && w > touch * 2;
+  // 剩下只有"几何上无解"才退化：触屏角无意义 / 偏移曲线比面板还宽
+  const fits = screenRadius > 0 && touch > 0 && w > touch * 2;
 
   if (!fits) {
     // 直角屏（桌面 / iPhone SE）也要有圆角：touch ≤ 0 时退回 20px 兜底
@@ -213,7 +240,10 @@ export function composerOutline(options: ComposerOutlineOptions): Point[] {
   // topRy 取偏移曲线的实测端点高度而非 R−inset，否则接缝处有 0.03px 错位；
   // 再以「贴角区高度」封顶 —— 多行输入把面板撑高时，上角不该跟着无限变大
   // （否则边缘出现细高椭圆），多余高度应还原成竖直直边。
-  const topRy = Math.max(0, Math.min(bl[0][1], h - bl[0][1]));
+  const topRy = Math.max(
+    0,
+    Math.min(bl[0][1], h - bl[0][1], topRyMax ?? Number.POSITIVE_INFINITY),
+  );
   const tr = cornerPoints(w, 0, touch, topRy, -1, 1, s, steps);
   const tl = cornerPoints(0, 0, touch, topRy, 1, 1, s, steps);
 

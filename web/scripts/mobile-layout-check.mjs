@@ -335,6 +335,15 @@ const PROBE = `(() => {
       attachRadius: radiusOf('.chat-view__attach-btn'),
       sendRadius: radiusOf('.chat-view__send'),
       clipPath: clipPath || null,
+      /**
+       * 上角纵向半径（轮廓首点的 y）。轮廓从左上角起点开始，所以首点 y 就是
+       * 上角吃掉的纵向高度。多行输入把面板撑高时它**不该变** —— 变了就是
+       * "每打一行两端形变一次"。
+       */
+      topRy: (() => {
+        const nums = clipPath ? (clipPath.match(/-?\\d+\\.?\\d*/g) || []).map(Number) : [];
+        return nums.length >= 2 ? +nums[1].toFixed(2) : null;
+      })(),
       outlineGap,
       cornerHitTest,
     } : null,
@@ -355,6 +364,22 @@ const PROBE = `(() => {
  * 也正常（实测 y=466..632，容器 top=640），截图里却什么都没有；唯一可靠的判据是
  * `elementFromPoint` 命中测试。2026-10 用户报障（移动端入口行 Agent 按钮点不动）即此。
  */
+/**
+ * 灌 3 行文本，把输入区撑高（单行 68px → 约 119px）。
+ *
+ * 为什么这一条必须断言：上角纵向半径取的是「剩余高度」，面板一长高它就跟着长
+ * ——2026-10 实测 iPhone 17 视口下 1 行 9.75 → 2 行 34.75 → 3 行 58.25px，
+ * 视觉上每打一行两端就从尖椭圆变成四分之一圆。用 `topRyMax` 锁住后应当纹丝不动，
+ * 且多出来的高度变成竖直直边（下角贴合度不受影响）。
+ */
+const GROW = `(() => {
+  const ta = document.querySelector('.chat-composer-float textarea');
+  if (!ta) return false;
+  ta.value = ['第一行', '第二行', '第三行'].join(String.fromCharCode(10));
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+})()`;
+
 const OPEN_MENU = `(() => {
   const card = document.querySelector('.agent-card');
   if (!card || card.disabled) return { skipped: true };
@@ -503,6 +528,34 @@ try {
         ? `间隙 ${m.composer.outlineGap.min}~${m.composer.outlineGap.max}px，波动 ${m.composer.outlineGap.spread}px（${m.composer.outlineGap.samples} 行采样；圆弧时代最好 2.3px，最初 34px）`
         : '采样失败',
     );
+    // 多行输入：形状不许跳变（上角半径锁定 + 下角仍贴合）
+    if (await evaluate(GROW)) {
+      await new Promise((r) => setTimeout(r, 400));
+      const grown = await evaluate(probe);
+      const before = m.composer?.topRy;
+      const after = grown.composer?.topRy;
+      check(
+        `${tag} 多行输入不改变上角半径（形状不跳变）`,
+        before != null && after != null && Math.abs(after - before) < 0.6,
+        `1 行 ${before}px → 3 行 ${after}px（条高 ${m.composer?.height} → ${grown.composer?.height}）`,
+      );
+      check(
+        `${tag} 多行输入后下角仍贴合`,
+        !!grown.composer?.outlineGap && grown.composer.outlineGap.spread < 1,
+        grown.composer?.outlineGap
+          ? `间隙 ${grown.composer.outlineGap.min}~${grown.composer.outlineGap.max}px，波动 ${grown.composer.outlineGap.spread}px`
+          : '采样失败',
+      );
+      // 复位，别影响后续检查
+      await evaluate(`(() => {
+        const ta = document.querySelector('.chat-composer-float textarea');
+        if (!ta) return false;
+        ta.value = '';
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`);
+      await new Promise((r) => setTimeout(r, 300));
+    }
     check(
       `${tag} 圆角真的切出来了（角尖点击穿透 / 底边命中）`,
       m.composer?.cornerHitTest?.tipOutside === false
@@ -578,7 +631,7 @@ for (const c of checks) {
   // 贴合度是这套断言的**核心指标**（一个数字就能看出角是不是平行），
   // 通过时也把间隙区间/波动打出来 —— 否则回归只能靠"从 0.3 涨到 0.9
   // 但都 < 1px"这类不报错的方式溜过去。
-  const showDetail = !c.ok || /贴合/.test(c.name);
+  const showDetail = !c.ok || /贴合|多行/.test(c.name);
   console.log(`${c.ok ? '✓' : '✗'} ${c.name}${showDetail ? `\n    → ${c.detail}` : ''}`);
   if (!c.ok) failed++;
 }

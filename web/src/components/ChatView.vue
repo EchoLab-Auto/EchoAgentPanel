@@ -154,6 +154,34 @@ const composerClip = ref('none');
 const composerClipInner = ref('none');
 const composerCornerR = ref('');
 
+/**
+ * 单行静止态下「上角能占的纵向高度」= 静止条高 − 贴角区高度。
+ *
+ * 静止条高不能直接读（此刻可能已被多行输入撑高），由内框的 `min-height`
+ * 反推：`--chat-control-h` 是 calc() 表达式、computed value 不求值，但
+ * **元素上**的 min-height 是 used value（resolved px），能读。加上
+ * padding/border 就是外框静止高。任何一步读不到就退回「不设上限」
+ * （即改动前的行为），不让它因为测不到而画错。
+ */
+function restingSlack(touch: number, style: CSSStyleDeclaration): number | undefined {
+  const el = composerFloatRef.value;
+  // 「单行内框高」的锚点：发送/附件按钮被钉在 `--chat-control-h`
+  // （height/min-height 都是它），而且**不随多行变高**，正是要的那个数。
+  // 不能读 `.nm-textarea` 的 min-height —— 那是 auto（自动撑高），读不到
+  // 静止值；也不能读 `--chat-control-h` 本身（calc 表达式，computed 不求值）。
+  const anchor = el?.querySelector<HTMLElement>('.chat-view__send, .chat-view__attach-btn');
+  if (!anchor) return undefined;
+  const fieldH = anchor.getBoundingClientRect().height;
+  const pad = Number.parseFloat(style.getPropertyValue('--composer-padding'));
+  const border = Number.parseFloat(style.getPropertyValue('--composer-border'));
+  if (!Number.isFinite(fieldH) || fieldH <= 0) return undefined;
+  if (!Number.isFinite(pad) || !Number.isFinite(border)) return undefined;
+  const restHeight = fieldH + (pad + border) * 2;
+  const slack = restHeight - touch;
+  // 负值/极窄说明模型对不上（例如字号被系统放大），交给默认行为
+  return slack > 1 ? slack : undefined;
+}
+
 function updateComposerClip() {
   const el = composerFloatRef.value;
   if (!el) return;
@@ -186,6 +214,11 @@ function updateComposerClip() {
     // 间隙波动 < 0.5px（n 偏 0.1 约换 0.4px 的角部误差）。
     exponent: 2.5,
     steps: 24,
+    // 上角纵向半径锁在「单行静止态」的剩余高度：不锁的话多行输入把面板从
+    // 68 撑到 170 时，上角会从 10px 一路长到 58px（实测 9.75 → 34.75 →
+    // 58.25），每打一行两端就从尖椭圆渐变到四分之一圆 —— 不是用户的操作对象，
+    // 读起来像抖动。锁住后长出来的高度变成竖直直边（本来就是更想要的形状）。
+    topRyMax: restingSlack(screenRadius - inset, style),
   });
   // 内轮廓：玻璃层铺在外层 padding(=1px 描边) 之内，故整体再平移 -1px
   const inner = insetPolyline(outer, 1).map(([x, y]) => [x - 1, y - 1] as const);

@@ -96,6 +96,50 @@ describe('composerOutline', () => {
       expect(y).toBeLessThanOrEqual(40.01);
     }
   });
+
+  /**
+   * 2026-10 iPhone 17 重标后新增的两条契约。
+   *
+   * 背景：R 从 55 抬到 74.5 后，`touch = R − inset` 涨到 58，与 68px 的条高只差
+   * 10px。两条"悬崖"随之暴露 —— 高度抖 2px 就整体换成胶囊（间隙波动 0.3 → 17px），
+   * 多行输入则让上角从 10px 长到 58px（每打一行形变一次）。下面把它们各钉一条。
+   */
+  it('面板略矮时按高度收缩屏幕圆角，而不是整块换成胶囊', () => {
+    const R = 74.5;
+    const inset = 16.5;
+    const height = 60; // 真实 touch=58 放不下 → 触发收缩：R_eff = 60−8+16.5 = 68.5
+    const steps = 40;
+    const pts = composerOutline({ width: 369, height, inset, screenRadius: R, steps });
+    const eff = height - 8 + inset;
+    // 与既有判据同构：末尾 steps+1 点是左下角，逐点量到「收缩后」屏幕角的距离
+    const bl = pts.slice(-(steps + 1));
+    const arc = screenArc(eff, 2.5);
+    const gaps = bl.map(([x, y]) => distToPolyline([x + inset, height + inset - y], arc));
+    // 胶囊退化会让间隙从 16.5 起飞到几十像素；收缩口径下仍是等间隙
+    expect(Math.min(...gaps)).toBeGreaterThan(inset - 1);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(0.5);
+  });
+
+  it('topRyMax 锁住上角：面板变高时上角半径不变，多出的高度成为竖直直边', () => {
+    const opts = { width: 369, inset: 16.5, screenRadius: 74.5, steps: 24, topRyMax: 9.6 };
+    const rest = composerOutline({ ...opts, height: 68 });
+    const grown = composerOutline({ ...opts, height: 170 });
+    // 首点 = 左上角起点（x=0, y=上角纵向半径）
+    expect(rest[0][0]).toBeCloseTo(0, 6);
+    expect(grown[0][0]).toBeCloseTo(0, 6);
+    expect(grown[0][1]).toBeCloseTo(rest[0][1], 6);
+    expect(grown[0][1]).toBeLessThan(10);
+    // 长出来的部分必须是竖直直边：轮廓里存在 x≈0 且 y 跨越 60px 以上的点
+    const left = grown.filter(([x]) => Math.abs(x) < 0.01).map(([, y]) => y);
+    expect(Math.max(...left) - Math.min(...left)).toBeGreaterThan(60);
+    // 且仍在框内
+    for (const [x, y] of grown) {
+      expect(x).toBeGreaterThan(-0.01);
+      expect(x).toBeLessThan(369.01);
+      expect(y).toBeGreaterThan(-0.01);
+      expect(y).toBeLessThan(170.01);
+    }
+  });
 });
 
 describe('insetPolyline', () => {
