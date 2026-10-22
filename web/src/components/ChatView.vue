@@ -160,7 +160,14 @@ function updateComposerClip() {
   const rect = el.getBoundingClientRect();
   const style = getComputedStyle(el);
   const screenRadius = Number.parseFloat(style.getPropertyValue('--panel-display-radius')) || 0;
-  const inset = Number.parseFloat(style.getPropertyValue('--composer-inset')) || 0;
+  // 留白取**实测位置**，不解析 CSS 变量值：变量现在是 clamp()/calc() 表达式
+  // （2026-10 起随屏角联动），自定义属性的 computed value 并不求值，
+  // parseFloat('clamp(14px, …)') = NaN —— 之前会静默清零、整块 clip 失效。
+  // rect.left 就是「输入区左边缘到屏幕左边」的真实距离，与 rect.width 同源；
+  // 它含 env(safe-area-inset-left)（横屏刘海时 > 变量值），此时按真实位置
+  // 画轮廓才是对的。变量是否**存在**仍作为「是否启用贴合模式」的开关。
+  const insetDeclared = style.getPropertyValue('--composer-inset').trim();
+  const inset = insetDeclared ? rect.left : 0;
   if (rect.width < 2 || rect.height < 2 || inset <= 0) {
     composerClip.value = 'none';
     composerClipInner.value = 'none';
@@ -172,10 +179,12 @@ function updateComposerClip() {
     height: rect.height,
     inset,
     screenRadius,
-    // 超椭圆指数：Apple 的连续曲率在 45° 处落在 0.26~0.29R 附近，对应 n≈2.3~3.0。
-    // 取 2.6 是中点：模型若落在 2.3~3.0 区间，间隙波动最坏 2.2px
-    // （取 4 时最坏 7.9px —— n 越大角越"方"，45° 处只到 0.16R，退让过度）。
-    exponent: 2.6,
+    // 超椭圆指数 2.5：2026-10 用 Apple 官方 bezel PNG 直接量屏幕角得到
+    // n = 2.42~2.54（16/17 两代 8 个机型，拟合残差 ≤0.4px），不再是
+    // 「45° 落在 0.26~0.29R、对应 n≈2.3~3.0」的区间推测。取 2.5 时
+    // 45° 处内缩 = (1−2^(−1/2.5))R = 0.242R；模型若真落在 2.42~2.54，
+    // 间隙波动 < 0.5px（n 偏 0.1 约换 0.4px 的角部误差）。
+    exponent: 2.5,
     steps: 24,
   });
   // 内轮廓：玻璃层铺在外层 padding(=1px 描边) 之内，故整体再平移 -1px
@@ -2303,7 +2312,16 @@ function mediaSrc(img: string): string {
      ⑤ 键盘弹出时（keyboardInset > 0）面板浮在键盘上方，等间隙已无意义，
         但仍沿用同一轮廓（形状不跳变）。 */
   .chat-composer-float {
-    --composer-inset: 14px;
+    /* 留白随屏幕圆角自动放大（2026-10 iPhone 17 重测后的联动）：
+       贴角区高度 = R(屏角) − inset，必须不超过输入框高 − 8 才有地方放上角，
+       否则 composerOutline 会退化成"四角同半径"的胶囊（实测 iPhone 17 上
+       间隙波动从 0.3px 炸到 17px）。R 从 55 涨到 74.5 后 14px 不再够用：
+       74.5 − 14 = 60.5 > 68 − 8 = 60。这里用公式让留白跟着 R 走 ——
+         R=55（375/320/兜底）→ 14px（原样，零回归）
+         R=65.5（393，iPhone 15/16）→ 14px
+         R=74.5（402/440，iPhone 16 Pro/17）→ 16.5px（上角 10px，1.5px 余量）
+       上限 20px：再大就只是无谓地缩窄输入框。 */
+    --composer-inset: clamp(14px, calc(var(--panel-display-radius) - 58px), 20px);
     left: max(var(--composer-inset), env(safe-area-inset-left, 0px));
     right: max(var(--composer-inset), env(safe-area-inset-right, 0px));
     bottom: calc(var(--composer-inset) + v-bind(keyboardInsetPx));

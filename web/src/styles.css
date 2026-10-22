@@ -689,27 +689,86 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   设备圆角（2026-10）：屏幕四角的物理圆角，供「贴着屏幕边缘的浮层」做
-   同心圆角用。浏览器**没有**读取它的 API（CSS Round Display 的
-   `device-radius` 未实现，`env()` 也没有对应变量），只能按机型量值近似。
-   桌面/无圆角屏（iPhone SE）为 0 —— 公式里配合 `clamp(下限 …)` 自动退回
-   设计值，不会算出非法负圆角。
+   设备圆角（2026-10 重测）：屏幕四角的物理圆角，供「贴着屏幕边缘的浮层」
+   做等间隙轮廓用。浏览器**没有**读取它的 API（CSS Round Display 的
+   `device-radius` 未实现，`env()` 也没有对应变量），只能按机型量值。
+   桌面/无圆角屏（iPhone SE）为 0 —— 使用方配合留白自动退回设计值。
+
+   ## 口径：这里是**跨度**，不是「等效圆弧半径」
+
+   `utils/squircle.ts` 把屏幕角建模成超椭圆 x^n + y^n = R^n，R 是这个角的
+   **纵向跨度**（即「贴角区高度 = R − 留白」里的那个 R）。而业界流传的
+   「iPhone 15/16 = 55、16 Pro 起 = 62」是**等效圆弧半径** —— 拿最贴的圆弧
+   去套同一个角、使 45° 处内缩量相等时解出的半径。两者关系：
+
+       r_eq = R · (1 − 2^(−1/n)) / (1 − 1/√2) ≈ 0.827·R      (n = 2.5)
+
+   口径混用会差 3–10px：把 55 当跨度用，45° 处比真机少切进去约 3px ——
+   这正是 2026-10 之前 iPhone 15/16 上「输入框角比屏幕角略紧」的来源。
+
+   ## 量值来源：Apple 官方 bezel 素材直接测量（可复现）
+
+   Apple Design Resources 的 `Bezel-iPhone-16.dmg` / `Bezel-iPhone-17.dmg`
+   中，Portrait PNG 的「屏幕镂空」是 **1:1 物理像素**（镂空宽高与机型物理
+   分辨率精确相等 —— 16/17 两代全部机型核对过），亚像素取边界 + 超椭圆
+   最小二乘拟合，残差 ≤ 0.4px：
+
+     机型                屏宽(物理)   R(px)    R(CSS)   n
+     iPhone 16           1179        196.0     65.3   2.48
+     iPhone 16 Plus      1290        199.5     66.5   2.54
+     iPhone 16 Pro       1206        220.5     73.5   2.46
+     iPhone 16 Pro Max   1320        217.5     72.5   2.42
+     iPhone 17           1206        224.0     74.7   2.50
+     iPhone 17 Pro       1206        222.5     74.2   2.48
+     iPhone 17 Pro Max   1320        225.0     75.0   2.48
+     iPhone Air          1260        223.0     74.3   2.48
+
+   换算回等效圆弧：16 → 54.0、16 Pro → 60.8、17 → 61.7、17 Pro Max → 62.0
+   —— 与流传值 55 / 62 自洽，两套数字只是口径差异，不是测量冲突。
+   注意 n ≈ 2.5，与 squircle.ts 里用的 2.6 只差 1%，模型误差 < 0.5px。
+
+   ## 分档方式：逻辑视口宽度（3x 屏）
+
+   浏览器读不到机型，但逻辑视口宽度是稳的指纹 —— 地址栏收展会改高度、不改
+   宽度：393 = iPhone 15/15 Pro/16，402 = 16 Pro/17/17 Pro（三代同尺寸），
+   420 = Air，430 = 16 Plus，440 = 16 Pro Max/17 Pro Max。同宽度的跨代机型
+   R 差 ≤ 1.2px，取中值即可。`min-resolution: 2.5dppx` 排除桌面窄窗口
+   （iPhone 恒 3x）；Android 3x 屏也会命中，但那边 R 真值只有 28–40，取大
+   会让角更「松」而不是切进内容，误差方向安全。
    ═══════════════════════════════════════════════════════════════════════ */
 :root {
   --panel-display-radius: 0px;
 }
 @media (max-width: 767.98px) {
   :root {
-    /* iPhone 12–16 系列（含 Pro）：显示圆角 ≈ 55pt（CSS px 同值）。
-       量值来源：Apple 营销图按 1170/1179/1290 宽像素反算 + 社区几何测量；
-       Android 多在 28–40、iPhone SE 为 0（直角屏）、iPad ≈ 18。
-       为什么统一按 55 近似而不按机型判定：误差方向是安全的 —— 使用方
-       （如输入区）都拿它减去边缘留白后再 `clamp()` 封顶，值偏大只会贴到上限，
-       不会算出比设计值更小的圆角；而按机型判定需要读屏幕圆角（浏览器没有
-       这个 API），用 `env(safe-area-inset-top)` 反推则要引入魔法系数，
-       不如一个诚实的常数 + 可覆盖的变量。需要精确值就在具体机型上覆盖它。 */
+    /* 兜底：非 iPhone 的窄屏（Android 多在 28–40、iPad ≈ 18、iPhone SE 为 0）
+       保持历史常数 55 —— 只用于「不知道」（设备名读不到），已知机型见下方分档。 */
     --panel-display-radius: 55px;
   }
+}
+/* iPhone 12/13/14（390×844）：同族等比外推，未实测 */
+@media (max-width: 767.98px) and (width: 390px) and (min-resolution: 2.5dppx) {
+  :root { --panel-display-radius: 57px; }
+}
+/* iPhone 15 / 15 Pro / 16（393×852）：实测 65.3 */
+@media (max-width: 767.98px) and (width: 393px) and (min-resolution: 2.5dppx) {
+  :root { --panel-display-radius: 65.5px; }
+}
+/* iPhone 16 Pro / 17 / 17 Pro（402×874）：实测 73.5 / 74.7 / 74.2 */
+@media (max-width: 767.98px) and (width: 402px) and (min-resolution: 2.5dppx) {
+  :root { --panel-display-radius: 74.5px; }
+}
+/* iPhone Air（420×912）：实测 74.3 */
+@media (max-width: 767.98px) and (width: 420px) and (min-resolution: 2.5dppx) {
+  :root { --panel-display-radius: 74.3px; }
+}
+/* iPhone 16 Plus（430×932）：实测 66.5 */
+@media (max-width: 767.98px) and (width: 430px) and (min-resolution: 2.5dppx) {
+  :root { --panel-display-radius: 66.5px; }
+}
+/* iPhone 16 Pro Max（72.5）/ 17 Pro Max（75.0）：取 74.5 偏向 17 代 */
+@media (max-width: 767.98px) and (width: 440px) and (min-resolution: 2.5dppx) {
+  :root { --panel-display-radius: 74.5px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

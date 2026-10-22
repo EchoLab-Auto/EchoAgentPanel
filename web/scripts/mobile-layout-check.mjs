@@ -34,17 +34,51 @@ function findChrome() {
   return cands.find((p) => p && existsSync(p)) || null;
 }
 
-const VIEWPORTS = [
-  { name: '375×812 (iPhone 主参考)', width: 375, height: 812 },
-  { name: '320×640 (最小)', width: 320, height: 640 },
-];
-/** iPhone 口径安全区：刘海 47 / Home 指示条 34。 */
-const SAFE = { top: 47, bottom: 34, left: 0, right: 0 };
 /**
- * 屏幕四角的物理圆角（CSS px）。iPhone 12–16 ≈ 55，与 styles.css 里
- * `--panel-display-radius` 的窄屏值同源（浏览器读不到这个值，只能按机型近似）。
+ * 每个视口自带三项设备参数：DPR、安全区、**屏幕圆角跨度**。
+ *
+ * 为什么必须 per-viewport：屏幕圆角`--panel-display-radius` 在 styles.css 里
+ * 是按逻辑视口宽度分档的（393 / 402 / 420 / 430 / 440 / 兜底），这里如果还用
+ * 一个常量，量出来的「贴合度」是拿 A 机型的屏幕去对 B 机型的输入框 —— 波动
+ * 会凭空变大，看起来像回归。两边同源才是可测的。
+ *
+ * 取值（跨度口径，实测自 Apple 官方 bezel PNG，见 styles.css 同名注释）：
+ *   375/320 宽 → 兜底 55；402 宽（16 Pro/17/17 Pro）→ 74.5；440 宽 → 74.5。
+ * 安全区：灵动岛机型顶部 62 / Home 指示条 34（iPhone 14 Pro 起）；刘海机型 47。
  */
-const DISPLAY_RADIUS = 55;
+const VIEWPORTS = [
+  {
+    name: '375×812 (iPhone 主参考)',
+    width: 375, height: 812, dpr: 2,
+    safe: { top: 47, bottom: 34, left: 0, right: 0 },
+    displayRadius: 55,
+  },
+  {
+    name: '320×640 (最小)',
+    width: 320, height: 640, dpr: 2,
+    safe: { top: 47, bottom: 34, left: 0, right: 0 },
+    displayRadius: 55,
+  },
+  {
+    // 用户实机（2026-10）：iPhone 17 与 17 Pro 同为 402×874 @3x
+    name: '402×874 (iPhone 17 / 17 Pro)',
+    width: 402, height: 874, dpr: 3,
+    safe: { top: 62, bottom: 34, left: 0, right: 0 },
+    displayRadius: 74.5,
+  },
+  {
+    name: '440×956 (iPhone 17 Pro Max)',
+    width: 440, height: 956, dpr: 3,
+    safe: { top: 62, bottom: 34, left: 0, right: 0 },
+    displayRadius: 74.5,
+  },
+];
+/**
+ * 超椭圆指数：必须与 ChatView.vue 传给 `composerOutline` 的 exponent 一致，
+ * 否则「贴合度」量的是两条不同曲线（会读出一个假的波动）。
+ * 实测 Apple bezel 屏幕角 n = 2.42~2.54，取 2.5。
+ */
+const EXPONENT = 2.5;
 
 async function connect(chrome) {
   const proc = spawn(
@@ -160,8 +194,8 @@ const PROBE = `(() => {
       const t = document.elementFromPoint(x, y);
       return !!(t && (t === el || el.contains(t)));
     };
-    // 屏幕左下角超椭圆（指数与组件一致）
-    const s = 2 / 2.6;
+    // 屏幕左下角超椭圆（指数与 ChatView.vue 一致，由 PROBE 模板注入）
+    const s = 2 / EXPONENT;
     const arc = [];
     for (let i = 0; i <= 3000; i += 1) {
       const t = (i / 3000) * Math.PI / 2;
@@ -310,9 +344,7 @@ const PROBE = `(() => {
       regionVisible: !!region && getComputedStyle(region).display !== 'none',
     } : null,
   };
-})()`
-  .replace('SAFE_TOP', String(SAFE.top))
-  .replace(/DISPLAY_RADIUS/g, String(DISPLAY_RADIUS));
+})()`;
 
 /**
  * Agent 菜单：点开卡片，验证弹层**真的**可见可点。
@@ -378,21 +410,25 @@ try {
   await send('Runtime.enable');
   for (const vp of VIEWPORTS) {
     await send('Emulation.setDeviceMetricsOverride', {
-      width: vp.width, height: vp.height, deviceScaleFactor: 2, mobile: true,
+      width: vp.width, height: vp.height, deviceScaleFactor: vp.dpr, mobile: true,
     });
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-    await send('Emulation.setSafeAreaInsetsOverride', { insets: SAFE }).catch(() => {});
+    await send('Emulation.setSafeAreaInsetsOverride', { insets: vp.safe }).catch(() => {});
     await send('Page.navigate', { url: BASE + '/' });
     await new Promise((r) => setTimeout(r, 3500));
-    const m = await evaluate(PROBE);
+    const probe = PROBE
+      .replace('SAFE_TOP', String(vp.safe.top))
+      .replace(/EXPONENT/g, String(EXPONENT))
+      .replace(/DISPLAY_RADIUS/g, String(vp.displayRadius));
+    const m = await evaluate(probe);
     const tag = `[${vp.name}]`;
 
     check(`${tag} 无横向溢出`, m.overflowX === 0, `scrollWidth - innerWidth = ${m.overflowX}`);
     check(`${tag} 不整页滚动（固定视口）`, !m.pageScrolls, `scrollHeight = ${m.vh}? ${!m.pageScrolls}`);
     check(
       `${tag} 顶栏让开刘海`,
-      !!m.header && m.header.padTop === `${SAFE.top}px` && m.header.height >= 56 + SAFE.top,
-      `padTop=${m.header?.padTop} height=${m.header?.height}（期望 ${SAFE.top}px / ≥${56 + SAFE.top}）`,
+      !!m.header && m.header.padTop === `${vp.safe.top}px` && m.header.height >= 56 + vp.safe.top,
+      `padTop=${m.header?.padTop} height=${m.header?.height}（期望 ${vp.safe.top}px / ≥${56 + vp.safe.top}）`,
     );
     check(`${tag} 顶栏按钮不被状态栏压住`, m.headerButtonsInside === true, `inside=${m.headerButtonsInside}`);
     check(`${tag} 顶栏最右按钮可达`, (m.maxButtonRight ?? 0) < vp.width, `right=${m.maxButtonRight} < ${vp.width}`);
@@ -539,7 +575,11 @@ try {
 
 let failed = 0;
 for (const c of checks) {
-  console.log(`${c.ok ? '✓' : '✗'} ${c.name}${c.ok ? '' : `\n    → ${c.detail}`}`);
+  // 贴合度是这套断言的**核心指标**（一个数字就能看出角是不是平行），
+  // 通过时也把间隙区间/波动打出来 —— 否则回归只能靠"从 0.3 涨到 0.9
+  // 但都 < 1px"这类不报错的方式溜过去。
+  const showDetail = !c.ok || /贴合/.test(c.name);
+  console.log(`${c.ok ? '✓' : '✗'} ${c.name}${showDetail ? `\n    → ${c.detail}` : ''}`);
   if (!c.ok) failed++;
 }
 console.log(`\n${checks.length - failed}/${checks.length} 通过${failed ? `，${failed} 项失败` : ''}`);

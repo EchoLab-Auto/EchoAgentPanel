@@ -118,7 +118,13 @@ describe('ChatView 竖屏移动端', () => {
       .map((m) => m[1])
       .join('\n');
     // 等间隙：左右与底部共用同一个 --composer-inset（这是"角部间隙恒定"的前提）
-    expect(composerRules, '左右/底部留白必须同源').toMatch(/--composer-inset: 14px/);
+    // 2026-10：留白随屏幕圆角走（clamp(14px, R−58, 20px)）——iPhone 17 的
+    // R=74.5 下 14px 会让贴角区(60.5px)顶穿 68px 的条高，composerOutline 退化
+    // 成胶囊。断言"下限 14 + 随 R 增长 + 有上限"三条，而不是钉死一个常数，
+    // 否则每次重测屏角都要改测试。
+    expect(composerRules, '左右/底部留白必须同源').toMatch(
+      /--composer-inset:\s*clamp\(\s*14px\s*,\s*calc\(\s*var\(--panel-display-radius\)\s*-\s*58px\s*\)\s*,\s*20px\s*\)/,
+    );
     expect(composerRules).toMatch(/left: max\(var\(--composer-inset\)/);
     expect(composerRules).toMatch(/right: max\(var\(--composer-inset\)/);
     expect(composerRules).toMatch(
