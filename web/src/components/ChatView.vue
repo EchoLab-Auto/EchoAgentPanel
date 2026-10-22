@@ -1504,10 +1504,6 @@ function mediaSrc(img: string): string {
       @focusin="onComposerFocus"
       @focusout="onComposerBlur"
     >
-      <!-- 外发光：clip-path 在 filter **之后**应用，同一元素里做不出"先裁剪
-           再模糊"（阴影会被裁掉），故拆两层——本层只负责模糊，::before 负责
-           形状。本层不带 backdrop-filter：filter 祖先会让毛玻璃失效。 -->
-      <div class="chat-composer-float__halo" aria-hidden="true"></div>
       <!-- 卡片本体（2026-10 用户要求：外框 + 玻璃整体换成 ui-frame 卡片）：
            材质、圆角、边缘高光、环境投影全部由 NeumorphismCard 的 glass 档位
            承担；这里只负责「定位 + 超椭圆裁剪」。内层 __body 只做 padding 与
@@ -1810,17 +1806,17 @@ function mediaSrc(img: string): string {
 }
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上。
-   结构（2026-10 用户要求：外框 + 玻璃换成 ui-frame 卡片）：
-     __halo  外发光（**必须**独立一层，见下）
-     __card  NeumorphismCard glass —— 材质/圆角/边缘高光/环境投影全归它
+   结构（2026-10）：
+     __card  NeumorphismCard glass —— 材质/圆角/边缘亮线全归它，
+             辉光是**内辉光**（inset），不是向外的投影
      __body  内层：只做 padding 与内容排布
    桌面走卡片自己的 border-radius；移动端走 JS 算的 clip-path 超椭圆轮廓。
 
-   为什么发光没交给卡片的 box-shadow：clip-path 会把元素**自身**的
-   box-shadow 一起裁掉，而移动端卡片要挂超椭圆 clip —— 投影会整体消失。
-   所以投影只能画在未被裁剪的兄弟层上（__halo），形状交给 ::before。
-   同一原因，__halo 不能挂 backdrop-filter（filter 会创建新的 backdrop
-   root，让卡片的毛玻璃失效）。 */
+   为什么用内辉光（inset box-shadow）而不是外发光：移动端卡片挂着超椭圆
+   clip-path，而 clip-path 会把元素**自身向外的** box-shadow 整块裁掉 ——
+   外发光只能靠额外的兄弟层（模糊 + 翻转形状）模拟，两层叠起来既有双重
+   阴影风险、又要在桌面端单独关掉。内辉光画在边缘内侧、由 clip 直接裁剪
+   到形状边界，**一份实现同时适配桌面圆角与移动端超椭圆**。 */
 .chat-composer-float {
   /* 输入行几何单一事实来源（圆角/高度都从这里派生）：
      - --chat-field-font：输入框实际字号（桌面 14px；移动端/iOS 16px，
@@ -1842,6 +1838,15 @@ function mediaSrc(img: string): string {
      —— 设 0 让「内层圆角 = 外框 − padding − border」与「静止条高」两条派生
      公式仍成立（卡片高度 = 内容 + 2×padding）。 */
   --composer-border: 0px;
+  /* ── 内辉光（2026-10）────────────────────────────────────────────
+     浅色档取值。为什么显式写 rgba 而不是复用 --nm-shadow-light：后者在
+     浅色主题是 rgba(255,255,255,.8)、深色是 .14 —— 直接把 α 当强度用在
+     两档之间摆幅太大，内辉光在深色底上会糊成灰雾。这里按主题各给一档，
+     深色覆盖见文件末尾的 [data-theme='dark'] 段。 */
+  --composer-glow-size: 18px; /* 四周内辉光的扩散半径 */
+  --composer-glow: rgba(255, 255, 255, 0.34);
+  --composer-glow-top-size: 10px; /* 上方内辉光的纵向扩散 */
+  --composer-glow-top: rgba(255, 255, 255, 0.5);
   /* 贴角区半径：移动端由 JS 写成「R屏角 − 留白」（超椭圆口径）；
      桌面/直角屏没有贴角区，等于外框半径，公式退化成原来的 R−P−B。 */
   --composer-corner-r: var(--composer-radius);
@@ -1860,38 +1865,10 @@ function mediaSrc(img: string): string {
   pointer-events: none;
 }
 
-/* 发光层（移动端形状跟 --composer-clip 走；桌面走 border-radius）。
-   为什么不用 box-shadow：clip-path 会把元素外部的 box-shadow 整个裁掉，
-   所以发光必须画在**未被裁剪**的父层上，形状交给 ::before 再模糊。
-   filter 会创建新的 backdrop root，故本层绝不能挂 backdrop-filter。 */
-.chat-composer-float__halo {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  /* 只在「卡片被 clip」时启用：clip-path 会把卡片**自身**的 box-shadow 一起
-     裁掉（移动端超椭圆轮廓），投影得由这一层补。桌面没有 clip，卡片自带的
-     glass-float 环境投影已经够，再叠一层就是双重阴影（实测明显发黑）。 */
-  display: none;
-  /* 原 0 12px 32px rgba(...,0.45)：blur 半径 ≈ 32/2，偏移量保持 12px */
-  filter: blur(16px);
-  transform: translateY(12px);
-}
-.chat-composer-float--clipped .chat-composer-float__halo {
-  display: block;
-}
-.chat-composer-float__halo::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--composer-halo, rgba(15, 23, 42, 0.16));
-  border-radius: var(--composer-radius);
-  clip-path: var(--composer-clip, none);
-}
-
 /* 卡片本体：ui-frame NeumorphismCard（glass 档）。
-   - 材质（半透明 + backdrop blur + 1px 内高光边）、环境投影全由卡片提供；
-   - 这里只覆盖两件输入区特有的事：圆角取 --composer-radius、挂超椭圆 clip。
+   - 材质（半透明 + backdrop blur）由卡片提供；
+   - 这里覆盖三件事：圆角取 --composer-radius、挂超椭圆 clip、
+     box-shadow 换成**内辉光**（不用卡片 glass-float 的外投影）。
    选择器带 .chat-composer-float 前缀：卡片自己的 `--nm-border-radius-*`
    档位类与本文特异性相同（都是单类 + scoped 属性），靠层叠顺序不可靠。 */
 .chat-composer-float .chat-composer-float__card {
@@ -1900,6 +1877,21 @@ function mediaSrc(img: string): string {
   pointer-events: auto;
   border-radius: var(--composer-radius);
   clip-path: var(--composer-clip, none);
+  /* 内辉光（2026-10 用户要求）：光从边缘向**内**衰减。
+     三层各司其职，顺序即叠放顺序（先写的在上）：
+       ① 1px 边缘亮线  —— 轮廓的清晰度，替代已删掉的独立描边层
+       ② 上方内辉光    —— 模拟光从上方落下，给"凹陷/受光"的立体感
+       ③ 四周内辉光    —— 主辉光，柔和铺满内缘
+     全部用 inset：移动端 clip-path 只裁"元素外部"，内辉光天然不会被裁掉，
+     所以桌面圆角与移动端超椭圆共用同一份实现（外发光做不到这点）。 */
+  box-shadow:
+    inset 0 0 0 1px color-mix(
+      in srgb,
+      var(--nm-shadow-light) calc(var(--nm-glass-border-opacity) * 100%),
+      transparent
+    ),
+    inset 0 2px var(--composer-glow-top-size) var(--composer-glow-top),
+    inset 0 0 var(--composer-glow-size) var(--composer-glow);
   /* 性能（2026-09-18 起、2026-10 随卡片迁移沿用）：库默认 20px + saturate，
      输入区降到 10px 且不加 saturate —— 大面积 backdrop-filter 每次重绘全量
      重栅格化，跨行拖选每帧触发。用变量覆盖保持与卡片同一实现路径。 */
@@ -1922,14 +1914,14 @@ function mediaSrc(img: string): string {
 /* clip 生效时必须清掉 border-radius —— 两者是**取交集**关系：留着 24px 圆角
    会把超椭圆轮廓又裁回圆角矩形（实测角部间隙 14→16.6px，等于白改）。
    用 class 而非媒体查询做门控：JS 没算出轮廓时（首帧/异常）仍保留圆角兜底。 */
-.chat-composer-float--clipped .chat-composer-float__halo::before,
 .chat-composer-float--clipped .chat-composer-float__card {
   border-radius: 0;
 }
 
-/* 深色主题的发光更重（与原 --panel-glass-shadow-md 取值一致） */
+/* 深色主题：内辉光要更弱（白在深底上的扩散比浅底更强），否则会发灰雾 */
 :root[data-theme='dark'] .chat-composer-float {
-  --composer-halo: rgba(0, 0, 0, 0.45);
+  --composer-glow: rgba(255, 255, 255, 0.1);
+  --composer-glow-top: rgba(255, 255, 255, 0.14);
 }
 /* 拖选卡顿根治之二（2026-09-18，2026-10 收敛）：库 NeumorphismTextarea 的
    hover/focused 1px translateY 抬升已在库侧移除（transform 层导致大段文本

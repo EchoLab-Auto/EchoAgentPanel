@@ -162,13 +162,24 @@ describe('ChatView 竖屏移动端', () => {
     expect(styleBlock, '卡片不得再手写毛玻璃背景').not.toMatch(
       /\.chat-composer-float__glass \{/,
     );
-    // 发光必须画在未被裁剪的父层上（clip-path 会裁掉 box-shadow），
-    // 且该层不能挂 backdrop-filter（filter 祖先会让毛玻璃失效）
-    expect(styleBlock, '发光层用 blur 而非 box-shadow').toMatch(
-      /\.chat-composer-float__halo \{[^}]*filter: blur\(/,
+    // 内辉光（2026-10）：box-shadow 全部 inset —— 光向内衰减。
+    // 关键理由：移动端卡片挂 clip-path，而 clip 只裁「元素外部」，所以 inset
+    // 阴影天然不会被裁掉 ⇒ 桌面圆角与移动端超椭圆共用同一份实现。
+    // 也因此**不再需要**额外的外发光兄弟层（__halo 已删除）。
+    const cardRules =
+      styleBlock.match(
+        /\.chat-composer-float \.chat-composer-float__card \{[\s\S]*?\n\}/,
+      )?.[0] ?? '';
+    expect(cardRules, '卡片必须定义 box-shadow').toMatch(/box-shadow:/);
+    const shadows = cardRules.match(/box-shadow:[\s\S]*?;/)?.[0] ?? '';
+    const layers = shadows.split('inset').length - 1;
+    expect(layers, '内辉光至少三层（亮线 / 上方 / 四周）').toBeGreaterThanOrEqual(3);
+    // 没有任何非 inset 的外投影残留（否则就是"外发光"而不是内辉光）
+    expect(shadows.replace(/inset/g, ''), '不得残留外投影').not.toMatch(
+      /(^|[\s,(])0 4px|0 2px 4px/,
     );
-    const haloRules = styleBlock.match(/\.chat-composer-float__halo \{[\s\S]*?\}/)?.[0] ?? '';
-    expect(haloRules, '发光层不得带 backdrop-filter').not.toMatch(/backdrop-filter/);
+    expect(raw, '外发光兄弟层已删除').not.toMatch(/chat-composer-float__halo/);
+    expect(styleBlock, '内辉光强度分主题给值').toMatch(/--composer-glow: rgba\(255, 255, 255, 0\.34\)/);
     // 内层一律消费派生变量（含 border 补偿）
     expect(styleBlock, '同心派生量必须减掉 padding 与 border').toMatch(
       /--composer-inner-radius: max\(\s*0px,\s*calc\(var\(--composer-corner-r\) - var\(--composer-padding\) - var\(--composer-border\)\)\s*\)/,
