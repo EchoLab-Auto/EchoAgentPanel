@@ -2608,41 +2608,44 @@ function mediaSrc(img: string): string {
         下角间隙由恒定 14/18.7px 变成 12.3~14 / 15.6~18.6（±1.7~3px），
         仍读作平行；两全解只有把留白提到 R−半高 ≈ 33~42px，输入区会被
         推得又窄又高，不可取。
-     ④ Home 指示条：可视范围距底 8~13px，面板底缘 14px 恰在其外。
+     ④ Home 指示条：可视范围距底 8~13px。留白取屏宽 3%（iPhone 上 11.3~13.2px），
+        与小屏段的指示条上缘基本齐平 —— 指示条由系统绘制在内容之上，不遮挡。
      ⑤ 键盘弹出时（keyboardInset > 0）面板浮在键盘上方，等间隙已无意义，
         但仍沿用同一轮廓（形状不跳变）。 */
   .chat-composer-float {
-    --composer-padding: 10px;
     /* 输入字号 16px（iOS 聚焦防缩放） */
     --chat-field-font: 16px;
 
     /* ── 四角等大 + 下角贴屏角：三个量互相约束，公式必须闭环 ──────────
 
-       ① 留白 d 只看屏角：`clamp(14px, 0.3R, 22px)`（R=55→16.5、65.5→19.65、
-          74.5→22）。**不能再依赖输入行高度** —— 四角等大要求输入行高度反过来
-          依赖跨度（见 ③），两边互相引用就是 CSS 变量循环，浏览器会把两边都
-          判成无效（`--composer-inset` 变空 → JS 侧 rect.left 还算得出，但
+       ① 留白 d = **屏宽的 3%**（用户 2026-10 定的比例）：375→11.25、393→11.79、
+          402→12.06、440→13.2。只跟视口宽度有关，与屏角无关。
+          **不能依赖输入行高度** —— 四角等大要求输入行高度反过来依赖跨度
+          （见 ③），两边互相引用就是 CSS 变量循环，浏览器会把两边都判成无效
+          （`--composer-inset` 变空 → JS 侧 rect.left 还算得出，但
           `--chat-control-h` 会整条失效、输入行高度退化为 0）。
-          下限 14 是历史值（不切进物理死弯），上限 22 避免大角机型把输入区压窄。
-       ② 跨度 = R − d：上下两角共用（上角是下角的镜像）。
-       ③ 输入行高度必须让「上下两角放得下」：
+       ② 跨度 = R − d：上下两角共用（上角是下角的镜像）。留白变小 → 跨度变大
+          （R=74.5：22 → 12.06 使跨度从 52.5 涨到 62.4）。
+       ③ 卡片高度必须让「上下两角放得下」：
             卡片静止高 H = 3P + controlH + statusH（P=body 上下 padding、状态行
             自身 margin-top 也是 P）
-            要求 H ≥ 2 × span ⇒ controlH ≥ 2span − 3P − statusH
-          R=74.5 时右侧算出 58px（基准只有 45.6），于是输入条主动长高
-          12.4px —— 这正是用户 2026-10 说的「那你可以调整一下输入区的高度」：
-          宁可把输入条做高一点，也不要用「上角吃掉剩余高度」去凑（那会让上下
-          角不等，正是用户报的问题）。
-          R=55 时右侧算出 30 → 取基准 45.6，小角机型零变化。
+            要求 H ≥ 2 × span
+          留白变小 → 跨度变大 → 卡片得更高（R=74.5：spans 52.5 → 62.4，卡片
+          105 → 125）。**多出来的高度给 padding，不给输入行**：卡片是胶囊形，
+          里面填一块 78px 高的输入条 + 78px 的圆形按钮不符合触控规范
+          （按钮基准 45.6 ≈ iOS 44）。所以
+                P = max(10px, (2span − controlH − statusH) / 3)
+          R=74.5 时 P = 20.8、输入行仍是 45.6、卡片 125；R=57 时 P 取基准 10、
+          卡片 93 —— 小角机型零变化。
 
-       注意两个变量都是 calc/clamp 表达式、computed 不求值：JS 侧一律用实测
+       注意变量都是 calc/clamp 表达式、computed 不求值：JS 侧一律用实测
        rect.left 当留白、用实测卡片高反推静止半高（见 updateComposerClip）。 */
-    --composer-inset: clamp(14px, calc(0.3 * var(--panel-display-radius)), 22px);
+    --composer-inset: calc(0.03 * 100vw);
     --composer-span: calc(var(--panel-display-radius) - var(--composer-inset));
-    --chat-control-h: max(
-      calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--chat-field-font) * 1.6),
+    --composer-padding: max(
+      10px,
       calc(
-        2 * var(--composer-span) - 3 * var(--composer-padding) - var(--chat-status-h)
+        (2 * var(--composer-span) - var(--chat-control-h) - var(--chat-status-h)) / 3
       )
     );
 
