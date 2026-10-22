@@ -238,6 +238,13 @@ struct ConnectFailure {
 // 上限提到 60s，每次睡眠加 ±20% 抖动（多标签页错峰）；同一上游同一错误
 // 只 warn 一次，直到连接成功或错误变化。
 
+/// 链路活过这么久才算"配置是好的"：短于此的断开按失败计数并退避。
+///
+/// 取值 2s：Core 重启时旧连接立刻断、新进程几秒内起来——2s 内断开视为抖动，
+/// 避免重启瞬间的 20 次/秒重建；活过 2s 的链路再断（滚更新、网络切换）
+/// 没有风暴风险，立即重连体感更好。
+const HEALTHY_LINK_AFTER: Duration = Duration::from_secs(2);
+
 /// 连续失败多少次后进入降级（退避上限 60s）。
 const RECONNECT_DEGRADE_AFTER: u32 = 5;
 const RECONNECT_BASE: Duration = Duration::from_secs(1);
@@ -912,7 +919,8 @@ async fn bridge(
                                         // 分清"对端发 Close/断 TCP"（None）与
                                         // "协议或传输错误"（Err）——前者通常是
                                         // Core 重启或主动断开，后者常伴版本不匹配。
-                                        Some(Err(_)) => {
+                                        Some(Err(e)) => {
+                                            warn!(core = %name2, error = %e, "upstream read error");
                                             stats.close_reason = "upstream read error";
                                             break;
                                         }
@@ -992,11 +1000,38 @@ async fn bridge(
                                         tokio_tungstenite::tungstenite::Message::Pong(p) => {
                                             BrowserMessage::Pong(p.to_vec().into())
                                         }
-                                        tokio_tungstenite::tungstenite::Message::Binary(_) => {
+                                        tokio_tungstenite::tungstenite::Message::Binary(payload) => {
+                                            // 二进制帧在管理面协议里不存在：收到即视为
+                                            // 协议不匹配（对方不是本协议的 Core，或版本
+                                            // 错位）。记长度便于区分"心跳怪包"与"整帧"。
+                                            warn!(
+                                                core = %name2,
+                                                bytes = payload.len(),
+                                                "upstream sent an unexpected binary frame; closing link"
+                                            );
                                             stats.close_reason = "upstream sent binary frame";
                                             break;
                                         }
-                                        tokio_tungstenite::tungstenite::Message::Close(_) => {
+                                        tokio_tungstenite::tungstenite::Message::Close(frame) => {
+                                            // **关帧码是归因的决定性证据**：1001 = 对端
+                                            // 进程退出/重启，1000 = 对端主动关，1006/无码
+                                            // = 传输层异常。以前这里直接 break、码被丢掉，
+                                            // "Core 主动踢人"与"网络掉线"完全分不开。
+                                            match &frame {
+                                                Some(frame) => info!(
+                                                    core = %name2,
+                                                    // `CloseCode` 不是 tracing::Value
+                                                    // （枚举），转 u16 才是稳定可聚合的
+                                                    // 数值字段。
+                                                    code = u16::from(frame.code),
+                                                    reason = %frame.reason,
+                                                    "upstream sent close"
+                                                ),
+                                                None => info!(
+                                                    core = %name2,
+                                                    "upstream sent close (no code)"
+                                                ),
+                                            }
                                             stats.close_reason = "upstream sent close";
                                             break;
                                         }
@@ -1117,7 +1152,35 @@ async fn bridge(
                     if event_tx.is_closed() {
                         break;
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    // 「连上就被断」的抖动必须退避，不能 50ms 无限重连。
+                    //
+                    // 此前这里是**固定 50ms**：建链成功时已把 `backoff` 复位成
+                    // `RECONNECT_BASE`、`failures = 0`，于是握手成功但立刻掉线
+                    // 的上游（对端刚重启、代理掐空闲连接、认证通过后策略拒绝）
+                    // 会以 **20 次/秒**的节奏重建——日志里是一串同秒 close，
+                    // Core 侧则是一串同秒 accept，双方都看不出是同一个根因。
+                    //
+                    // 判据用**存活时长**而不是成败：链路活过
+                    // `HEALTHY_LINK_AFTER` 才算"这条配置是好的"，随时可重连；
+                    // 短命链路按连续失败处理，走标准退避（1s→…→60s，±20%）。
+                    let lived = link_started.elapsed();
+                    if lived < HEALTHY_LINK_AFTER {
+                        failures = failures.saturating_add(1);
+                        let wait = jittered(backoff);
+                        warn!(
+                            core = %name,
+                            lived_ms = lived.as_millis() as u64,
+                            attempt = failures,
+                            retry_in_ms = wait.as_millis() as u64,
+                            "upstream link died immediately after connect; backing off"
+                        );
+                        tokio::time::sleep(wait).await;
+                        backoff = next_backoff(backoff, failures);
+                    } else {
+                        // 长命链路正常断开（对端重启 / 网络切换）：立即重连，
+                        // 并复位退避——短命抖动会自己把 `failures` 顶上去。
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
                 }
             });
             // 登记循环句柄（并兜底中止同名的上一枚循环——调用方在

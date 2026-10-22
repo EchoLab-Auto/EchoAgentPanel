@@ -201,6 +201,9 @@ impl UpstreamRegistry {
                 String::new()
             },
         };
+        // 是否**真的**改了（合并密文后的有效配置与旧值逐字段比较）。
+        // 只用于决定"要不要发 Upsert 事件"，不影响写入与持久化。
+        let mut unchanged = false;
         let effective = {
             let mut inner = self.inner.write().await;
             // 先快照旧状态——persist 失败时回滚内存，保持内存/磁盘一致
@@ -235,6 +238,7 @@ impl UpstreamRegistry {
                             new_ssh.passphrase = old_ssh.passphrase.clone();
                         }
                     }
+                    unchanged = *existing == effective;
                     *existing = effective.clone();
                 }
                 None => inner.push(effective.clone()),
@@ -247,6 +251,18 @@ impl UpstreamRegistry {
         };
         // 事件携带**合并后的有效配置**（此前发的是原始入参——编辑 token
         // 留空时中继会拿到空 token 去连，认证失败直到下次变更）。
+        //
+        // **无变化不发事件**：`Upsert` 的语义是"这条上游变了"，中继收到会
+        // abort 现有链路 + 重建（见 `proxy.rs` 的注册表变更泵）。每轮联邦
+        // 目录巡检、每次在设置页点一下保存，都会 upsert 一遍同样的配置——
+        // 无条件发事件就等于"配置没变也把连接掐了重连"，日志里表现为一串
+        // 无解释的 `upstream link closed`。
+        //
+        // 比较用**有效配置**（含 token/ssh 密文合并后的值）：用户把密文留空
+        // 表示"不改"，此时不该判成变化。
+        if unchanged {
+            return Ok(effective);
+        }
         let _ = self
             .events
             .send(UpstreamEvent::Upsert(Box::new(effective.clone())));
@@ -456,6 +472,54 @@ mod tests {
         ));
         std::fs::remove_file(&p).ok();
         p
+    }
+
+    /// 无变化的 upsert 不得发 `Upsert` 事件。
+    ///
+    /// 中继收到 `Upsert` 会 abort 现有链路并重建——无条件发事件等于"配置没变
+    /// 也把连接掐了重连"。联邦目录巡检（每轮 upsert 已知节点）与设置页重复
+    /// 保存都会踩到这条路径。
+    #[tokio::test]
+    async fn upsert_without_change_does_not_emit_event() {
+        let path = temp_path("upsert-idempotent");
+        let reg = UpstreamRegistry::new(vec![], Some(path.clone()));
+        let mut events = reg.subscribe();
+
+        let cfg = UpstreamConfig::direct("core", "ws://127.0.0.1:3132", "tok");
+        reg.upsert(cfg.clone()).await.expect("第一次写入");
+        assert!(
+            events.try_recv().is_ok(),
+            "首次新增必须发 Upsert（中继要靠它建链）"
+        );
+
+        // 同样内容再来一次：内存/磁盘照旧，但不得再发事件。
+        reg.upsert(cfg).await.expect("重复写入");
+        assert!(
+            events.try_recv().is_err(),
+            "配置未变时不得发 Upsert（会让中继白掐一次链路）"
+        );
+    }
+
+    /// 真正改变配置时仍要发事件（否则中继永远用旧地址拨号）。
+    #[tokio::test]
+    async fn upsert_with_change_emits_event() {
+        let path = temp_path("upsert-changed");
+        let reg = UpstreamRegistry::new(vec![], Some(path.clone()));
+        let mut events = reg.subscribe();
+
+        reg.upsert(UpstreamConfig::direct("core", "ws://127.0.0.1:3132", "tok"))
+            .await
+            .expect("写入");
+        let _ = events.try_recv();
+
+        reg.upsert(UpstreamConfig::direct("core", "ws://127.0.0.1:3133", "tok"))
+            .await
+            .expect("改地址");
+        let event = events.try_recv().expect("地址变了必须发 Upsert");
+        match event {
+            UpstreamEvent::Upsert(cfg) => assert_eq!(cfg.url, "ws://127.0.0.1:3133"),
+            other => panic!("应为 Upsert，得到 {other:?}"),
+        }
     }
 
     #[tokio::test]
