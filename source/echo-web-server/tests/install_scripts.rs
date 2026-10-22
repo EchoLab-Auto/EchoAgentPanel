@@ -183,3 +183,106 @@ fn installer_enables_linger_for_the_user_unit() {
         "失败告警应说明后果（否则用户会当作可忽略的噪音）"
     );
 }
+
+/// 卸载器与安装器在 **linger** 上必须对称：装时开、卸时**不擅自关**。
+///
+/// install.sh 现在会开 linger（见 `installer_enables_linger_for_the_user_unit`），
+/// 于是卸载时产生一个诱人的"顺手清理"：把 linger 关回去。这是错的——
+/// linger 是**用户级、机器级**开关，不是本服务的私有属性：这台机器上可能
+/// 还有别的 user 作用域服务（用户自己跑的守护进程），关掉会让它们在最后
+/// 一个登录会话结束时静默死亡，而卸载器既不知道、也无法补偿。
+///
+/// 正确行为：**默认保留并明确告知**，关必须走显式 `--disable-linger`。
+#[test]
+fn uninstaller_reports_linger_and_only_disables_it_on_request() {
+    let uninstall = read_script("uninstall.sh");
+
+    assert!(
+        uninstall.contains("--disable-linger"),
+        "uninstall.sh 应提供 --disable-linger（显式开关）"
+    );
+    assert!(
+        uninstall.contains("DISABLE_LINGER=0"),
+        "默认必须是「不关」——DISABLE_LINGER 初始为 0"
+    );
+    let disable_at = uninstall
+        .find("loginctl disable-linger")
+        .expect("应支持关闭 linger");
+    let guard_at = uninstall
+        .find("if ((DISABLE_LINGER)); then")
+        .expect("disable-linger 必须被 DISABLE_LINGER 守卫");
+    assert!(
+        guard_at < disable_at,
+        "loginctl disable-linger 必须位于 DISABLE_LINGER 守卫之内"
+    );
+
+    assert!(
+        uninstall.contains("Keeping linger for"),
+        "默认保留 linger 时应明确告知（否则用户以为卸干净了）"
+    );
+    assert!(
+        uninstall.contains("loginctl disable-linger $current_user"),
+        "保留时应给出关闭方式（可发现性）"
+    );
+
+    assert!(
+        uninstall.contains("linger:"),
+        "dry-run 计划里应有一行 linger 状态"
+    );
+}
+
+/// 卸载器必须能清掉 **system 作用域** 的存量单元（服务器装法）。
+///
+/// install.sh 只写 user 作用域，但存量机器可能是手工或旧脚本装的
+/// `/etc/systemd/system/echo-agent-panel*.service`（多节点部署常见）。静默
+/// 跳过是最坏的：二进制被删了，systemd 下次开机仍会去拉起它。
+#[test]
+fn uninstaller_handles_system_scope_units() {
+    let uninstall = read_script("uninstall.sh");
+    assert!(
+        uninstall.contains("SYSTEM_UNIT_DIR=/etc/systemd/system"),
+        "应探测 /etc/systemd/system"
+    );
+    assert!(
+        uninstall.contains("system-scope units present but this script is not running as root"),
+        "非 root 时应告警，而不是静默跳过"
+    );
+    assert!(
+        uninstall.contains("sudo systemctl disable --now"),
+        "非 root 时应给出可直接复制的清理命令"
+    );
+    assert!(
+        uninstall.contains("system:    "),
+        "dry-run 计划里应有一行 system 作用域单元"
+    );
+}
+
+/// 卸载器不得顺手删掉**用户数据**：默认只清受管产物。
+///
+/// Panel 的数据目录里除了源码检出还有 `media-cache/`（远端图床/MCP 图片的
+/// 回源缓存）。此前 `remove_dir "$DATA_DIR"` 会把它一起删掉，而 help 里写的是
+/// "配置默认保留"——用户读到的是"只删程序"，实际连缓存都没了。缓存虽可
+/// 重新拉取，但口径必须与 Core 一致：**不带 --purge 就不碰**。
+#[test]
+fn uninstaller_keeps_user_data_unless_purged() {
+    let uninstall = read_script("uninstall.sh");
+    assert!(
+        uninstall.contains(r#"remove_dir "$DATA_DIR/source""#),
+        "默认应只删受管源码检出"
+    );
+    assert!(
+        uninstall.contains("Keeping media cache"),
+        "默认应保留 media-cache 并告知"
+    );
+    // --purge 才整体移除，且必须发生在 PURGE 分支里。
+    let purge_guard = uninstall
+        .find("if ((PURGE)); then")
+        .expect("应有 PURGE 分支");
+    let whole_dir = uninstall
+        .find(r#"remove_dir "$DATA_DIR" "data directory"#)
+        .expect("--purge 应整体移除数据目录");
+    assert!(
+        purge_guard < whole_dir,
+        "整体移除数据目录必须在 PURGE 分支内"
+    );
+}
