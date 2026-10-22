@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  composerCornerSpan,
+  composerGeometry,
   composerOutline,
   insetPolyline,
   screenCornerOffset,
@@ -50,9 +52,10 @@ describe('screenCornerOffset', () => {
 
 describe('composerOutline', () => {
   const width = 365;
-  const height = 68;
   const inset = 14;
   const R = 55;
+  // 上角 + 下角放得下的高度才能纯贴角（两角各 R−inset = 41）
+  const height = 100;
 
   it('下角与屏幕角的间隙恒为 inset（波动 < 0.3px）', () => {
     const pts = composerOutline({ width, height, inset, screenRadius: R, exponent: 4, steps: 40 });
@@ -61,15 +64,6 @@ describe('composerOutline', () => {
     const gaps = bl.map(([x, y]) => distToPolyline([x + inset, height + inset - y], arc));
     expect(Math.min(...gaps)).toBeCloseTo(inset, 1);
     expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(0.3);
-  });
-
-  it('左右边缘无直边：上角起点高度 = 下角终点高度（C1 连续）', () => {
-    const pts = composerOutline({ width, height, inset, screenRadius: R, steps: 40 });
-    const bl = pts.slice(-41);
-    const tl = pts.slice(0, 41);
-    expect(tl[0][0]).toBeCloseTo(0, 2); // 左上角起点在左边缘
-    expect(bl[bl.length - 1][0]).toBeCloseTo(0, 2); // 左下角终点也在左边缘
-    expect(tl[0][1]).toBeCloseTo(bl[bl.length - 1][1], 1);
   });
 
   it('全部点落在面板框内', () => {
@@ -98,47 +92,83 @@ describe('composerOutline', () => {
   });
 
   /**
-   * 2026-10 iPhone 17 重标后新增的两条契约。
+   * 2026-10 用户报「移动端输入区上两个圆角和下两个圆角不相等」后的新契约：
+   * **四个角等大**。
    *
-   * 背景：R 从 55 抬到 74.5 后，`touch = R − inset` 涨到 58，与 68px 的条高只差
-   * 10px。两条"悬崖"随之暴露 —— 高度抖 2px 就整体换成胶囊（间隙波动 0.3 → 17px），
-   * 多行输入则让上角从 10px 长到 58px（每打一行形变一次）。下面把它们各钉一条。
+   * 旧口径里上角"纵向吃剩余高度"，iPhone 上纵向只有 10~25px，下角却是
+   * 41~56px（镜像误差实测 10.7~46px，卡片越高差得越多）。新口径把上角改成
+   * 下角关于水平中轴的**镜像**，并把跨度封顶在「静止态半高」。
    */
-  it('面板略矮时按高度收缩屏幕圆角，而不是整块换成胶囊', () => {
-    const R = 74.5;
-    const inset = 16.5;
-    const height = 60; // 真实 touch=58 放不下 → 触发收缩：R_eff = 60−8+16.5 = 68.5
-    const steps = 40;
-    const pts = composerOutline({ width: 369, height, inset, screenRadius: R, steps });
-    const eff = height - 8 + inset;
-    // 与既有判据同构：末尾 steps+1 点是左下角，逐点量到「收缩后」屏幕角的距离
-    const bl = pts.slice(-(steps + 1));
-    const arc = screenArc(eff, 2.5);
-    const gaps = bl.map(([x, y]) => distToPolyline([x + inset, height + inset - y], arc));
-    // 胶囊退化会让间隙从 16.5 起飞到几十像素；收缩口径下仍是等间隙
-    expect(Math.min(...gaps)).toBeGreaterThan(inset - 1);
-    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(0.5);
+  it('四角等大：轮廓关于水平中轴镜像对称（偏差 < 0.05px）', () => {
+    const cases = [
+      { width: 365, height: 93, inset: 14, screenRadius: 65.5, cornerMax: 46.5 },
+      { width: 402 - 37.5, height: 93, inset: 18.74, screenRadius: 74.5, cornerMax: 46.5 },
+      { width: 365, height: 100, inset: 14, screenRadius: 55 },
+      { width: 365, height: 170, inset: 14, screenRadius: 65.5, cornerMax: 46.5 },
+      { width: 365, height: 68, inset: 14, screenRadius: 55, steps: 40 },
+      { width: 300, height: 90, inset: 12, screenRadius: 0 },
+    ];
+    for (const c of cases) {
+      const pts = composerOutline({ steps: 24, ...c });
+      const mirrored = pts.map(([x, y]) => [x, c.height - y] as Point);
+      const oneWay = Math.max(...pts.map((p) => distToPolyline(p, mirrored)));
+      const otherWay = Math.max(...mirrored.map((p) => distToPolyline(p, pts)));
+      expect(Math.max(oneWay, otherWay)).toBeLessThan(0.05);
+    }
   });
 
-  it('topRyMax 锁住上角：面板变高时上角半径不变，多出的高度成为竖直直边', () => {
-    const opts = { width: 369, inset: 16.5, screenRadius: 74.5, steps: 24, topRyMax: 9.6 };
-    const rest = composerOutline({ ...opts, height: 68 });
-    const grown = composerOutline({ ...opts, height: 170 });
-    // 首点 = 左上角起点（x=0, y=上角纵向半径）
-    expect(rest[0][0]).toBeCloseTo(0, 6);
-    expect(grown[0][0]).toBeCloseTo(0, 6);
+  it('上下两角各吃一半高度：静止态 93px 卡片上跨度 = 46.5（而不是 R−d = 51.5）', () => {
+    const geo = composerGeometry({ width: 365, height: 93, inset: 14, screenRadius: 65.5 });
+    // 上限先由 height/2 命中（调用方不传 cornerMax 时）
+    expect(geo.span).toBeCloseTo(46.5, 6);
+    expect(geo.hugging).toBe(true);
+    // 上角起点（左边缘）与下角终点（左边缘）关于中轴对称 → 各占一半
+    const pts = composerOutline({ width: 365, height: 93, inset: 14, screenRadius: 65.5, steps: 24 });
+    expect(pts[0][1]).toBeCloseTo(46.5, 1);
+    expect(93 - pts[pts.length - 1][1]).toBeCloseTo(46.5, 1);
+  });
+
+  it('cornerMax 锁住大小：卡片被多行撑高时两角不变，长出来的是竖直直边', () => {
+    const opts = { width: 369, inset: 16, screenRadius: 74.5, steps: 24, cornerMax: 46.5 };
+    const rest = composerOutline({ ...opts, height: 93 });
+    const grown = composerOutline({ ...opts, height: 200 });
+    expect(rest[0][1]).toBeCloseTo(46.5, 1);
     expect(grown[0][1]).toBeCloseTo(rest[0][1], 6);
-    expect(grown[0][1]).toBeLessThan(10);
-    // 长出来的部分必须是竖直直边：轮廓里存在 x≈0 且 y 跨越 60px 以上的点
+    // 左边缘变成一段竖直直边：x≈0 的点跨越 100px 以上
     const left = grown.filter(([x]) => Math.abs(x) < 0.01).map(([, y]) => y);
-    expect(Math.max(...left) - Math.min(...left)).toBeGreaterThan(60);
+    expect(Math.max(...left) - Math.min(...left)).toBeGreaterThan(100);
     // 且仍在框内
     for (const [x, y] of grown) {
       expect(x).toBeGreaterThan(-0.01);
       expect(x).toBeLessThan(369.01);
       expect(y).toBeGreaterThan(-0.01);
-      expect(y).toBeLessThan(170.01);
+      expect(y).toBeLessThan(200.01);
     }
+  });
+
+  it('cornerMax 比 R−d 更小就按 cornerMax 来：内层圆角跟着变小', () => {
+    const opts = { width: 369, height: 200, inset: 16, screenRadius: 74.5, steps: 24 };
+    // 不封顶：跨度 = R−d = 58.5
+    expect(composerCornerSpan(opts)).toBeCloseTo(58.5, 6);
+    // 封顶 40：跨度降到 40（上下各 40，中间 120 直边）
+    expect(composerCornerSpan({ ...opts, cornerMax: 40 })).toBeCloseTo(40, 6);
+    expect(composerOutline({ ...opts, cornerMax: 40 })[0][1]).toBeCloseTo(40, 1);
+  });
+
+  it('面板略矮时按高度收缩屏幕圆角，而不是整块换成胶囊', () => {
+    const R2 = 74.5;
+    const inset2 = 16.5;
+    const height2 = 60; // 两角各 30 → 收缩后模型屏幕角 = 30 + 16.5 = 46.5
+    const steps = 40;
+    const pts = composerOutline({ width: 369, height: height2, inset: inset2, screenRadius: R2, steps });
+    const eff = height2 / 2 + inset2;
+    // 与既有判据同构：末尾 steps+1 点是左下角，逐点量到「收缩后」屏幕角的距离
+    const bl = pts.slice(-(steps + 1));
+    const arc = screenArc(eff, 2.5);
+    const gaps = bl.map(([x, y]) => distToPolyline([x + inset2, height2 + inset2 - y], arc));
+    // 胶囊退化会让间隙从 16.5 起飞到几十像素；收缩口径下仍是等间隙
+    expect(Math.min(...gaps)).toBeGreaterThan(inset2 - 1);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(0.5);
   });
 });
 
@@ -162,7 +192,7 @@ describe('insetPolyline', () => {
   it('超椭圆轮廓内缩 1px 后仍在框内且面积变小', () => {
     const outer = composerOutline({
       width: 365,
-      height: 68,
+      height: 100, // 留出竖直直边：胶囊形中间是尖缝，内缩后 miter 会顶出去
       inset: 14,
       screenRadius: 55,
       steps: 24,

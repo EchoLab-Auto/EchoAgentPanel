@@ -205,7 +205,14 @@ describe('ChatView 竖屏移动端', () => {
       /--composer-corner-r: var\(--composer-radius\)/,
     );
     // 源码里必须真的调用了轮廓计算（否则 clip 变量永远 none）
-    expect(raw, '移动端必须调用 composerOutline').toMatch(/composerOutline\(\{/);
+    expect(raw, '移动端必须调用 composerOutline').toMatch(/composerOutline\(/);
+    // 四角等大（2026-10 用户报上下角不等）：跨度以「静止态半高」封顶，
+    // 内层圆角读实际跨度而不是 R − inset
+    expect(raw, '上下角尺寸按静止半高封顶').toMatch(/cornerMax:\s*restHalfHeight\(\)/);
+    expect(raw, '内层圆角读实际生效的跨度').toMatch(/composerCornerSpan\(/);
+    expect(raw, '静止半高由「卡片高 − 输入框长出来的高度」反推').toMatch(
+      /const restH = cardH - Math\.max\(0, grew\)/,
+    );
     // 单层卡片：不再写内轮廓变量（否则 JS 白算一份）
     expect(raw).not.toMatch(/--composer-clip-inner/);
     expect(raw, '读屏角/留白变量作为输入').toMatch(/'--panel-display-radius'/);

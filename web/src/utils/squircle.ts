@@ -9,8 +9,8 @@
  * `pointsToPathData` / `pointsToClipPath`。
  *
  * 本文件只保留 Panel 特有的两件事：
- * 1. **把「屏幕角偏移曲线」（下角）与「同族超椭圆」（上角）拼成一个轮廓** ——
- *    `composerOutline`；
+ * 1. **把「屏幕角偏移曲线」（下角）与它的水平镜像（上角）拼成一个四角等大的
+ *    轮廓** —— `composerOutline` + `composerGeometry`；
  * 2. 闭合折线的法线内缩（1px 内轮廓时代留下的工具，测试仍在用）——
  *    `insetPolyline`。
  *
@@ -21,12 +21,15 @@
  *
  * - **下角**必须等于「屏幕角超椭圆沿法线内缩 d」—— 这是一条**偏移曲线**，
  *   不是同族超椭圆（拿半径 R−d 的超椭圆去近似，实测偏差 2.65px）。
- * - **上角**没有屏幕对应物（那里屏幕边是直的），取同族超椭圆、纵向吃剩余高度，
- *   使上下两段在左/右边缘处切线都竖直 → C1 连续，看不出接缝。
+ * - **上角**取**下角关于水平中轴的镜像**（2026-10 起）：四个角必须等大 ——
+ *   此前上角"纵向吃剩余高度"，在 iPhone 上纵向只有 10~25px，而下角是 41~56px，
+ *   肉眼一眼看出上下不等（实测镜像误差 10.7~46px，卡片越高差得越多）。
  *
- * 代价是"贴角区"纵向占 R−d，输入区静止态不高，于是左右两侧没有竖直直边，
- * 端头呈椭圆状。这是完全贴合的必然结果 —— 想要可见直边只能降低贴合度
- * （调大 `--composer-inset` 或调小 R）。
+ * 上下等大的代价：两角加起来不能超过卡片高度，所以跨度取
+ * `min(R − d, 静止态半高)` —— 建模的屏幕角因此比真机略紧（iPhone 上 65.5 → 60.4），
+ * 下角间隙从「恒为 d」变成「d ± 1.7px」（R=74.5 的机型 ±3.0px）。要严格等间隙
+ * 就得放弃等大，二者在静止态 93px 的卡片上无法兼得：唯一两全解是把 d 提到
+ * R − 半高 ≈ 33~42px，输入区会被推得又窄又高。
  */
 
 import {
@@ -99,76 +102,110 @@ export interface ComposerOutlineOptions {
   /** 每角采样段数 */
   steps?: number;
   /**
-   * 上角纵向半径的上限（省略 = 不设上限，吃掉全部剩余高度）。
+   * 上下角纵向尺寸（= 贴角跨度）的上限，单位 px。省略 = 只按当前高度的一半封顶。
    *
-   * 为什么要设上限：上角取「剩余高度」是为了让左右边缘都是竖直切线（C1 连续），
-   * 但剩余高度随面板变高而增长 —— 多行输入时面板从 68px 长到 170px，上角会从
-   * 10px 一路长到 58px（实测 iPhone 17 视口：1 行 9.75 → 2 行 34.75 → 3 行 58.25），
-   * 等于每打一行，两端就从「尖椭圆端头」渐变到「四分之一圆」。这个形变不是
-   * 用户操作的对象，读起来像抖动。
+   * 为什么要封顶：贴角跨度必须是 `R − d`（下角贴着屏幕角走）才能等间隙，但
+   * 「上下角等大」要求两角加起来不超过卡片高度 —— 而 R−d 在 iPhone 上就有
+   * 41~56px，卡片静止高度才 93px，一半是 46.5px。于是跨度取
+   * `min(R − d, 上限)`，**上角与下角共用这一个值**（上角是下角关于水平中轴的
+   * 镜像，形状完全相同）。
    *
-   * 传「静止态（单行）的剩余高度」即可锁住：面板长高时上角不再变大，中间那段
-   * 还原成竖直直边（本来就是更想要的样子）。
+   * 为什么由调用方传"静止态半高"而不是用当前 `height / 2`：多行输入会把卡片
+   * 从 93 撑到 170，用 `height / 2` 会让两角每打一行就变大一次（用户读作抖动）。
+   * 传静止半高即可锁住：长出来的高度成为竖直直边。
    */
-  topRyMax?: number;
+  cornerMax?: number;
+}
+
+/** 轮廓的几何口径（`composerOutline` 与 `composerCornerSpan` 共用） */
+export interface ComposerGeometry {
+  /** 上下四角共用的纵向尺寸（贴角跨度）；退化口径下等于同半径的半径 */
+  span: number;
+  /** 建模用的屏幕圆角跨度：贴角模式下 = span + inset */
+  screenRadius: number;
+  /** true = 贴角模式（下角 = 屏幕角偏移曲线）；false = 四角同半径兜底 */
+  hugging: boolean;
+}
+
+/**
+ * 解出轮廓的几何口径。
+ *
+ * 跨度取三者最小：真实屏角 `R`、调用方给的静止半高上限、以及当前高度的
+ * 一半（两角不能重叠 —— 这一条是兜底，静止态下 `cornerMax` 已经先命中）。
+ * 收缩模型的代价只有「模型屏幕角比真机略紧」：R 差 1px 时 45° 处间隙偏差
+ * ≈0.17px，肉眼读不出；换来的是上下角等大。
+ */
+export function composerGeometry(options: ComposerOutlineOptions): ComposerGeometry {
+  const { width: w, height: h, inset, screenRadius: R, cornerMax } = options;
+  const limit = Math.min(
+    R,
+    (cornerMax ?? Number.POSITIVE_INFINITY) + inset,
+    h / 2 + inset,
+  );
+  const span = Math.max(0, Math.min(R, limit) - inset);
+  // 只有"几何上无解"才退化：直角屏（span ≤ 0）/ 偏移曲线比面板还宽
+  if (span > 0 && w > span * 2) {
+    return { span, screenRadius: span + inset, hugging: true };
+  }
+  // 退化：四角同半径（直角屏给 20px 兜底，别画成纯矩形）
+  return {
+    span: Math.max(0, Math.min(h / 2, w / 2, span > 0 ? span : 20)),
+    screenRadius: 0,
+    hugging: false,
+  };
+}
+
+/**
+ * 上下角实际使用的纵向尺寸（面积 = 贴角跨度）。
+ *
+ * 面板侧拿它当 `--composer-corner-r`：内层控件按 `span − padding − border`
+ * 算同心圆角，与真实生效的外轮廓一致（不能再用 `R − inset` —— 封顶之后
+ * 那个值比实际大）。
+ */
+export function composerCornerSpan(options: ComposerOutlineOptions): number {
+  return composerGeometry(options).span;
 }
 
 /**
  * 输入区外轮廓（面板坐标系，原点在面板左上角，y 向下）。
  *
- * 上下角不等大：下角被"贴屏幕角"锁死为 R−d，上角吃掉剩余高度。
+ * **四个角等大**（2026-10 用户要求）：下角是屏幕角的偏移曲线，上角是它关于
+ * 水平中轴的**镜像** —— 所以形状严格对称，不是"看起来差不多"。
+ * 跨度由 `composerGeometry` 统一解出（见 `cornerMax`）。
  */
 export function composerOutline(options: ComposerOutlineOptions): Point[] {
-  const { width: w, height: h, inset, exponent = 2.5, steps = 28, topRyMax } = options;
+  const { width: w, height: h, inset, exponent = 2.5, steps = 28 } = options;
   const s = powerOf(exponent);
-  /**
-   * 屏幕圆角**按面板高度收缩**（2026-10）。
-   *
-   * 贴角区纵向占 R−d；面板太矮时它放不下，此前直接退化成「四角同半径」的胶囊
-   * —— 一次 2px 的高度抖动就能让形状整体换掉（实测 iPhone 17 视口下间隙波动
-   * 从 0.3px 跳到 17px），是个悬崖。这里改成连续降级：面板矮到放不下时，把
-   * **建模的**屏幕圆角缩到刚好放得下（`R_eff = h − 8 + d`）。
-   *
-   * 代价只有「模型屏幕角比真机略紧」：R 差 1px 时 45° 处间隙偏差 ≈0.17px，
-   * 与"整个形状换掉"不是一个量级。d 与 R 由 CSS 联动（`R − 0.85 × 条高`）时
-   * R_eff = R 恒成立，这条路径平时根本走不到 —— 它是防抖动的兜底。
-   */
-  const fitRadius = Math.max(inset, Math.min(options.screenRadius, h - 8 + inset));
-  const screenRadius = fitRadius;
-  const touch = screenRadius - inset;
-  // 剩下只有"几何上无解"才退化：触屏角无意义 / 偏移曲线比面板还宽
-  const fits = screenRadius > 0 && touch > 0 && w > touch * 2;
+  const geo = composerGeometry(options);
 
-  if (!fits) {
-    // 直角屏（桌面 / iPhone SE）也要有圆角：touch ≤ 0 时退回 20px 兜底
-    const side = Math.max(0, Math.min(h / 2, w / 2, touch > 0 ? touch : 20));
-    return clockwise(w, h, side, side, s, steps);
+  if (!geo.hugging) {
+    return clockwise(w, h, geo.span, geo.span, s, steps);
   }
 
   // 屏幕左下角在面板坐标系里的位置：面板左边 x=0 距屏幕左边 inset，
   // 面板底边 y=h 距屏幕底边 inset，故屏幕角点在 (−inset, h + inset)。
-  const half = sampleCornerOffset(screenRadius, inset, exponent, steps);
+  const half = sampleCornerOffset(geo.screenRadius, inset, exponent, steps).slice() as Point[];
+  // 端点吸附到屏幕两条边上：偏移曲线的端点法线是用**单侧**切线估的（没取到
+  // 真正的切线），实测会差 0.2px（R=65.5 时 46.71 而非 46.5）。理论端点就是
+  // 「弧起点 (0, R) 沿法线 (1,0) 内移 d」= (d, R)，吸附后跨度精确等于 span，
+  // 内层圆角（span − padding）才有意义。
+  half[0] = [inset, geo.screenRadius];
+  half[half.length - 1] = [geo.screenRadius, inset];
   const toPanel = (p: Point): Point => [p[0] - inset, h + inset - p[1]] as const;
 
   // BL：屏幕偏移曲线 → 面板坐标（起点在左边缘、终点在底边，顺时针方向）
   const bl = half.map(toPanel);
-  // BR：镜像到右侧（同样是从右边到底边）
-  const br = half.map((p) => [w - (p[0] - inset), h + inset - p[1]] as const);
-  // 上角：纵向吃掉剩余高度，横向与贴角区同宽（两边切线都竖直 → C1 连续）。
-  // topRy 取偏移曲线的实测端点高度而非 R−inset，否则接缝处有 0.03px 错位；
-  // 再以「贴角区高度」封顶 —— 多行输入把面板撑高时，上角不该跟着无限变大。
-  const topRy = Math.max(
-    0,
-    Math.min(bl[0][1], h - bl[0][1], topRyMax ?? Number.POSITIVE_INFINITY),
-  );
-  const tr = cornerPoints(w, 0, touch, topRy, -1, 1, exponent, steps);
-  const tl = cornerPoints(0, 0, touch, topRy, 1, 1, exponent, steps);
+  // BR：镜像到右侧（同样是从左边…不，从右边到底边）
+  const br = half.map((p): Point => [w - (p[0] - inset), h + inset - p[1]] as const);
+  // TL / TR：把下角关于水平中轴 y = h/2 翻上去 —— 上下角因此**同形同大**。
+  // 翻折不改 x，所以 tl 仍然"从左边起、到顶边止"，顺序可直接用；
+  // tr 翻折后是"从右边起、到顶边止"，需反转成"顶边 → 右边"。
+  const tl = bl.map(([x, y]): Point => [x, h - y] as const);
+  const tr = br.map(([x, y]): Point => [x, h - y] as const);
 
   // 顺时针：左上 → 右上 → 右下 → 左下 → 闭合。
-  // cornerPoints 对 TR/BL 给出的是逆时针参数方向，需反转。
   return [...tl, ...tr.reverse(), ...br, ...bl.reverse()];
 }
-
 /** 四角同半径的顺时针圆角矩形（退化口径：贴角放不下时用） */
 function clockwise(
   w: number,

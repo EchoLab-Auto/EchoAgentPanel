@@ -423,6 +423,39 @@ const PROBE = `(() => {
         const nums = clipPath ? (clipPath.match(/-?\\d+\\.?\\d*/g) || []).map(Number) : [];
         return nums.length >= 2 ? +nums[1].toFixed(2) : null;
       })(),
+      /**
+       * 四角等大（2026-10 用户报「上两个圆角和下两个圆角不相等」）：把真实
+       * clip-path 折线关于**水平中轴**翻折，量与原轮廓的最大双向偏差。
+       * 上角是下角的镜像时恒为 0；旧口径（上角吃剩余高度）实测 10.7~46px。
+       */
+      symmetry: (() => {
+        if (!clipPath) return null;
+        const nums = (clipPath.match(/-?\\d+\\.?\\d*/g) || []).map(Number);
+        const pts = [];
+        for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i], nums[i + 1]]);
+        if (pts.length < 8) return null;
+        const hh = Math.max(...pts.map((p) => p[1]));
+        const mirror = pts.map(([x, y]) => [x, hh - y]);
+        const segDist = (p, line) => {
+          let best = Infinity;
+          for (let i = 0; i < line.length; i += 1) {
+            const a = line[i];
+            const b = line[(i + 1) % line.length];
+            const vx = b[0] - a[0];
+            const vy = b[1] - a[1];
+            const L = vx * vx + vy * vy || 1;
+            const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L));
+            const d = Math.hypot(p[0] - (a[0] + vx * t), p[1] - (a[1] + vy * t));
+            if (d < best) best = d;
+          }
+          return best;
+        };
+        const dev = Math.max(
+          ...pts.map((p) => segDist(p, mirror)),
+          ...mirror.map((p) => segDist(p, pts)),
+        );
+        return +dev.toFixed(2);
+      })(),
       outlineGap,
       cornerHitTest,
     } : null,
@@ -448,8 +481,8 @@ const PROBE = `(() => {
  *
  * 为什么这一条必须断言：上角纵向半径取的是「剩余高度」，面板一长高它就跟着长
  * ——2026-10 实测 iPhone 17 视口下 1 行 9.75 → 2 行 34.75 → 3 行 58.25px，
- * 视觉上每打一行两端就从尖椭圆变成四分之一圆。用 `topRyMax` 锁住后应当纹丝不动，
- * 且多出来的高度变成竖直直边（下角贴合度不受影响）。
+ * 视觉上每打一行两端就从尖椭圆变成四分之一圆。现在两角尺寸由「静止态半高」
+ * （`cornerMax`）锁住，应当纹丝不动，多出来的高度变成竖直直边。
  */
 const GROW = `(() => {
   const ta = document.querySelector('.chat-composer-float textarea');
@@ -622,11 +655,25 @@ try {
       `radius=${m.textareaRadius} ≤ 贴角半径 ${m.composer?.cornerRadius}` +
         `（声明值 30 超过输入框半高 ${(m.textareaHeight ?? 0) / 2} 时由浏览器按规范等比削减为胶囊）`,
     );
+    /**
+     * 四角等大（2026-10 用户要求）—— 这条现在是**主契约**，压过"下角严格等间隙"。
+     *
+     * 二者在静止态 93px 的卡片上无法兼得：下角贴屏角要求跨度 = R−留白
+     * （iPhone 上 41~56px），而四角等大要求「上下两角加起来 ≤ 卡片高」，即
+     * 跨度 ≤ 46.5px。旧口径让上角吃剩余高度（纵向只有 10~25px）换来恒定间隙，
+     * 代价就是用户看到的「上下角不等」。现在反过来：跨度封顶在静止半高，
+     * 上角取镜像，间隙因此从恒定值放宽 ±1.7~3.5px（见下一条）。
+     */
     check(
-      `${tag} 下角贴合屏幕角（间隙波动 < 1px）`,
-      !!m.composer?.outlineGap && m.composer.outlineGap.spread < 1,
+      `${tag} 四角等大：轮廓关于水平中轴对称（偏差 < 0.3px）`,
+      m.composer?.symmetry != null && m.composer.symmetry < 0.3,
+      `镜像偏差 ${m.composer?.symmetry}px（旧口径实测 10.7~46px；0 = 上角是下角的镜像）`,
+    );
+    check(
+      `${tag} 下角仍贴在屏幕角内侧（波动 ≤ 4px：等大优先的代价）`,
+      !!m.composer?.outlineGap && m.composer.outlineGap.spread <= 4,
       m.composer?.outlineGap
-        ? `间隙 ${m.composer.outlineGap.min}~${m.composer.outlineGap.max}px，波动 ${m.composer.outlineGap.spread}px（${m.composer.outlineGap.samples} 行采样；左 ${JSON.stringify(m.composer.outlineGap.left)} 右 ${JSON.stringify(m.composer.outlineGap.right)}；圆弧时代最好 2.3px，最初 34px）`
+        ? `间隙 ${m.composer.outlineGap.min}~${m.composer.outlineGap.max}px，波动 ${m.composer.outlineGap.spread}px（${m.composer.outlineGap.samples} 行采样；左 ${JSON.stringify(m.composer.outlineGap.left)} 右 ${JSON.stringify(m.composer.outlineGap.right)}；等间隙口径曾是 < 0.3px，代价换来四角等大）`
         : '采样失败',
     );
     /**
@@ -655,11 +702,10 @@ try {
      * 容差 1px：光栅化 + 亚像素插值的量级。
      */
     check(
-      `${tag} 间隙不小于声明留白（不切进物理死弯）`,
-      !!m.composer?.outlineGap
-        && m.composer.outlineGap.min >= (m.composer.leftInset ?? 0) - 1,
+      `${tag} 间隙恒正（不切进物理死弯）`,
+      !!m.composer?.outlineGap && m.composer.outlineGap.min >= 6,
       m.composer?.outlineGap
-        ? `min ${m.composer.outlineGap.min} ≥ 留白 ${m.composer.leftInset} − 1`
+        ? `min ${m.composer.outlineGap.min} ≥ 6px（留白 ${m.composer.leftInset}；建模屏角被静止半高收缩后角部会比边上近 1.7~3.5px，但仍远离死弯）`
         : '采样失败',
     );
     /**
@@ -667,11 +713,11 @@ try {
      * 或上角 topRy 两侧不一致时，只有一侧会坏。分别断言两边波动。
      */
     check(
-      `${tag} 左右下角都贴合（两侧波动各 < 1px）`,
+      `${tag} 左右下角都贴合（两侧波动各 ≤ 4px）`,
       !!m.composer?.outlineGap?.left
         && !!m.composer?.outlineGap?.right
-        && m.composer.outlineGap.left.spread < 1
-        && m.composer.outlineGap.right.spread < 1,
+        && m.composer.outlineGap.left.spread <= 4
+        && m.composer.outlineGap.right.spread <= 4,
       m.composer?.outlineGap
         ? `左 ${m.composer.outlineGap.left?.spread}px / 右 ${m.composer.outlineGap.right?.spread}px`
         : '采样失败',
@@ -683,13 +729,18 @@ try {
       const before = m.composer?.topRy;
       const after = grown.composer?.topRy;
       check(
-        `${tag} 多行输入不改变上角半径（形状不跳变）`,
+        `${tag} 多行输入不改变角的尺寸（形状不跳变）`,
         before != null && after != null && Math.abs(after - before) < 0.6,
         `1 行 ${before}px → 3 行 ${after}px（条高 ${m.composer?.height} → ${grown.composer?.height}）`,
       );
       check(
+        `${tag} 多行输入后四角仍等大`,
+        grown.composer?.symmetry != null && grown.composer.symmetry < 0.3,
+        `镜像偏差 ${grown.composer?.symmetry}px`,
+      );
+      check(
         `${tag} 多行输入后下角仍贴合`,
-        !!grown.composer?.outlineGap && grown.composer.outlineGap.spread < 1,
+        !!grown.composer?.outlineGap && grown.composer.outlineGap.spread <= 4,
         grown.composer?.outlineGap
           ? `间隙 ${grown.composer.outlineGap.min}~${grown.composer.outlineGap.max}px，波动 ${grown.composer.outlineGap.spread}px`
           : '采样失败',

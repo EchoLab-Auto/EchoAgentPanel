@@ -29,7 +29,7 @@ import { checklistKey, sessionKey, teamKey } from '../keys';
 import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
-import { composerOutline, toClipPath } from '../utils/squircle';
+import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
@@ -159,31 +159,31 @@ const composerClip = ref('none');
 const composerCornerR = ref('');
 
 /**
- * 单行静止态下「上角能占的纵向高度」= 静止条高 − 贴角区高度。
+ * 静止态（单行、无附件）的卡片半径 = 卡片静止高 / 2 —— 上下角尺寸的上限。
  *
- * 静止条高不能直接读（此刻可能已被多行输入撑高），由内框的 `min-height`
- * 反推：`--chat-control-h` 是 calc() 表达式、computed value 不求值，但
- * **元素上**的 min-height 是 used value（resolved px），能读。加上
- * padding/border 就是外框静止高。任何一步读不到就退回「不设上限」
- * （即改动前的行为），不让它因为测不到而画错。
+ * 为什么需要它：四个角等大要求「上角 + 下角 = 卡片高」，而卡片静止高只有
+ * 93px（输入行 65.6 + 状态行 17 + 间隙），一半是 46.5px；贴角跨度 R−d 在
+ * iPhone 上是 41~56px，超了就得让两角各吃一半。
+ *
+ * 为什么不能用「当前高 / 2」：多行输入会把卡片从 93 撑到 170，那样每打一行
+ * 两角就长大一次，用户读作抖动。这里把「输入框长出来的高度」从当前高里刨掉，
+ * 得到**与内容无关**的静止高：
+ *   `restH = 卡片高 − (输入框当前高 − 单行内框高)`
+ * 其中「单行内框高」的锚点不能用 `--chat-control-h`（calc 表达式，computed
+ * 不求值），改用发送/附件按钮 —— 它们被钉在 `--chat-control-h` 且**不随多行
+ * 变高**。任何一步测不到就返回 undefined（调用方退回「按当前半高封顶」）。
  */
-function restingSlack(touch: number, style: CSSStyleDeclaration): number | undefined {
+function restHalfHeight(): number | undefined {
   const el = composerFloatRef.value;
-  // 「单行内框高」的锚点：发送/附件按钮被钉在 `--chat-control-h`
-  // （height/min-height 都是它），而且**不随多行变高**，正是要的那个数。
-  // 不能读 `.nm-textarea` 的 min-height —— 那是 auto（自动撑高），读不到
-  // 静止值；也不能读 `--chat-control-h` 本身（calc 表达式，computed 不求值）。
+  const card = el?.querySelector<HTMLElement>('.chat-composer-float__card');
+  const field = el?.querySelector<HTMLElement>('.nm-textarea');
   const anchor = el?.querySelector<HTMLElement>('.chat-view__send, .chat-view__attach-btn');
-  if (!anchor) return undefined;
-  const fieldH = anchor.getBoundingClientRect().height;
-  const pad = Number.parseFloat(style.getPropertyValue('--composer-padding'));
-  const border = Number.parseFloat(style.getPropertyValue('--composer-border'));
-  if (!Number.isFinite(fieldH) || fieldH <= 0) return undefined;
-  if (!Number.isFinite(pad) || !Number.isFinite(border)) return undefined;
-  const restHeight = fieldH + (pad + border) * 2;
-  const slack = restHeight - touch;
-  // 负值/极窄说明模型对不上（例如字号被系统放大），交给默认行为
-  return slack > 1 ? slack : undefined;
+  if (!card || !field || !anchor) return undefined;
+  const cardH = card.getBoundingClientRect().height;
+  const grew = field.getBoundingClientRect().height - anchor.getBoundingClientRect().height;
+  const restH = cardH - Math.max(0, grew);
+  // 小于 8px 说明模型对不上（字号被系统放大等），交给默认行为
+  return restH > 8 ? restH / 2 : undefined;
 }
 
 function updateComposerClip() {
@@ -205,7 +205,7 @@ function updateComposerClip() {
     composerCornerR.value = '';
     return;
   }
-  const outer = composerOutline({
+  const geometry = {
     width: rect.width,
     height: rect.height,
     inset,
@@ -217,15 +217,17 @@ function updateComposerClip() {
     // 间隙波动 < 0.5px（n 偏 0.1 约换 0.4px 的角部误差）。
     exponent: 2.5,
     steps: 24,
-    // 上角纵向半径锁在「单行静止态」的剩余高度：不锁的话多行输入把面板从
-    // 68 撑到 170 时，上角会从 10px 一路长到 58px（实测 9.75 → 34.75 →
-    // 58.25），每打一行两端就从尖椭圆渐变到四分之一圆 —— 不是用户的操作对象，
-    // 读起来像抖动。锁住后长出来的高度变成竖直直边（本来就是更想要的形状）。
-    topRyMax: restingSlack(screenRadius - inset, style),
-  });
-  composerClip.value = toClipPath(outer);
-  // 内层圆角：贴角区半径扣掉 padding+border，与超椭圆外框同心
-  composerCornerR.value = `${Math.max(0, screenRadius - inset)}px`;
+    // 上下角尺寸锁在「静止态半高」：不锁的话多行输入把卡片从 93 撑到 170 时
+    // 两角会跟着长大（旧口径实测上角 9.75 → 34.75 → 58.25），每打一行形状就
+    // 变一次 —— 不是用户的操作对象，读起来像抖动。锁住后长出来的高度变成
+    // 竖直直边（本来就是更想要的形状）。
+    cornerMax: restHalfHeight(),
+  } as const;
+  composerClip.value = toClipPath(composerOutline(geometry));
+  // 内层圆角：真实生效的贴角跨度扣掉 padding+border，与外轮廓同心。
+  // 不能再用 `screenRadius − inset` —— 四角等大之后跨度被静止半高封顶，
+  // 那个值比实际跨度大一圈，内层控件会显得"比外框还圆"。
+  composerCornerR.value = `${Math.max(0, composerCornerSpan(geometry))}px`;
 }
 
 const composerStyle = computed(() => ({
@@ -2582,29 +2584,31 @@ function mediaSrc(img: string): string {
      ② 为什么必须用 clip-path：border-radius 只能画圆弧，而屏角是超椭圆。
         圆弧贴超椭圆的误差不可通过调半径消除 —— 圆心重合(r=41)时 45° 处多
         切进 10.4px，最优 r≈20 也仍有 2.3px 波动。轮廓计算见
-        utils/squircle.ts（对屏角超椭圆做法线内缩，误差 < 0.3px）。
-     ③ 形状代价：贴角区纵向占 R−14 = 41px，而静止态条高只有 68px，上角吃掉
-        剩余 27px → 左右两端没有竖直直边，端头呈椭圆状。这是"完全贴合"的
-        几何必然；想要直边只能降低贴合度（调大 --composer-inset）。
+        utils/squircle.ts（对屏角超椭圆做法线内缩）。
+     ③ 四角必须等大（2026-10 用户报「上两个圆角和下两个圆角不相等」）：
+        旧口径上角"纵向吃剩余高度"，iPhone 上纵向只有 10~25px，下角却是
+        R−14 = 41~56px —— 一眼看出上下不等。现在上角取下角关于水平中轴的
+        镜像，并把跨度封顶在「静止态卡片半高」（JS 用 `cornerMax` 传入），
+        于是四角同形同大。代价只有「建模屏角比真机略紧」：R=65.5/74.5 时
+        下角间隙由恒定 14/18.7px 变成 12.3~14 / 15.6~18.6（±1.7~3px），
+        仍读作平行；两全解只有把留白提到 R−半高 ≈ 33~42px，输入区会被
+        推得又窄又高，不可取。
      ④ Home 指示条：可视范围距底 8~13px，面板底缘 14px 恰在其外。
      ⑤ 键盘弹出时（keyboardInset > 0）面板浮在键盘上方，等间隙已无意义，
         但仍沿用同一轮廓（形状不跳变）。 */
   .chat-composer-float {
-    /* 留白与屏角联动：贴角区高度 = R − inset，占单行静止条高的比例必须封顶。
+    /* 留白：14px 起，随屏角线性放宽到 20px 封顶。
 
-       为什么要联动：贴角区（R−inset）纵向吃掉输入框的一部分，剩给上角的
-       「剩余高度」= 条高 − 贴角区。若让它吃掉太多，上角就只剩几像素，
-       两端变成畸形的尖椭圆端头。早期版本在这里还会整体退化成胶囊
-       （`composerOutline` 的悬崖分支）；dd266c4 之后已改成连续降级
-       （`fitRadius` 按面板高度收缩模型半径），所以这条 clamp 现在的真实作用
-       是**保住上角的可见高度**，不再是防崩溃。
+       现在这条 clamp 只管**间距**，不再管角的形状 —— 四角尺寸由 JS 按
+       「静止态卡片半高」定（见 `restHalfHeight` / `cornerMax`），跨机型恒等。
+       屏角大的机型多给几像素留白，纯粹是为了观感：同一根角在更宽的机型上
+       贴得一样近会显得挤。
 
-       比例取 85%：上角恒得静止条高的 15%（≈10px），与 R 无关 ——
-       这就是「比例约束」比「R 减魔法数 58」更稳的地方：字号/内边距一变，
-       静止条高跟着变，约束自动跟随；未来机型 R 继续涨也只需重测 R。
-
-       下限 14px / 上限 20px：下限是历史值（小角机型 R=55 时给出 14，
-       零回归）；上限避免 R 很大的机型把输入框压得过窄。 */
+       公式 = R − 0.85 × 单行静止条高（rest-h = 输入行 + 2×padding）：
+       R=55 → 9.7 → 夹到下限 14；R=65.5 → 也是 14；R=74.5 → 18.7。
+       下限是历史值（小角机型零回归），上限 20 避免大角机型把输入框压窄。
+       注意变量本身是 clamp() 表达式、computed 不求值，JS 侧一律用实测
+       rect.left 当留白（见 updateComposerClip）。 */
     --composer-rest-h: calc(
       var(--chat-control-h) + 2 * var(--composer-padding) + 2 * var(--composer-border)
     );
