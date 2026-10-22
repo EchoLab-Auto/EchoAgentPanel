@@ -1,3 +1,5 @@
+import { GlassValue } from '../../utils/glass';
+
 export type ButtonVariant = 'raised' | 'pressed' | 'primary' | 'glow' | 'glass' | 'glass-raised';
 export type ButtonSize = 'small' | 'medium' | 'large';
 export type ButtonShape = 'rounded' | 'pill' | 'circle';
@@ -20,6 +22,16 @@ export interface NeumorphismButtonProps {
     form?: string;
     /** Accessible label for the button */
     ariaLabel?: string;
+    /**
+     * 玻璃拟态档位（与 `NeumorphismCard` 同一套命名）：
+     *   - `true` / `'float'` — 悬浮磨砂玻璃，hover 抬升（等价旧 `variant="glass"`）
+     *   - `'raised'`         — 磨砂玻璃 + 新拟态凸起双阴影（等价旧 `variant="glass-raised"`）
+     *   - `'pressed'`        — 磨砂玻璃 + 凹陷内阴影
+     *
+     * 与 `variant` 正交：玻璃只换「表面材质」，与 `variant` 同时给时玻璃优先。
+     * 显式传入时覆盖旧 `variant` 里的玻璃语义。
+     */
+    glass?: GlassValue;
 }
 declare function __VLS_template(): {
     default?(_: {}): any;
@@ -28,18 +40,21 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     disabled: boolean;
     loading: boolean;
     type: string;
+    glass: undefined;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {
     click: (event: MouseEvent) => void;
 }, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismButtonProps>, {
     disabled: boolean;
     loading: boolean;
     type: string;
+    glass: undefined;
 }>>> & Readonly<{
     onClick?: ((event: MouseEvent) => any) | undefined;
 }>, {
     type: "button" | "submit" | "reset";
     disabled: boolean;
     loading: boolean;
+    glass: GlassValue;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;

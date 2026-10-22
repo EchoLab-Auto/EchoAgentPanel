@@ -1,4 +1,4 @@
-import { N as f } from "../../chunks/NeumorphismCard-DGFr51dd.js";
+import { N as f } from "../../chunks/NeumorphismCard-BgpR689L.js";
 export {
   f as default
 };

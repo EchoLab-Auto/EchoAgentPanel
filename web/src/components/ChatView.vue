@@ -1510,7 +1510,8 @@ function mediaSrc(img: string): string {
            内容排布。 -->
       <NeumorphismCard
         class="chat-composer-float__card"
-        glass
+        glass="pressed"
+        :elevation="2"
         no-padding
       >
         <div class="chat-composer-float__body">
@@ -1530,12 +1531,18 @@ function mediaSrc(img: string): string {
           </div>
           <!-- 契约：ChatComposer 提供 #actions 插槽时*替换*渲染默认发送按钮，
                因此必须自己渲染 submit 按钮；删除该插槽会恢复库默认发送按钮。 -->
+          <!-- focus-effect="glow"：聚焦时主色光从输入槽**内部**亮起
+               （`inset 0 0 18px` 光晕 + 1px 内描边，抑制默认外环）——这是
+               ui-frame 自带的内辉光实现，不在面板侧手写 box-shadow。
+               卡片本身用 glass="pressed"（另一处库实现）：常态就是内凹的
+               内辉光/内阴影质感，聚焦时再叠一层主色内光。 -->
           <ChatComposer
             v-model="input"
             :disabled="!connected"
             :cancelable="false"
             :rows="1"
             :placeholder="placeholder"
+            focus-effect="glow"
             @send="onSend"
             @cancel="emit('cancel')"
           >
@@ -1807,16 +1814,15 @@ function mediaSrc(img: string): string {
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上。
    结构（2026-10）：
-     __card  NeumorphismCard glass —— 材质/圆角/边缘亮线全归它，
-             辉光是**内辉光**（inset），不是向外的投影
+     __card  NeumorphismCard glass="pressed" —— 材质/圆角/边缘亮线/内辉光
+             全归它（内辉光 = 库的 pressed 档，全 inset，不是向外的投影）
      __body  内层：只做 padding 与内容排布
    桌面走卡片自己的 border-radius；移动端走 JS 算的 clip-path 超椭圆轮廓。
 
-   为什么用内辉光（inset box-shadow）而不是外发光：移动端卡片挂着超椭圆
-   clip-path，而 clip-path 会把元素**自身向外的** box-shadow 整块裁掉 ——
-   外发光只能靠额外的兄弟层（模糊 + 翻转形状）模拟，两层叠起来既有双重
-   阴影风险、又要在桌面端单独关掉。内辉光画在边缘内侧、由 clip 直接裁剪
-   到形状边界，**一份实现同时适配桌面圆角与移动端超椭圆**。 */
+   为什么用内辉光而不是外发光：移动端卡片挂着超椭圆 clip-path，而 clip-path
+   会把元素**自身向外的** box-shadow 整块裁掉 —— 外发光只能靠额外的兄弟层
+   （模糊 + 翻转形状）模拟，既有双重阴影风险、又要在桌面端单独关掉。
+   inset 阴影画在边缘内侧，**一份实现同时适配桌面圆角与移动端超椭圆**。 */
 .chat-composer-float {
   /* 输入行几何单一事实来源（圆角/高度都从这里派生）：
      - --chat-field-font：输入框实际字号（桌面 14px；移动端/iOS 16px，
@@ -1838,15 +1844,9 @@ function mediaSrc(img: string): string {
      —— 设 0 让「内层圆角 = 外框 − padding − border」与「静止条高」两条派生
      公式仍成立（卡片高度 = 内容 + 2×padding）。 */
   --composer-border: 0px;
-  /* ── 内辉光（2026-10）────────────────────────────────────────────
-     浅色档取值。为什么显式写 rgba 而不是复用 --nm-shadow-light：后者在
-     浅色主题是 rgba(255,255,255,.8)、深色是 .14 —— 直接把 α 当强度用在
-     两档之间摆幅太大，内辉光在深色底上会糊成灰雾。这里按主题各给一档，
-     深色覆盖见文件末尾的 [data-theme='dark'] 段。 */
-  --composer-glow-size: 18px; /* 四周内辉光的扩散半径 */
-  --composer-glow: rgba(255, 255, 255, 0.34);
-  --composer-glow-top-size: 10px; /* 上方内辉光的纵向扩散 */
-  --composer-glow-top: rgba(255, 255, 255, 0.5);
+  /* 状态行高度：常驻行与忙碌行同高，同时是 API 徽标的 line-height
+     （盒子铺满行高 → 徽标下边缘 = 行下边缘，三处等距的 ③ 才成立）。 */
+  --chat-status-h: 17px;
   /* 贴角区半径：移动端由 JS 写成「R屏角 − 留白」（超椭圆口径）；
      桌面/直角屏没有贴角区，等于外框半径，公式退化成原来的 R−P−B。 */
   --composer-corner-r: var(--composer-radius);
@@ -1865,33 +1865,22 @@ function mediaSrc(img: string): string {
   pointer-events: none;
 }
 
-/* 卡片本体：ui-frame NeumorphismCard（glass 档）。
-   - 材质（半透明 + backdrop blur）由卡片提供；
-   - 这里覆盖三件事：圆角取 --composer-radius、挂超椭圆 clip、
-     box-shadow 换成**内辉光**（不用卡片 glass-float 的外投影）。
-   选择器带 .chat-composer-float 前缀：卡片自己的 `--nm-border-radius-*`
-   档位类与本文特异性相同（都是单类 + scoped 属性），靠层叠顺序不可靠。 */
+/* 卡片本体：ui-frame NeumorphismCard（**glass="pressed"**）。
+   内辉光不用自己写 —— 库的 `nm-card-glass-pressed` 档就是它：三层 inset
+   （左上内阴影 `--nm-shadow-dark-deep` + 右下内高光 `--nm-shadow-light-deep`
+   + 1px 边缘亮线），强度由 `elevation` 决定、深浅主题各自取令牌。
+   这就是"内辉光/内凹"在库里的标准实现，跨组件一致。
+
+   本层只覆盖输入区特有的三件事：圆角取 --composer-radius、挂超椭圆 clip、
+   毛玻璃强度降档。选择器带 `.chat-composer-float` 前缀：卡片自己的
+   `--nm-border-radius-*` 档位类与本文特异性相同（都是单类 + scoped 属性），
+   靠层叠顺序不可靠。 */
 .chat-composer-float .chat-composer-float__card {
   position: relative;
   z-index: 1;
   pointer-events: auto;
   border-radius: var(--composer-radius);
   clip-path: var(--composer-clip, none);
-  /* 内辉光（2026-10 用户要求）：光从边缘向**内**衰减。
-     三层各司其职，顺序即叠放顺序（先写的在上）：
-       ① 1px 边缘亮线  —— 轮廓的清晰度，替代已删掉的独立描边层
-       ② 上方内辉光    —— 模拟光从上方落下，给"凹陷/受光"的立体感
-       ③ 四周内辉光    —— 主辉光，柔和铺满内缘
-     全部用 inset：移动端 clip-path 只裁"元素外部"，内辉光天然不会被裁掉，
-     所以桌面圆角与移动端超椭圆共用同一份实现（外发光做不到这点）。 */
-  box-shadow:
-    inset 0 0 0 1px color-mix(
-      in srgb,
-      var(--nm-shadow-light) calc(var(--nm-glass-border-opacity) * 100%),
-      transparent
-    ),
-    inset 0 2px var(--composer-glow-top-size) var(--composer-glow-top),
-    inset 0 0 var(--composer-glow-size) var(--composer-glow);
   /* 性能（2026-09-18 起、2026-10 随卡片迁移沿用）：库默认 20px + saturate，
      输入区降到 10px 且不加 saturate —— 大面积 backdrop-filter 每次重绘全量
      重栅格化，跨行拖选每帧触发。用变量覆盖保持与卡片同一实现路径。 */
@@ -1918,11 +1907,6 @@ function mediaSrc(img: string): string {
   border-radius: 0;
 }
 
-/* 深色主题：内辉光要更弱（白在深底上的扩散比浅底更强），否则会发灰雾 */
-:root[data-theme='dark'] .chat-composer-float {
-  --composer-glow: rgba(255, 255, 255, 0.1);
-  --composer-glow-top: rgba(255, 255, 255, 0.14);
-}
 /* 拖选卡顿根治之二（2026-09-18，2026-10 收敛）：库 NeumorphismTextarea 的
    hover/focused 1px translateY 抬升已在库侧移除（transform 层导致大段文本
    拖选慢路径，见 ui-frame CHANGELOG Unreleased）——此处的应用侧
@@ -2276,21 +2260,41 @@ function mediaSrc(img: string): string {
 /* 状态行（2026-10）：输入区内部的一行，取代原先入口行左侧的玻璃胶囊浮条。
    为什么不再用胶囊：浮条是「入口行的一个子项」，它的出现/消失会推着 Agent
    切换器到「模型」整排按钮左右移动；文案一长（子代理任务名 72 字符上限）按钮
-   还会随 detail 抖动。搬进输入区内、独占一行后，入口行的排布完全稳定。 */
+   还会随 detail 抖动。搬进输入区内、独占一行后，入口行的排布完全稳定。
+
+   ## 三处等距（2026-10 用户要求，有 layout 断言守着）
+
+     ┌─ 外壳（卡片）────────────────────────┐
+     │            ↑ P                        │  ← ① 输入框上边框 → 外壳上边框
+     │  ┌─ 输入框 ──────────────┐            │
+     │  └───────────────────────┘            │
+     │            ↕ P                        │  ← ② 输入框下边框 → API 徽标
+     │  deepseek / deepseek-flash            │
+     │            ↕ P                        │  ← ③ API 徽标 → 外壳下边框
+     └───────────────────────────────────────┘
+
+   P = `--composer-padding`（桌面 12 / 窄屏 10）。三处分属三个不同的盒子：
+     ① 由 __body 的 padding-top 决定；
+     ② 由本行的 margin-top 决定 → 显式写成 var(--composer-padding)；
+     ③ 由 __body 的 padding-bottom 决定，但**只有徽标盒高 = 行高**时才等于 P
+        （否则行内还会剩一点居中留白）。所以：
+          · 行高由 --chat-status-h 单一来源给出（min-height）；
+          · 徽标 line-height 取同一个变量，盒子正好铺满行高，上下各 0 余量。
+   三者用同源变量后，「改 padding 就三处一起变」是结构性的，不靠人肉对齐。 */
 .chat-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* 与操作行拉开一点视觉呼吸；不设 padding，避免把输入区撑高得离谱 */
-  margin-top: 6px;
+  /* ② 输入框下边框 → 本行 */
+  margin-top: var(--composer-padding);
   padding-left: 2px;
   font-size: 12px;
   line-height: 16px;
   color: var(--nm-text-secondary);
   min-width: 0;
-  /* 常驻行：即使只有 API 徽标（未忙碌），也保持与忙碌态相同的高度与基线，
-     避免"开始回答时输入区突然长高 23px"——高度在两种状态下完全一致。 */
-  min-height: 17px;
+  /* 行高单一来源：常驻行（只有 API 徽标）与忙碌行同高，避免"开始回答时
+     输入区突然长高"；徽标 line-height 也取它，见 .chat-status__api。 */
+  min-height: var(--chat-status-h);
 }
 /* API 徽标（provider / model）：**纯文字**（2026-10 用户要求去掉外框）——
    静态信息不需要第二层容器，胶囊反而和输入区卡片抢层次。
@@ -2305,7 +2309,11 @@ function mediaSrc(img: string): string {
   min-width: 0;
   max-width: 55%;
   font-size: 11px;
-  line-height: 15px;
+  /* 盒子高度 = 行高（不是 15px 的紧凑行盒）：这样徽标的下边缘就是本行的
+     下边缘，③「徽标 → 外壳下边框」才精确等于 __body 的 padding-bottom。 */
+  line-height: var(--chat-status-h);
+  display: inline-flex;
+  align-items: center;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;

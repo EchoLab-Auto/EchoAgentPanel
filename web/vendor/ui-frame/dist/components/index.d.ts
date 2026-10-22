@@ -16,7 +16,7 @@ export type { NeumorphismButtonProps, ButtonVariant, ButtonSize, ButtonShape, } 
 export { default as NeumorphismSwitch } from './NeumorphismSwitch';
 export type { NeumorphismSwitchProps, SwitchVariant, SwitchSize } from './NeumorphismSwitch';
 export { default as NeumorphismCard } from './NeumorphismCard';
-export type { NeumorphismCardProps, CardVariant, CardDepth } from './NeumorphismCard';
+export type { NeumorphismCardProps, CardVariant, CardDepth, CardGlass } from './NeumorphismCard';
 export { default as NeumorphismInput } from './NeumorphismInput';
 export type { NeumorphismInputProps, InputSize } from './NeumorphismInput';
 export { default as ThemeProvider } from './ThemeProvider';
@@ -101,6 +101,8 @@ export { default as NeumorphismAsciiArt } from './NeumorphismAsciiArt';
 export type { NeumorphismAsciiArtProps, AsciiArtRadius } from './NeumorphismAsciiArt';
 export { default as NeumorphismPixelFont } from './NeumorphismPixelFont';
 export type { NeumorphismPixelFontProps, PixelFontAlign } from './NeumorphismPixelFont';
+export { default as NeumorphismGraphView } from './NeumorphismGraphView';
+export type { NeumorphismGraphViewProps, GraphNode, GraphLink, GraphLabelMode, GraphView, } from './NeumorphismGraphView';
 export { NeumorphismRadio, NeumorphismRadioGroup } from './NeumorphismRadio';
 export type { NeumorphismRadioProps, NeumorphismRadioGroupProps } from './NeumorphismRadio';
 export { default as NeumorphismSlider } from './NeumorphismSlider';

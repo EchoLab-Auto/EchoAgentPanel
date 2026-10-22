@@ -26,7 +26,7 @@
  */
 /** @category 原子组件 */
 export { default as ChatComposer } from './ChatComposer';
-export type { ChatComposerProps } from './ChatComposer';
+export type { ChatComposerProps, ChatComposerFocusEffect } from './ChatComposer';
 export type { ChatComposerEmits } from './ChatComposer';
 /** @category 原子组件 */
 export { default as ChatFold } from './ChatFold';

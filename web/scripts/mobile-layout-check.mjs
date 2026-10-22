@@ -392,6 +392,29 @@ const PROBE = `(() => {
       sendRadius: radiusOf('.chat-view__send'),
       clipPath: clipPath || null,
       /**
+       * 三处等距（2026-10 用户要求）：
+       *   ① 输入框上边框 → 外壳上边框
+       *   ② 输入框下边框 → API 徽标
+       *   ③ API 徽标     → 外壳下边框
+       * 三者必须都等于外壳内边距 P（--composer-padding）。
+       * 只有徽标盒高 = 状态行行高时 ③ 才等于 P —— 靠 --chat-status-h
+       * 单一来源保证（min-height 与 line-height 取同一个变量）。
+       */
+      statusGaps: (() => {
+        const card = document.querySelector('.chat-composer-float__card');
+        const body = document.querySelector('.chat-composer-float__body');
+        const ta = document.querySelector('.chat-composer-float .nm-textarea');
+        const api = document.querySelector('.chat-status__api');
+        if (!card || !body || !ta || !api) return null;
+        const r = (el) => el.getBoundingClientRect();
+        return {
+          p: +parseFloat(getComputedStyle(body).paddingTop).toFixed(2),
+          g1: +(r(ta).top - r(card).top).toFixed(2),
+          g2: +(r(api).top - r(ta).bottom).toFixed(2),
+          g3: +(r(card).bottom - r(api).bottom).toFixed(2),
+        };
+      })(),
+      /**
        * 上角纵向半径（轮廓首点的 y）。轮廓从左上角起点开始，所以首点 y 就是
        * 上角吃掉的纵向高度。多行输入把面板撑高时它**不该变** —— 变了就是
        * "每打一行两端形变一次"。
@@ -607,6 +630,25 @@ try {
         : '采样失败',
     );
     /**
+     * 三处等距（2026-10 用户要求，写进文档并有此断言守着）：
+     *   输入框上边框↔外壳上边框 = 输入框下边框↔API 徽标 = API 徽标↔外壳下边框
+     * 容差 0.6px：桌面档 P=12 时文本域高度是小数（45.598），
+     * 起点会带 0.4px 的亚像素偏移。
+     */
+    if (m.composer?.statusGaps) {
+      const g = m.composer.statusGaps;
+      const dev = Math.max(
+        Math.abs(g.g1 - g.p),
+        Math.abs(g.g2 - g.p),
+        Math.abs(g.g3 - g.p),
+      );
+      check(
+        `${tag} 三处间距都等于外壳内边距（输入框上/下、API 徽标）`,
+        dev <= 0.6,
+        `P=${g.p}  g1(输入框上)=${g.g1}  g2(输入框下→徽标)=${g.g2}  g3(徽标→外壳下)=${g.g3}  最大偏差 ${dev}px`,
+      );
+    }
+    /**
      * 危险方向守卫（2026-10）：间隙**变小**意味着输入框的角切进了屏幕的
      * 物理死弯——内容会被屏幕圆角裁掉，是唯一不可接受的失效。变大只是"不贴"。
      * 只看 spread 抓不到这个：整体向里陷时 spread 可能仍然很小。
@@ -738,7 +780,7 @@ for (const c of checks) {
   // 贴合度是这套断言的**核心指标**（一个数字就能看出角是不是平行），
   // 通过时也把间隙区间/波动打出来 —— 否则回归只能靠"从 0.3 涨到 0.9
   // 但都 < 1px"这类不报错的方式溜过去。
-  const showDetail = !c.ok || /贴合|多行|间隙不小于|左右下角/.test(c.name);
+  const showDetail = !c.ok || /贴合|多行|间隙不小于|左右下角|三处间距/.test(c.name);
   console.log(`${c.ok ? '✓' : '✗'} ${c.name}${showDetail ? `\n    → ${c.detail}` : ''}`);
   if (!c.ok) failed++;
 }

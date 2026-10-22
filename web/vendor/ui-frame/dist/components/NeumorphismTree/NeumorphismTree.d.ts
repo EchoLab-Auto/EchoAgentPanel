@@ -34,9 +34,9 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     selectedKeys: () => never[];
     expandedKeys: () => never[];
 }>>> & Readonly<{
+    "onNode-click"?: ((node: TreeNodeData) => any) | undefined;
     "onUpdate:selectedKeys"?: ((value: string[]) => any) | undefined;
     "onUpdate:expandedKeys"?: ((value: string[]) => any) | undefined;
-    "onNode-click"?: ((node: TreeNodeData) => any) | undefined;
     "onNode-select"?: ((key: string) => any) | undefined;
 }>, {
     multiple: boolean;

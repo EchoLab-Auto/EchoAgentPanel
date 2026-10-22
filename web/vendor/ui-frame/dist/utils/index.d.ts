@@ -1,3 +1,5 @@
+export { GLASS_VARIANTS, glassClassNames, normalizeGlass } from './glass';
+export type { GlassValue, GlassVariant } from './glass';
 export { isBrowser, isServer, safeMatchMedia, safeLocalStorageGet, safeLocalStorageSet, safeLocalStorageRemove, safeDocument, safeWindow, safeGetComputedStyle, } from './ssr';
 /**
  * Generate a unique ID string

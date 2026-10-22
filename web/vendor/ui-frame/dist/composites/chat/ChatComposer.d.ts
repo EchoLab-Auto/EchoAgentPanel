@@ -1,3 +1,15 @@
+import { GlassValue } from '../../utils/glass';
+
+/**
+ * 聚焦（选中）特效。
+ *
+ * 全部落在**输入槽**上——输入器的视觉主体是那个凹陷槽，特效贴着它才读得懂：
+ *   - `ring`  外侧主色光环（历史默认，零变化）
+ *   - `glow`  **内辉光**：主色光从凹槽内部亮起来（抑制外环，改内阴影 + 内描边）
+ *   - `inset` 纯新拟态语汇：只是把凹陷加深，不带彩色
+ *   - `none`  不施加任何装饰性特效（保留输入框自身的基础凹陷加深，别让聚焦完全不可见）
+ */
+export type ChatComposerFocusEffect = 'ring' | 'glow' | 'inset' | 'none';
 export interface ChatComposerProps {
     /** 输入内容（v-model） */
     modelValue?: string;
@@ -17,6 +29,18 @@ export interface ChatComposerProps {
     autoResize?: boolean;
     /** 最大输入长度 */
     maxlength?: number | string;
+    /**
+     * 玻璃拟态档位（与按钮 / 卡片同一套命名）：
+     *   - `true` / `'float'` — 悬浮磨砂托盘（环境投影）
+     *   - `'raised'`         — 磨砂托盘 + 新拟态凸起双阴影
+     *   - `'pressed'`        — 磨砂托盘 + 凹陷内阴影
+     *
+     * 材质挂在**外壳**上（浮起的玻璃托盘），内部输入槽保持凹陷——
+     * 层次是「玻璃托盘 > 凹陷输入槽」，而不是让输入框自己半透明。
+     */
+    glass?: GlassValue;
+    /** 聚焦（选中）特效，见 `ChatComposerFocusEffect` */
+    focusEffect?: ChatComposerFocusEffect;
 }
 export type ChatComposerEmits = {
     (e: 'update:modelValue', value: string): void;
@@ -42,6 +66,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     rows: number;
     autoResize: boolean;
     maxlength: undefined;
+    glass: undefined;
+    focusEffect: string;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {
     "update:modelValue": (value: string) => void;
     send: (content: string) => void;
@@ -56,6 +82,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     rows: number;
     autoResize: boolean;
     maxlength: undefined;
+    glass: undefined;
+    focusEffect: string;
 }>>> & Readonly<{
     onCancel?: (() => any) | undefined;
     "onUpdate:modelValue"?: ((value: string) => any) | undefined;
@@ -65,11 +93,13 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     placeholder: string;
     modelValue: string;
     maxlength: number | string;
+    glass: GlassValue;
     rows: number | string;
     cancelLabel: string;
     autoResize: boolean;
     cancelable: boolean;
     sendLabel: string;
+    focusEffect: ChatComposerFocusEffect;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 declare const _default: __VLS_WithTemplateSlots<typeof __VLS_component, ReturnType<typeof __VLS_template>>;
 export default _default;

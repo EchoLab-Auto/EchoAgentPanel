@@ -1,5 +1,14 @@
+import { GlassVariant } from '../../utils/glass';
+
 export type CardVariant = 'raised' | 'pressed';
 export type CardDepth = 'shallow' | 'medium' | 'deep' | 'very-deep';
+/**
+ * 玻璃拟态档位——与按钮等其它组件共用 `GlassVariant`（见 `@/utils/glass`）。
+ *
+ * 与 `elevation` 正交：玻璃只替换「表面材质」，台阶高度模型仍由 `elevation` 决定
+ * （档位定阴影方向、`|elevation|` 定强度）。
+ */
+export type CardGlass = GlassVariant;
 /**
  * Card elevation — unified step-height model:
  *
@@ -38,8 +47,15 @@ export interface NeumorphismCardProps {
      *   - `'sink'` — elevation decreases (card sinks inward)
      */
     hoverable?: boolean | 'bulge' | 'sink';
-    /** Enable glass morphism: frosted glass with backdrop blur */
-    glass?: boolean;
+    /**
+     * 玻璃拟态：磨砂玻璃 + 背景模糊。
+     *   - `true` / `'float'` — 悬浮磨砂玻璃（环境投影 + 亮边；hover 抬升）
+     *   - `'raised'`         — 磨砂玻璃上的凸起双阴影，强度跟随 `elevation`
+     *   - `'pressed'`        — 磨砂玻璃上的凹陷内阴影，强度跟随 `|elevation|`
+     *
+     * 需置于有色背景 / 图片之上才能看到半透明与模糊效果。
+     */
+    glass?: boolean | CardGlass;
 }
 declare function __VLS_template(): {
     header?(_: {}): any;
@@ -49,13 +65,13 @@ declare function __VLS_template(): {
 declare const __VLS_component: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismCardProps>, {
     hoverable: undefined;
     noPadding: boolean;
-    glass: boolean;
+    glass: undefined;
 }>>, {}, {}, {}, {}, import('vue').ComponentOptionsMixin, import('vue').ComponentOptionsMixin, {}, string, import('vue').PublicProps, Readonly<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismCardProps>, {
     hoverable: undefined;
     noPadding: boolean;
-    glass: boolean;
+    glass: undefined;
 }>>> & Readonly<{}>, {
-    glass: boolean;
+    glass: boolean | CardGlass;
     noPadding: boolean;
     hoverable: boolean | "bulge" | "sink";
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;

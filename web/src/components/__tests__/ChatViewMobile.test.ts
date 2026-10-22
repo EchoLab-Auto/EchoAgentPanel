@@ -162,24 +162,24 @@ describe('ChatView 竖屏移动端', () => {
     expect(styleBlock, '卡片不得再手写毛玻璃背景').not.toMatch(
       /\.chat-composer-float__glass \{/,
     );
-    // 内辉光（2026-10）：box-shadow 全部 inset —— 光向内衰减。
-    // 关键理由：移动端卡片挂 clip-path，而 clip 只裁「元素外部」，所以 inset
-    // 阴影天然不会被裁掉 ⇒ 桌面圆角与移动端超椭圆共用同一份实现。
-    // 也因此**不再需要**额外的外发光兄弟层（__halo 已删除）。
-    const cardRules =
+    // 内辉光（2026-10 二次修订）：**不再自己写 box-shadow** —— ui-frame 的
+    // `NeumorphismCard glass="pressed"` 就是内凹内辉光（三层 inset），
+    // `ChatComposer focus-effect="glow"` 是聚焦内辉光（主色 inset 光晕）。
+    // 面板侧只声明档位，材质/阴影留给库，保证跨组件一致。
+    expect(raw, '卡片必须声明 glass="pressed"（库的内凹内辉光档）').toMatch(
+      /<NeumorphismCard[\s\S]{0,200}glass="pressed"/,
+    );
+    expect(raw, '输入器必须声明 focus-effect="glow"（库的聚焦内辉光）').toMatch(
+      /<ChatComposer[\s\S]{0,300}focus-effect="glow"/,
+    );
+    const cardRules2 =
       styleBlock.match(
         /\.chat-composer-float \.chat-composer-float__card \{[\s\S]*?\n\}/,
       )?.[0] ?? '';
-    expect(cardRules, '卡片必须定义 box-shadow').toMatch(/box-shadow:/);
-    const shadows = cardRules.match(/box-shadow:[\s\S]*?;/)?.[0] ?? '';
-    const layers = shadows.split('inset').length - 1;
-    expect(layers, '内辉光至少三层（亮线 / 上方 / 四周）').toBeGreaterThanOrEqual(3);
-    // 没有任何非 inset 的外投影残留（否则就是"外发光"而不是内辉光）
-    expect(shadows.replace(/inset/g, ''), '不得残留外投影').not.toMatch(
-      /(^|[\s,(])0 4px|0 2px 4px/,
+    expect(cardRules2, '面板侧不得再手写 box-shadow（内辉光归库）').not.toMatch(
+      /box-shadow:/,
     );
     expect(raw, '外发光兄弟层已删除').not.toMatch(/chat-composer-float__halo/);
-    expect(styleBlock, '内辉光强度分主题给值').toMatch(/--composer-glow: rgba\(255, 255, 255, 0\.34\)/);
     // 内层一律消费派生变量（含 border 补偿）
     expect(styleBlock, '同心派生量必须减掉 padding 与 border').toMatch(
       /--composer-inner-radius: max\(\s*0px,\s*calc\(var\(--composer-corner-r\) - var\(--composer-padding\) - var\(--composer-border\)\)\s*\)/,

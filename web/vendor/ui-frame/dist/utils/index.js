@@ -1,5 +1,6 @@
+import { G as A, g as G, n as I } from "../chunks/glass-BqY-XLAc.js";
 const t = typeof window < "u", i = !t;
-function a(e) {
+function c(e) {
   return t ? window.matchMedia(e) : {
     matches: !1,
     media: e,
@@ -23,65 +24,68 @@ function u(e) {
     return null;
   }
 }
-function l(e, n) {
+function s(e, n) {
   if (t)
     try {
       localStorage.setItem(e, n);
     } catch {
     }
 }
-function f(e) {
+function l(e) {
   if (t)
     try {
       localStorage.removeItem(e);
     } catch {
     }
 }
-function s() {
+function f() {
   return t ? document : void 0;
 }
-function d() {
+function g() {
   return t ? window : void 0;
 }
-function g(e) {
+function m(e) {
   return t ? window.getComputedStyle(e) : {
     getPropertyValue: () => ""
   };
 }
-function m(e = "nm") {
+function d(e = "nm") {
   return `${e}-${Math.random().toString(36).slice(2, 9)}`;
 }
 function p(e) {
   return e.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
-function y(e) {
+function S(e) {
   return e.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/[\s-]+/g, "-").replace(/^-+|-+$/g, "");
 }
-function h(e, n) {
+function y(e, n) {
   let r = null;
-  const o = (...c) => {
-    r && clearTimeout(r), r = setTimeout(() => e(...c), n);
+  const o = (...a) => {
+    r && clearTimeout(r), r = setTimeout(() => e(...a), n);
   };
   return o.cancel = () => {
     r && (clearTimeout(r), r = null);
   }, o;
 }
-function w(e) {
+function h(e) {
   return e == null ? !0 : typeof e == "string" ? e.trim() === "" : Array.isArray(e) ? e.length === 0 : typeof e == "object" ? Object.keys(e).length === 0 : !1;
 }
 export {
-  h as debounce,
+  A as GLASS_VARIANTS,
+  y as debounce,
   p as escapeHtml,
-  m as generateId,
+  d as generateId,
+  G as glassClassNames,
   t as isBrowser,
-  w as isEmpty,
+  h as isEmpty,
   i as isServer,
-  s as safeDocument,
-  g as safeGetComputedStyle,
+  I as normalizeGlass,
+  f as safeDocument,
+  m as safeGetComputedStyle,
   u as safeLocalStorageGet,
-  f as safeLocalStorageRemove,
-  l as safeLocalStorageSet,
-  a as safeMatchMedia,
-  d as safeWindow,
-  y as slugify
+  l as safeLocalStorageRemove,
+  s as safeLocalStorageSet,
+  c as safeMatchMedia,
+  g as safeWindow,
+  S as slugify
 };
