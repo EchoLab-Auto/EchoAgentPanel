@@ -533,23 +533,34 @@ const busy = computed(() => {
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
 });
 
-// ── 覆盖面板的几何：上到会话框顶、下到入口行上边缘（2026-10 统一） ──
+// ── 覆盖面板的几何：上下边界对齐侧栏（2026-10 统一） ──
 //
 // 口径演变（两次纠正，写下来免得再猜）：
 // 1. 先是「会话消息区」（`.chat-view__tray`）—— 但 tray 是 `flex: 1`，它的
 //    下界就是视图底，面板照样铺到底，结果**内容被输入区与入口行挡住**；
 // 2. 改成「铺满整个会话视图」（`top/bottom: 0`）—— 盖住了输入区，面板底边
 //    落到会话框底，看起来像被截了一段；
-// 3. 最终口径（用户）：**上 = 会话框顶，下 = 入口行上边缘**。面板自己的底边
-//    就停在入口行顶边，输入区与入口行完整露在面板下方、谁也不压谁。
+// 3. 用户要求「上到会话框顶、下到入口行上边缘」；
+// 4. 最终口径（用户）：**上下边界对齐左右侧栏**——`top: 0`、`bottom` 取
+//    `.chat-rail` 的同一个表达式 `entryBottom + 45`（入口行高 37 + 8px 间隙）。
+//    于是面板上沿与侧栏上沿齐、下沿与侧栏下沿齐，三块（左栏 / 面板 / 右栏）
+//    在同一条水平线上收口，输入区与入口行完整露在下方。
 //
-// 横向仍扣掉边栏留白（`trayPadLeft/Right`）——侧栏是常驻信息（连接状态 /
-// 文件浏览器 / Git / Shell），面板不该把它压掉。
-//
-// 下界用**入口行实测 rect**，不用 `entryBottom + 常量`：入口行高度由按钮
-// 尺寸决定、位置又随输入区撑高而变，实测才跟得上（`ResizeObserver` 观察它）。
+// 横向扣掉边栏留白（`trayPadLeft/Right`）——侧栏是常驻信息（连接状态 /
+// 文件浏览器 / Git / Shell），面板不该把它压掉；扣除后面板的左右边界正好是
+// 侧栏的内侧边缘。
 const viewRootRef = ref<HTMLElement | null>(null);
 const overlayInset = ref<OverlayInset | null>(null);
+
+/**
+ * 侧栏下界与入口行的净距（入口行高 37 + 8px 间隙）。
+ *
+ * **与 `.chat-rail` 的 `bottom` 同一事实源**：覆盖面板的上下边界要对齐侧栏
+ * （用户 2026-10 要求），所以两处都读这一个值——CSS 侧经 `v-bind(railEntryGap)`
+ * 取用，JS 侧用它算 `overlayInset.bottom`。改动时只改这里。
+ */
+const RAIL_ENTRY_GAP = 45;
+const railEntryGap = `${RAIL_ENTRY_GAP}px`;
 
 function syncOverlayInset() {
   const root = viewRootRef.value;
@@ -560,12 +571,11 @@ function syncOverlayInset() {
   const t = tray?.getBoundingClientRect() ?? r;
   const padLeft = Number.parseFloat(trayPadLeft.value) || 0;
   const padRight = Number.parseFloat(trayPadRight.value) || 0;
-  // 下界 = 入口行上边缘；入口行尚未布局（首帧 / 无按钮）时退回整高。
-  const entry = entryRowRef.value?.getBoundingClientRect();
-  const bottom =
-    entry && entry.height > 0
-      ? Math.max(0, Math.round(r.bottom - entry.top))
-      : Math.max(0, Math.round(r.bottom - t.bottom));
+  // 下界 = 侧栏下界（= 入口行上方 8px 净距）：`entryBottom + RAIL_ENTRY_GAP`，
+  // 与 `.chat-rail` 的 bottom 完全一致，所以面板与左右栏上下齐平。窄屏还要
+  // 叠加软键盘内缩（入口行在窄屏按 `entryBottom + keyboardInset` 抬升）。
+  const bottomBase = Number.parseFloat(entryBottom.value) || 170;
+  const bottom = Math.max(0, Math.round(bottomBase + RAIL_ENTRY_GAP + keyboardInset.value));
   overlayInset.value = {
     top: 0,
     bottom,
@@ -580,8 +590,6 @@ onMounted(() => {
   if (typeof ResizeObserver === 'undefined') return;
   overlayObserver = new ResizeObserver(syncOverlayInset);
   if (viewRootRef.value) overlayObserver.observe(viewRootRef.value);
-  // 入口行的位置/高度决定面板下界：两者都要跟。
-  if (entryRowRef.value) overlayObserver.observe(entryRowRef.value);
   const tray = viewRootRef.value?.querySelector<HTMLElement>('.chat-view__tray');
   if (tray) overlayObserver.observe(tray);
 });
@@ -589,8 +597,13 @@ onBeforeUnmount(() => {
   overlayObserver?.disconnect();
   overlayObserver = null;
 });
-// 输入区高度 / 边栏留白 / 移动端切换都会改矩形的分量（入口行 rect 不一定变）。
-watch([entryBottom, trayPadLeft, trayPadRight, isMobile], () => void nextTick(syncOverlayInset));
+// 输入区高度 / 边栏留白 / 移动端切换 / 软键盘都会改面板边界的分量；
+// 打开面板时也重算一次——关闭期间视口可能变过，而 ResizeObserver 只对
+// 「被观察元素自身尺寸变化」触发，未必覆盖得到。
+watch(
+  [entryBottom, trayPadLeft, trayPadRight, isMobile, keyboardInset, entryOverlay],
+  () => void nextTick(syncOverlayInset),
+);
 
 const configTeam = computed(() => {
   const teams = state.teams;
@@ -1741,10 +1754,10 @@ function mediaSrc(img: string): string {
 .chat-rail {
   position: absolute;
   top: 0;
-  /* 下界统一让出入口行（底部功能条：活动/Agent 切换/配置/上下文/清单/会话）：
-     入口行高 37px（实测，由按钮尺寸决定）+ 8px 间隙 = 45px。两列一致
-     ——入口行按钮尺寸调整时同步此处。 */
-  bottom: calc(v-bind(entryBottom) + 45px);
+  /* 下界统一让出入口行（底部功能条）：入口行高 37px（实测，由按钮尺寸决定）
+     + 8px 间隙 = `RAIL_ENTRY_GAP`。**与覆盖面板的 `overlayInset.bottom` 同源**
+     ——会话区覆盖面板的上下边界要对齐侧栏，所以两处都读这一个常量。 */
+  bottom: calc(v-bind(entryBottom) + v-bind(railEntryGap));
   z-index: 4;
   width: 324px;
   display: flex;
@@ -2034,7 +2047,7 @@ function mediaSrc(img: string): string {
 .chat-view__jump {
   position: absolute;
   right: calc(v-bind(trayPadRight) + 16px);
-  bottom: calc(v-bind(entryBottom) + 45px);
+  bottom: calc(v-bind(entryBottom) + v-bind(railEntryGap));
   z-index: 5;
   width: 36px;
   height: 36px;

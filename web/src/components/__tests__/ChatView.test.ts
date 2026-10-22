@@ -170,7 +170,10 @@ describe('ChatView 布局契约', () => {
     const jumpRule = styleBlock.match(/\.chat-view__jump\s*\{([\s\S]*?)\}/)?.[1] ?? '';
     // 横向避让右侧栏列（trayPadRight）+ 纵向与边栏列底对齐（entryBottom + 45）
     expect(jumpRule).toMatch(/right:\s*calc\(v-bind\(trayPadRight\)\s*\+\s*16px\)/);
-    expect(jumpRule).toMatch(/bottom:\s*calc\(v-bind\(entryBottom\)\s*\+\s*45px\)/);
+    // 2026-10：45px 抽成 RAIL_ENTRY_GAP（与侧栏、覆盖面板同源）
+    expect(jumpRule).toMatch(
+      /bottom:\s*calc\(v-bind\(entryBottom\)\s*\+\s*v-bind\(railEntryGap\)\)/,
+    );
     expect(jumpRule).toMatch(/z-index:\s*5/);
     // 浮层打开时隐藏（覆盖 rail 之上不再被盖住）
     expect(styleBlock).toMatch(
