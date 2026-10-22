@@ -186,9 +186,24 @@ function restHalfHeight(): number | undefined {
   return restH > 8 ? restH / 2 : undefined;
 }
 
+/** 上一次测到的输入行高度（= --chat-control-h 的 used value）。 */
+let lastControlH = 0;
+
 function updateComposerClip() {
   const el = composerFloatRef.value;
   if (!el) return;
+  // 输入行高度变了（跨屏角档位：`--chat-control-h` 吃 `--panel-display-radius`），
+  // 但库的 auto-resize 高度是**内联 px**，只在自己收到 input 时重算 —— 变矮时
+  // 它会卡在旧值上（实测 402 → 393 跨档：按钮 58 → 45.6，文本域仍是 58，
+  // 卡片因此停在 105 而不会收到 93）。补一次 input 让库按新 min-height 重算。
+  const anchor = el.querySelector<HTMLElement>('.chat-view__send, .chat-view__attach-btn');
+  const controlH = anchor?.getBoundingClientRect().height ?? 0;
+  if (lastControlH && controlH && Math.abs(controlH - lastControlH) > 0.5) {
+    const field = el.querySelector<HTMLTextAreaElement>('.nm-textarea__field');
+    if (field?.style.height) field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (controlH) lastControlH = controlH;
+
   const rect = el.getBoundingClientRect();
   const style = getComputedStyle(el);
   const screenRadius = Number.parseFloat(style.getPropertyValue('--panel-display-radius')) || 0;
