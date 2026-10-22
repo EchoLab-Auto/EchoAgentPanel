@@ -190,7 +190,13 @@ async fn main() -> Result<()> {
         .await
         .unwrap_or_else(|error| panic!("cannot bind {bind}: {error}"));
     info!(%bind, upstreams = %upstream_desc, static_dir = %static_dir.display(), "EchoAgentPanel web server listening");
-    axum::serve(listener, app).await?;
+    // 装 connect-info：`/ws` 的 peer 字段据此得到对端地址（日志里区分
+    // 本机标签页 / 局域网手机 / 反向代理）。没装时 handler 退化为 "unknown"。
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

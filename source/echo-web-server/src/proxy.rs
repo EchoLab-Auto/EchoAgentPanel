@@ -183,16 +183,40 @@ impl AppState {
 }
 
 /// `GET /ws` — upgrade the browser connection and bridge it to Core.
+/// 对端地址提取器：**永不失配**——服务端没装 connect-info（测试 / 嵌入式
+/// 复用本 handler）时退化成 `None`，日志里显示 "unknown"。
+///
+/// 不用 `Option<ConnectInfo<_>>`：axum 0.8 里 `Option<T>` 要求
+/// `OptionalFromRequestParts`，`ConnectInfo` 没实现，handler 会直接失配。
+pub struct PeerAddr(pub Option<std::net::SocketAddr>);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for PeerAddr {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(PeerAddr(
+            parts
+                .extensions
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|axum::extract::ConnectInfo(addr)| *addr),
+        ))
+    }
+}
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    peer: PeerAddr,
 ) -> impl IntoResponse {
     if !state.authorized(&headers, params.get("token").map(String::as_str)) {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
     }
-    ws.on_upgrade(move |socket| bridge(socket, state))
+    ws.on_upgrade(move |socket| bridge(socket, state, peer.0))
         .into_response()
 }
 
@@ -499,6 +523,21 @@ pub async fn probe_pump(state: AppState) {
 /// 序号来自 Core 的 `serialize_event_sequenced`（顶层 `"seq":N`）。提取它
 /// 是为了做中继侧的**丢帧诊断**——本函数是中继唯一解析帧的地方，复用同一次
 /// `serde_json` 解析、不额外增加开销（多上游模式此前就已解析过）。
+/// 从裸命令帧里取**命令名**（首层唯一键）。
+///
+/// 只取名字、绝不记 payload：命令体里可能有消息正文与配置值。日志的价值在
+/// "哪条命令被丢了"——丢了哪条都看不出来，就只能靠猜。
+fn command_name(frame: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(frame)
+        .ok()
+        .and_then(|v| {
+            v.as_object()
+                .and_then(|o| o.keys().next().cloned())
+                .or_else(|| Some(v.to_string()))
+        })
+        .unwrap_or_else(|| "<unparsed>".to_string())
+}
+
 fn decode_core_frame(upstream_name: &str, text: &str, wrap: bool) -> Option<(String, Option<u64>)> {
     if !wrap {
         // 单上游：原样透传（非 JSON 帧也照旧发）。序号取不到就返回 None，
@@ -542,6 +581,11 @@ struct LinkStats {
     non_json: u64,
     /// 因浏览器侧写不动而提前结束（其余排队帧由重连补拉）。
     browser_stalled: bool,
+    /// 链路退出的**原因短名**（日志字段，稳定可聚合）。
+    ///
+    /// 以前只有"是否丢帧"这一个维度，`upstream link closed` 把"对端关的"、
+    /// "本端收割的"、"浏览器走了连带拆除的"混成一条 —— 排查时无法区分。
+    close_reason: &'static str,
 }
 
 /// 一条链路上相邻两帧序号的连续性判定（纯函数，便于单测）。
@@ -655,7 +699,19 @@ impl BroadcastReplay {
     }
 }
 
-async fn bridge(browser: WebSocket, state: AppState) {
+async fn bridge(
+    browser: WebSocket,
+    state: AppState,
+    peer: Option<std::net::SocketAddr>,
+) {
+    // 浏览器侧的连接与断开此前**都没有日志**：上游那条 "upstream link closed"
+    // 是被动结果（浏览器走了 → 连带拆除），却成了唯一可见的线索，于是每次
+    // 排查都得从 Core 的 accept 数反推。这里补齐两端，并统一成
+    // "browser link up / down" 一对，便于按 peer 聚合出"哪个标签页在抖"。
+    let peer_desc = peer
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let bridge_started = Instant::now();
     let (mut browser_tx, mut browser_rx) = browser.split();
     // 每上游一条「浏览器→Core」转发任务（命令按壳路由/无壳广播）与
     // 「Core→浏览器」加壳转发任务（汇合进单一 mpsc 出口）。
@@ -782,6 +838,9 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     backoff = RECONNECT_BASE;
                     failures = 0;
                     state.set_online_ok(&name);
+                    // 存活计时：关闭日志里的 `up_ms` 是判断"是抖动还是真断了"
+                    // 的关键（几秒就断 = 重连风暴，几十分钟 = 偶发网络事件）。
+                    let link_started = Instant::now();
                     // 每轮克隆句柄——reader/心跳任务 move 走本轮副本，
                     // 下轮重连仍可用。
                     let event_tx_reader = event_tx.clone();
@@ -830,7 +889,17 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                     let message = match message {
                                         Some(Ok(m)) => m,
                                         // 上游关闭：返回统计供外层写日志。
-                                        _ => break,
+                                        // 分清"对端发 Close/断 TCP"（None）与
+                                        // "协议或传输错误"（Err）——前者通常是
+                                        // Core 重启或主动断开，后者常伴版本不匹配。
+                                        Some(Err(_)) => {
+                                            stats.close_reason = "upstream read error";
+                                            break;
+                                        }
+                                        None => {
+                                            stats.close_reason = "upstream stream ended";
+                                            break;
+                                        }
                                     };
                                     last_frame = Instant::now();
                                     let forward = match message {
@@ -903,19 +972,34 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                         tokio_tungstenite::tungstenite::Message::Pong(p) => {
                                             BrowserMessage::Pong(p.to_vec().into())
                                         }
-                                        tokio_tungstenite::tungstenite::Message::Binary(_)
-                                        | tokio_tungstenite::tungstenite::Message::Close(_) => break,
+                                        tokio_tungstenite::tungstenite::Message::Binary(_) => {
+                                            stats.close_reason = "upstream sent binary frame";
+                                            break;
+                                        }
+                                        tokio_tungstenite::tungstenite::Message::Close(_) => {
+                                            stats.close_reason = "upstream sent close";
+                                            break;
+                                        }
                                         _ => continue,
                                     };
                                     if event_tx_reader.send(forward).await.is_err() {
                                         // 浏览器侧出口已关：本链路剩余事件无处可去。
                                         stats.browser_stalled = true;
+                                        stats.close_reason = "browser side gone (relay torn down)";
                                         break;
                                     }
                                 }
                                 _ = hb.tick() => {
                                     if last_frame.elapsed() > reap_after {
-                                        warn!(core = %name2, "core side silent, reaping relay link");
+                                        // 注意：这判的是**上游**静默（core 侧这么久
+                                        // 一条帧都没来，含它的 Ping）。空闲会话不该
+                                        // 走到这里（core 每 30s 有 Ping/Pong 往返）。
+                                        warn!(
+                                            core = %name2,
+                                            idle_s = last_frame.elapsed().as_secs(),
+                                            "core side silent, reaping relay link"
+                                        );
+                                        stats.close_reason = "upstream silent (reaper)";
                                         break;
                                     }
                                     let _ = heartbeat_tx.send(String::new()).await;
@@ -938,6 +1022,14 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     // 一份，最后一个覆盖前一个（表现为某些 agent 消失）。
                     refresh_multi(&state.registry, &multi, &links).await;
                     state.set_online_ok(&name);
+                    // 链路**建成**也记一条：只记关闭时，反复重连在日志里只剩
+                    // 一串没有对应开头的 close，看不出频率与存活时长。
+                    info!(
+                        core = %name,
+                        url = %upstream.url,
+                        resumed_from = ?last_seq_seen,
+                        "upstream link up"
+                    );
                     // 握手期广播补投（见 BroadcastReplay）：本链路晚于浏览器
                     // 的发现广播（RequestState / RequestTeamsList）建成时，
                     // 把最近的广播帧补发一份——否则这次请求对本链路永久丢失
@@ -965,26 +1057,36 @@ async fn bridge(browser: WebSocket, state: AppState) {
                     //   seq_gaps/missed  → core→relay 之间丢了几条
                     //   non_json         → 无法归属 core 被丢弃的帧
                     //   browser_stalled  → 浏览器侧出口先关，剩余帧由重连补拉
-                    if stats.frames > 0 || stats.seq_gaps > 0 || stats.non_json > 0 {
-                        if stats.seq_gaps > 0 || stats.non_json > 0 || stats.browser_stalled {
-                            warn!(
-                                core = %name,
-                                frames = stats.frames,
-                                last_seq = ?stats.last_seq,
-                                seq_gaps = stats.seq_gaps,
-                                missed = stats.seq_missed,
-                                non_json = stats.non_json,
-                                browser_stalled = stats.browser_stalled,
-                                "upstream link closed with dropped frames"
-                            );
-                        } else {
-                            info!(
-                                core = %name,
-                                frames = stats.frames,
-                                last_seq = ?stats.last_seq,
-                                "upstream link closed"
-                            );
-                        }
+                    // 原先这条日志有 `frames > 0` 的前置条件：握手成功但**一帧
+                    // 没收到**就断的链路完全静默——恰恰是"连上就掉"这种最该
+                    // 看到的形态。现在无条件记，用 `reason` 区分责任方。
+                    let reason = if stats.close_reason.is_empty() {
+                        "unknown (task ended without recording a reason)"
+                    } else {
+                        stats.close_reason
+                    };
+                    if stats.seq_gaps > 0 || stats.non_json > 0 || stats.browser_stalled {
+                        warn!(
+                            core = %name,
+                            frames = stats.frames,
+                            last_seq = ?stats.last_seq,
+                            seq_gaps = stats.seq_gaps,
+                            missed = stats.seq_missed,
+                            non_json = stats.non_json,
+                            browser_stalled = stats.browser_stalled,
+                            reason,
+                            up_ms = link_started.elapsed().as_millis() as u64,
+                            "upstream link closed with dropped frames"
+                        );
+                    } else {
+                        info!(
+                            core = %name,
+                            frames = stats.frames,
+                            last_seq = ?stats.last_seq,
+                            reason,
+                            up_ms = link_started.elapsed().as_millis() as u64,
+                            "upstream link closed"
+                        );
                     }
                     writer_abort.abort();
                     links.write().await.remove(&name);
@@ -1032,11 +1134,17 @@ async fn bridge(browser: WebSocket, state: AppState) {
     }
 
     // 初始上游接入（零上游 = 空转等待——管理面添加后变更泵接入）。
-    for cfg in state.registry.list().await {
+    let initial_upstreams = state.registry.list().await;
+    for cfg in &initial_upstreams {
         if cfg.has_endpoint() {
-            spawn_link(cfg);
+            spawn_link(cfg.clone());
         }
     }
+    info!(
+        peer = %peer_desc,
+        upstreams = initial_upstreams.iter().filter(|c| c.has_endpoint()).count(),
+        "browser link up"
+    );
     refresh_multi(&state.registry, &multi, &links).await;
 
     // 注册表变更泵：Upsert →（旧链路摘除后）接入；Removed → 摘除。
@@ -1131,7 +1239,12 @@ async fn bridge(browser: WebSocket, state: AppState) {
                                 break;
                             }
                             if Instant::now() >= deadline {
-                                warn!(core = %name, "targeted command dropped: upstream link not ready");
+                                warn!(
+                                    core = %name,
+                                    command = %command_name(&text),
+                                    waited_ms = LINK_READY_WAIT.as_millis() as u64,
+                                    "targeted command dropped: upstream link not ready"
+                                );
                                 break;
                             }
                             tokio::time::sleep(LINK_READY_POLL).await;
@@ -1161,7 +1274,12 @@ async fn bridge(browser: WebSocket, state: AppState) {
                             let sender = {
                                 let links = links.read().await;
                                 if links.len() > 1 {
+                                    // 名字必带：这条命令**不会**送到任何上游，
+                                    // 前端也收不到任何回执（静默丢弃）——不知道
+                                    // 是哪条命令丢了，就只能靠刷新重发来试。
                                     warn!(
+                                        command = %command_name(&text),
+                                        links = links.len(),
                                         "rejected untargeted command (need {{core}} or {{broadcast:true}} envelope)"
                                     );
                                     break;
@@ -1188,32 +1306,72 @@ async fn bridge(browser: WebSocket, state: AppState) {
     // 与半死收割（与原单上游中继同语义：收割阈值内浏览器无任何帧
     // （含 Pong）即断开整条链路；每 30s 向浏览器发 Ping）。
     let (browser_ping_tx, mut browser_ping_rx) = tokio::sync::mpsc::channel::<()>(8);
+    let peer_for_read = peer_desc.clone();
     let browser_read = tokio::spawn(async move {
         let mut last_frame = Instant::now();
         let mut hb = tokio::time::interval(heartbeat_interval());
         hb.tick().await;
+        // 退出原因（返回值交给外层统一记一条）。浏览器侧结束的 4 种情形
+        // 以前全都静默，只在上游那条 close 里间接体现。
+        #[allow(unused_assignments)]
+        let mut reason: &'static str = "browser read loop ended";
         loop {
             tokio::select! {
                 message = browser_rx.next() => {
                     let message = match message {
                         Some(Ok(m)) => m,
-                        _ => break,
+                        Some(Err(e)) => {
+                            // 错误文本必须记：1006（异常断开）/ RST / 协议错误
+                            // 是"网络掉了"的唯一直接证据。
+                            warn!(peer = %peer_for_read, error = %e, "browser read error");
+                            reason = "browser read error";
+                            break;
+                        }
+                        None => {
+                            reason = "browser socket closed (no close frame)";
+                            break;
+                        }
                     };
                     last_frame = Instant::now();
                     match message {
                         BrowserMessage::Text(text) => {
                             let (route, frame) = unwrap_command(&text);
                             if cmd_tx.send((route, frame)).await.is_err() {
+                                reason = "command channel closed";
                                 break;
                             }
                         }
                         BrowserMessage::Ping(_) | BrowserMessage::Pong(_) => {}
-                        BrowserMessage::Binary(_) | BrowserMessage::Close(_) => break,
+                        BrowserMessage::Binary(_) => {
+                            reason = "browser sent binary frame";
+                            break;
+                        }
+                        BrowserMessage::Close(frame) => {
+                            // **关帧码是断链归因的决定性证据**：
+                            //   1000/1005 → 前端自己 close()（自愈探测超时）
+                            //   1001      → 页面卸载/刷新（going away）
+                            //   1006/无帧 → 网络异常（TCP 被丢，见上面的 read error）
+                            match &frame {
+                                Some(frame) => info!(
+                                    peer = %peer_for_read,
+                                    code = u16::from(frame.code),
+                                    close_reason = %frame.reason,
+                                    "browser sent close"
+                                ),
+                                None => info!(peer = %peer_for_read, "browser sent close (no code)"),
+                            }
+                            reason = "browser sent close";
+                            break;
+                        }
                     }
                 }
                 _ = hb.tick() => {
                     if last_frame.elapsed() > reap_after {
-                        warn!("browser side silent, reaping relay link");
+                        warn!(
+                            idle_s = last_frame.elapsed().as_secs(),
+                            "browser side silent, reaping relay link"
+                        );
+                        reason = "browser silent (reaper)";
                         break;
                     }
                     // 向浏览器发 Ping（经事件出口统一写端）；出口满/关
@@ -1223,12 +1381,13 @@ async fn bridge(browser: WebSocket, state: AppState) {
             }
         }
         drop(cmd_tx);
+        reason
     });
 
     // 事件出口：event_rx + 心跳 Ping → 浏览器（带写超时）。
     let browser_write = tokio::spawn(async move {
         let mut sent: u64 = 0;
-        let mut close_reason = "browser closed";
+        let mut close_reason: &'static str = "browser closed";
         loop {
             tokio::select! {
                 frame = event_rx.recv() => {
@@ -1268,6 +1427,7 @@ async fn bridge(browser: WebSocket, state: AppState) {
         }
         debug!(sent, close_reason, "browser relay writer finished");
         let _ = browser_tx.close().await;
+        (sent, close_reason)
     });
 
     // 任一方向退出即整条链路收尾（显式 abort 其余——spawn 任务在
@@ -1276,11 +1436,38 @@ async fn bridge(browser: WebSocket, state: AppState) {
     let route_abort = route_pump.abort_handle();
     let read_abort = browser_read.abort_handle();
     let write_abort = browser_write.abort_handle();
-    tokio::select! {
-        _ = route_pump => { read_abort.abort(); write_abort.abort(); }
-        _ = browser_read => { route_abort.abort(); write_abort.abort(); }
-        _ = browser_write => { route_abort.abort(); read_abort.abort(); }
-    }
+    // 谁先退出 = 断链的**主动方**。这是区分「浏览器关的 / 中继判死的 /
+    // 路由泵结束」的唯一可靠依据，以前只留在 debug 日志里，info 级别下
+    // 完全不可见（于是上游那条被动 close 成了唯一线索）。
+    let (ended_by, reason, frames_sent) = tokio::select! {
+        _ = route_pump => {
+            read_abort.abort();
+            write_abort.abort();
+            ("route pump", "command routing ended".to_string(), 0u64)
+        }
+        r = browser_read => {
+            route_abort.abort();
+            write_abort.abort();
+            let reason = r.unwrap_or("browser read task panicked").to_string();
+            ("browser read", reason, 0u64)
+        }
+        w = browser_write => {
+            route_abort.abort();
+            read_abort.abort();
+            match w {
+                Ok((sent, reason)) => ("browser write", reason.to_string(), sent),
+                Err(_) => ("browser write", "browser write task panicked".to_string(), 0),
+            }
+        }
+    };
+    info!(
+        peer = %peer_desc,
+        ended_by,
+        reason = %reason,
+        elapsed_s = bridge_started.elapsed().as_secs(),
+        frames_sent,
+        "browser link down"
+    );
 }
 
 #[cfg(test)]
