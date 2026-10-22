@@ -293,6 +293,9 @@ export interface BranchTab {
   sessionId: string;
   /** 归属上游 core（多上游；null = 单上游/未标注）。 */
   core?: string | null;
+  /** 分支 id（`branchTabs` 的键是 `scopedKey(core, branchId)`，快照回收
+   *  running 残留时要拿它去收尾对应任务，故显式留一份）。 */
+  branchId?: string;
   task: string;
   target: string;
   startedAtMs: number;
@@ -1175,9 +1178,78 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       // 刷新恢复（2026-10）：运行状态本是瞬时事件流，刷新重连后 Core 在
       // TrunkTimeline 之后补发本快照。按列表重建 running 集合——本地已有
       // 但快照中不存在的 activity 置 completed（多为刷新前已结束的残留）。
-      const e = (event as { ActiveTurnsSnapshot: { session_ids: string[]; team_id?: string | null } }).ActiveTurnsSnapshot;
+      const e = (event as {
+        ActiveTurnsSnapshot: {
+          session_ids: string[];
+          team_id?: string | null;
+          /** 运行中的回复分支（旧 Core 不发 → 空数组，退化到只有活动浮条）。 */
+          branches?: Array<{
+            session_id: string;
+            branch_id: string;
+            message_sequence: number;
+            task: string;
+            target: string;
+            started_at_ms: number;
+          }>;
+        };
+      }).ActiveTurnsSnapshot;
       if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
       const core = evtCore(e);
+      // 分支快照：`ReplyBranchStarted` 只在分支开始那一刻发一次，重连/刷新
+      // 后拿不到它，而协议里没有"查运行分支"的命令 —— 不重建的话分支卡与
+      // 任务卡会一直是空的（只能等下一次分支开始）。这里按快照原地补建，
+      // 并用同一套 reducer（startReplyBranch + branchTabs）保证与实时事件
+      // 产生完全一致的状态形状。
+      const liveBranches = new Set(
+        (e.branches ?? []).map(b => scopedKey(core, b.branch_id)),
+      );
+      for (const b of e.branches ?? []) {
+        const key = scopedKey(core, b.branch_id);
+        if (!state.branchTabs[key]) {
+          state.branchTabs[key] = {
+            sessionId: b.session_id,
+            core,
+            branchId: b.branch_id,
+            task: b.task,
+            target: b.target,
+            startedAtMs: b.started_at_ms,
+            status: 'running',
+            finalContent: null,
+            msgs: [],
+          };
+        }
+        if (!state.tasks.some(t => t.id === b.branch_id && t.kind === 'reply')) {
+          startReplyBranch(
+            state,
+            b.session_id,
+            core,
+            b.branch_id,
+            b.message_sequence,
+            b.task,
+            b.target,
+            b.started_at_ms,
+          );
+        }
+      }
+      // 反向清理：本地仍标 running 的**分支**，若快照里没有它，说明它已经
+      // 结束（或 Core 重启过），就地收尾——否则重连后残留的"运行中"标签会
+      // 永远停在那里（正是 connection.ts 清空 branchTabs 想避免的问题，
+      // 只是清空会把**仍然在跑**的那些也一起抹掉）。
+      //
+      // ⚠️ 只在**字段存在**时清理：`branches === undefined` 是旧 Core（不发
+      // 该字段），此时"快照为空"不代表"没有分支在跑"——照清会把正在跑的
+      // 分支卡抹掉（旧 Core + 新前端的灰度期会踩）。
+      //
+      // 收尾口径与 `ReplyBranchCompleted` 一致（`completeReplyBranch` +
+      // 删临时标签），保证两条路径产出同样的状态。
+      for (const [key, tab] of e.branches === undefined ? [] : Object.entries(state.branchTabs)) {
+        if (tab.status !== 'running') continue;
+        if (core != null && (tab.core ?? null) !== core) continue;
+        if (liveBranches.has(key)) continue;
+        const branchId = tab.branchId ?? key.split('::').pop() ?? '';
+        completeReplyBranch(state, branchId, true, false, Date.now());
+        delete state.branchTabs[key];
+      }
       // activity 键是复合 (core, session_id)：同名跨 core 不互相误杀。
       const running = new Set(e.session_ids.map(id => sessionKey(core, id)));
       // 快照范围：只覆盖"本 core 的该 team"会话的 activity（其他 team/core
@@ -1321,6 +1393,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       state.branchTabs[scopedKey(evtCore(e), e.branch_id)] = {
         sessionId: e.session_id,
         core: evtCore(e),
+        branchId: e.branch_id,
         task: e.task,
         target: e.target,
         startedAtMs: e.started_at_ms,

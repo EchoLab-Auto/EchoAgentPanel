@@ -538,6 +538,26 @@ fn command_name(frame: &str) -> String {
         .unwrap_or_else(|| "<unparsed>".to_string())
 }
 
+/// 回一条**丢命令错误帧**给浏览器。
+///
+/// 为什么必须有：被丢弃的命令既没有发往任何上游，也就没有任何回执——
+/// 前端只能表现为"这块数据永远是空的"，用户唯一能做的就是刷新重发，而
+/// 重发很可能踩同一个坑（比如多上游下命令没有 `{core}` 信封）。这里按
+/// `BackendEvent::Error` 的线形状补一条**不带 core 外壳**的本地错误帧：
+/// 前端 `parseFrame` 的单上游分支可以直接解析，聚合分支忽略（无 core）。
+///
+/// 不带外壳是刻意的：这类错误**不属于任何上游**（正因为不知道该发给谁
+/// 才丢的），挂上某个 core 反而会误导前端把提示归到错的 Agent 头上。
+fn reject_to_browser(event_tx: &tokio::sync::mpsc::Sender<BrowserMessage>, message: &str) {
+    let frame = serde_json::json!({
+        "type": "event",
+        "payload": { "Error": { "session_id": null, "message": message } },
+    });
+    // try_send：出口满/已关时丢弃本提示即可——不能用阻塞等待把路由泵卡住
+    // （提示本身是尽力而为，丢帧的真实后果已有 WARN 落日志）。
+    let _ = event_tx.try_send(BrowserMessage::Text(frame.to_string().into()));
+}
+
 fn decode_core_frame(upstream_name: &str, text: &str, wrap: bool) -> Option<(String, Option<u64>)> {
     if !wrap {
         // 单上游：原样透传（非 JSON 帧也照旧发）。序号取不到就返回 None，
@@ -1213,13 +1233,15 @@ async fn bridge(
         });
     }
 
-    drop(event_tx);
-
     // 命令路由泵：浏览器命令 → 目标上游（无壳 = 广播全部在线上游）。
     // 目标表是动态 links（管理面增删即时生效）。
     let route_pump = {
         let links = links.clone();
         let replay = broadcast_replay.clone();
+        // 丢命令时要给浏览器回执（见 `reject_to_browser`）：路由泵需要自己
+        // 一份出口句柄。**必须在 `drop(event_tx)` 之前克隆**——否则出口
+        // 引用计数提前归零，浏览器读侧会把「没有人再发事件」当成正常关闭。
+        let event_tx_for_cmds = event_tx.clone();
         tokio::spawn(async move {
             while let Some((route, text)) = cmd_rx.recv().await {
                 match route {
@@ -1239,11 +1261,18 @@ async fn bridge(
                                 break;
                             }
                             if Instant::now() >= deadline {
+                                let command = command_name(&text);
                                 warn!(
                                     core = %name,
-                                    command = %command_name(&text),
+                                    command = %command,
                                     waited_ms = LINK_READY_WAIT.as_millis() as u64,
                                     "targeted command dropped: upstream link not ready"
+                                );
+                                reject_to_browser(
+                                    &event_tx_for_cmds,
+                                    &format!(
+                                        "命令 {command} 未发送：上游 {name} 的链路未就绪（正在重连），稍后会自动恢复"
+                                    ),
                                 );
                                 break;
                             }
@@ -1277,10 +1306,18 @@ async fn bridge(
                                     // 名字必带：这条命令**不会**送到任何上游，
                                     // 前端也收不到任何回执（静默丢弃）——不知道
                                     // 是哪条命令丢了，就只能靠刷新重发来试。
+                                    let command = command_name(&text);
                                     warn!(
-                                        command = %command_name(&text),
+                                        command = %command,
                                         links = links.len(),
                                         "rejected untargeted command (need {{core}} or {{broadcast:true}} envelope)"
+                                    );
+                                    reject_to_browser(
+                                        &event_tx_for_cmds,
+                                        &format!(
+                                            "命令 {command} 未发送：多上游（{} 条在线链路）下无法确定目标 Agent，请先选择 Agent 后重试",
+                                            links.len()
+                                        ),
                                     );
                                     break;
                                 }
@@ -1301,6 +1338,9 @@ async fn bridge(
             }
         })
     };
+
+    // 路由泵已持有自己的出口克隆，此处方可释放主句柄。
+    drop(event_tx);
 
     // 浏览器 → 命令通道（读浏览器帧 → 拆壳 → cmd_tx）+ 浏览器侧心跳
     // 与半死收割（与原单上游中继同语义：收割阈值内浏览器无任何帧
@@ -1354,7 +1394,7 @@ async fn bridge(
                             match &frame {
                                 Some(frame) => info!(
                                     peer = %peer_for_read,
-                                    code = u16::from(frame.code),
+                                    code = frame.code,
                                     close_reason = %frame.reason,
                                     "browser sent close"
                                 ),
@@ -1533,6 +1573,33 @@ mod tests {
     }
 
     /// 定向壳：解析出目标上游名。
+    /// 丢命令回执：线形状必须是**不带 core 外壳**的 `BackendEvent::Error`。
+    ///
+    /// 不带壳是契约：这类错误不属于任何上游（正因为不知道该发给谁才丢的），
+    /// 挂上某个 core 会让前端把提示归到错的 Agent 头上。
+    #[test]
+    fn reject_frame_is_bare_error_event() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<BrowserMessage>(4);
+        reject_to_browser(&tx, "命令 RequestState 未发送：测试");
+        let BrowserMessage::Text(text) = rx.try_recv().expect("frame") else {
+            panic!("应为文本帧")
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).expect("json");
+        assert!(value.get("core").is_none(), "回执不得带 core 外壳");
+        assert_eq!(value["type"], "event");
+        assert_eq!(value["payload"]["Error"]["session_id"], serde_json::Value::Null);
+        let message = value["payload"]["Error"]["message"]
+            .as_str()
+            .expect("message");
+        assert!(message.contains("RequestState"), "回执要带上命令名：{message}");
+    }
+
+    #[test]
+    fn command_name_reads_single_key() {
+        assert_eq!(command_name(r#"{"RequestState":null}"#), "RequestState");
+        assert_eq!(command_name("not json"), "<unparsed>");
+    }
+
     #[test]
     fn unwrap_targets_named_core() {
         let (route, frame) = unwrap_command(
@@ -1565,8 +1632,6 @@ mod tests {
     }
 
     /// 广播重放缓冲：按序记录、越容量丢最旧（供晚建成的链路补投）。
-    // ── Core 帧解码与丢帧诊断（2026-10）────────────────────────────────
-
     /// 单上游：原样透传，同时取到顶层的扇出序号。
     #[test]
     fn decode_passthrough_extracts_seq() {

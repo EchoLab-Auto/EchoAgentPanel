@@ -127,6 +127,12 @@ export function startConnection(): void {
       // 时间线到达标志按"本次连接"计：重连后若无缓存需要重新加载，
       // 聊天区据此显示「正在加载时间线…」而不是「暂无消息」（见 ChatView）。
       state.timelineArrivedOnce = false;
+      // 上游清单先落位（本地 HTTP 快照）：`knownCores` 决定命令能否加壳
+      // 路由，而它原本只由「收到某 core 的事件」填充——首屏在事件到达前
+      // 发的命令都是裸帧，中继在多上游下直接拒收（`rejected untargeted
+      // command`，且不回执），对应的数据就永远不出现。用已知上游名预填，
+      // 让第一批命令就能定向。
+      for (const upstream of state.upstreams) state.knownCores.add(upstream.name);
       // 新连接 = 新基线：Core 的序号是进程级连续的，但重连窗口里丢掉的帧
       // 由下面的 since_seq 补拉负责，不该在重连后第一帧被误判成"跳号"
       // （见 event-seq.ts）。
