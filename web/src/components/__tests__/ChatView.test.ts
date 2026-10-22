@@ -417,6 +417,48 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     wrapper.unmount();
   });
 
+  it('空闲时也显示 API 徽标（常驻），但没有相位文案与 spinner', () => {
+    // 用户明确要求：不管忙不忙，始终能看到当前 API
+    state.api = {
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      active_api: '',
+      profiles: [],
+    } as unknown as typeof state.api;
+    // activities 为空 = 空闲
+    const wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.chat-status').exists()).toBe(true);
+    expect(wrapper.find('.chat-status__api').text()).toBe('deepseek / deepseek-v4-flash');
+    // 相位部分整体不存在（含 spinner），但 live region 容器也不该留下空壳
+    expect(wrapper.find('.chat-status__live').exists()).toBe(false);
+    expect(wrapper.find('.chat-status__spinner').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('既无 API 又无相位时整行不渲染（不留空行占位）', () => {
+    // beforeEach 已把 api 置 null
+    const wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.chat-status').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('忙碌与空闲的输入区高度一致（常驻行不引入跳动）', async () => {
+    state.api = {
+      provider: 'deepseek', model: 'm', active_api: '', profiles: [],
+    } as unknown as typeof state.api;
+    const idle = mountChatView(SESSION);
+    const idleRow = idle.find('.chat-status').exists();
+    idle.unmount();
+
+    state.activities[SESSION] = act('thinking');
+    const busy = mountChatView(SESSION);
+    // 两种状态都渲染同一行 .chat-status（高度由 CSS min-height 兜住，
+    // 组件层面能断言的是"行存在"这件事在两种状态下都成立）
+    expect(idleRow).toBe(true);
+    expect(busy.find('.chat-status').exists()).toBe(true);
+    busy.unmount();
+  });
+
   it('文案按相位切换：thinking / tool / subagent', async () => {
     state.activities[SESSION] = act('thinking');
     const wrapper = mountChatView(SESSION);

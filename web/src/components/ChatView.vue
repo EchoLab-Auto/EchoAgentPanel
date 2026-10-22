@@ -1616,15 +1616,16 @@ function mediaSrc(img: string): string {
           <!-- 状态行（2026-10）：取代入口行的浮条。贴在文本域/操作行**下方**、
                玻璃层内——它描述的是「这次输入会得到什么响应」，属于输入区自己
                的状态，而不是入口行（导航/配置）的一部分。
-               role=status + aria-live=polite：相位文案变化时读屏器会播报，
-               但不会打断用户正在输入的内容。 -->
-          <div v-if="activityText" class="chat-status">
-            <!-- 左：当前会话生效的 provider / model。会话级覆盖与 persona 级
-                 active_api 可能不同，以本会话实际生效者为准。 -->
+               行本身常驻（API 徽标总在）；相位文案变化时读屏器会播报，
+               但不会打断用户正在输入的内容（live region 只包相位文案）。 -->
+          <div v-if="apiLabel || activityText" class="chat-status">
+            <!-- 左：当前会话生效的 provider / model。**常显**（不随忙碌消失）——
+                 用户要"随时能看出这条回答是哪个 API 产出的"。会话级覆盖与
+                 persona 级 active_api 可能不同，以本会话实际生效者为准。 -->
             <span v-if="apiLabel" class="chat-status__api" :title="apiTitle">{{ apiLabel }}</span>
-            <!-- 右：相位文案。live region 只包这一段——API 名是静态信息，
-                 重复播报只会吵。 -->
-            <span class="chat-status__live" role="status" aria-live="polite">
+            <!-- 右：相位文案，仅忙碌时存在。live region 只包这一段——API 名是
+                 静态信息，重复播报只会吵。 -->
+            <span v-if="activityText" class="chat-status__live" role="status" aria-live="polite">
               <span class="chat-status__spinner" aria-hidden="true" />
               <span class="chat-status__text">{{ activityText }}</span>
             </span>
@@ -2292,6 +2293,9 @@ function mediaSrc(img: string): string {
   line-height: 16px;
   color: var(--nm-text-secondary);
   min-width: 0;
+  /* 常驻行：即使只有 API 徽标（未忙碌），也保持与忙碌态相同的高度与基线，
+     避免"开始回答时输入区突然长高 23px"——高度在两种状态下完全一致。 */
+  min-height: 17px;
 }
 /* API 徽标（provider / model）：静态信息，用极轻的胶囊与右侧「活」的状态区分；
    可收缩 + 省略——窄屏优先保住右侧相位文案。 */
