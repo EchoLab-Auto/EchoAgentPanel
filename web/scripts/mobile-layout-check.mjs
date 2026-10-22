@@ -447,7 +447,28 @@ const MENU_PROBE = `(() => {
   if (!menu || !pop) return { open: false };
   const r = menu.getBoundingClientRect();
   const pr = pop.getBoundingClientRect();
-  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  /**
+   * 用 elementsFromPoint（复数）而不是 elementFromPoint（单数）。
+   *
+   * 单数版把「被临时浮层盖住」与「被祖先裁掉 / 根本没渲染」判成同一件事：
+   * 2026-10 这个断言间歇红，实测命中 .nm-toast__message —— 加载时 4 条
+   * 「core / ai_station / A100-40g / cloud-server-2 已恢复在线」的 info toast
+   * 叠在 top-center（z-index 500、320 宽下容器高到 y=535），恰好盖住菜单中心
+   * (160, 384.5)。而 elementsFromPoint 的栈里**菜单一直在**（menuInStack=true），
+   * 说明它既没被裁、也没消失，只是上面压了一条会自动消失的提示。
+   *
+   * 判据改为「菜单出现在栈里的任意一层」：真正的历史 bug（菜单挂在入口行
+   * overflow-x 容器里被整体裁掉）在栈里根本不会出现，仍然会被抓住。
+   * coveredBy 只作诊断信息输出，不参与判定。
+   */
+  const stack = document.elementsFromPoint(cx, cy);
+  const inStack = stack.some((e) => e === menu || menu.contains(e));
+  const top = stack[0] ?? null;
+  const coveredBy = top && top !== menu && !menu.contains(top)
+    ? String(top.className || top.tagName).slice(0, 48)
+    : null;
   const items = [...menu.querySelectorAll('.agent-menu__item')];
   return {
     open: true,
@@ -455,7 +476,8 @@ const MENU_PROBE = `(() => {
     itemHeight: items[0] ? +items[0].getBoundingClientRect().height.toFixed(1) : null,
     inBody: pop.parentElement === document.body,
     inViewport: pr.left >= -0.5 && pr.right <= innerWidth + 0.5 && pr.top >= -0.5 && pr.bottom <= innerHeight + 0.5,
-    hitInsideMenu: !!(hit && menu.contains(hit)),
+    hitInsideMenu: inStack,
+    coveredBy,
     popRect: { left: +pr.left.toFixed(1), top: +pr.top.toFixed(1), width: +pr.width.toFixed(1) },
   };
 })()`;
@@ -686,7 +708,8 @@ try {
       check(
         `${tag} Agent 菜单没被入口行裁掉（点了看得见）`,
         mn?.open === true && mn.hitInsideMenu === true,
-        `open=${mn?.open} hitInsideMenu=${mn?.hitInsideMenu} items=${mn?.items}（被裁时 elementFromPoint 命中消息区）`,
+        `open=${mn?.open} hitInsideMenu=${mn?.hitInsideMenu} items=${mn?.items}` +
+          `（被裁时菜单不在命中栈里；被临时浮层盖住时 coveredBy=${mn?.coveredBy ?? '—'}，不算失败）`,
       );
       check(
         `${tag} Agent 菜单在视口内且已 teleport`,
