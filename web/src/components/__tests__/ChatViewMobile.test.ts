@@ -162,12 +162,11 @@ describe('ChatView 竖屏移动端', () => {
     expect(styleBlock, '卡片不得再手写毛玻璃背景').not.toMatch(
       /\.chat-composer-float__glass \{/,
     );
-    // 内辉光（2026-10 二次修订）：**不再自己写 box-shadow** —— ui-frame 的
-    // `NeumorphismCard glass="pressed"` 就是内凹内辉光（三层 inset），
-    // `ChatComposer focus-effect="glow"` 是聚焦内辉光（主色 inset 光晕）。
-    // 面板侧只声明档位，材质/阴影留给库，保证跨组件一致。
-    expect(raw, '卡片必须声明 glass="pressed"（库的内凹内辉光档）').toMatch(
-      /<NeumorphismCard[\s\S]{0,200}glass="pressed"/,
+    // 悬浮（2026-10 用户要求「输入区换成悬浮」）：外壳走库的 float 档 ——
+    // 向外环境投影（0 4px 16px + 0 2px 4px）由 `nm-card--glass-float` 提供，
+    // 面板侧不写 box-shadow。
+    expect(raw, '卡片必须声明 glass="float"（库的悬浮档）').toMatch(
+      /<NeumorphismCard[\s\S]{0,220}glass="float"/,
     );
     expect(raw, '输入器必须声明 focus-effect="glow"（库的聚焦内辉光）').toMatch(
       /<ChatComposer[\s\S]{0,300}focus-effect="glow"/,
@@ -176,10 +175,20 @@ describe('ChatView 竖屏移动端', () => {
       styleBlock.match(
         /\.chat-composer-float \.chat-composer-float__card \{[\s\S]*?\n\}/,
       )?.[0] ?? '';
-    expect(cardRules2, '面板侧不得再手写 box-shadow（内辉光归库）').not.toMatch(
+    expect(cardRules2, '面板侧不得手写卡片 box-shadow（悬浮投影归库）').not.toMatch(
       /box-shadow:/,
     );
-    expect(raw, '外发光兄弟层已删除').not.toMatch(/chat-composer-float__halo/);
+    // 投影补层（移动端 clip 会裁掉卡片自身的外阴影，只能由未裁剪的兄弟层补）
+    const haloRules2 =
+      styleBlock.match(/\.chat-composer-float__halo \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(haloRules2, '补层必须用 blur 做柔化').toMatch(/filter:\s*blur\(/);
+    expect(haloRules2, '补层默认隐藏（桌面不叠影）').toMatch(/display:\s*none/);
+    expect(haloRules2, '补层不得挂 backdrop-filter（会破坏卡片毛玻璃）').not.toMatch(
+      /backdrop-filter/,
+    );
+    expect(styleBlock, 'clip 生效时才显示补层').toMatch(
+      /\.chat-composer-float--clipped \.chat-composer-float__halo \{[^}]*display:\s*block/,
+    );
     // 内层一律消费派生变量（含 border 补偿）
     expect(styleBlock, '同心派生量必须减掉 padding 与 border').toMatch(
       /--composer-inner-radius: max\(\s*0px,\s*calc\(var\(--composer-corner-r\) - var\(--composer-padding\) - var\(--composer-border\)\)\s*\)/,

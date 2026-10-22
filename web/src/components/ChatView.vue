@@ -1504,14 +1504,18 @@ function mediaSrc(img: string): string {
       @focusin="onComposerFocus"
       @focusout="onComposerBlur"
     >
-      <!-- 卡片本体（2026-10 用户要求：外框 + 玻璃整体换成 ui-frame 卡片）：
-           材质、圆角、边缘高光、环境投影全部由 NeumorphismCard 的 glass 档位
-           承担；这里只负责「定位 + 超椭圆裁剪」。内层 __body 只做 padding 与
-           内容排布。 -->
+      <!-- 投影补层（只在移动端 clip 生效时显示）：见下方 __halo 的样式注释 ——
+           `clip-path` 会把卡片**自身**的外阴影一起裁掉，手机上的悬浮观感只能
+           由这一层（未裁剪的兄弟节点 + blur）补出来。桌面没有 clip，卡片自带
+           的 float 环境投影已经够，这层 display:none 避免双重阴影。 -->
+      <div class="chat-composer-float__halo" aria-hidden="true"></div>
+      <!-- 卡片本体：ui-frame NeumorphismCard **glass="float"**（悬浮档）——
+           材质（半透明 + backdrop blur）+ 向外环境投影（`0 4px 16px` +
+           `0 2px 4px`）都由库提供，视觉上是一块浮在消息之上的磨砂托盘。
+           内层 __body 只做 padding 与内容排布。 -->
       <NeumorphismCard
         class="chat-composer-float__card"
-        glass="pressed"
-        :elevation="2"
+        glass="float"
         no-padding
       >
         <div class="chat-composer-float__body">
@@ -1814,15 +1818,15 @@ function mediaSrc(img: string): string {
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上。
    结构（2026-10）：
-     __card  NeumorphismCard glass="pressed" —— 材质/圆角/边缘亮线/内辉光
-             全归它（内辉光 = 库的 pressed 档，全 inset，不是向外的投影）
+     __halo  投影补层（仅移动端 clip 生效时启用）
+     __card  NeumorphismCard glass="float" —— 材质/圆角/向外环境投影全归它
+             （悬浮观感）
      __body  内层：只做 padding 与内容排布
    桌面走卡片自己的 border-radius；移动端走 JS 算的 clip-path 超椭圆轮廓。
 
-   为什么用内辉光而不是外发光：移动端卡片挂着超椭圆 clip-path，而 clip-path
-   会把元素**自身向外的** box-shadow 整块裁掉 —— 外发光只能靠额外的兄弟层
-   （模糊 + 翻转形状）模拟，既有双重阴影风险、又要在桌面端单独关掉。
-   inset 阴影画在边缘内侧，**一份实现同时适配桌面圆角与移动端超椭圆**。 */
+   投影为什么需要一个额外的兄弟层：clip-path 会把元素**自身向外的**
+   box-shadow 整块裁掉，而移动端卡片必须挂超椭圆 clip —— 手机上的悬浮投影
+   只能由 __halo（未裁剪 + blur）补，桌面则关掉它避免双重阴影。 */
 .chat-composer-float {
   /* 输入行几何单一事实来源（圆角/高度都从这里派生）：
      - --chat-field-font：输入框实际字号（桌面 14px；移动端/iOS 16px，
@@ -1865,16 +1869,45 @@ function mediaSrc(img: string): string {
   pointer-events: none;
 }
 
-/* 卡片本体：ui-frame NeumorphismCard（**glass="pressed"**）。
-   内辉光不用自己写 —— 库的 `nm-card-glass-pressed` 档就是它：三层 inset
-   （左上内阴影 `--nm-shadow-dark-deep` + 右下内高光 `--nm-shadow-light-deep`
-   + 1px 边缘亮线），强度由 `elevation` 决定、深浅主题各自取令牌。
-   这就是"内辉光/内凹"在库里的标准实现，跨组件一致。
+/* 投影补层（2026-10 用户要求输入区「悬浮」）——
+   为什么非要独立的兄弟层：卡片用 `glass="float"`，它的悬浮感来自**向外的**
+   box-shadow；而移动端为了贴 iPhone 超椭圆屏角给卡片挂了 `clip-path`，
+   clip 裁的是元素**整个渲染结果**，连同自己的外阴影一起裁掉（实测：注入
+   6px 外投影红环，clip 生效时只剩 955 个红像素、关掉 clip 是 47939 —— 差 50 倍）。
+   所以手机上的投影必须画在**未被裁剪**的兄弟节点上：本层只做 `filter: blur`
+   负责柔化，形状交给 `::before` 的 clip-path（与卡片同一轮廓）。
+   本层绝不能挂 backdrop-filter：`filter` 会创建新的 backdrop root，卡片的
+   毛玻璃会失效。
+   桌面（无 clip）不启用 —— 卡片自带的 float 投影已经够，叠一层就是双重阴影。 */
+.chat-composer-float__halo {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  display: none;
+  /* 光向下偏 12px：模拟天花板光源，投影落在下方（不是四周均匀） */
+  transform: translateY(12px);
+  filter: blur(16px);
+}
+.chat-composer-float--clipped .chat-composer-float__halo {
+  display: block;
+}
+.chat-composer-float__halo::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--composer-halo, rgba(15, 23, 42, 0.2));
+  border-radius: var(--composer-radius);
+  clip-path: var(--composer-clip, none);
+}
 
-   本层只覆盖输入区特有的三件事：圆角取 --composer-radius、挂超椭圆 clip、
-   毛玻璃强度降档。选择器带 `.chat-composer-float` 前缀：卡片自己的
-   `--nm-border-radius-*` 档位类与本文特异性相同（都是单类 + scoped 属性），
-   靠层叠顺序不可靠。 */
+/* 卡片本体：ui-frame NeumorphismCard（**glass="float"**，悬浮档）。
+   向外环境投影（`0 4px 16px` ambient + `0 2px 4px` 加深）+ 半透明底 +
+   backdrop blur 全部由库提供 —— 面板侧不写 box-shadow。
+
+   本层只覆盖输入区特有的两件事：圆角取 --composer-radius、挂超椭圆 clip。
+   选择器带 `.chat-composer-float` 前缀：卡片自己的 `--nm-border-radius-*`
+   档位类与本文特异性相同（都是单类 + scoped 属性），靠层叠顺序不可靠。 */
 .chat-composer-float .chat-composer-float__card {
   position: relative;
   z-index: 1;
@@ -1903,8 +1936,14 @@ function mediaSrc(img: string): string {
 /* clip 生效时必须清掉 border-radius —— 两者是**取交集**关系：留着 24px 圆角
    会把超椭圆轮廓又裁回圆角矩形（实测角部间隙 14→16.6px，等于白改）。
    用 class 而非媒体查询做门控：JS 没算出轮廓时（首帧/异常）仍保留圆角兜底。 */
-.chat-composer-float--clipped .chat-composer-float__card {
+.chat-composer-float--clipped .chat-composer-float__card,
+.chat-composer-float--clipped .chat-composer-float__halo::before {
   border-radius: 0;
+}
+
+/* 深色主题：投影要更重（浅底靠光、深底靠影），取值与 --panel-glass-shadow-md 同源 */
+:root[data-theme='dark'] .chat-composer-float {
+  --composer-halo: rgba(0, 0, 0, 0.45);
 }
 
 /* 拖选卡顿根治之二（2026-09-18，2026-10 收敛）：库 NeumorphismTextarea 的
