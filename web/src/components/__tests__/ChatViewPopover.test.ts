@@ -80,6 +80,26 @@ describe('ChatView 入口弹层（PanelPopover）', () => {
     expect(w.element.querySelector('.session-overlay')).toBeNull();
   });
 
+  it('几何：面板 = 整个会话视图（上到顶、下到会话框底，盖住输入区），内容让开入口行', async () => {
+    state.trunk = [];
+    const w = mountChatView();
+    await nextTick();
+    const btn = w.findAll('button').find((b) => b.text().includes('工作区'))!;
+    await btn.trigger('click');
+    await nextTick();
+    const overlay = w.element.querySelector('.session-overlay') as HTMLElement | null;
+    expect(overlay).not.toBeNull();
+    const style = overlay!.getAttribute('style') ?? '';
+    // 纵向贴满视图（不是只到消息区底）
+    expect(style).toContain('top: 0px');
+    expect(style).toContain('bottom: 0px');
+    // 内容区底部让开入口行：reserve = entryBottom（默认 170）+ 入口行高 37 = 207
+    const body = overlay!.querySelector('.session-overlay__body') as HTMLElement | null;
+    expect(body).not.toBeNull();
+    expect(body!.style.paddingBottom).toBe('225px'); // 207 + 18（常规内边距）
+    w.unmount();
+  });
+
   it('互斥：再点另一个入口直接切换面板（同一时刻只开一个）', async () => {
     state.trunk = [];
     const w = mountChatView();

@@ -533,33 +533,49 @@ const busy = computed(() => {
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
 });
 
-// ── 覆盖面板的几何：= 会话消息区的矩形（2026-10 统一） ──
+// ── 覆盖面板的几何：整个会话视图（聊天区），2026-10 统一 ──
 //
-// 用户要求三个弹层「大小等于会话消息区」。消息区就是 `.chat-view__tray`
-// （中间那条 `flex: 1` 的弹性子项：上到会话框顶、下到输入区顶）。这里把它
-// 相对 `.chat-view` 的四边内缩量出来给 `SessionOverlay` 用：
-// - 左右再扣掉边栏留白（`trayPadLeft/Right`）——那才是「正文消息列」的宽度，
-//   否则弹层会伸到悬浮的卡片栈底下；
-// - 测量而非纯 CSS：`tray` 高度随输入区（多行输入撑高 / 软键盘）、边栏进出、
-//   窗口尺寸而变，纯 CSS 要把这几件事的公式再抄一遍、且必然与 tray 漂移。
+// 用户第一次说的是「大小等于会话消息区」，按 `.chat-view__tray` 实现后发现
+// 不对：tray 的下界是**输入区顶**，于是输入区与入口行整条露在面板下方，面板
+// 看上去像被人截了一段。正确口径是**整个会话视图**（`.chat-view`）：
+// 上到会话框顶、下到会话框底，把输入区一起盖住；入口行作为底部工具条浮在
+// 面板之上（`z-index` 高于面板），所以「点另一个按钮直接切换」仍然成立。
+//
+// - 左右仍扣掉边栏留白（`trayPadLeft/Right`）——侧栏是常驻信息（连接状态 /
+//   文件浏览器 / Git），面板不该把它压掉；扣除后即「正文列」的宽度；
+// - 纵向靠**测量**：会话框的高度随窗口变，`top: 0 / bottom: 0` 已经足够（不
+//   需要读 tray），但 `reserve`（内容底部要让开入口行的多少 px）必须实测——
+//   入口行高度由按钮尺寸决定、`entryBottom` 又随输入区撑高而变；
+// - 让位而不是「缩面板」：面板背景铺到会话框底（视觉上是一整块），内容止于
+//   入口行上方，滚到底也不会被工具条压住。
 const viewRootRef = ref<HTMLElement | null>(null);
-const trayRef = ref<HTMLElement | null>(null);
 const overlayInset = ref<OverlayInset | null>(null);
+
+/** 入口行高（按钮 30 + 上下各 3.5 的足迹，实测 37px）。 */
+const ENTRY_ROW_H = 37;
+
+/** 内容区底部让位：从会话框底到入口行顶的距离。 */
+const overlayReserve = computed(() => {
+  const m = entryBottom.value.match(/(\d+(?:\.\d+)?)/);
+  return Math.round((m ? Number(m[1]) : 170) + ENTRY_ROW_H);
+});
 
 function syncOverlayInset() {
   const root = viewRootRef.value;
-  const tray = trayRef.value;
-  if (!root || !tray) return;
+  const tray = viewRootRef.value?.querySelector<HTMLElement>('.chat-view__tray') ?? null;
+  if (!root) return;
   const r = root.getBoundingClientRect();
-  const t = tray.getBoundingClientRect();
-  if (r.width <= 0 || t.width <= 0) return;
+  if (r.width <= 0) return;
+  // 左右对齐「正文列」= 消息区（tray）的横向范围；tray 缺失（首帧/未渲染）
+  // 时退回视图自身，宁可宽一点也不要错位。
+  const t = tray?.getBoundingClientRect() ?? r;
   const padLeft = Number.parseFloat(trayPadLeft.value) || 0;
   const padRight = Number.parseFloat(trayPadRight.value) || 0;
   overlayInset.value = {
-    top: Math.max(0, Math.round(t.top - r.top)),
+    top: 0,
+    bottom: 0,
     left: Math.max(0, Math.round(t.left - r.left + padLeft)),
     right: Math.max(0, Math.round(r.right - t.right + padRight)),
-    bottom: Math.max(0, Math.round(r.bottom - t.bottom)),
   };
 }
 
@@ -569,7 +585,8 @@ onMounted(() => {
   if (typeof ResizeObserver === 'undefined') return;
   overlayObserver = new ResizeObserver(syncOverlayInset);
   if (viewRootRef.value) overlayObserver.observe(viewRootRef.value);
-  if (trayRef.value) overlayObserver.observe(trayRef.value);
+  const tray = viewRootRef.value?.querySelector<HTMLElement>('.chat-view__tray');
+  if (tray) overlayObserver.observe(tray);
 });
 onBeforeUnmount(() => {
   overlayObserver?.disconnect();
@@ -1283,6 +1300,7 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'sessions'"
       :inset="overlayInset"
+      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="会话"
       @close="closeOverlay()"
@@ -1296,6 +1314,7 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'workspace'"
       :inset="overlayInset"
+      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="工作区会话"
       @close="closeOverlay()"
@@ -1305,6 +1324,7 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'instance'"
       :inset="overlayInset"
+      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="实例管理"
       @close="closeOverlay()"
@@ -1314,6 +1334,7 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'tasks'"
       :inset="overlayInset"
+      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="任务与分支"
       @close="closeOverlay()"
@@ -1323,6 +1344,7 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'checklist'"
       :inset="overlayInset"
+      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="清单"
       @close="closeOverlay()"
@@ -1341,6 +1363,7 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'context'"
       :inset="overlayInset"
+      :reserve="overlayReserve"
       :ignore="entryRowRef"
       :padded="false"
       label="上下文占用"
@@ -1364,7 +1387,7 @@ function mediaSrc(img: string): string {
          解散，吸底行为改直用 headless useChatScroll）。
          行模型由面板自组：连续工作条目（工具调用 + 思考 + 子代理完成）合并
          为一排小圆角矩形 chip（WorkRunGroup），其余消息逐条 MessageItem。 -->
-    <div ref="trayRef" class="chat-view__tray">
+    <div class="chat-view__tray">
       <div
         ref="listRef"
         class="chat-view__list"
@@ -1460,6 +1483,7 @@ function mediaSrc(img: string): string {
       v-if="entryOverlay === 'config' && configTeam"
       :team="configTeam"
       :inset="overlayInset"
+      :reserve="overlayReserve"
       @close="closeOverlay()"
     />
 
@@ -2369,7 +2393,10 @@ function mediaSrc(img: string): string {
   position: absolute;
   left: 20px;
   bottom: v-bind(entryBottom);
-  z-index: 6;
+  /* 7：高于会话区覆盖面板（6）——面板铺满整个聊天区（连输入区一起盖住），
+     入口行作为底部工具条留在最上层，所以面板打开时仍可点另一个按钮直接
+     切换。 */
+  z-index: 7;
   display: flex;
   align-items: center;
   gap: 8px;
