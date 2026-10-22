@@ -1977,30 +1977,58 @@ function mediaSrc(img: string): string {
    clip 裁的是元素**整个渲染结果**，连同自己的外阴影一起裁掉（实测：注入
    6px 外投影红环，clip 生效时只剩 955 个红像素、关掉 clip 是 47939 —— 差 50 倍）。
    所以手机上的投影必须画在**未被裁剪**的兄弟节点上：本层只做 `filter: blur`
-   负责柔化，形状交给 `::before` 的 clip-path（与卡片同一轮廓）。
+   负责柔化，形状交给两个伪元素的 clip-path（与卡片同一轮廓）。
    本层绝不能挂 backdrop-filter：`filter` 会创建新的 backdrop root，卡片的
    毛玻璃会失效。
-   桌面（无 clip）不启用 —— 卡片自带的 float 投影已经够，叠一层就是双重阴影。 */
+   桌面（无 clip）不启用 —— 卡片自带的 float 投影已经够，叠一层就是双重阴影。
+
+   ## 为什么是**两层**（2026-10 用户报「边框有点下宽上窄」）
+
+   单层 + `translateY(12px)` 是「光从上方来」的写法，但它有两个副作用，实测
+   把卡片的上/下观感拉开到 3.6 倍（中线灰度、相对无投影对照的暗化积分）：
+
+     ① 底部只有 12px 可用（间距 = 屏宽 3%），而位移 12 + 模糊 16 = 28px，
+        影子**被视口硬切**——底边挂一条又浓又硬的暗带（峰值 Δ29）；
+     ② 卡片背景是 65% 半透明 + backdrop-filter，影子不只是外阴影，还透过
+        玻璃把**卡片内部**的下半区压暗（内部 Δ13 vs 顶部 Δ8）。
+
+   于是顶边是「一条细亮线 + 几乎没有影子」，底边是「亮线 + 浓暗带」，读起来
+   就是「下宽上窄」——而 clip-path 折线的镜像偏差其实是 0.00px（几何无辜）。
+
+   改成两层后（本文件下方 `::before` 环境层 + `::after` 落地层）：
+     顶峰值 Δ18 / 底峰值 Δ21（1.2×，原 2.2×）、暗化积分 117 : 163（1.4×，原 3.6×）、
+     卡片内部上/下 Δ 基本相等。既有四周均匀的「环境光」定义边缘，又保留一点
+     向下的方向感，且位移降到 4px 后不再被视口截断。 */
 .chat-composer-float__halo {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
   display: none;
-  /* 光向下偏 12px：模拟天花板光源，投影落在下方（不是四周均匀） */
-  transform: translateY(12px);
-  filter: blur(16px);
+  /* 模糊只写在这里：两层的柔化一起做。10px 与层内 4px 位移配平后
+     底部余量（12px）刚好够，不会被视口截断 */
+  filter: blur(10px);
 }
 .chat-composer-float--clipped .chat-composer-float__halo {
   display: block;
 }
-.chat-composer-float__halo::before {
+/* 两层共用形状：与卡片轮廓完全一致 */
+.chat-composer-float__halo::before,
+.chat-composer-float__halo::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: var(--composer-halo, rgba(15, 23, 42, 0.2));
   border-radius: var(--composer-radius);
   clip-path: var(--composer-clip, none);
+}
+/* 环境层：四周均匀，负责给**上边**也补一条边缘定义（这正是原来缺的） */
+.chat-composer-float__halo::before {
+  background: var(--composer-halo-ambient, rgba(15, 23, 42, 0.08));
+}
+/* 落地层：轻微下移，保留「光从上方来」的方向感 */
+.chat-composer-float__halo::after {
+  background: var(--composer-halo, rgba(15, 23, 42, 0.12));
+  transform: translateY(4px);
 }
 
 /* 卡片本体：ui-frame NeumorphismCard（**glass="float"**，悬浮档）。
@@ -2043,9 +2071,11 @@ function mediaSrc(img: string): string {
   border-radius: 0;
 }
 
-/* 深色主题：投影要更重（浅底靠光、深底靠影），取值与 --panel-glass-shadow-md 同源 */
+/* 深色主题：投影要更重（浅底靠光、深底靠影），取值与 --panel-glass-shadow-md 同源。
+   两层都调：环境层略轻（避免四周发闷），落地层保持原来的浓度。 */
 :root[data-theme='dark'] .chat-composer-float {
-  --composer-halo: rgba(0, 0, 0, 0.45);
+  --composer-halo-ambient: rgba(0, 0, 0, 0.28);
+  --composer-halo: rgba(0, 0, 0, 0.40);
 }
 
 /* 拖选卡顿根治之二（2026-09-18，2026-10 收敛）：库 NeumorphismTextarea 的

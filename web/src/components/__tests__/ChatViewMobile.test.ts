@@ -186,8 +186,10 @@ describe('ChatView 竖屏移动端', () => {
       /\.chat-composer-float__glass \{/,
     );
     // halo（投影补层）仍需要同一条轮廓，走 CSS 变量（它不是卡片）
+    // 2026-10 起是**两层**（::before 环境层 + ::after 落地层），两者共用同一条
+    // 轮廓；见下方"上下对称"那组断言
     expect(styleBlock, '投影补层复用同一轮廓变量').toMatch(
-      /\.chat-composer-float__halo::before \{[^}]*clip-path: var\(--composer-clip, none\)/,
+      /\.chat-composer-float__halo::(?:before|after) \{[^}]*clip-path: var\(--composer-clip, none\)/,
     );
     // 悬浮（2026-10 用户要求「输入区换成悬浮」）：外壳走库的 float 档 ——
     // 向外环境投影（0 4px 16px + 0 2px 4px）由 `nm-card--glass-float` 提供，
@@ -216,6 +218,42 @@ describe('ChatView 竖屏移动端', () => {
     expect(styleBlock, 'clip 生效时才显示补层').toMatch(
       /\.chat-composer-float--clipped \.chat-composer-float__halo \{[^}]*display:\s*block/,
     );
+    /**
+     * 上下观感必须对称（2026-10 用户报「输入区边框有点下宽上窄」）。
+     *
+     * 几何是无辜的（折线镜像偏差 0.00px）—— 元凶是投影补层的单向大位移：
+     * 原来 `translateY(12px) + blur(16px)`，而底部只有 12px 可用（间距 3%），
+     * 影子被视口硬切、底边挂一条浓暗带，且透过 65% 半透明玻璃把卡片内部
+     * 下半区也压暗。实测（中线灰度、相对"无投影"对照的暗化）：
+     *   顶峰值 13 / 底峰值 29（2.2×）、积分 83 : 300（3.6×）、内部 8 : 13。
+     *
+     * 改成「环境层（四周均匀）+ 落地层（小幅下移）」后：
+     *   顶 18 / 底 21（1.17×）、积分 117 : 163（1.39×）、内部 11 : 12。
+     * 下面三条把结构钉住，防止有人再把位移调回去。
+     */
+    expect(styleBlock, '补层必须是两层（环境 + 落地）').toMatch(
+      /\.chat-composer-float__halo::before,\s*\n?\.chat-composer-float__halo::after \{/,
+    );
+    expect(haloRules2, '补层本体不得再有大位移（模糊与位移都在层内）').not.toMatch(
+      /transform:\s*translateY\(\s*(?:[1-9]\d|\d{3,})/,
+    );
+    // 取**最后一处**：第一处是 `::before, ::after` 的共用块（只放共性与 clip），
+    // 独立块在后面才有 translateY
+    const afterRules = [...styleBlock.matchAll(/\.chat-composer-float__halo::after \{[\s\S]*?\n\}/g)];
+    const haloAfter = afterRules[afterRules.length - 1]?.[0] ?? '';
+    // 落地层位移必须 ≤ 6px：底部可用余量 = 间距（屏宽 3% ≈ 12px），
+    // 位移 + 模糊超出就会被视口硬切出一条浓暗带 —— 那正是「下宽」的来源
+    const shift = Number(haloAfter.match(/translateY\((\d+(?:\.\d+)?)px\)/)?.[1] ?? NaN);
+    expect(Number.isFinite(shift), '落地层应有 translateY').toBe(true);
+    expect(shift, '落地层位移必须 ≤ 6px（否则被视口截断）').toBeLessThanOrEqual(6);
+    expect(haloRules2, '模糊半径 ≤ 12px（与位移一起装进底部余量）').toMatch(
+      /filter:\s*blur\((?:\d|1[0-2])(?:\.\d+)?px\)/,
+    );
+    // 环境层与落地层浓度都要有独立变量（深色主题各自可调）
+    expect(styleBlock, '环境层与落地层用各自的变量').toMatch(
+      /--composer-halo-ambient:/,
+    );
+    expect(styleBlock).toMatch(/--composer-halo:/);
     // 内层一律消费派生变量（含 border 补偿）
     expect(styleBlock, '同心派生量必须减掉 padding 与 border').toMatch(
       /--composer-inner-radius: max\(\s*0px,\s*calc\(var\(--composer-corner-r\) - var\(--composer-padding\) - var\(--composer-border\)\)\s*\)/,
