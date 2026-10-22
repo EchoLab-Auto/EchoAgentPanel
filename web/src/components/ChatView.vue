@@ -33,7 +33,7 @@ import { composerOutline, toClipPath } from '../utils/squircle';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
-import PanelPopover from './PanelPopover.vue';
+import SessionOverlay, { type OverlayInset } from './SessionOverlay.vue';
 import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
@@ -111,24 +111,29 @@ onBeforeUnmount(() => {
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
-/** NeumorphismButton 组件根 DOM（模板 ref 拿到的是组件实例，取 $el）。 */
-function btnElement(instance: unknown): HTMLElement | null {
-  const el = (instance as { $el?: unknown } | null)?.$el;
-  return el instanceof HTMLElement ? el : null;
+// ── 入口行覆盖面板：单一状态（2026-10 统一） ──
+//
+// 用户要求：「入口行除 Agent 切换以外的弹层统一成一种样式（大小 = 会话消息
+// 区），并且唤起一个就关掉另一个」。互斥不靠「打开前逐个关」——那样每加一个
+// 弹层就要改 N 处；这里只留**一个** id，任何时刻最多一个为真，互斥是结构性的。
+type EntryOverlayId =
+  | 'config'
+  | 'context'
+  | 'checklist'
+  | 'sessions'
+  | 'workspace'
+  | 'instance'
+  | 'tasks';
+const entryOverlay = ref<EntryOverlayId | null>(null);
+
+/** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。 */
+function toggleOverlay(id: EntryOverlayId) {
+  entryOverlay.value = entryOverlay.value === id ? null : id;
 }
 
-const showInstance = ref(false);
-const instanceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-
-function toggleInstance() {
-  showInstance.value = !showInstance.value;
-}
-const showChecklist = ref(false);
-const checklistBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-const showContext = ref(false);
-
-function toggleChecklist() {
-  showChecklist.value = !showChecklist.value;
+/** 无条件关闭（点面板外 / Esc / 选择后）。 */
+function closeOverlay() {
+  entryOverlay.value = null;
 }
 // 入口按钮固定与输入框间距 12px：观察输入框高度变化（auto-resize），
 // bottom = composerHeight + 12(margin) + 12(gap)。
@@ -319,7 +324,7 @@ const checklistAvailable = computed(() =>
 // 插件/Team 更新回推后，若清单工具变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
   if (!available) {
-    showChecklist.value = false;
+    if (entryOverlay.value === 'checklist') closeOverlay();
     // 清单已不可用：丢弃当前会话的本地快照（其他会话/core 的不动）。
     // 两种键形态都清（新键带 team 维度、旧键退化形态）。
     delete state.checklists[checklistKey(state.activeRegion, state.activeTeamId, props.sessionId)];
@@ -363,16 +368,9 @@ const tasksAvailable = computed(
     sessionTasks.value.length > 0,
 );
 
-const showTasks = ref(false);
-const tasksBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-
-function toggleTasks() {
-  showTasks.value = !showTasks.value;
-}
-
 // 插件/Team 更新回推后，若任务入口变为不可用，关闭残留弹层。
 watch(tasksAvailable, (available) => {
-  if (!available) showTasks.value = false;
+  if (!available && entryOverlay.value === 'tasks') closeOverlay();
 });
 
 /** 当前智能体名下的会话（去重团队归属，供「会话」按钮显隐）。 */
@@ -411,16 +409,8 @@ function syncEntryScroll(): void {
   entryAtEnd.value = el.scrollLeft >= max - 2;
 }
 
-const showSessions = ref(false);
-const sessionsBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-
-function toggleSessions() {
-  showSessions.value = !showSessions.value;
-}
-
-
 function pickSession(id: string) {
-  showSessions.value = false;
+  closeOverlay();
   emit('selectSession', id);
 }
 
@@ -440,27 +430,23 @@ onMounted(() => {
 });
 onBeforeUnmount(() => window.removeEventListener('resize', syncEntryScroll));
 
-const showWorkspace = ref(false);
-const workspaceBtnRef = ref<InstanceType<typeof NeumorphismButton> | null>(null);
-
+/**
+ * 打开工作区会话管理（入口按钮与文件浏览器卡的「工作区会话管理 →」共用）。
+ * 走单一状态：从侧栏按钮打开时同样会关掉其它覆盖面板。
+ */
 function toggleWorkspace() {
-  showWorkspace.value = !showWorkspace.value;
+  toggleOverlay('workspace');
 }
 
 // 插件/Team 更新回推后，若 workspace 插件变为不可用，关闭残留弹层。
 watch(workspaceAvailable, (available) => {
-  if (!available) showWorkspace.value = false;
+  if (!available && entryOverlay.value === 'workspace') closeOverlay();
 });
 
 // 切换 Agent 时若实例/工作区/会话/任务面板打开则关闭，避免残留禁用 agent 的面板
 watch(
   () => props.activeTeamId,
-  () => {
-    showInstance.value = false;
-    showWorkspace.value = false;
-    showSessions.value = false;
-    showTasks.value = false;
-  },
+  () => closeOverlay(),
 );
 
 // ── 双侧边栏（2026-09-24）：左右两列卡片容器，卡片可互相拖动 ──
@@ -532,24 +518,14 @@ const trayPadRight = computed(() =>
 );
 
 /**
- * 是否有会话区内的浮层/弹层打开（入口行弹出层、Agent 配置、上下文弹层…）。
+ * 是否有覆盖面板打开（入口行七项：会话 / 工作区 / 实例 / 任务 / 清单 /
+ * 上下文 / 配置）。
  *
- * 用途：「回到底部」悬浮按钮在这些浮层打开时**隐藏**（2026-09-28）——该
- * 按钮浮在消息区下沿，而各弹出层恰好都从入口行向上展开（520px 宽、最高
- * 68vh），实测在窄视口下会盖住按钮（elementFromPoint 命中入口弹层）。
- * 与其用更高 z-index 把按钮压在浮层之上（视觉更糟），不如在浮层期间隐藏。
+ * 用途：「回到底部」悬浮按钮在面板打开时**隐藏**（2026-09-28；2026-10 面板
+ * 统一后仍然成立）——按钮浮在消息区下沿，而面板现在**就是**整个消息区，
+ * 叠在一起只会互相干扰。与其用更高 z-index 把按钮压在面板之上，不如隐藏。
  */
-const anyOverlayOpen = computed(() => {
-  return (
-    showChecklist.value ||
-    showSessions.value ||
-    showWorkspace.value ||
-    showInstance.value ||
-    showTasks.value ||
-    configOpen.value ||
-    showContext.value
-  );
-});
+const anyOverlayOpen = computed(() => entryOverlay.value !== null);
 
 // 当前会话是否在运行任务（用于显示"取消任务"按钮）
 const busy = computed(() => {
@@ -557,22 +533,57 @@ const busy = computed(() => {
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
 });
 
-// ── Agent 配置悬浮弹层（会话区内） ──
-const configOpen = ref(false);
+// ── 覆盖面板的几何：= 会话消息区的矩形（2026-10 统一） ──
+//
+// 用户要求三个弹层「大小等于会话消息区」。消息区就是 `.chat-view__tray`
+// （中间那条 `flex: 1` 的弹性子项：上到会话框顶、下到输入区顶）。这里把它
+// 相对 `.chat-view` 的四边内缩量出来给 `SessionOverlay` 用：
+// - 左右再扣掉边栏留白（`trayPadLeft/Right`）——那才是「正文消息列」的宽度，
+//   否则弹层会伸到悬浮的卡片栈底下；
+// - 测量而非纯 CSS：`tray` 高度随输入区（多行输入撑高 / 软键盘）、边栏进出、
+//   窗口尺寸而变，纯 CSS 要把这几件事的公式再抄一遍、且必然与 tray 漂移。
+const viewRootRef = ref<HTMLElement | null>(null);
+const trayRef = ref<HTMLElement | null>(null);
+const overlayInset = ref<OverlayInset | null>(null);
+
+function syncOverlayInset() {
+  const root = viewRootRef.value;
+  const tray = trayRef.value;
+  if (!root || !tray) return;
+  const r = root.getBoundingClientRect();
+  const t = tray.getBoundingClientRect();
+  if (r.width <= 0 || t.width <= 0) return;
+  const padLeft = Number.parseFloat(trayPadLeft.value) || 0;
+  const padRight = Number.parseFloat(trayPadRight.value) || 0;
+  overlayInset.value = {
+    top: Math.max(0, Math.round(t.top - r.top)),
+    left: Math.max(0, Math.round(t.left - r.left + padLeft)),
+    right: Math.max(0, Math.round(r.right - t.right + padRight)),
+    bottom: Math.max(0, Math.round(r.bottom - t.bottom)),
+  };
+}
+
+let overlayObserver: ResizeObserver | null = null;
+onMounted(() => {
+  syncOverlayInset();
+  if (typeof ResizeObserver === 'undefined') return;
+  overlayObserver = new ResizeObserver(syncOverlayInset);
+  if (viewRootRef.value) overlayObserver.observe(viewRootRef.value);
+  if (trayRef.value) overlayObserver.observe(trayRef.value);
+});
+onBeforeUnmount(() => {
+  overlayObserver?.disconnect();
+  overlayObserver = null;
+});
+// 输入区高度 / 边栏留白 / 移动端切换都会改矩形的分量（tray 自身尺寸不一定变）。
+watch([entryBottom, trayPadLeft, trayPadRight, isMobile], () => void nextTick(syncOverlayInset));
+
 const configTeam = computed(() => {
   const teams = state.teams;
   if (!teams.length) return null;
   const active = props.activeTeamId ? teams.find((t) => t.id === props.activeTeamId) : undefined;
   return active ?? teams[0];
 });
-// 弹层 bottom 偏移：入口行（含配置按钮，高约 30px）之上 12px
-// entryBottom 为入口行距底部的 CSS 值（px 字符串），换算数值：
-const configBottomOffset = computed(() => {
-  const m = entryBottom.value.match(/(\d+)/);
-  return (m ? parseInt(m[1], 10) : 170) + 30 + 12;
-});
-// 上下文弹层底部偏移与配置弹层一致：入口行（高约 30px）之上 12px
-const ctxBottomOffsetCss = computed(() => `${configBottomOffset.value}px`);
 
 // 活动指示浮条：思考/调用工具/子代理 的实时状态，让用户知道 agent 在干什么
 const activityText = computed(() => {
@@ -1125,7 +1136,7 @@ function mediaSrc(img: string): string {
 </script>
 
 <template>
-  <div class="chat-view" :class="{ 'chat-view--overlay-open': anyOverlayOpen }" @paste="onPaste">
+  <div ref="viewRootRef" class="chat-view" :class="{ 'chat-view--overlay-open': anyOverlayOpen }" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
     <div ref="entryRowRef" class="entry-row" @scroll.passive="syncEntryScroll">
       <AgentSwitcher
@@ -1139,7 +1150,7 @@ function mediaSrc(img: string): string {
         shape="pill"
         size="small"
         title="配置当前 Agent（系统提示词 / 能力白名单 / 禁用工具等）"
-        @click="configOpen = true"
+        @click="toggleOverlay('config')"
       >
         <svg
           class="ctx-entry__icon"
@@ -1163,7 +1174,7 @@ function mediaSrc(img: string): string {
         shape="pill"
         size="small"
         title="查看上下文占用"
-        @click="showContext = true"
+        @click="toggleOverlay('context')"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 2a10 10 0 1 0 10 10" />
@@ -1177,13 +1188,12 @@ function mediaSrc(img: string): string {
         :show-zero="false"
       >
         <NeumorphismButton
-          ref="checklistBtnRef"
           class="ctx-entry"
           variant="glass"
           shape="pill"
           size="small"
           title="任务清单"
-          @click="toggleChecklist"
+          @click="toggleOverlay('checklist')"
         >
           <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M9 11l3 3L22 4" />
@@ -1194,13 +1204,12 @@ function mediaSrc(img: string): string {
       </NeumorphismBadge>
       <NeumorphismButton
         v-if="sessionSwitcherAvailable"
-        ref="sessionsBtnRef"
         class="ctx-entry"
         variant="glass"
         shape="pill"
         size="small"
         title="切换会话（每个群/私聊独立上下文）"
-        @click="toggleSessions"
+        @click="toggleOverlay('sessions')"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -1209,7 +1218,6 @@ function mediaSrc(img: string): string {
       </NeumorphismButton>
       <NeumorphismButton
         v-if="workspaceAvailable"
-        ref="workspaceBtnRef"
         class="ctx-entry"
         variant="glass"
         shape="pill"
@@ -1224,13 +1232,12 @@ function mediaSrc(img: string): string {
       </NeumorphismButton>
       <NeumorphismButton
         v-if="instanceAvailable"
-        ref="instanceBtnRef"
         class="ctx-entry"
         variant="glass"
         shape="pill"
         size="small"
         title="平台实例"
-        @click="toggleInstance"
+        @click="toggleOverlay('instance')"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
@@ -1245,13 +1252,12 @@ function mediaSrc(img: string): string {
         :show-zero="false"
       >
         <NeumorphismButton
-          ref="tasksBtnRef"
           class="ctx-entry"
           variant="glass"
           shape="pill"
           size="small"
           title="任务（Subagent / 后台 / 分支，仅当前会话）"
-          @click="toggleTasks"
+          @click="toggleOverlay('tasks')"
         >
           <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -1270,39 +1276,82 @@ function mediaSrc(img: string): string {
       >›</span>
     </div>
 
-    <!-- 入口行面板统一由 PanelPopover 提供：定位、尺寸、外部点击和 Escape。 -->
-    <PanelPopover v-model="showSessions" :anchor="btnElement(sessionsBtnRef)">
+    <!-- 入口行覆盖面板（2026-10 统一）：除 Agent 切换外的七项共用
+         `SessionOverlay` —— 几何 = 会话消息区的矩形、同一套玻璃外壳、点外面 /
+         Esc 关闭；开关由单一 `entryOverlay` 驱动，因此**同一时刻只可能开一个**
+         （唤起另一个自动关掉当前）。Agent 切换仍用锚定浮层（PanelPopover）。 -->
+    <SessionOverlay
+      :open="entryOverlay === 'sessions'"
+      :inset="overlayInset"
+      :ignore="entryRowRef"
+      label="会话"
+      @close="closeOverlay()"
+    >
       <SessionSwitcher
         :active-team-id="props.activeTeamId ?? null"
         :active-session-id="props.sessionId"
         @select="pickSession"
       />
-    </PanelPopover>
-    <PanelPopover v-model="showWorkspace" :anchor="btnElement(workspaceBtnRef)">
+    </SessionOverlay>
+    <SessionOverlay
+      :open="entryOverlay === 'workspace'"
+      :inset="overlayInset"
+      :ignore="entryRowRef"
+      label="工作区会话"
+      @close="closeOverlay()"
+    >
       <WorkspacePanel :team-id="props.activeTeamId ?? null" />
-    </PanelPopover>
-    <PanelPopover v-model="showInstance" :anchor="btnElement(instanceBtnRef)">
+    </SessionOverlay>
+    <SessionOverlay
+      :open="entryOverlay === 'instance'"
+      :inset="overlayInset"
+      :ignore="entryRowRef"
+      label="实例管理"
+      @close="closeOverlay()"
+    >
       <InstancePanel :team-id="props.activeTeamId ?? null" :core="state.activeRegion ?? null" />
-    </PanelPopover>
-    <PanelPopover v-model="showTasks" :anchor="btnElement(tasksBtnRef)">
+    </SessionOverlay>
+    <SessionOverlay
+      :open="entryOverlay === 'tasks'"
+      :inset="overlayInset"
+      :ignore="entryRowRef"
+      label="任务与分支"
+      @close="closeOverlay()"
+    >
       <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />
-    </PanelPopover>
-    <PanelPopover v-model="showChecklist" :anchor="btnElement(checklistBtnRef)">
-      <ChecklistSidebar
-        :session-id="sessionId === 'global' ? undefined : sessionId"
-        :lists="sessionId === 'global' ? sessionChecklists : undefined"
-      />
-    </PanelPopover>
+    </SessionOverlay>
+    <SessionOverlay
+      :open="entryOverlay === 'checklist'"
+      :inset="overlayInset"
+      :ignore="entryRowRef"
+      label="清单"
+      @close="closeOverlay()"
+    >
+      <!-- 清单是「卡片」形态的内容：铺满整块消息区会把进度条拉成一米长，
+           限宽后仍靠左上（列表与卡片栈的既有视觉）。 -->
+      <div class="overlay-narrow">
+        <ChecklistSidebar
+          :session-id="sessionId === 'global' ? undefined : sessionId"
+          :lists="sessionId === 'global' ? sessionChecklists : undefined"
+        />
+      </div>
+    </SessionOverlay>
 
-    <!-- 上下文弹层：与 Agent 配置同几何（上/左/右 12px，底距入口行 12px）；
-         点击弹层外背景关闭（@click.self），无独立返回按钮 -->
-    <div v-if="showContext" class="ctx-overlay" @click.self="showContext = false">
-      <div class="ctx-overlay__panel">
-        <div class="ctx-overlay__head">
-          <h3 class="ctx-overlay__title">上下文占用</h3>
-          <span class="ctx-overlay__id">{{ props.activeTeamId ?? 'default' }}</span>
+    <!-- 上下文占用：同一外壳（内容自带标题与分块列表，故外壳不加内边距）。 -->
+    <SessionOverlay
+      :open="entryOverlay === 'context'"
+      :inset="overlayInset"
+      :ignore="entryRowRef"
+      :padded="false"
+      label="上下文占用"
+      @close="closeOverlay()"
+    >
+      <div class="ctx-pane">
+        <div class="ctx-pane__head">
+          <h3 class="ctx-pane__title">上下文占用</h3>
+          <span class="ctx-pane__id">{{ props.activeTeamId ?? 'default' }}</span>
         </div>
-        <div class="ctx-overlay__body">
+        <div class="ctx-pane__body">
           <ContextView
             :team-id="props.activeTeamId ?? null"
             :session-id="props.sessionId"
@@ -1310,12 +1359,12 @@ function mediaSrc(img: string): string {
           />
         </div>
       </div>
-    </div>
+    </SessionOverlay>
     <!-- 消息列表：flex:1，滚动区独立（2026-10-13 起自组——原 ChatTray 组装件
          解散，吸底行为改直用 headless useChatScroll）。
          行模型由面板自组：连续工作条目（工具调用 + 思考 + 子代理完成）合并
          为一排小圆角矩形 chip（WorkRunGroup），其余消息逐条 MessageItem。 -->
-    <div class="chat-view__tray">
+    <div ref="trayRef" class="chat-view__tray">
       <div
         ref="listRef"
         class="chat-view__list"
@@ -1405,12 +1454,13 @@ function mediaSrc(img: string): string {
       </button>
     </div>
 
-    <!-- Agent 配置悬浮弹层：覆盖会话区（上/左/右 12px，底距配置按钮 12px） -->
+    <!-- Agent 配置：外壳由组件内部的 `SessionOverlay` 提供（与其它七项同一套
+         几何 / 玻璃 / 关闭语义），内容自带头部与表单 padding。 -->
     <AgentConfigModal
-      v-if="configOpen && configTeam"
+      v-if="entryOverlay === 'config' && configTeam"
       :team="configTeam"
-      :bottom-offset="configBottomOffset"
-      @close="configOpen = false"
+      :inset="overlayInset"
+      @close="closeOverlay()"
     />
 
     <!-- 双侧边栏（2026-09-24）：左右各一列卡片栈，卡片可在两列之间拖动
@@ -2225,33 +2275,19 @@ function mediaSrc(img: string): string {
   flex: 0 0 auto;
 }
 
-/* 上下文弹层：与 Agent 配置弹层同几何（覆盖层点击空白关闭） */
-.ctx-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 50;
-  background: var(--nm-mask-bg);
+/* 上下文占用的内容排布：外壳（玻璃/几何/滚动）由 `SessionOverlay` 统一提供
+   （2026-10），这里只管「头部 + 可滚动分块列表」的内部结构。 */
+.overlay-narrow {
+  max-width: 640px;
 }
-.ctx-overlay__panel {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  bottom: v-bind(ctxBottomOffsetCss);
+
+.ctx-pane {
   display: flex;
   flex-direction: column;
-  border-radius: 20px;
-  border: 1px solid var(--panel-glass-border);
-  background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow:
-    var(--panel-glass-shadow-lg),
-    0 0 0 0.5px var(--panel-glass-border),
-    inset 0 1px 0 var(--panel-glass-highlight);
-  overflow: hidden;
+  min-height: 0;
+  height: 100%;
 }
-.ctx-overlay__head {
+.ctx-pane__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2260,23 +2296,74 @@ function mediaSrc(img: string): string {
   border-bottom: 1px solid var(--nm-border-subtle);
   background: linear-gradient(color-mix(in srgb, #ffffff 6%, transparent), transparent);
 }
-.ctx-overlay__title {
+.ctx-pane__title {
   margin: 0;
   font-size: 15px;
   color: var(--nm-text-primary);
 }
-.ctx-overlay__id {
+.ctx-pane__id {
   font-size: 11px;
   color: var(--nm-text-secondary);
   font-family: var(--nm-font-mono, monospace);
 }
-.ctx-overlay__body {
+.ctx-pane__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 12px 18px;
 }
 
+.entry-row {
+  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-color) 45%, transparent);
+  --nm-glass-blur: 24px;
+}
+.ctx-entry {
+  flex: 0 0 auto;
+}
+.ctx-entry__icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.entry-row {
+  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-color) 45%, transparent);
+  --nm-glass-blur: 24px;
+}
+.ctx-entry {
+  flex: 0 0 auto;
+}
+.ctx-entry__icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.entry-row {
+  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-color) 45%, transparent);
+  --nm-glass-blur: 24px;
+}
+.ctx-entry {
+  flex: 0 0 auto;
+}
+.ctx-entry__icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.entry-row {
+  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-color) 45%, transparent);
+  --nm-glass-blur: 24px;
+}
+.ctx-entry {
+  flex: 0 0 auto;
+}
+.ctx-entry__icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
 
 .entry-row {
   position: absolute;
@@ -2286,10 +2373,6 @@ function mediaSrc(img: string): string {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.ctx-overlay__panel--narrow {
-  max-width: 640px;
-  align-self: center;
 }
 
 
@@ -2538,21 +2621,13 @@ function mediaSrc(img: string): string {
     padding-bottom: calc(130px + v-bind(keyboardInsetPx));
   }
 
-  /* 会话区覆盖层（上下文 / Agent 配置）：桌面贴会话框 12px —— 窄屏收为
-     8px 近全屏，最大化内容宽度；内部表格各自横向滚动（见各组件）。 */
-  .ctx-overlay {
-    inset: 6px;
-    bottom: calc(v-bind(entryBottom) + 24px);
-    border-radius: 18px;
-  }
+  /* 会话区覆盖面板的几何已统一由 `SessionOverlay` 按消息区矩形计算
+     （窄屏即近全屏）；内部表格各自横向滚动，无需在此覆写。 */
   /* 「回到底部」按钮：右界让开横屏刘海；纵向用桌面口径 entryBottom + 45
      （输入区贴底后不再叠加 safe-area）。 */
   .chat-view__jump {
     right: calc(v-bind(trayPadRight) + 16px + env(safe-area-inset-right, 0px));
     bottom: calc(v-bind(entryBottom) + 45px);
-  }
-  .ctx-overlay__panel {
-    border-radius: 16px;
   }
   .mobile-cards {
     display: flex;

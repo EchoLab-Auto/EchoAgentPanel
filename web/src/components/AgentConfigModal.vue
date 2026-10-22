@@ -8,7 +8,6 @@
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
-import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import NeumorphismCheckbox from '@echolab-auto/ui-frame/components/NeumorphismCheckbox';
 import NeumorphismCollapse from '@echolab-auto/ui-frame/components/NeumorphismCollapse';
 import NeumorphismDivider from '@echolab-auto/ui-frame/components/NeumorphismDivider';
@@ -20,6 +19,7 @@ import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwit
 import NeumorphismTable from '@echolab-auto/ui-frame/components/NeumorphismTable';
 import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTextarea';
 import PanelIcon from './PanelIcon.vue';
+import SessionOverlay from './SessionOverlay.vue';
 import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';
@@ -29,11 +29,22 @@ import LoadHint from './LoadHint.vue';
 import type { LoopMode, TeamInfo } from '../protocol';
 import { applyMode, deriveMode } from '../loop-mode';
 
-const props = defineProps<{
-  team: TeamInfo;
-  /** 卡片底部距视图底部的偏移（px），用于避开输入区/配置按钮 */
-  bottomOffset?: number;
-}>();
+// ⚠️ Boolean prop 未传时 Vue 会铸成 false（resolvePropValue 的布尔铸型）——
+// 「缺省 = 打开」必须走 withDefaults 显式声明，否则外壳永远不渲染。
+const props = withDefaults(
+  defineProps<{
+    team: TeamInfo;
+    /**
+     * 相对会话视图容器的矩形（px）。2026-10 统一：外壳（玻璃 / 几何 / 关闭）
+     * 由 `SessionOverlay` 提供，本组件只渲染内容。缺省（null）= 贴满父容器，
+     * 用于测试或独立嵌入。
+     */
+    inset?: { top: number; right: number; bottom: number; left: number } | null;
+    /** 是否打开（转发给外壳；默认随挂载即开）。 */
+    open?: boolean;
+  }>(),
+  { inset: null, open: true },
+);
 const emit = defineEmits<{ close: [] }>();
 
 // 弹层每次打开都会重新挂载（v-if）：挂载时拉取能力列表，
@@ -226,7 +237,6 @@ const CAP_SECTIONS = [
 ];
 const openSections = ref<string[]>(CAP_SECTIONS.map((s) => s.key));
 
-const bottomPx = computed(() => `${props.bottomOffset ?? 42}px`);
 
 // ── 循环模式分段单选（互斥循环插件，写入 enabled_plugins 白名单） ──
 const MODE_OPTIONS = [
@@ -289,10 +299,17 @@ function save() {
 </script>
 
 <template>
-  <div class="agent-config-overlay" @click.self="emit('close')">
-    <!-- 玻璃外壳 = ui-frame NeumorphismCard（glass）；尺寸/定位与库 glass 的
-         面板化微调见样式区，内层布局保持不变。 -->
-    <NeumorphismCard glass no-padding class="agent-config">
+  <!-- 嵌入模式（ChatView 的入口行覆盖面板）：外壳/几何/关闭语义全部由
+       `SessionOverlay` 提供，这里只保留内容结构。独立使用（有 `inset`）时
+       退化为自绘外壳，行为与改造前一致（点空白关闭、Esc 由外层负责）。 -->
+  <SessionOverlay
+    :open="props.open !== false"
+    :inset="props.inset ?? null"
+    :padded="false"
+    label="配置 Agent"
+    @close="emit('close')"
+  >
+    <div class="agent-config">
       <div class="agent-config__head">
         <div>
           <h3>配置 Agent：{{ props.team.name }}</h3>
@@ -488,51 +505,20 @@ function save() {
         <NeumorphismButton size="small" variant="glass" @click="emit('close')">取消</NeumorphismButton>
         <NeumorphismButton size="small" variant="primary" @click="save">保存</NeumorphismButton>
       </div>
-    </NeumorphismCard>
-  </div>
+    </div>
+  </SessionOverlay>
 </template>
 
 <style scoped>
-.agent-config-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 50;
-}
-/* 玻璃外壳 = ui-frame NeumorphismCard（glass）：距会话框 上/左/右 12px，
-   下边框距配置按钮上边框 12px。库负责玻璃语义（--nm-glass-* 与圆角/结构），
-   这里只做定位 + 面板化微调——背景与模糊走库 token，圆角/边框/投影按
-   .ctx-overlay__panel 的既有配方覆写（库无对应 token，且 blur 需带 saturate）。 */
-.agent-config-overlay .agent-config {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  bottom: v-bind(bottomPx);
+/* 内容容器：外壳由 `SessionOverlay` 提供（几何 = 会话消息区），这里只负责
+   内部排版——头部 + 可滚动的表单体 + 底部操作条。 */
+.agent-config {
   display: flex;
   flex-direction: column;
-  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  --nm-glass-blur: 24px;
-  /* 表格密度对齐弹层（库默认 small 行为 8px/12px，弹层内更紧凑） */
-  --nm-table-cell-padding-y-sm: 5px;
-  --nm-table-cell-padding-x-sm: 10px;
-  border-radius: 20px;
-  border: 1px solid var(--panel-glass-border);
-  backdrop-filter: blur(var(--nm-glass-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--nm-glass-blur)) saturate(1.6);
-  box-shadow:
-    var(--panel-glass-shadow-lg),
-    0 0 0 0.5px var(--panel-glass-border),
-    inset 0 1px 0 var(--panel-glass-highlight);
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
 }
-/* 库的内容槽：让头部/滚动区/脚部仍是外壳的直接弹性子项（布局不变） */
-.agent-config :deep(.nm-card__body) {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-/* 头部/脚部随玻璃面半透明处理 */
 .agent-config__head {
   background: linear-gradient(
     color-mix(in srgb, #ffffff 6%, transparent),
@@ -617,12 +603,8 @@ function save() {
 /* 竖屏移动端（2026-10，断点 768px）：覆盖层几何从「贴会话框 12px」收为
    6px 近全屏（最大化内容宽度）；内容内的表格靠横向滚动兜底。 */
 @media (max-width: 767.98px) {
-  .agent-config-overlay .agent-config {
-    top: 6px;
-    left: 6px;
-    right: 6px;
-    border-radius: 16px;
-  }
+  /* 几何由 `SessionOverlay` 统一（= 消息区矩形，窄屏自然接近全屏），
+     这里只收紧内部留白。 */
   .agent-config__head {
     padding: 10px 12px 8px;
   }

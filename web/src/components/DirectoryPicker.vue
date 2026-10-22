@@ -143,9 +143,9 @@ watch(
 </script>
 
 <template>
-  <!-- Teleport 到 body（2026-10 审计修复）：本组件常挂在 ChatView 的
-       `PanelPopover` 浮层内——其 `backdrop-filter` 会把 fixed 后代的包含块
-       改为自身、`overflow-y:auto` 再行裁剪，导致全屏遮罩只罩住 520px 浮层、
+  <!-- Teleport 到 body（2026-10 审计修复）：本组件常挂在工作区面板
+       （`SessionOverlay` 内）——外壳的 `backdrop-filter` 会把 fixed 后代的
+       包含块改为自身、`overflow:auto` 再行裁剪，导致全屏遮罩只罩住面板、
        @click.self 关闭大面积失效。teleport 后 fixed/inset 参照视口。 -->
   <Teleport to="body">
     <div class="dp-overlay" @click.self="emit('close')">

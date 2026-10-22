@@ -1,11 +1,12 @@
-//! Agent 配置弹层契约：外壳 = ui-frame NeumorphismCard（glass），
-//! 内层元素全部为 ui-frame 组件（Input/Textarea/Switch/Checkbox/Collapse/
-//! Table/Tag/Divider/Select/Segmented/Button）——不再手写原生表单元素。
+//! Agent 配置面板契约：外壳 = `SessionOverlay`（2026-10 统一：与入口行其余
+//! 弹层同一套几何 / 玻璃 / 关闭语义），内层元素全部为 ui-frame 组件
+//! （Input/Textarea/Switch/Checkbox/Collapse/Table/Tag/Divider/Select/
+//! Segmented/Button）——不再手写原生表单元素。
 //!
-//! 背景：外壳原为手写 CSS 玻璃卡片、内层为原生 input/table；2026-09 两步
-//! 改造为库组件（磨砂配方保留）。本测试锁定：
-//!   1) 外壳带 glass 语义且样式覆写能命中（scope id）；
-//!   2) 头部 / 滚动区 / 脚部仍是库内容槽的直接子级（滚动与贴底契约）；
+//! 沿革：外壳先是手写 CSS 玻璃卡片、后为 ui-frame `NeumorphismCard`，2026-10
+//! 并入会话区覆盖面板（用户要求入口行弹层统一尺寸/样式）。本测试锁定：
+//!   1) 外壳是 `.session-overlay`（几何由 inset 传入，缺省贴满父容器）；
+//!   2) 头部 / 滚动区 / 脚部是内容容器的直接子级（滚动与贴底契约）；
 //!   3) 内层不存在手写原生输入/表格（回归为裸元素即失败）。
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -43,36 +44,37 @@ function mountModal() {
   return mount(AgentConfigModal, { props: { team } });
 }
 
-describe('AgentConfigModal 玻璃外壳', () => {
-  it('外壳带 NeumorphismCard glass 语义与自身定位类', () => {
+describe('AgentConfigModal 外壳（SessionOverlay）', () => {
+  it('外壳是统一的会话区覆盖面板，内容自成一列', () => {
     const wrapper = mountModal();
-    const shell = wrapper.find('.agent-config');
+    const shell = wrapper.find('.session-overlay');
     expect(shell.exists()).toBe(true);
-    expect(shell.classes()).toContain('nm-card');
-    expect(shell.classes()).toContain('nm-card--glass');
-    // no-padding：内容槽不叠加库内边距（内层自带 padding）
-    expect(shell.classes()).toContain('nm-card--no-padding');
-    // 外壳继承本组件的 scope id，样式区的
-    // `.agent-config-overlay .agent-config[data-v-*]` 覆写（圆角/边框/投影）
-    // 才能命中库的玻璃配方。
-    const scopeKeys = Object.keys(wrapper.find('.agent-config-overlay').attributes()).filter((k) =>
-      k.startsWith('data-v-'),
-    );
-    expect(scopeKeys.length).toBeGreaterThan(0);
-    for (const key of scopeKeys) {
-      expect(shell.attributes(key), `外壳缺少 ${key}`).toBeDefined();
+    // 内容容器（头部 / 表单体 / 脚部）撑满外壳
+    const content = shell.find('.agent-config');
+    expect(content.exists()).toBe(true);
+    expect(shell.find('.session-overlay__body--flush').exists()).toBe(true);
+  });
+
+  it('inset 透传到外壳（几何 = 会话消息区矩形）', () => {
+    const wrapper = mount(AgentConfigModal, {
+      props: { team, inset: { top: 12, right: 340, bottom: 180, left: 340 } },
+    });
+    const shell = wrapper.find('.session-overlay');
+    const style = shell.attributes('style') ?? '';
+    for (const part of ['top: 12px', 'right: 340px', 'bottom: 180px', 'left: 340px']) {
+      expect(style, `缺少 ${part}`).toContain(part);
     }
   });
 
-  it('头部 / 滚动区 / 脚部是内容槽（.nm-card__body）的直接子级', () => {
+  it('头部 / 滚动区 / 脚部是内容容器的直接子级', () => {
     const wrapper = mountModal();
-    const slot = wrapper.find('.agent-config .nm-card__body');
-    expect(slot.exists()).toBe(true);
-    const classes = Array.from(slot.element.children).map((el) => el.className);
+    const content = wrapper.find('.agent-config');
+    expect(content.exists()).toBe(true);
+    const classes = Array.from(content.element.children).map((el) => el.className);
     for (const part of ['agent-config__head', 'agent-config__body', 'agent-config__foot']) {
       expect(
         classes.some((c) => c.includes(part)),
-        `${part} 应为内容槽直接子级：${classes.join(' | ')}`,
+        `${part} 应为内容直接子级：${classes.join(' | ')}`,
       ).toBe(true);
     }
   });

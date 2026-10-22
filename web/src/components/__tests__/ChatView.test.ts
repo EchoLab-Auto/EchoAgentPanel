@@ -234,13 +234,16 @@ describe('ChatView 布局契约', () => {
     await btn!.trigger('click');
     // 弹层组件为按需加载（defineAsyncComponent，2026-10 首屏瘦身）：
     // 异步 chunk 的解析落在宏任务，`vi.waitFor` 等到弹层渲染完成。
-    // PanelPopover Teleport 到 body：弹层内容不在 wrapper 内，从 document.body 查询。
+    // 覆盖面板（SessionOverlay，2026-10 统一）：内容在会话视图内部渲染，
+    // 从 wrapper 查询（不再 Teleport 到 body）。
     await vi.waitFor(() => {
-      expect(document.body.querySelectorAll('.panel-popover .sw-item').length).toBeGreaterThan(0);
+      expect(wrapper.findAll('.session-overlay .sw-item').length).toBeGreaterThan(0);
     });
-    // 弹层内可选 QQ 私聊项
-    const item = Array.from(document.body.querySelectorAll<HTMLElement>('.panel-popover .sw-item'))
-      .find((b) => (b.textContent ?? '').includes('Evence'));
+    // 面板内可选 QQ 私聊项
+    const items = Array.from(
+      (wrapper.element as HTMLElement).querySelectorAll('.session-overlay .sw-item'),
+    ) as HTMLElement[];
+    const item = items.find((b) => (b.textContent ?? '').includes('Evence'));
     expect(item).toBeTruthy();
     item!.click();
     await nextTick();
@@ -317,8 +320,8 @@ describe('ChatView 布局契约', () => {
     expect(btn, 'tasks entry visible').toBeTruthy();
     await btn!.trigger('click');
     // 弹层按当前会话过滤：只传当前 sessionId 给 TasksPanel
-    // （PanelPopover Teleport 到 body，从 document.body 查询）
-    const panel = document.body.querySelector('.panel-popover .stub-tasks');
+    // （覆盖面板渲染在会话视图内部，从 wrapper 查询）
+    const panel = wrapper.element.querySelector('.session-overlay .stub-tasks');
     expect(panel).not.toBeNull();
     expect(panel!.textContent).toBe('local:tui::local_user');
     wrapper.unmount();
