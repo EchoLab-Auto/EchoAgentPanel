@@ -497,7 +497,7 @@ function formatSize(size: number): string {
   gap: 2px;
   flex: none;
   margin-right: 2px;
-  color: var(--panel-accent, #0969da);
+  color: var(--panel-accent, #546200);
   font-size: 10px;
   font-weight: 600;
 }

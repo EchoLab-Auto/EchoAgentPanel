@@ -298,7 +298,7 @@ watch(
   border: none;
   background: none;
   cursor: pointer;
-  color: var(--panel-accent, #0969da);
+  color: var(--panel-accent, #546200);
   padding: 2px 4px;
 }
 .dp-crumb-sep { opacity: 0.5; }

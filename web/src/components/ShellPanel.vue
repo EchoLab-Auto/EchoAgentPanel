@@ -269,7 +269,7 @@ watch(shellTailSignature, () => {
 .shell-entry__cmd-text { color: #e6edf3; font-weight: 600; }
 .shell-entry__spinner {
   width: 10px; height: 10px; border-radius: 50%;
-  border: 2px solid #30363d; border-top-color: #4c9aff;
+  border: 2px solid #30363d; border-top-color: var(--nm-primary-color);
   animation: shell-spin 0.8s linear infinite;
 }
 .shell-entry__status { font-size: 10px; opacity: 0.75; }

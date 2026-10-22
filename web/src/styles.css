@@ -11,11 +11,20 @@
 
 /* ── 令牌覆盖与 panel 语义色 ─────────────────────────────────── */
 :root {
-  /* 主色：库默认 lime 换成 panel 蓝（light） */
-  --nm-primary-color: #0969da;
-  --nm-primary-light: #4c9aff;
-  --nm-primary-dark: #0550ae;
-  --nm-text-on-primary: #ffffff;
+  /* 主色（2026-10 用户要求）：**跟随 ui-frame 默认，不再覆盖** ——
+     example 站点用的就是库默认 lime `#cdfa4e`（tokens.scss 的 :root 与
+     [data-theme='dark'] 同值），面板保持一致。
+
+     这里刻意**不写**这四个令牌（--nm-primary-color / -light / -dark /
+     --nm-text-on-primary）：不覆盖 = 自动跟随库升级。唯一的硬约束是
+     `--nm-text-on-primary: #000`（库已给对）—— lime 是亮色，白字对比度
+     只有 1.21:1，必须深色字。
+
+     但 `--panel-accent`（panel 自己的语义色，库不认识）**不能**直接用 lime：
+     它大量用作**文字/边框**（84 处），而 lime 在浅底 #e0e0e0 上只有
+     1.09:1 —— 等于不可见。所以按主题分档：深色档用 lime 原色（14.1:1 极好），
+     浅色档用同色相的深橄榄 #546200（5.09:1，过 WCAG AA 文本）。
+     详见下方 --panel-accent 的两处定义。
 
   /* 语义色桥接（2026-10 审计修复）：库组件（FormItem 校验错误 / Upload /
      FieldLabel…）与 Panel 自绘层共用同一套语义色——不再出现"库红 #e74c3c
@@ -24,8 +33,10 @@
   --nm-color-success: #1a7f37;
   --nm-color-warning: #9a6700;
   --nm-color-error: #cf222e;
-  --panel-accent: #0969da;
-  --panel-accent-soft: rgba(9, 105, 218, 0.12);
+  /* 浅色档：lime 色相的深橄榄版（lime 作文字在浅底上 1.09:1，不可读；
+     #546200 在 #e0e0e0 上 5.09:1、在白底 6.72:1，过 WCAG AA 文本 4.5:1）。 */
+  --panel-accent: #546200;
+  --panel-accent-soft: rgba(205, 250, 78, 0.22);
   --panel-ok: var(--nm-color-success);
   --panel-warn: var(--nm-color-warning);
   --panel-err: var(--nm-color-error);
@@ -48,16 +59,14 @@
 }
 
 [data-theme='dark'] {
-  --nm-primary-color: #4c9aff;
-  --nm-primary-light: #6fadff;
-  --nm-primary-dark: #3a7bd5;
-  --nm-text-on-primary: #ffffff;
+  /* 主色不覆盖（跟随库默认 lime，深色档同为 #cdfa4e）。 */
 
   --nm-color-success: #3fb950;
   --nm-color-warning: #d29922;
   --nm-color-error: #f85149;
-  --panel-accent: #4c9aff;
-  --panel-accent-soft: rgba(76, 154, 255, 0.16);
+  /* 深色档：lime 原色在 #1c1c1c 上 14.1:1 —— 直接用库默认值，不需要变体。 */
+  --panel-accent: #cdfa4e;
+  --panel-accent-soft: rgba(205, 250, 78, 0.16);
 
   --panel-glass-border: color-mix(in srgb, #ffffff 16%, transparent);
   --panel-glass-highlight: rgba(255, 255, 255, 0.12);

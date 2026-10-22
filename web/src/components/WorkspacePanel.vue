@@ -662,7 +662,7 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  color: var(--panel-accent, #0969da);
+  color: var(--panel-accent, #546200);
   font-weight: 600;
   margin-right: 2px;
 }
