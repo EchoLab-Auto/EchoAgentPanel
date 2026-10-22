@@ -118,17 +118,32 @@ describe('ChatView 竖屏移动端', () => {
       .map((m) => m[1])
       .join('\n');
     // 等间隙：左右与底部共用同一个 --composer-inset（这是"角部间隙恒定"的前提）
-    // 2026-10：留白与屏角联动，且用**比例**约束而不是「R 减魔法数」——
-    // 贴角区高度 = R − inset 占单行静止条高的比例封顶 85%，上角恒得 15%。
-    // 断言三件事（而不是钉死一个数值，否则每次重测屏角都要改测试）：
-    //   ① 静止条高由 --chat-control-h + padding + border 派生（不写死 68）
-    //   ② inset 的 clamp 下限 14 / 上限 20，中间项随 --panel-display-radius 增长
-    //   ③ 系数 0.85 是把「贴角区 ≤ 85% 条高」翻译成 CSS 的那个常数
-    expect(composerRules, '静止条高必须派生而非写死').toMatch(
-      /--composer-rest-h:\s*calc\(\s*var\(--chat-control-h\)\s*\+\s*2\s*\*\s*var\(--composer-padding\)\s*\+\s*2\s*\*\s*var\(--composer-border\)\s*\)/,
+    // 2026-10 三次修订（用户："移动端输入区上下圆角不相等" → "那你可以调整一下
+    // 输入区的高度"）：三个量必须闭环，且**不能互相循环**。
+    //   ① 留白只看屏角：clamp(14px, 0.3R, 22px) —— 一旦它再去读输入行高度，
+    //      就与 ③ 形成 CSS 变量循环（浏览器会把两边都判成无效）；
+    //   ② 跨度 = R − 留白，上下两角共用（上角是下角的镜像）；
+    //   ③ 输入行高度取 max(基准, 2×跨度 − 3×padding − 状态行高)：卡片静止高
+    //      H = 3P + controlH + statusH 必须 ≥ 2×跨度，否则上下角放不下，
+    //      只能靠"上角吃掉剩余高度"凑 —— 那正是上下角不等的老 bug。
+    expect(composerRules, '留白只依赖屏角（不得引用输入行高度，否则变量循环）').toMatch(
+      /--composer-inset:\s*clamp\(\s*14px\s*,\s*calc\(\s*0\.3\s*\*\s*var\(--panel-display-radius\)\s*\)\s*,\s*22px\s*\)/,
     );
-    expect(composerRules, '左右/底部留白必须同源').toMatch(
-      /--composer-inset:\s*clamp\(\s*14px\s*,\s*calc\(\s*var\(--panel-display-radius\)\s*-\s*0\.85\s*\*\s*var\(--composer-rest-h\)\s*\)\s*,\s*20px\s*\)/,
+    expect(composerRules, '跨度 = 屏角 − 留白，供上下两角共用').toMatch(
+      /--composer-span:\s*calc\(\s*var\(--panel-display-radius\)\s*-\s*var\(--composer-inset\)\s*\)/,
+    );
+    // 基准项（字号派生）与保底项（让两角放得下）取 max —— 分两条断言，
+    // 不硬啃嵌套括号的正则
+    // 取**最后一处**：第一处是桌面基类的基准式，窄屏段才是 max(基准, 保底)
+    const controlHRules = [...composerRules.matchAll(/--chat-control-h:([^;]+);/g)];
+    const controlHRule = controlHRules[controlHRules.length - 1]?.[1] ?? '';
+    expect(controlHRule, '输入行高度取 max(基准, 保底)').toMatch(/^\s*max\(/);
+    expect(controlHRule, '基准项仍由字号派生').toMatch(/--chat-field-font/);
+    expect(controlHRule, '保底项 = 2×跨度 − 3×padding − 状态行高').toMatch(
+      /2\s*\*\s*var\(--composer-span\)\s*-\s*3\s*\*\s*var\(--composer-padding\)\s*-\s*var\(--chat-status-h\)/,
+    );
+    expect(composerRules, '留白不得再引用 --composer-rest-h（循环）').not.toMatch(
+      /--composer-rest-h/,
     );
     expect(composerRules).toMatch(/left: max\(var\(--composer-inset\)/);
     expect(composerRules).toMatch(/right: max\(var\(--composer-inset\)/);

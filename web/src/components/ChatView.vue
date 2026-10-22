@@ -2597,46 +2597,70 @@ function mediaSrc(img: string): string {
      ⑤ 键盘弹出时（keyboardInset > 0）面板浮在键盘上方，等间隙已无意义，
         但仍沿用同一轮廓（形状不跳变）。 */
   .chat-composer-float {
-    /* 留白：14px 起，随屏角线性放宽到 20px 封顶。
+    --composer-padding: 10px;
+    /* 输入字号 16px（iOS 聚焦防缩放） */
+    --chat-field-font: 16px;
 
-       现在这条 clamp 只管**间距**，不再管角的形状 —— 四角尺寸由 JS 按
-       「静止态卡片半高」定（见 `restHalfHeight` / `cornerMax`），跨机型恒等。
-       屏角大的机型多给几像素留白，纯粹是为了观感：同一根角在更宽的机型上
-       贴得一样近会显得挤。
+    /* ── 四角等大 + 下角贴屏角：三个量互相约束，公式必须闭环 ──────────
 
-       公式 = R − 0.85 × 单行静止条高（rest-h = 输入行 + 2×padding）：
-       R=55 → 9.7 → 夹到下限 14；R=65.5 → 也是 14；R=74.5 → 18.7。
-       下限是历史值（小角机型零回归），上限 20 避免大角机型把输入框压窄。
-       注意变量本身是 clamp() 表达式、computed 不求值，JS 侧一律用实测
-       rect.left 当留白（见 updateComposerClip）。 */
-    --composer-rest-h: calc(
-      var(--chat-control-h) + 2 * var(--composer-padding) + 2 * var(--composer-border)
+       ① 留白 d 只看屏角：`clamp(14px, 0.3R, 22px)`（R=55→16.5、65.5→19.65、
+          74.5→22）。**不能再依赖输入行高度** —— 四角等大要求输入行高度反过来
+          依赖跨度（见 ③），两边互相引用就是 CSS 变量循环，浏览器会把两边都
+          判成无效（`--composer-inset` 变空 → JS 侧 rect.left 还算得出，但
+          `--chat-control-h` 会整条失效、输入行高度退化为 0）。
+          下限 14 是历史值（不切进物理死弯），上限 22 避免大角机型把输入区压窄。
+       ② 跨度 = R − d：上下两角共用（上角是下角的镜像）。
+       ③ 输入行高度必须让「上下两角放得下」：
+            卡片静止高 H = 3P + controlH + statusH（P=body 上下 padding、状态行
+            自身 margin-top 也是 P）
+            要求 H ≥ 2 × span ⇒ controlH ≥ 2span − 3P − statusH
+          R=74.5 时右侧算出 58px（基准只有 45.6），于是输入条主动长高
+          12.4px —— 这正是用户 2026-10 说的「那你可以调整一下输入区的高度」：
+          宁可把输入条做高一点，也不要用「上角吃掉剩余高度」去凑（那会让上下
+          角不等，正是用户报的问题）。
+          R=55 时右侧算出 30 → 取基准 45.6，小角机型零变化。
+
+       注意两个变量都是 calc/clamp 表达式、computed 不求值：JS 侧一律用实测
+       rect.left 当留白、用实测卡片高反推静止半高（见 updateComposerClip）。 */
+    --composer-inset: clamp(14px, calc(0.3 * var(--panel-display-radius)), 22px);
+    --composer-span: calc(var(--panel-display-radius) - var(--composer-inset));
+    --chat-control-h: max(
+      calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--chat-field-font) * 1.6),
+      calc(
+        2 * var(--composer-span) - 3 * var(--composer-padding) - var(--chat-status-h)
+      )
     );
-    --composer-inset: clamp(
-      14px,
-      calc(var(--panel-display-radius) - 0.85 * var(--composer-rest-h)),
-      20px
-    );
+
     left: max(var(--composer-inset), env(safe-area-inset-left, 0px));
     right: max(var(--composer-inset), env(safe-area-inset-right, 0px));
     bottom: calc(var(--composer-inset) + v-bind(keyboardInsetPx));
-    --composer-padding: 10px;
-    /* 输入字号 16px（iOS 聚焦防缩放）；--chat-control-h 随之重算为
-       10*2 + 16*1.6 = 45.6px，取消/附件/发送与内框保持同高 */
-    --chat-field-font: 16px;
   }
   /* iOS 聚焦自动缩放对策：输入字号提至 16px（<16px 聚焦必缩放）。
      只放大打字面，不改工具栏按钮/占位字号观感。 */
   .chat-composer-float :deep(.nm-textarea__field) {
     font-size: 16px;
+    /* 纵向 padding 取「让 1 行文字恰好填满 --chat-control-h」的对称值：
+         padding-y = (controlH − 1.6em) / 2
+       - controlH = 45.6（R=55 等小角机型）→ 10px，与库的默认值一致（零回归）；
+       - controlH = 58（R=74.5，输入条为「让两角放得下」而抬高）→ 16.2px，
+         文本域因此与发送/附件按钮同高，单行文字仍垂直居中。
+       多行时 1.6em 只是首行，多出的行照常把文本域撑高。 */
+    min-height: var(--chat-control-h);
+    padding-block: calc((var(--chat-control-h) - 1.6em) / 2);
   }
   /* 圆角同心（移动口径）：内层一律取 --composer-inner-radius
-     （= 贴角半径 − padding − border，由根变量派生，见桌面段）。
-     贴角半径 = R屏角 − 留白 = 41 → 内层 41−10−1 = 30（超椭圆口径）。
-     30px 超过输入框半高（45.6/2 ≈ 23）时浏览器按规范等比削减，视觉上
-     内框自动成为胶囊 —— 与外框的椭圆端头方向一致。 */
+     （= 跨度 − padding − border；跨度由 JS 写入 --composer-corner-r）。
+     R=74.5 机型：跨度 52.5 → 内层 42.5；超过输入框半高（58/2 = 29）时
+     浏览器按规范等比削减，视觉上内框自动成为胶囊 —— 与外框的椭圆端头方向
+     一致（外框角同样是「一整个半圆」，两者同形）。 */
   .chat-composer-float :deep(.nm-textarea.nm-textarea) {
     border-radius: var(--composer-inner-radius);
+    /* 与发送/附件按钮同高（两者都钉在 --chat-control-h）。**必须给容器**
+       而不是只给 field：ChatComposer 的输入行是 `align-items: flex-end` 的
+       横向 flex，容器矮一截时会底对齐、上方空出一条 —— 实测 402 宽机型
+       曾是「按钮 58 / 输入槽 38」，槽比按钮矮 20px。 */
+    min-height: var(--chat-control-h);
+    align-items: center;
   }
   .chat-composer-float :deep(.chat-view__attach-btn),
   .chat-composer-float :deep(.chat-view__send) {
@@ -2652,7 +2676,7 @@ function mediaSrc(img: string): string {
      桌面口径的 190px 在这里会空出一大块，收到 130px（= 82 + 48 余量）；
      键盘弹出时按 keyboardInset 同步加高，否则最新消息被键盘压住。 */
   .chat-view__list {
-    padding-bottom: calc(130px + v-bind(keyboardInsetPx));
+    padding-bottom: calc(150px + v-bind(keyboardInsetPx));
   }
 
   /* 会话区覆盖面板的几何已统一由 `SessionOverlay` 按消息区矩形计算
