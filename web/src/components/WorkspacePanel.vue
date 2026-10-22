@@ -1,6 +1,6 @@
 //! 工作区会话面板（workspace 插件）：会话管理（新建/编辑/删除/激活）、
 //! 会话内**对话管理**（2026-10 多对话：新建/重命名/删除/切换）与
-//! 各目录 git 状态。文件浏览器已迁至会话视图右侧边栏（2026-09-19，
+//! 各目录 git 状态已迁至边栏独立卡片（2026-10 `WorkspaceGitCard`）。文件浏览器已迁至会话视图右侧边栏（2026-09-19，
 //! `ChatView` 的 workspace-rail 卡）。
 //!
 //! 数据流：命令带 team_id 路由到对应 persona（去主智能体后必填）；
@@ -17,7 +17,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
-import { sessionKey } from '../keys';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 import PanelIcon from './PanelIcon.vue';
@@ -72,33 +71,12 @@ function requestSessions() {
   sendPending({ RequestWorkspaceSessions: { team_id: props.teamId } }, 'workspace:sessions');
 }
 
-// ── git 状态 ──
-const gitLoading = ref(false);
-const gitDirs = computed(() =>
-  selected.value
-    ? (state.workspaceGitBySession[sessionKey(state.activeRegion, selected.value.id)] ?? [])
-    : [],
-);
+// ── 选中 ──
 
-function requestGit(sessionId?: string) {
-  const id = sessionId ?? selected.value?.id;
-  if (!props.teamId || !id) return;
-  gitLoading.value = true;
-  sendCommand({ RequestWorkspaceGitStatus: { team_id: props.teamId, session_id: id } });
-  // 事件缺失时自然超时收敛（无挂死加载态）。
-  window.setTimeout(() => {
-    gitLoading.value = false;
-  }, 8000);
-}
-
+/** 选中会话（只影响本面板的编辑目标；git 状态已由边栏 Git 卡片自理）。 */
 function select(session: WorkspaceSessionInfo) {
   selectedId.value = session.id;
-  if (!state.workspaceGitBySession[sessionKey(state.activeRegion, session.id)]) requestGit(session.id);
 }
-
-watch(gitDirs, () => {
-  gitLoading.value = false;
-});
 
 // ── 新建 / 编辑 ──
 const editing = ref<null | { id: string }>(null);
@@ -323,7 +301,6 @@ watch(sessions, (list) => {
 onMounted(() => {
   if (!state.connected) return;
   requestSessions();
-  requestGit();
 });
 
 onUnmounted(() => {
@@ -334,31 +311,21 @@ onUnmounted(() => {
 watch(
   () => state.connected,
   (connected) => {
-    if (connected) {
-      requestSessions();
-      requestGit();
-    }
+    if (connected) requestSessions();
   },
 );
 
-const gitSummary = (dir: { staged?: number; modified?: number; untracked?: number }): string => {
-  const parts: string[] = [];
-  if (dir.staged) parts.push(`已暂存 ${dir.staged}`);
-  if (dir.modified) parts.push(`已修改 ${dir.modified}`);
-  if (dir.untracked) parts.push(`未跟踪 ${dir.untracked}`);
-  return parts.length ? parts.join(' · ') : '工作区干净';
-};
 </script>
 
 <template>
   <div class="ws-panel">
     <p v-if="actionError" class="ws-error">{{ actionError }}</p>
-    <!-- 会话管理与 git 状态 -->
+    <!-- 会话管理 -->
     <section class="ws-pane--main">
       <div class="ws-head">
       <div class="ws-head__text">
         <h2>工作区会话</h2>
-        <p class="ws-head__sub">多会话 · 多工作区目录 · git 状态</p>
+        <p class="ws-head__sub">多会话 · 多工作区目录 · 每会话多对话（git 状态见侧边栏「Git」卡片）</p>
       </div>
       <div class="ws-head__actions">
         <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="startCreate">
@@ -533,41 +500,6 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
         （暂无工作区会话，点击「新建」创建第一个）
       </div>
     </div>
-
-    <!-- 选中会话的 git 状态 -->
-    <div v-if="selected" class="ws-section">
-      <div class="ws-section__head">
-        <h3>git 状态 · {{ selected.name }}</h3>
-        <NeumorphismButton
-          size="small"
-          variant="glass"
-          :disabled="gitLoading || !state.connected"
-          @click="requestGit()"
-        >
-          {{ gitLoading ? '读取中…' : '刷新状态' }}
-        </NeumorphismButton>
-      </div>
-
-      <div v-for="dir in gitDirs" :key="dir.directory" class="ws-git">
-        <div class="ws-git__path" :title="dir.directory">{{ dir.directory }}</div>
-        <template v-if="dir.is_repo">
-          <div class="ws-git__row">
-            <span class="ws-git__branch">⑂ {{ dir.branch || '（未知分支）' }}</span>
-            <span v-if="dir.ahead" class="ws-git__sync">↑{{ dir.ahead }}</span>
-            <span v-if="dir.behind" class="ws-git__sync">↓{{ dir.behind }}</span>
-            <span class="ws-git__counts">{{ gitSummary(dir) }}</span>
-          </div>
-          <div v-if="dir.last_commit" class="ws-git__commit">{{ dir.last_commit }}</div>
-          <div v-if="(dir.changed_files ?? []).length" class="ws-git__files">
-            <span v-for="file in dir.changed_files" :key="file" class="ws-file-chip">{{ file }}</span>
-          </div>
-        </template>
-        <div v-else class="ws-git__error">{{ dir.error || '不是 git 仓库' }}</div>
-      </div>
-      <div v-if="!gitDirs.length" class="muted ws-empty">
-        （{{ gitLoading ? '正在读取 git 状态…' : '暂无数据，点击「刷新状态」' }}）
-      </div>
-      </div>
     </section>
   </div>
 
@@ -736,55 +668,6 @@ const gitSummary = (dir: { staged?: number; modified?: number; untracked?: numbe
 .ws-section__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ws-section h3 { margin: 0; font-size: 12px; font-weight: 700; color: var(--nm-text-primary); }
 
-.ws-git {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid var(--nm-border-color);
-  border-radius: 12px;
-  background: var(--nm-surface-raised);
-}
-.ws-git__path {
-  font-family: var(--nm-font-mono, monospace);
-  font-size: 11px;
-  word-break: break-all;
-  color: var(--nm-text-primary);
-}
-.ws-git__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11px; }
-.ws-git__branch {
-  font-family: var(--nm-font-mono, monospace);
-  font-weight: 700;
-  color: var(--panel-accent);
-  background: var(--panel-accent-soft);
-  border-radius: 999px;
-  padding: 1px 8px;
-}
-.ws-git__sync { font-weight: 700; color: var(--panel-accent); }
-.ws-git__counts { color: var(--nm-text-secondary); }
-.ws-git__commit {
-  font-family: var(--nm-font-mono, monospace);
-  font-size: 11px;
-  color: var(--nm-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ws-git__files { display: flex; flex-wrap: wrap; gap: 4px; max-height: 96px; overflow-y: auto; }
-.ws-file-chip {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--nm-font-mono, monospace);
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 6px;
-  border: 1px solid var(--nm-border-color);
-  background: var(--panel-hover);
-  color: var(--nm-text-secondary);
-}
-.ws-git__error { font-size: 11px; color: var(--panel-err, #d9534f); }
 .ws-empty { margin: 0; font-size: 12px; }
 .ws-error { margin: 4px 0; color: var(--panel-err, #d9534f); font-size: 12px; }
 </style>

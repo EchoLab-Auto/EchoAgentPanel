@@ -1,7 +1,7 @@
 //! 工作区会话面板契约（workspace 插件，2026-09-13）。
 //!
 //! 面板按 team 寻址（去主智能体后会话类命令 team_id 必填）：
-//! - 打开面板即请求会话列表 + 选中会话的 git 状态；
+//! - 打开面板即请求会话列表（git 状态已迁至边栏 Git 卡片，2026-10）；
 //! - 新建/编辑经 `SaveWorkspaceSession` 提交（目录按行解析为列表）；
 //! - 激活/取消激活经 `ActivateWorkspaceSession`；
 //! - team 未选择时不发任何命令（Core 会拒绝无 team_id 的请求）。
@@ -40,7 +40,7 @@ describe('WorkspacePanel 工作区会话', () => {
     seed([]);
   });
 
-  it('打开面板请求列表与选中会话 git 状态', async () => {
+  it('打开面板只请求会话列表（git 状态归边栏 Git 卡片，本面板不再请求）', async () => {
     seed([
       { id: 'core', name: '框架', directories: ['/srv/core', '/srv/panel'] },
     ]);
@@ -52,11 +52,11 @@ describe('WorkspacePanel 工作区会话', () => {
     ) as { RequestWorkspaceSessions: { team_id: string } };
     expect(list).toBeTruthy();
     expect(list.RequestWorkspaceSessions.team_id).toBe('EchoCode');
-    const git = calls.find(
-      (c) => typeof c === 'object' && 'RequestWorkspaceGitStatus' in (c as object),
-    ) as { RequestWorkspaceGitStatus: { session_id: string } };
-    expect(git).toBeTruthy();
-    expect(git.RequestWorkspaceGitStatus.session_id).toBe('core');
+    // 2026-10 迁出：面板不再发 git 请求，也不再渲染 git 区块
+    expect(
+      calls.some((c) => typeof c === 'object' && 'RequestWorkspaceGitStatus' in (c as object)),
+    ).toBe(false);
+    expect(wrapper.text()).not.toContain('git 状态 ·');
     wrapper.unmount();
   });
 
@@ -105,45 +105,6 @@ describe('WorkspacePanel 工作区会话', () => {
     ) as { ActivateWorkspaceSession: { team_id: string; id: string | null } };
     expect(act).toBeTruthy();
     expect(act.ActivateWorkspaceSession.id).toBeNull();
-    wrapper.unmount();
-  });
-
-  it('git 状态：分支/计数/最近提交与文件列表渲染，非仓库显示错误', async () => {
-    seed([{ id: 'core', name: '框架', directories: ['/srv/core', '/srv/missing'] }], 'core', 'EchoCode');
-    state.workspaceGitBySession = {
-      core: [
-        {
-          directory: '/srv/core',
-          is_repo: true,
-          branch: 'main',
-          ahead: 2,
-          behind: 1,
-          staged: 1,
-          modified: 3,
-          untracked: 2,
-          changed_files: ['src/main.rs', 'README.md'],
-          last_commit: 'abc1234 初始提交',
-          error: null,
-        },
-        {
-          directory: '/srv/missing',
-          is_repo: false,
-          error: '目录不存在',
-        },
-      ],
-    };
-    const wrapper = mount(WorkspacePanel, { props: { teamId: 'EchoCode' } });
-    await nextTick();
-    const text = wrapper.text();
-    expect(text).toContain('main');
-    expect(text).toContain('↑2');
-    expect(text).toContain('↓1');
-    expect(text).toContain('已暂存 1');
-    expect(text).toContain('已修改 3');
-    expect(text).toContain('未跟踪 2');
-    expect(text).toContain('abc1234 初始提交');
-    expect(text).toContain('src/main.rs');
-    expect(text).toContain('目录不存在');
     wrapper.unmount();
   });
 

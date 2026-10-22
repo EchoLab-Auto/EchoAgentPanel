@@ -22,6 +22,7 @@ vi.mock('../../connection', () => {
 import PanelSidebar from '../PanelSidebar.vue';
 import { state } from '../../store';
 import { moveToOtherSide, resetRailLayout, sideOf } from '../../rail-layout';
+import { sessionKey } from '../../keys';
 import type { SessionInfo, TeamInfo } from '../../protocol';
 
 function team(over: Partial<TeamInfo>): TeamInfo {
@@ -80,6 +81,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.workspaceSessions = [];
     state.workspaceActive = null;
     state.workspaceTeamId = null;
+    state.workspaceGitBySession = {};
   });
 
   it('卡片顺序与门控：连接状态置顶常驻、Shell 常驻（在文件浏览器下方）、临时分支仅并行模式、无激活工作区时无文件浏览器卡', async () => {
@@ -142,7 +144,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.connected = true;
   });
 
-  it('有激活工作区会话：文件浏览器卡在连接状态下方、Shell 在其下', async () => {
+  it('有激活工作区会话：文件浏览器与 Git 状态卡在连接状态下方、Shell 在其下', async () => {
     state.workspaceSessions = [
       { id: 'core', name: '框架', description: '', directories: ['/srv/core'] },
     ];
@@ -150,11 +152,39 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.workspaceTeamId = 'alix';
     const wrapper = await mountSidebar();
     const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
-    // [连接状态, 文件浏览器, Shell]
+    // [连接状态, 文件浏览器, Git, Shell]——Git 卡紧跟文件浏览器（同一工作区）
     expect(titles[0]).toContain('连接状态');
     expect(titles[1]).toContain('文件浏览器');
     expect(titles[1]).toContain('框架');
-    expect(titles[2]).toContain('Shell');
+    expect(titles[2]).toContain('Git');
+    expect(titles[2]).toContain('框架');
+    expect(titles[3]).toContain('Shell');
+  });
+
+  it('Git 状态卡：无激活工作区时不渲染（与文件浏览器同一门控）', async () => {
+    const wrapper = await mountSidebar();
+    const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
+    expect(titles.some((t) => t.includes('Git'))).toBe(false);
+  });
+
+  it('Git 状态卡：徽标 = 未提交变更文件数（已暂存 + 已修改 + 未跟踪）', async () => {
+    state.workspaceSessions = [
+      { id: 'core', name: '框架', description: '', directories: ['/srv/core', '/srv/panel'] },
+    ];
+    state.workspaceActive = 'core';
+    state.workspaceTeamId = 'alix';
+    state.workspaceGitBySession = {
+      [sessionKey(null, 'core')]: [
+        { directory: '/srv/core', is_repo: true, staged: 2, modified: 3, untracked: 1 },
+        { directory: '/srv/panel', is_repo: true, staged: 0, modified: 4, untracked: 0 },
+      ],
+    } as never;
+    const wrapper = await mountSidebar();
+    const gitTitle = wrapper
+      .findAll('.rail-stack__title')
+      .find((t) => t.text().includes('Git'))!;
+    expect(gitTitle.text()).toContain('10');
+    state.workspaceGitBySession = {};
   });
 
   it('并行多会话模式：临时分支卡出现在栈尾', async () => {
@@ -184,12 +214,13 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.workspaceActive = 'core';
     state.workspaceTeamId = 'alix';
     const wrapper = await mountSidebar();
-    // 卡片：[连接状态(紧凑), 文件浏览器, Shell]；与紧凑卡相邻的分隔条不可拖，
-    // 文件浏览器 ↔ Shell 之间的那条可拖。
+    // 卡片：[连接状态(紧凑), 文件浏览器, Git, Shell]；与紧凑卡相邻的分隔条不可拖，
+    // 其余（文件浏览器 ↔ Git ↔ Shell）都可拖。
     const dividers = wrapper.findAll('.rail-stack__divider');
-    expect(dividers.length).toBe(2);
+    expect(dividers.length).toBe(3);
     expect(dividers[0].classes()).not.toContain('rail-stack__divider--draggable');
     expect(dividers[1].classes()).toContain('rail-stack__divider--draggable');
+    expect(dividers[2].classes()).toContain('rail-stack__divider--draggable');
     // 折叠上方卡片（文件浏览器）后该分隔条不可拖
     const filesHead = wrapper
       .findAll('.rail-stack__head')

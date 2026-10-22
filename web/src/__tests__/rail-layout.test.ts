@@ -39,10 +39,10 @@ describe('rail-layout 默认与归一化', () => {
     );
     // 'bogus' 被丢弃；'shell' 只保留左列第一次出现
     expect(normalized.left).toEqual(['shell']);
-    // 右侧原样保留 status（shell 已去重），并把未登记的 files/branches 按规范顺序补进去
+    // 右侧原样保留 status（shell 已去重），并把未登记的 files/git/branches 按规范顺序补进去
     expect(normalized.right).toContain('status');
     expect(normalized.right).not.toContain('shell');
-    expect(new Set(normalized.right)).toEqual(new Set(['status', 'files', 'branches']));
+    expect(new Set(normalized.right)).toEqual(new Set(['status', 'files', 'git', 'branches']));
     // 补齐后的顺序仍按规范顺序（files 在 branches 之前）
     expect(normalized.right.indexOf('files')).toBeLessThan(normalized.right.indexOf('branches'));
   });
@@ -60,12 +60,13 @@ describe('rail-layout 落位语义', () => {
   });
 
   it('placeCardAfter：插到锚点之后；null = 列首；锚点不存在 = 列尾', () => {
-    resetRailLayout(); // right = [status, files, shell, branches]
+    resetRailLayout(); // right = [status, files, git, shell, branches]
     placeCardAfter('branches', 'right', null);
     expect(railLayout.right[0]).toBe('branches');
 
     placeCardAfter('branches', 'right', 'files');
-    expect(railLayout.right).toEqual(['status', 'files', 'branches', 'shell']);
+    // 摘出 branches 后插到 files 之后：[status, files, branches, git, shell]
+    expect(railLayout.right).toEqual(['status', 'files', 'branches', 'git', 'shell']);
 
     placeCardAfter('branches', 'right', 'does-not-exist');
     expect(railLayout.right[railLayout.right.length - 1]).toBe('branches');
@@ -94,11 +95,11 @@ describe('rail-layout 落位语义', () => {
   it('placeCard（按序号）：仅用于可见列表与存储列表一致时', () => {
     resetRailLayout();
     placeCard('branches', 'right', 0);
-    expect(railLayout.right).toEqual(['branches', 'status', 'files', 'shell']);
+    expect(railLayout.right).toEqual(['branches', 'status', 'files', 'git', 'shell']);
   });
 
   it('cardsFor：按列内顺序 × 可见性过滤（不可见卡片不占位）', () => {
-    expect(cardsFor('right', (id) => id !== 'files')).toEqual(['status', 'shell', 'branches']);
+    expect(cardsFor('right', (id) => id !== 'files')).toEqual(['status', 'git', 'shell', 'branches']);
     placeCardAfter('shell', 'left', null);
     expect(cardsFor('left', () => true)).toEqual(['shell']);
   });

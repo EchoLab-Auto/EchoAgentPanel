@@ -13,6 +13,7 @@ import { teamPluginEnabled, teamToolAvailable } from './capabilities';
 import { railLayout, type RailSide } from './rail-layout';
 import { ref } from 'vue';
 import { parseWorkspaceChannelId } from './workspace';
+import { sessionKey } from './keys';
 import type { RailCardDef } from './components/RailStack.vue';
 
 /** 当前激活人格（用于卡片门控与计数）。 */
@@ -52,6 +53,23 @@ export function workspaceCardFor(teamId: string | null) {
   return state.workspaceSessions.find((s) => s.id === target) ?? null;
 }
 
+/**
+ * 工作区 git 状态卡的会话绑定（与文件浏览器卡同源：`workspaceCardFor`）。
+ *
+ * 只把「工作区会话」传出去，git 快照由卡片自己按 session id 取
+ * （`state.workspaceGitBySession`）——注册表只算**计数**（徽标），不持有数据。
+ */
+function workspaceGitCard(teamId: string | null) {
+  const session = workspaceCardFor(teamId);
+  if (!session) return null;
+  const dirs = state.workspaceGitBySession[sessionKey(state.activeRegion, session.id)] ?? [];
+  const changed = dirs.reduce(
+    (sum, d) => sum + (d.staged ?? 0) + (d.modified ?? 0) + (d.untracked ?? 0),
+    0,
+  );
+  return { session, changed };
+}
+
 /** 临时分支卡可见性：仅并行多会话模式（单会话模式 Core 不发 ReplyBranch*）。 */
 export function branchCardVisible(teamId: string | null): boolean {
   return loopModeOf(currentTeam(teamId)) === 'parallel';
@@ -73,10 +91,19 @@ export function shellSessionCount(teamId: string | null): number {
  */
 export function railCardsFor(side: RailSide, teamId: string | null): RailCardDef[] {
   const workspace = workspaceCardFor(teamId);
+  const gits = workspaceGitCard(teamId);
   const defs: Record<string, RailCardDef | null> = {
     status: { id: 'status', title: '连接状态', compact: true },
     files: workspace
       ? { id: 'files', title: `文件浏览器 · ${workspace.name}` }
+      : null,
+    git: gits
+      ? {
+          id: 'git',
+          title: `Git · ${gits.session.name}`,
+          count: gits.changed,
+          countTitle: '未提交的变更文件数（已暂存 + 已修改 + 未跟踪）',
+        }
       : null,
     shell: {
       id: 'shell',

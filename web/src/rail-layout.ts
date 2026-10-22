@@ -19,7 +19,7 @@ export type RailSide = 'left' | 'right';
  * 卡片 id 的规范顺序（新增卡片时在此登记；用于未归属卡片的补位与默认布局）。
  * 与 `PanelSidebar` 里的卡片注册表一致。
  */
-export const RAIL_CARD_ORDER = ['status', 'files', 'shell', 'branches'] as const;
+export const RAIL_CARD_ORDER = ['status', 'files', 'git', 'shell', 'branches'] as const;
 
 export interface RailLayout {
   left: string[];

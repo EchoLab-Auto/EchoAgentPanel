@@ -1,11 +1,12 @@
 <script setup lang="ts">
 //! 边栏卡片栈（chat-rail 内容；左右两列共用同一组件，`side` 区分）：
-//! 连接状态 / 文件浏览器 / Shell / 临时分支，上下排列
+//! 连接状态 / 文件浏览器 / Git 状态 / Shell / 临时分支，上下排列
 //! （RailStack：折叠为横条、分隔条拖动调整上下空间、卡片可拖到另一列，均持久化）。
 //!
 //! 卡片门控（与所在列无关）：
 //! - 连接状态：常驻（Core 管理通道 + 各 QQ 实例；紧凑卡，固定高度）
 //! - 文件浏览器：workspace 插件可用且有激活会话（内容跟随激活会话）
+//! - Git 状态：同上（同一工作区会话；2026-10 从「工作区会话管理」面板提出）
 //! - Shell：常驻（与 LLM 工具共用同一会话体系）
 //! - 临时分支：仅并行多会话模式（单会话模式 Core 不发 ReplyBranch*）
 //!
@@ -24,6 +25,7 @@ import RailStack, { type RailCardDef } from './RailStack.vue';
 // 异步 chunk，首屏 JS 不再被它们拖累。
 const ConnectionStatusCard = lazy(() => import('./ConnectionStatusCard.vue'), 'ConnectionStatusCard');
 const WorkspaceFileBrowser = lazy(() => import('./WorkspaceFileBrowser.vue'), 'WorkspaceFileBrowser');
+const WorkspaceGitCard = lazy(() => import('./WorkspaceGitCard.vue'), 'WorkspaceGitCard');
 const ShellList = lazy(() => import('./ShellList.vue'), 'ShellList');
 
 const props = withDefaults(
@@ -78,13 +80,16 @@ function truncateTask(task: string): string {
         <button
           type="button"
           class="rail-files__manage"
-          title="工作区会话管理与 git 状态"
+          title="工作区会话管理（新建 / 编辑 / 激活、多对话）"
           @click="emit('manageWorkspace')"
         >
-          会话管理与 git 状态 →
+          工作区会话管理 →
         </button>
         <WorkspaceFileBrowser :team-id="teamId" :session="workspaceCard" />
       </div>
+    </template>
+    <template #git>
+      <WorkspaceGitCard :team-id="teamId" :session="workspaceCard" />
     </template>
     <template #shell>
       <ShellList :team-id="teamId" @open-detail="(id, core) => emit('openShellDetail', id, core)" />
