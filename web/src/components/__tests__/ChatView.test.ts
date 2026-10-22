@@ -400,6 +400,8 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
   beforeEach(() => {
     state.trunk = [];
     state.activities = {};
+    state.sessionApiOverrides = {};
+    state.api = null;
   });
 
   it('忙碌时状态行出现在输入区内，且入口行里没有它', () => {
@@ -435,14 +437,67 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     wrapper.unmount();
   });
 
-  it('读屏契约：role=status + aria-live=polite（播报但不打断输入）', () => {
+  it('读屏契约：相位文案是 live region，API 徽标不在其中', () => {
     state.activities[SESSION] = act('thinking');
     const wrapper = mountChatView(SESSION);
-    const status = wrapper.find('.chat-status');
-    expect(status.attributes('role')).toBe('status');
-    expect(status.attributes('aria-live')).toBe('polite');
+    // live region 收窄到 .chat-status__live：API 名是静态信息，重复播报只会吵
+    const live = wrapper.find('.chat-status__live');
+    expect(live.attributes('role')).toBe('status');
+    expect(live.attributes('aria-live')).toBe('polite');
+    expect(wrapper.find('.chat-status').attributes('role')).toBeUndefined();
     // 装饰性 spinner 不该被读出来
     expect(wrapper.find('.chat-status__spinner').attributes('aria-hidden')).toBe('true');
+    wrapper.unmount();
+  });
+
+  // 状态行左侧的「当前会话正在用的 API」：会话级覆盖 → persona 激活 → 顶层默认
+  it('API 徽标：会话级覆盖优先于 persona 级 active_api', async () => {
+    state.api = {
+      provider: 'deepseek',
+      model: 'top-level-model',
+      active_api: 'persona-profile',
+      profiles: [
+        { name: 'persona-profile', provider: 'deepseek', model: 'persona-model' },
+        { name: 'session-profile', provider: 'kimi', model: 'k3-session' },
+      ],
+    } as unknown as typeof state.api;
+    state.activities[SESSION] = act('thinking');
+
+    // 无会话级覆盖 → persona 激活的 profile
+    let wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.chat-status__api').text()).toBe('deepseek / persona-model');
+    wrapper.unmount();
+
+    // 有会话级覆盖 → 覆盖优先（与入口行「模型」按钮显示的 persona 级不同）
+    state.sessionApiOverrides[SESSION] = 'session-profile';
+    wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.chat-status__api').text()).toBe('kimi / k3-session');
+    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('本会话覆盖');
+    wrapper.unmount();
+
+    // 两层都空 → 顶层默认配置
+    delete state.sessionApiOverrides[SESSION];
+    state.api!.active_api = '';
+    wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.chat-status__api').text()).toBe('deepseek / top-level-model');
+    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('顶层默认配置');
+    wrapper.unmount();
+  });
+
+  it('API 徽标在相位文案左边（DOM 顺序 = 视觉顺序）', () => {
+    // beforeEach 把 api 清成 null（徽标不渲染），这里必须先放一份配置
+    state.api = {
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      active_api: '',
+      profiles: [],
+    } as unknown as typeof state.api;
+    state.activities[SESSION] = act('thinking');
+    const wrapper = mountChatView(SESSION);
+    const row = wrapper.find('.chat-status');
+    const kids = [...row.element.children].map((el) => el.className);
+    expect(kids[0]).toContain('chat-status__api');
+    expect(kids[1]).toContain('chat-status__live');
     wrapper.unmount();
   });
 });

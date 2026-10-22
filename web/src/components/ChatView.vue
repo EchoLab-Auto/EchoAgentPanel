@@ -601,6 +601,40 @@ const activityText = computed(() => {
   }
 });
 
+/**
+ * 状态行左侧的「当前会话正在用的 API」：`provider / model`。
+ *
+ * 解析顺序与会话弹层里的「会话级 API」下拉严格同源（`SessionSwitcher`）：
+ *   会话级覆盖 `state.sessionApiOverrides[sessionId]`
+ *   → persona 级 `state.api.active_api`
+ *   → 顶层默认配置（`state.api.provider` / `state.api.model`）
+ *
+ * 为什么要放在状态行：忙碌时用户最想知道"这条回答是谁在产出"，而入口行的
+ * 「模型」按钮显示的是 **persona 级** active_api —— 当本会话被会话级覆盖
+ * （工作区对话可以单独指定 profile）时，两者会不一致，看按钮会看错。
+ */
+const apiLabel = computed(() => {
+  const api = state.api;
+  if (!api) return '';
+  const override = state.sessionApiOverrides[props.sessionId] ?? '';
+  const name = override || api.active_api || '';
+  const profile = name ? api.profiles?.find((x) => x.name === name) : undefined;
+  const provider = profile?.provider || api.provider || '';
+  const model = profile?.model || api.model || '';
+  if (!provider && !model) return '';
+  if (!provider) return model;
+  if (!model) return provider;
+  return `${provider} / ${model}`;
+});
+
+/** apiLabel 的悬停说明：profile 名 + 是否会话级覆盖（按钮上看不到这两层）。 */
+const apiTitle = computed(() => {
+  const override = state.sessionApiOverrides[props.sessionId] ?? '';
+  const name = override || state.api?.active_api || '';
+  const scope = override ? '本会话覆盖' : state.api?.active_api ? 'persona 激活' : '顶层默认配置';
+  return name ? `API：${apiLabel.value || '未知'}\n来源：${scope} · profile「${name}」` : `API：${apiLabel.value || '未知'}\n来源：${scope}`;
+});
+
 /** 推理消息所属会话当前是否仍在输出（thinking / tool / subagent）——打字机准入条件之一。 */
 function reasoningSessionRunning(sessionId: string | undefined): boolean {
   if (!sessionId) return false;
@@ -1584,9 +1618,16 @@ function mediaSrc(img: string): string {
                的状态，而不是入口行（导航/配置）的一部分。
                role=status + aria-live=polite：相位文案变化时读屏器会播报，
                但不会打断用户正在输入的内容。 -->
-          <div v-if="activityText" class="chat-status" role="status" aria-live="polite">
-            <span class="chat-status__spinner" aria-hidden="true" />
-            <span class="chat-status__text">{{ activityText }}</span>
+          <div v-if="activityText" class="chat-status">
+            <!-- 左：当前会话生效的 provider / model。会话级覆盖与 persona 级
+                 active_api 可能不同，以本会话实际生效者为准。 -->
+            <span v-if="apiLabel" class="chat-status__api" :title="apiTitle">{{ apiLabel }}</span>
+            <!-- 右：相位文案。live region 只包这一段——API 名是静态信息，
+                 重复播报只会吵。 -->
+            <span class="chat-status__live" role="status" aria-live="polite">
+              <span class="chat-status__spinner" aria-hidden="true" />
+              <span class="chat-status__text">{{ activityText }}</span>
+            </span>
           </div>
         </div>
       </div>
@@ -2243,13 +2284,43 @@ function mediaSrc(img: string): string {
 .chat-status {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   /* 与操作行拉开一点视觉呼吸；不设 padding，避免把输入区撑高得离谱 */
   margin-top: 6px;
   padding-left: 2px;
   font-size: 12px;
   line-height: 16px;
   color: var(--nm-text-secondary);
+  min-width: 0;
+}
+/* API 徽标（provider / model）：静态信息，用极轻的胶囊与右侧「活」的状态区分；
+   可收缩 + 省略——窄屏优先保住右侧相位文案。 */
+.chat-status__api {
+  /* 不参与收缩：API 名短且稳定，被相位文案挤掉只会让人看不全。
+     上限 55%（超长 provider 名仍在内部省略），余下的宽度全给右侧文案。
+     55 而非 45：`deepseek / deepseek-flash` 在 320 宽下正好需要 ~148px，
+     45% 会吃掉最后一两个字符。 */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 55%;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-glass-border);
+  background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
+  font-size: 11px;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--nm-text-secondary);
+}
+.chat-status__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  /* 相位文案是可收缩的一侧：先截它，保住 API 名 */
+  flex: 0 1 auto;
   min-width: 0;
 }
 .chat-status__spinner {
