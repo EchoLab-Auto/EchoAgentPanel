@@ -13,6 +13,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { lazy } from '../lazy';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import NeumorphismDrawer from '@echolab-auto/ui-frame/components/NeumorphismDrawer';
 import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
@@ -28,7 +29,7 @@ import { checklistKey, sessionKey, teamKey } from '../keys';
 import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
-import { composerOutline, insetPolyline, toClipPath } from '../utils/squircle';
+import { composerOutline, toClipPath } from '../utils/squircle';
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
@@ -142,16 +143,14 @@ let ctxObserver: ResizeObserver | null = null;
  * 超椭圆无论取什么半径都会在 45° 附近错位（实测最优仍有 2.3px 波动）。
  * 这里直接算真实轮廓的折线交给 `clip-path: path()`（Safari 支持）。
  *
- * 三条 CSS 变量：
- * - `--composer-clip`：外轮廓（描边层裁剪）
- * - `--composer-clip-inner`：内缩 1px 的内轮廓（玻璃层裁剪，空出描边）
+ * 两条 CSS 变量：
+ * - `--composer-clip`：外轮廓（卡片裁剪）
  * - `--composer-corner-r`：贴角区半径，供内层控件算同心圆角
  *
  * 桌面 / 直角屏（`--composer-inset` 未定义或屏角为 0）不启用，退回
  * border-radius 口径 —— clip-path 变量留 `none`。
  */
 const composerClip = ref('none');
-const composerClipInner = ref('none');
 const composerCornerR = ref('');
 
 /**
@@ -198,7 +197,6 @@ function updateComposerClip() {
   const inset = insetDeclared ? rect.left : 0;
   if (rect.width < 2 || rect.height < 2 || inset <= 0) {
     composerClip.value = 'none';
-    composerClipInner.value = 'none';
     composerCornerR.value = '';
     return;
   }
@@ -220,17 +218,13 @@ function updateComposerClip() {
     // 读起来像抖动。锁住后长出来的高度变成竖直直边（本来就是更想要的形状）。
     topRyMax: restingSlack(screenRadius - inset, style),
   });
-  // 内轮廓：玻璃层铺在外层 padding(=1px 描边) 之内，故整体再平移 -1px
-  const inner = insetPolyline(outer, 1).map(([x, y]) => [x - 1, y - 1] as const);
   composerClip.value = toClipPath(outer);
-  composerClipInner.value = toClipPath(inner);
   // 内层圆角：贴角区半径扣掉 padding+border，与超椭圆外框同心
   composerCornerR.value = `${Math.max(0, screenRadius - inset)}px`;
 }
 
 const composerStyle = computed(() => ({
   '--composer-clip': composerClip.value,
-  '--composer-clip-inner': composerClipInner.value,
   ...(composerCornerR.value ? { '--composer-corner-r': composerCornerR.value } : {}),
 }));
 
@@ -1514,9 +1508,16 @@ function mediaSrc(img: string): string {
            再模糊"（阴影会被裁掉），故拆两层——本层只负责模糊，::before 负责
            形状。本层不带 backdrop-filter：filter 祖先会让毛玻璃失效。 -->
       <div class="chat-composer-float__halo" aria-hidden="true"></div>
-      <!-- 1px 描边：surface 铺描边色，glass 从内侧盖住，只留下边缘那 1px -->
-      <div class="chat-composer-float__surface">
-        <div class="chat-composer-float__glass">
+      <!-- 卡片本体（2026-10 用户要求：外框 + 玻璃整体换成 ui-frame 卡片）：
+           材质、圆角、边缘高光、环境投影全部由 NeumorphismCard 的 glass 档位
+           承担；这里只负责「定位 + 超椭圆裁剪」。内层 __body 只做 padding 与
+           内容排布。 -->
+      <NeumorphismCard
+        class="chat-composer-float__card"
+        glass
+        no-padding
+      >
+        <div class="chat-composer-float__body">
           <!-- 待发送图片预览 -->
           <div v-if="attachments.length" class="chat-view__attachments">
             <div v-for="(img, i) in attachments" :key="i" class="chat-view__attach">
@@ -1631,7 +1632,7 @@ function mediaSrc(img: string): string {
             </span>
           </div>
         </div>
-      </div>
+      </NeumorphismCard>
     </div>
   </div>
 </template>
@@ -1809,11 +1810,17 @@ function mediaSrc(img: string): string {
 }
 
 /* 吸底悬浮输入区：absolute 脱离文档流，盖在消息列表之上。
-   玻璃质感拆成三层（因为 clip-path 会裁掉 border 和 box-shadow）：
-     __halo    外发光（未裁父层做模糊，::before 出形状）
-     __surface 描边（铺描边色，被 glass 盖剩 1px）
-     __glass   毛玻璃背景 + 顶部高光
-   桌面三层走 border-radius；移动端三层走同一条 clip-path 超椭圆轮廓。 */
+   结构（2026-10 用户要求：外框 + 玻璃换成 ui-frame 卡片）：
+     __halo  外发光（**必须**独立一层，见下）
+     __card  NeumorphismCard glass —— 材质/圆角/边缘高光/环境投影全归它
+     __body  内层：只做 padding 与内容排布
+   桌面走卡片自己的 border-radius；移动端走 JS 算的 clip-path 超椭圆轮廓。
+
+   为什么发光没交给卡片的 box-shadow：clip-path 会把元素**自身**的
+   box-shadow 一起裁掉，而移动端卡片要挂超椭圆 clip —— 投影会整体消失。
+   所以投影只能画在未被裁剪的兄弟层上（__halo），形状交给 ::before。
+   同一原因，__halo 不能挂 backdrop-filter（filter 会创建新的 backdrop
+   root，让卡片的毛玻璃失效）。 */
 .chat-composer-float {
   /* 输入行几何单一事实来源（圆角/高度都从这里派生）：
      - --chat-field-font：输入框实际字号（桌面 14px；移动端/iOS 16px，
@@ -1831,7 +1838,10 @@ function mediaSrc(img: string): string {
      公式只写一次，改任何一个数内层自动跟随。 */
   --composer-radius: 24px;
   --composer-padding: 12px;
-  --composer-border: 1px;
+  /* 卡片自带 1px 内高光边（`--nm-glass-border-opacity`），不再有独立的描边层
+     —— 设 0 让「内层圆角 = 外框 − padding − border」与「静止条高」两条派生
+     公式仍成立（卡片高度 = 内容 + 2×padding）。 */
+  --composer-border: 0px;
   /* 贴角区半径：移动端由 JS 写成「R屏角 − 留白」（超椭圆口径）；
      桌面/直角屏没有贴角区，等于外框半径，公式退化成原来的 R−P−B。 */
   --composer-corner-r: var(--composer-radius);
@@ -1859,9 +1869,16 @@ function mediaSrc(img: string): string {
   inset: 0;
   z-index: 0;
   pointer-events: none;
+  /* 只在「卡片被 clip」时启用：clip-path 会把卡片**自身**的 box-shadow 一起
+     裁掉（移动端超椭圆轮廓），投影得由这一层补。桌面没有 clip，卡片自带的
+     glass-float 环境投影已经够，再叠一层就是双重阴影（实测明显发黑）。 */
+  display: none;
   /* 原 0 12px 32px rgba(...,0.45)：blur 半径 ≈ 32/2，偏移量保持 12px */
   filter: blur(16px);
   transform: translateY(12px);
+}
+.chat-composer-float--clipped .chat-composer-float__halo {
+  display: block;
 }
 .chat-composer-float__halo::before {
   content: '';
@@ -1872,55 +1889,41 @@ function mediaSrc(img: string): string {
   clip-path: var(--composer-clip, none);
 }
 
-/* 描边层：整块铺描边色，由 glass 从内侧盖住，只剩边缘 1px。
-   这样描边能跟随任意 clip-path 形状 —— border 做不到（它只认 border-radius）。 */
-.chat-composer-float__surface {
+/* 卡片本体：ui-frame NeumorphismCard（glass 档）。
+   - 材质（半透明 + backdrop blur + 1px 内高光边）、环境投影全由卡片提供；
+   - 这里只覆盖两件输入区特有的事：圆角取 --composer-radius、挂超椭圆 clip。
+   选择器带 .chat-composer-float 前缀：卡片自己的 `--nm-border-radius-*`
+   档位类与本文特异性相同（都是单类 + scoped 属性），靠层叠顺序不可靠。 */
+.chat-composer-float .chat-composer-float__card {
   position: relative;
   z-index: 1;
   pointer-events: auto;
-  padding: var(--composer-border);
-  background: var(--panel-glass-border);
   border-radius: var(--composer-radius);
   clip-path: var(--composer-clip, none);
+  /* 性能（2026-09-18 起、2026-10 随卡片迁移沿用）：库默认 20px + saturate，
+     输入区降到 10px 且不加 saturate —— 大面积 backdrop-filter 每次重绘全量
+     重栅格化，跨行拖选每帧触发。用变量覆盖保持与卡片同一实现路径。 */
+  --nm-glass-blur: 10px;
 }
 
-/* 玻璃层：毛玻璃 + 高光。它的 clip 内轮廓比外轮廓再内缩 1px（JS 一起算），
-   保证描边粗细处处相等。 */
-.chat-composer-float__glass {
+/* 内层：只负责 padding 与内容排布（卡片已 no-padding）。 */
+.chat-composer-float__body {
   position: relative;
-  pointer-events: auto;
   padding: var(--composer-padding);
-  /* 双层背景：低透明表面 + 顶部白色高光渐变（玻璃高光） */
-  background:
-    linear-gradient(
-      160deg,
-      color-mix(in srgb, #ffffff 10%, transparent) 0%,
-      transparent 45%
-    ),
-    color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  /* 性能（2026-09-18）：blur 20px→10px、去 saturate；聚焦/拖选期间由
-     .chat-composer-float--busy 临时关闭 blur。大面积 backdrop-filter 每次
-     重绘全量重栅格化，跨行拖选每帧触发，是拖选卡顿的根治点。 */
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-radius: calc(var(--composer-radius) - var(--composer-border));
-  clip-path: var(--composer-clip-inner, none);
-  box-shadow: inset 0 1px 0 var(--panel-glass-highlight);
 }
 
 /* 聚焦/拖选期间：临时关毛玻璃（纯色底撑住视觉），拖选重绘不再触发
    大面积 blur 重栅格化。 */
-.chat-composer-float--busy .chat-composer-float__glass {
+.chat-composer-float--busy .chat-composer-float__card {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  background: var(--nm-surface-raised);
+  --nm-glass-bg: var(--nm-surface-raised);
 }
 /* clip 生效时必须清掉 border-radius —— 两者是**取交集**关系：留着 24px 圆角
    会把超椭圆轮廓又裁回圆角矩形（实测角部间隙 14→16.6px，等于白改）。
    用 class 而非媒体查询做门控：JS 没算出轮廓时（首帧/异常）仍保留圆角兜底。 */
 .chat-composer-float--clipped .chat-composer-float__halo::before,
-.chat-composer-float--clipped .chat-composer-float__surface,
-.chat-composer-float--clipped .chat-composer-float__glass {
+.chat-composer-float--clipped .chat-composer-float__card {
   border-radius: 0;
 }
 
@@ -2297,8 +2300,10 @@ function mediaSrc(img: string): string {
      避免"开始回答时输入区突然长高 23px"——高度在两种状态下完全一致。 */
   min-height: 17px;
 }
-/* API 徽标（provider / model）：静态信息，用极轻的胶囊与右侧「活」的状态区分；
-   可收缩 + 省略——窄屏优先保住右侧相位文案。 */
+/* API 徽标（provider / model）：**纯文字**（2026-10 用户要求去掉外框）——
+   静态信息不需要第二层容器，胶囊反而和输入区卡片抢层次。
+   与右侧相位文案靠「色阶」区分：标签用 --nm-text-primary 偏实、
+   相位文案保持 --nm-text-secondary 偏淡。 */
 .chat-status__api {
   /* 不参与收缩：API 名短且稳定，被相位文案挤掉只会让人看不全。
      上限 55%（超长 provider 名仍在内部省略），余下的宽度全给右侧文案。
@@ -2307,17 +2312,14 @@ function mediaSrc(img: string): string {
   flex: 0 0 auto;
   min-width: 0;
   max-width: 55%;
-  padding: 0 7px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-glass-border);
-  background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
   font-size: 11px;
   line-height: 15px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--nm-text-secondary);
+  color: var(--nm-text-primary);
+  opacity: 0.75;
 }
 .chat-status__live {
   display: inline-flex;

@@ -147,11 +147,20 @@ describe('ChatView 竖屏移动端', () => {
     expect(mobileStyle, '移动端轮廓改由 clip-path 提供').not.toMatch(
       /--composer-radius: clamp\(/,
     );
-    expect(styleBlock, '外框消费 clip 变量').toMatch(
-      /\.chat-composer-float__surface \{[^}]*clip-path: var\(--composer-clip, none\)/,
+    // 2026-10：外框 + 玻璃整体换成 ui-frame NeumorphismCard（glass 档），
+    // 超椭圆 clip 挂在卡片上（单层，不再有内轮廓——卡片自带 1px 内高光边）。
+    expect(
+      styleBlock,
+      '卡片消费 clip 变量（前缀类名压过卡片自己的 radius 档位）',
+    ).toMatch(
+      /\.chat-composer-float \.chat-composer-float__card \{[^}]*clip-path: var\(--composer-clip, none\)/,
     );
-    expect(styleBlock, '玻璃层消费内轮廓（内缩 1px 空出描边）').toMatch(
-      /\.chat-composer-float__glass \{[^}]*clip-path: var\(--composer-clip-inner, none\)/,
+    // 结构性断言：模板里真的是卡片组件（否则样式对了也只是个空 div）
+    expect(raw, '输入区外壳必须是 NeumorphismCard').toMatch(
+      /<NeumorphismCard[\s\S]{0,160}class="chat-composer-float__card"[\s\S]{0,80}glass/,
+    );
+    expect(styleBlock, '卡片不得再手写毛玻璃背景').not.toMatch(
+      /\.chat-composer-float__glass \{/,
     );
     // 发光必须画在未被裁剪的父层上（clip-path 会裁掉 box-shadow），
     // 且该层不能挂 backdrop-filter（filter 祖先会让毛玻璃失效）
@@ -170,7 +179,8 @@ describe('ChatView 竖屏移动端', () => {
     );
     // 源码里必须真的调用了轮廓计算（否则 clip 变量永远 none）
     expect(raw, '移动端必须调用 composerOutline').toMatch(/composerOutline\(\{/);
-    expect(raw).toMatch(/--composer-clip-inner/);
+    // 单层卡片：不再写内轮廓变量（否则 JS 白算一份）
+    expect(raw).not.toMatch(/--composer-clip-inner/);
     expect(raw, '读屏角/留白变量作为输入').toMatch(/'--panel-display-radius'/);
     expect(raw).toMatch(/'--composer-inset'/);
     expect(mobileStyle, '内框/按钮 = 外框 − padding − border（同心）').toMatch(
@@ -179,10 +189,11 @@ describe('ChatView 竖屏移动端', () => {
     expect(mobileStyle).toMatch(
       /\.chat-view__send\) \{\s*border-radius: var\(--composer-inner-radius\) !important/,
     );
-    // 桌面口径：外框 24px / padding 12px / border 1px → 内层 11px
+    // 桌面口径：卡片圆角 24px / padding 12px / border 0（卡片无独立描边层，
+    // 1px 边由 NeumorphismCard 的内高光承担）→ 内层 12px
     expect(styleBlock).toMatch(/--composer-radius: 24px/);
     expect(styleBlock).toMatch(/--composer-padding: 12px/);
-    expect(styleBlock).toMatch(/--composer-border: 1px/);
+    expect(styleBlock).toMatch(/--composer-border: 0px/);
     // 输入行控件高度跟随字号：字号一变，取消/附件/发送同步重算（不写死 42px）
     expect(mobileStyle).toMatch(/--chat-field-font: 16px/);
   });

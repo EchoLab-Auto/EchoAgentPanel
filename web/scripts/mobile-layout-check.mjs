@@ -168,12 +168,14 @@ const PROBE = `(() => {
   const cornerR = compCS
     ? (parseFloat(compCS.getPropertyValue('--composer-corner-r')) || compRadius)
     : compRadius;
-  const glassEl = document.querySelector('.chat-composer-float__glass');
-  const glassCS = glassEl ? getComputedStyle(glassEl) : null;
-  // 描边层 padding(承载 1px 描边) + 玻璃层 padding = 内外半径之差
-  const surfaceEl = document.querySelector('.chat-composer-float__surface');
-  const surfacePad = surfaceEl ? parseFloat(getComputedStyle(surfaceEl).paddingTop) : 0;
-  const insetTotal = surfacePad + (glassCS ? parseFloat(glassCS.paddingTop) : 0);
+  /**
+   * 2026-10：外框 + 玻璃换成 ui-frame NeumorphismCard（glass 档）。
+   * 结构变成「卡片（材质/圆角/裁剪）> __body（padding + 内容）」两层：
+   * 卡片自带 1px 内高光边（不是独立描边层），所以内外半径之差 = body padding。
+   */
+  const bodyEl = document.querySelector('.chat-composer-float__body');
+  const bodyCS = bodyEl ? getComputedStyle(bodyEl) : null;
+  const insetTotal = bodyCS ? parseFloat(bodyCS.paddingTop) : 0;
   /** 内框/按钮的圆角（同心检查用）。 */
   const radiusOf = (sel) => {
     const e = document.querySelector(sel);
@@ -185,7 +187,7 @@ const PROBE = `(() => {
    * 超过即输入区的角会伸到物理圆角外、被屏幕裁出一个缺口。
    */
   // 有 clip-path 的那一层才是"看得见/点得到"的形状（外层只剩定位作用）
-  const clipEl = document.querySelector('.chat-composer-float__surface');
+  const clipEl = document.querySelector('.chat-composer-float__card');
   const clipPath = clipEl ? getComputedStyle(clipEl).clipPath : null;
   /**
    * 输入区下角与屏幕角的贴合度 —— 用命中测试取出**真实渲染轮廓**，逐点量到
