@@ -379,6 +379,74 @@ describe('ChatView 布局契约', () => {
   });
 });
 
+describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
+  // 需求：入口行左侧那颗玻璃胶囊浮条（.chat-activity）推到 Agent 切换器到
+  // 「模型」整排按钮左右移动，文案一长还抖动。改成输入区内、文本域下方独占
+  // 一行（.chat-status），入口行排布不再受影响。
+  const SESSION = 'local:tui::a';
+
+  function act(phase: 'thinking' | 'tool' | 'subagent' | 'completed', detail: string | null = null) {
+    return {
+      phase,
+      detail,
+      startedAt: Date.now(),
+      toolsCompleted: 0,
+      subagentsCompleted: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+    };
+  }
+
+  beforeEach(() => {
+    state.trunk = [];
+    state.activities = {};
+  });
+
+  it('忙碌时状态行出现在输入区内，且入口行里没有它', () => {
+    state.activities[SESSION] = act('thinking');
+    const wrapper = mountChatView(SESSION);
+    const status = wrapper.find('.chat-status');
+    expect(status.exists()).toBe(true);
+    // 位置契约：必须是输入区（.chat-composer-float）的后代
+    expect(wrapper.find('.chat-composer-float .chat-status').exists()).toBe(true);
+    // 旧浮条已移除：入口行里不能再有这个元素
+    expect(wrapper.find('.entry-row .chat-activity').exists()).toBe(false);
+    expect(wrapper.find('.chat-activity').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('文案按相位切换：thinking / tool / subagent', async () => {
+    state.activities[SESSION] = act('thinking');
+    const wrapper = mountChatView(SESSION);
+    expect(wrapper.find('.chat-status__text').text()).toBe('正在思考…');
+
+    state.activities[SESSION] = act('thinking', '正在整合 subagent 结果');
+    await nextTick();
+    expect(wrapper.find('.chat-status__text').text()).toContain('正在整合 subagent 结果');
+
+    state.activities[SESSION] = act('subagent', '写文档');
+    await nextTick();
+    expect(wrapper.find('.chat-status__text').text()).toContain('子代理工作中');
+
+    state.activities[SESSION] = act('completed');
+    await nextTick();
+    // 结束即整行移除（不是变灰留白）
+    expect(wrapper.find('.chat-status').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('读屏契约：role=status + aria-live=polite（播报但不打断输入）', () => {
+    state.activities[SESSION] = act('thinking');
+    const wrapper = mountChatView(SESSION);
+    const status = wrapper.find('.chat-status');
+    expect(status.attributes('role')).toBe('status');
+    expect(status.attributes('aria-live')).toBe('polite');
+    // 装饰性 spinner 不该被读出来
+    expect(wrapper.find('.chat-status__spinner').attributes('aria-hidden')).toBe('true');
+    wrapper.unmount();
+  });
+});
+
 describe('推理行打字机门槛（2026-10）', () => {
   // 需求：只有「正在输出」的思考播打字动画；已经完成的思考卡片
   // （重新）加载/显示时直接全量显示（见 reasoning-anim.ts）。

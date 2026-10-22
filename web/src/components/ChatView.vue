@@ -1100,10 +1100,6 @@ function mediaSrc(img: string): string {
   <div class="chat-view" :class="{ 'chat-view--overlay-open': anyOverlayOpen }" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
     <div ref="entryRowRef" class="entry-row" @scroll.passive="syncEntryScroll">
-      <div v-if="activityText" class="chat-activity">
-        <span class="chat-activity__spinner" />
-        <span class="chat-activity__text">{{ activityText }}</span>
-      </div>
       <AgentSwitcher
         :active-team-id="props.activeTeamId ?? null"
         @select="(id, core) => emit('selectTeam', id, core)"
@@ -1583,6 +1579,15 @@ function mediaSrc(img: string): string {
               </NeumorphismButton>
             </template>
           </ChatComposer>
+          <!-- 状态行（2026-10）：取代入口行的浮条。贴在文本域/操作行**下方**、
+               玻璃层内——它描述的是「这次输入会得到什么响应」，属于输入区自己
+               的状态，而不是入口行（导航/配置）的一部分。
+               role=status + aria-live=polite：相位文案变化时读屏器会播报，
+               但不会打断用户正在输入的内容。 -->
+          <div v-if="activityText" class="chat-status" role="status" aria-live="polite">
+            <span class="chat-status__spinner" aria-hidden="true" />
+            <span class="chat-status__text">{{ activityText }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -2231,31 +2236,33 @@ function mediaSrc(img: string): string {
 }
 
 /* ── 活动指示浮条：思考中 / 调用工具 / 子代理 ── */
-.chat-activity {
-  display: inline-flex;
+/* 状态行（2026-10）：输入区内部的一行，取代原先入口行左侧的玻璃胶囊浮条。
+   为什么不再用胶囊：浮条是「入口行的一个子项」，它的出现/消失会推着 Agent
+   切换器到「模型」整排按钮左右移动；文案一长（子代理任务名 72 字符上限）按钮
+   还会随 detail 抖动。搬进输入区内、独占一行后，入口行的排布完全稳定。 */
+.chat-status {
+  display: flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-glass-border);
-  background: color-mix(in srgb, var(--nm-surface-raised) 48%, transparent);
-  backdrop-filter: blur(20px) saturate(1.5);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  /* 与操作行拉开一点视觉呼吸；不设 padding，避免把输入区撑高得离谱 */
+  margin-top: 6px;
+  padding-left: 2px;
   font-size: 12px;
+  line-height: 16px;
   color: var(--nm-text-secondary);
-  box-shadow: var(--panel-glass-shadow-md);
+  min-width: 0;
 }
-.chat-activity__spinner {
+.chat-status__spinner {
   flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--panel-accent) 30%, transparent);
   border-top-color: var(--panel-accent);
   animation: activity-spin 0.8s linear infinite;
 }
-.chat-activity__text {
-  max-width: 320px;
+.chat-status__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2295,9 +2302,10 @@ function mediaSrc(img: string): string {
   .entry-row > * {
     flex: 0 0 auto;
   }
-  /* 活动浮条不占满：截断更紧，给按钮留浏览空间 */
-  .chat-activity__text {
-    max-width: 42vw;
+  /* 状态行（输入区内部）：窄屏给按钮区让位——文案截断，单行不换行，
+     避免它把输入区撑高到吃掉消息区可视高度。 */
+  .chat-status__text {
+    max-width: 62vw;
   }
 
   /* 「还有更多」提示（v2）：sticky 右贴边叠在滚动容器末端——不随内容滚走，
