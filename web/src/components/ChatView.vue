@@ -533,47 +533,42 @@ const busy = computed(() => {
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
 });
 
-// ── 覆盖面板的几何：整个会话视图（聊天区），2026-10 统一 ──
+// ── 覆盖面板的几何：上到会话框顶、下到入口行上边缘（2026-10 统一） ──
 //
-// 用户第一次说的是「大小等于会话消息区」，按 `.chat-view__tray` 实现后发现
-// 不对：tray 的下界是**输入区顶**，于是输入区与入口行整条露在面板下方，面板
-// 看上去像被人截了一段。正确口径是**整个会话视图**（`.chat-view`）：
-// 上到会话框顶、下到会话框底，把输入区一起盖住；入口行作为底部工具条浮在
-// 面板之上（`z-index` 高于面板），所以「点另一个按钮直接切换」仍然成立。
+// 口径演变（两次纠正，写下来免得再猜）：
+// 1. 先是「会话消息区」（`.chat-view__tray`）—— 但 tray 是 `flex: 1`，它的
+//    下界就是视图底，面板照样铺到底，结果**内容被输入区与入口行挡住**；
+// 2. 改成「铺满整个会话视图」（`top/bottom: 0`）—— 盖住了输入区，面板底边
+//    落到会话框底，看起来像被截了一段；
+// 3. 最终口径（用户）：**上 = 会话框顶，下 = 入口行上边缘**。面板自己的底边
+//    就停在入口行顶边，输入区与入口行完整露在面板下方、谁也不压谁。
 //
-// - 左右仍扣掉边栏留白（`trayPadLeft/Right`）——侧栏是常驻信息（连接状态 /
-//   文件浏览器 / Git），面板不该把它压掉；扣除后即「正文列」的宽度；
-// - 纵向靠**测量**：会话框的高度随窗口变，`top: 0 / bottom: 0` 已经足够（不
-//   需要读 tray），但 `reserve`（内容底部要让开入口行的多少 px）必须实测——
-//   入口行高度由按钮尺寸决定、`entryBottom` 又随输入区撑高而变；
-// - 让位而不是「缩面板」：面板背景铺到会话框底（视觉上是一整块），内容止于
-//   入口行上方，滚到底也不会被工具条压住。
+// 横向仍扣掉边栏留白（`trayPadLeft/Right`）——侧栏是常驻信息（连接状态 /
+// 文件浏览器 / Git / Shell），面板不该把它压掉。
+//
+// 下界用**入口行实测 rect**，不用 `entryBottom + 常量`：入口行高度由按钮
+// 尺寸决定、位置又随输入区撑高而变，实测才跟得上（`ResizeObserver` 观察它）。
 const viewRootRef = ref<HTMLElement | null>(null);
 const overlayInset = ref<OverlayInset | null>(null);
 
-/** 入口行高（按钮 30 + 上下各 3.5 的足迹，实测 37px）。 */
-const ENTRY_ROW_H = 37;
-
-/** 内容区底部让位：从会话框底到入口行顶的距离。 */
-const overlayReserve = computed(() => {
-  const m = entryBottom.value.match(/(\d+(?:\.\d+)?)/);
-  return Math.round((m ? Number(m[1]) : 170) + ENTRY_ROW_H);
-});
-
 function syncOverlayInset() {
   const root = viewRootRef.value;
-  const tray = viewRootRef.value?.querySelector<HTMLElement>('.chat-view__tray') ?? null;
   if (!root) return;
   const r = root.getBoundingClientRect();
   if (r.width <= 0) return;
-  // 左右对齐「正文列」= 消息区（tray）的横向范围；tray 缺失（首帧/未渲染）
-  // 时退回视图自身，宁可宽一点也不要错位。
+  const tray = root.querySelector<HTMLElement>('.chat-view__tray');
   const t = tray?.getBoundingClientRect() ?? r;
   const padLeft = Number.parseFloat(trayPadLeft.value) || 0;
   const padRight = Number.parseFloat(trayPadRight.value) || 0;
+  // 下界 = 入口行上边缘；入口行尚未布局（首帧 / 无按钮）时退回整高。
+  const entry = entryRowRef.value?.getBoundingClientRect();
+  const bottom =
+    entry && entry.height > 0
+      ? Math.max(0, Math.round(r.bottom - entry.top))
+      : Math.max(0, Math.round(r.bottom - t.bottom));
   overlayInset.value = {
     top: 0,
-    bottom: 0,
+    bottom,
     left: Math.max(0, Math.round(t.left - r.left + padLeft)),
     right: Math.max(0, Math.round(r.right - t.right + padRight)),
   };
@@ -585,6 +580,8 @@ onMounted(() => {
   if (typeof ResizeObserver === 'undefined') return;
   overlayObserver = new ResizeObserver(syncOverlayInset);
   if (viewRootRef.value) overlayObserver.observe(viewRootRef.value);
+  // 入口行的位置/高度决定面板下界：两者都要跟。
+  if (entryRowRef.value) overlayObserver.observe(entryRowRef.value);
   const tray = viewRootRef.value?.querySelector<HTMLElement>('.chat-view__tray');
   if (tray) overlayObserver.observe(tray);
 });
@@ -592,7 +589,7 @@ onBeforeUnmount(() => {
   overlayObserver?.disconnect();
   overlayObserver = null;
 });
-// 输入区高度 / 边栏留白 / 移动端切换都会改矩形的分量（tray 自身尺寸不一定变）。
+// 输入区高度 / 边栏留白 / 移动端切换都会改矩形的分量（入口行 rect 不一定变）。
 watch([entryBottom, trayPadLeft, trayPadRight, isMobile], () => void nextTick(syncOverlayInset));
 
 const configTeam = computed(() => {
@@ -1300,7 +1297,6 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'sessions'"
       :inset="overlayInset"
-      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="会话"
       @close="closeOverlay()"
@@ -1314,7 +1310,6 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'workspace'"
       :inset="overlayInset"
-      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="工作区会话"
       @close="closeOverlay()"
@@ -1324,7 +1319,6 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'instance'"
       :inset="overlayInset"
-      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="实例管理"
       @close="closeOverlay()"
@@ -1334,7 +1328,6 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'tasks'"
       :inset="overlayInset"
-      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="任务与分支"
       @close="closeOverlay()"
@@ -1344,7 +1337,6 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'checklist'"
       :inset="overlayInset"
-      :reserve="overlayReserve"
       :ignore="entryRowRef"
       label="清单"
       @close="closeOverlay()"
@@ -1363,7 +1355,6 @@ function mediaSrc(img: string): string {
     <SessionOverlay
       :open="entryOverlay === 'context'"
       :inset="overlayInset"
-      :reserve="overlayReserve"
       :ignore="entryRowRef"
       :padded="false"
       label="上下文占用"
@@ -1483,7 +1474,6 @@ function mediaSrc(img: string): string {
       v-if="entryOverlay === 'config' && configTeam"
       :team="configTeam"
       :inset="overlayInset"
-      :reserve="overlayReserve"
       @close="closeOverlay()"
     />
 

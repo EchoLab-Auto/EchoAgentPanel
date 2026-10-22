@@ -42,10 +42,8 @@ const props = withDefaults(
     inset?: { top: number; right: number; bottom: number; left: number } | null;
     /** 是否打开（转发给外壳；默认随挂载即开）。 */
     open?: boolean;
-    /** 内容区底部让位（px，避开浮在面板之上的入口行）—— 透传给外壳。 */
-    reserve?: number;
   }>(),
-  { inset: null, open: true, reserve: 0 },
+  { inset: null, open: true },
 );
 const emit = defineEmits<{ close: [] }>();
 
@@ -308,7 +306,6 @@ function save() {
     :open="props.open !== false"
     :inset="props.inset ?? null"
     :padded="false"
-    :reserve="props.reserve"
     label="配置 Agent"
     @close="emit('close')"
   >

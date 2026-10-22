@@ -11,11 +11,11 @@
 //!   （上/左/右 12px、底距入口行），带遮罩、点遮罩关闭；
 //! - Agent 切换 `AgentSwitcher`：锚定浮层（**保留**，见用户要求）。
 //!
-//! 现在除 Agent 切换外全部走本组件：几何 = **整个会话视图**（`ChatView` 量
-//! 正文列的左右边界后按 px 传入；纵向上到会话框顶、下到会话框底，把输入区
-//! 一起盖住），入口行作为底部工具条浮在面板之上（`z-index 7 > 6`），内容区
-//! 按 `reserve` 让开它。玻璃配方与圆角沿用面板既有的 `--panel-glass-*` 一套，
-//! 开关由父组件的单一状态驱动（同一时刻只可能开一个 → 互斥天然成立）。
+//! 现在除 Agent 切换外全部走本组件：几何 = **会话框顶 → 入口行上边缘**
+//! （`ChatView` 实测入口行 rect 与正文列左右边界后按 px 传入）——面板底边
+//! 就停在入口行顶边，输入区与入口行完整露在面板下方，谁也不压谁。玻璃配方
+//! 与圆角沿用面板既有的 `--panel-glass-*` 一套，开关由父组件的单一状态驱动
+//! （同一时刻只可能开一个 → 互斥天然成立）。
 //!
 //! 为什么不用 `position: fixed` + Teleport（`PanelPopover` 的做法）：覆盖层要
 //! 「等于消息区」，而消息区是会话视图里的弹性子项——fixed 需要每帧测量视口，
@@ -60,13 +60,8 @@ const props = withDefaults(
     padded?: boolean;
     /** 无障碍名称（`role="dialog"` 需要）。 */
     label?: string;
-    /**
-     * 内容区底部让位（px）：面板铺到会话框底，但入口行（工具条）浮在面板之上，
-     * 内容必须止于它上方。父组件按 `entryBottom + 入口行高` 算出实测值传入。
-     */
-    reserve?: number;
   }>(),
-  { inset: null, ignore: null, padded: true, label: '', reserve: 0 },
+  { inset: null, ignore: null, padded: true, label: '' },
 );
 
 const emit = defineEmits<{ (event: 'close'): void }>();
@@ -85,23 +80,6 @@ const insetStyle = computed(() => {
     bottom: `${i?.bottom ?? 0}px`,
     left: `${i?.left ?? 0}px`,
   };
-});
-
-/**
- * 内容区内边距：`reserve` 从底部让开入口行。
- *
- * - 常规（padded）：四周 18px，底部取 `max(18, reserve)`；
- * - flush（内容自带 padding）：底部只留 `reserve`，其余为 0。
- *
- * 用内联样式而不是 class 切换：`reserve` 是实测值（随输入区高度变），
- * 静态 CSS 变量方案要每帧写回 `--overlay-reserve`，反而更绕。
- */
-const bodyStyle = computed(() => {
-  const reserve = Math.max(0, props.reserve ?? 0);
-  if (!props.padded) {
-    return reserve > 0 ? { paddingBottom: `${reserve}px` } : {};
-  }
-  return reserve > 18 ? { paddingBottom: `${reserve + 18}px` } : {};
 });
 
 function requestClose() {
@@ -167,11 +145,7 @@ onBeforeUnmount(detach);
            「新建」、实例的「刷新」、上下文的「清空」）重叠，而外壳无法逐面板
            避让。关闭语义统一为「点面板外 / Esc / 再点同一入口按钮」——与改造
            前六个 popover 的行为一致，不新增学习成本。 -->
-      <div
-        class="session-overlay__body"
-        :class="{ 'session-overlay__body--flush': !padded }"
-        :style="bodyStyle"
-      >
+      <div class="session-overlay__body" :class="{ 'session-overlay__body--flush': !padded }">
         <slot />
       </div>
     </div>
@@ -182,9 +156,9 @@ onBeforeUnmount(detach);
 /* 外壳：与 RailStack 卡片同一套玻璃配方（同一屏内两种玻璃会看出色差）。 */
 .session-overlay {
   position: absolute;
-  /* 6：高于输入区与「回到底部」（5，被面板整块盖住），低于入口行（7）——
-     入口行作为底部工具条浮在面板之上，所以打开状态下仍能点另一个按钮直接
-     切换。 */
+  /* 6：几何上已不与输入区（5）重叠（底边停在入口行顶边），仍高一档以免阴影/
+     溢出的边角盖到它；低于入口行（7）——入口行是面板的切换器与关闭器，必须
+     始终可点。 */
   z-index: 6;
   display: flex;
   flex-direction: column;

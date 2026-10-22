@@ -3,8 +3,8 @@
 //! 用户要求：入口行除 Agent 切换外的弹层统一成一种样式 —— **大小等于会话消息
 //! 区**，并且**唤起一个就关掉另一个**。互斥由父组件（ChatView 的单一
 //! `entryOverlay` 状态）保证；本组件负责外壳、几何与关闭语义。锁定：
-//!   1) 几何 = 父组件传入的 inset（= 整个会话视图，横向扣边栏留白），缺省
-//!      贴满容器；`reserve` 把内容区底部让开浮在面板之上的入口行；
+//!   1) 几何 = 父组件传入的 inset（= 会话框顶 → 入口行上边缘，横向扣边栏
+//!      留白），缺省贴满容器；
 //!   2) 关闭：点面板外 / Esc / `padded=false` 时的内容排布；
 //!   3) `ignore` 元素（入口行）内的按下**不算**外部（否则点另一个按钮会先关
 //!      再被 click 重新打开，且 ui-frame 下拉选项点不动）。
@@ -67,24 +67,6 @@ describe('SessionOverlay 会话区覆盖面板', () => {
     for (const part of ['top: 0px', 'right: 0px', 'bottom: 0px', 'left: 0px']) {
       expect(flushStyle, `缺少 ${part}`).toContain(part);
     }
-  });
-
-  it('reserve：内容区底部让开入口行（常规 +18，flush 只留 reserve）', async () => {
-    const w = mountOverlay({ reserve: 156 });
-    expect(w.find('.session-overlay__body').attributes('style') ?? '').toContain(
-      'padding-bottom: 174px',
-    );
-    w.unmount();
-
-    const flush = mountOverlay({ padded: false, reserve: 156 });
-    expect(flush.find('.session-overlay__body').attributes('style') ?? '').toContain(
-      'padding-bottom: 156px',
-    );
-    flush.unmount();
-
-    // reserve 为 0：不加内联样式（沿用 CSS 的 18px）
-    const none = mountOverlay();
-    expect(none.find('.session-overlay__body').attributes('style') ?? '').toBe('');
   });
 
   it('padded 缺省给内容统一内边距；padded=false 交给内容自己排', async () => {
