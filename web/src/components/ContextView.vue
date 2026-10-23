@@ -378,6 +378,42 @@ async function compactHistory() {
       </NeumorphismButton>
     </div>
 
+    <!-- 压缩 / 归档进度：放在**最外层**——它是"点完按钮之后发生了什么"的
+         唯一反馈。此前它被包在 `v-else`（有快照）分支里：压缩期间 Core 重载
+         会话会让快照短暂为 null，进度条随之消失；无快照时点「压缩」更是全程
+         看不到。进度与快照是两个独立事实，不该互相门控。 -->
+    <div
+      v-if="compaction"
+      class="ctx-compaction"
+      :class="{
+        'ctx-compaction--running': compacting,
+        'ctx-compaction--done': compaction.phase === 'done',
+        'ctx-compaction--failed': compaction.phase === 'failed',
+      }"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="ctx-compaction-head">
+        <span class="ctx-compaction-phase">{{ compactionPhaseLabel }}</span>
+        <span v-if="compactionCountText" class="ctx-compaction-count">
+          {{ compactionCountText }}
+        </span>
+        <!-- 只在**长度确定**的阶段显示百分比：不确定阶段（如"正在计算压缩
+             计划…"）写"0%"是误导，进度条本身已经表达了"还在跑"。 -->
+        <span v-if="compacting && compaction.total > 0" class="ctx-compaction-pct">
+          {{ compactionPct }}%
+        </span>
+      </div>
+      <NeumorphismProgress
+        v-if="compacting || compaction.phase === 'done'"
+        :model-value="compactionPct"
+        :variant="compactionVariant"
+        :indeterminate="compacting && compaction.total === 0"
+        size="small"
+      />
+      <p class="ctx-compaction-msg">{{ compaction.message }}</p>
+    </div>
+
     <div v-if="!snapshot" class="ctx-state">
       <template v-if="!connected">
         <NeumorphismSpinner size="large" />
@@ -402,40 +438,6 @@ async function compactHistory() {
       </span>
     </div>
     <template v-else>
-      <!-- 压缩 / 归档进度：放在最上面——它是**动作的反馈**，用户点完按钮
-           第一眼就要看到；塞在底部与"暂无快照"的提示同级只会被忽略。 -->
-      <div
-        v-if="compaction"
-        class="ctx-compaction"
-        :class="{
-          'ctx-compaction--running': compacting,
-          'ctx-compaction--done': compaction.phase === 'done',
-          'ctx-compaction--failed': compaction.phase === 'failed',
-        }"
-        role="status"
-        aria-live="polite"
-      >
-        <div class="ctx-compaction-head">
-          <span class="ctx-compaction-phase">{{ compactionPhaseLabel }}</span>
-          <span v-if="compactionCountText" class="ctx-compaction-count">
-            {{ compactionCountText }}
-          </span>
-          <!-- 只在**长度确定**的阶段显示百分比：不确定阶段（如"正在计算压缩
-               计划…"）写"0%"是误导，进度条本身已经表达了"还在跑"。 -->
-          <span v-if="compacting && compaction.total > 0" class="ctx-compaction-pct">
-            {{ compactionPct }}%
-          </span>
-        </div>
-        <NeumorphismProgress
-          v-if="compacting || compaction.phase === 'done'"
-          :model-value="compactionPct"
-          :variant="compactionVariant"
-          :indeterminate="compacting && compaction.total === 0"
-          size="small"
-        />
-        <p class="ctx-compaction-msg">{{ compaction.message }}</p>
-      </div>
-
       <div class="ctx-summary">
         <NeumorphismProgress :model-value="pct" :variant="gaugeVariant" show-label />
         <div class="ctx-summary-stats">

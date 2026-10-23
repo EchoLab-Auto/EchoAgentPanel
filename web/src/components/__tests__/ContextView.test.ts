@@ -85,7 +85,7 @@ describe('ContextView 压缩进度', () => {
     state.connected = true;
     state.contexts = {};
     state.compactions = {};
-    // 快照存在 → 进度条所在的 v-else 分支才会渲染
+    // 快照仅用于常规内容；进度块**不再**依赖它（见「无快照」用例）。
     state.contexts['core-a\u0000s1'] = snapshot as never;
   });
 
@@ -185,12 +185,35 @@ describe('ContextView 压缩进度', () => {
     expect(wrapper.find('.ctx-compaction').exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it('无快照时进度照常显示（进度与快照是两个独立事实）', async () => {
+    // 2026-10 实测：进度块此前被包在 `v-else`（有快照）分支里 ——
+    // ① 压缩期间 Core 重载会话会让快照短暂为 null，进度条随之消失；
+    // ② 无快照时点「压缩」（按钮在头部工具栏，不受快照门控）全程看不到反馈。
+    // 进度是"动作的反馈"，不该被另一个数据源的存在性门控。
+    state.contexts = {}; // 没有快照
+    seed('summarize', 2, 5);
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 's1', core: 'core-a' },
+    });
+
+    // 快照缺失的另一面确实发生了（否则这条测试测不到目标分支）
+    expect(wrapper.find('.ctx-summary').exists()).toBe(false);
+
+    const box = wrapper.find('.ctx-compaction');
+    expect(box.exists(), '无快照时也必须画出进度块').toBe(true);
+    expect(box.text()).toContain('生成摘要');
+    expect(box.text()).toContain('2/5 组');
+    wrapper.unmount();
+  });
 });
 
 describe('ContextView 清理历史记忆（会话范围契约）', () => {
   beforeEach(() => {
     vi.mocked(sendCommand).mockClear();
     state.contexts = {};
+    // 残留的进行态会把按钮置灰（点击静默无效）——用例之间必须清干净。
+    state.compactions = {};
     state.connected = true;
   });
 
@@ -241,6 +264,8 @@ describe('ContextView 归档（会话范围契约）', () => {
     vi.mocked(confirmDialog).mockClear();
     vi.mocked(confirmDialog).mockResolvedValue(true);
     state.contexts = {};
+    // 同上：`compacting` 为真时「归档」按钮 disabled，trigger 不会触发点击。
+    state.compactions = {};
     state.connected = true;
   });
 
