@@ -62,23 +62,38 @@ function seedProfiles() {
 describe('ApiSettings 快捷模板', () => {
   beforeEach(seedApi);
 
-  it('模板列表：DeepSeek 合并 + Kimi/中转站预设', async () => {
+  it('模板列表：DeepSeek 合并 + Kimi/中转站/OpenCode 预设', async () => {
     const wrapper = mount(ApiSettings);
     // 概览态 → 打开「添加 API 服务商」表单
     await wrapper.find('.profile-add-row button').trigger('click');
 
     const items = wrapper.findAll('.template-item');
-    expect(items.length).toBe(6);
+    expect(items.length).toBe(8);
     const labels = items.map((i) => i.find('.template-name').text());
     expect(labels).toEqual([
       'DeepSeek',
       'Kimi For Coding',
       '中转站（OpenAI 兼容）',
+      'OpenCode Go（订阅）',
+      'OpenCode Zen（按量）',
       'OpenAI',
       'Anthropic',
       'Ollama（本地）',
     ]);
   });
+
+  it('点击 OpenCode Go 预设：Go 端点 + kimi-k3', async () => {
+    const wrapper = mount(ApiSettings);
+    await wrapper.find('.profile-add-row button').trigger('click');
+    await wrapper.findAll('.template-item')[3].trigger('click');
+
+    const inputs = wrapper.findAll('input');
+    const modelInput = inputs[1].element as HTMLInputElement;
+    const baseUrlInput = inputs[2].element as HTMLInputElement;
+    expect(modelInput.value).toBe('kimi-k3');
+    expect(baseUrlInput.value).toBe('https://opencode.ai/inference/go/openai/v1');
+  });
+
 
   it('点击 Kimi 预设：Anthropic 兼容端点 + k3 + high 档位', async () => {
     const wrapper = mount(ApiSettings);

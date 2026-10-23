@@ -73,7 +73,6 @@ const TEMPLATES: ApiTemplate[] = [
     model: 'k3',
     thinking: 'enabled',
     reasoning: 'high',
-    hint: 'Kimi Code 订阅（Anthropic 兼容）；Key 在 www.kimi.com/code/console 创建',
   },
   {
     key: 'third-party',
@@ -84,6 +83,26 @@ const TEMPLATES: ApiTemplate[] = [
     thinking: 'enabled',
     reasoning: 'max',
     hint: '填中转站 /v1 地址与模型名（one-api / new-api 等）',
+  },
+  {
+    key: 'opencode-go',
+    label: 'OpenCode Go（订阅）',
+    provider: 'opencode-go',
+    base_url: 'https://opencode.ai/inference/go/openai/v1',
+    model: 'kimi-k3',
+    thinking: 'enabled',
+    reasoning: 'max',
+    hint: 'Go $10/月订阅；Key 在 opencode.ai Console 创建（oc_sk_…）。可选模型：kimi-k3 / glm-5.2 / deepseek-v4-pro 等（Chat Completions 形态）',
+  },
+  {
+    key: 'opencode',
+    label: 'OpenCode Zen（按量）',
+    provider: 'opencode',
+    base_url: 'https://opencode.ai/inference/openai/v1',
+    model: 'kimi-k3',
+    thinking: 'enabled',
+    reasoning: 'max',
+    hint: 'Zen 按量付费（$20 起充）；与 Go 共用同一个 Console Key，端点少一层 /go 前缀',
   },
   {
     key: 'openai',
@@ -367,6 +386,19 @@ function applyProviderPreset(value: string | number | (string | number)[] | unde
     model.value = 'k3';
     thinking.value = 'enabled';
     reasoning.value = 'high';
+  } else if (v === 'opencode-go') {
+    // OpenCode Go（订阅）：默认走 Chat Completions 形态；
+    // 想接 Claude Haiku / Qwen 这类只提供 Messages 的模型时，把地址改成
+    // 同前缀下的 /anthropic（后端按结尾自动切客户端）。
+    baseUrl.value = 'https://opencode.ai/inference/go/openai/v1';
+    model.value = 'kimi-k3';
+    thinking.value = 'enabled';
+    reasoning.value = 'max';
+  } else if (v === 'opencode') {
+    baseUrl.value = 'https://opencode.ai/inference/openai/v1';
+    model.value = 'kimi-k3';
+    thinking.value = 'enabled';
+    reasoning.value = 'max';
   }
   // third-party：保留手动输入的 base_url / model，仅切换 provider 名。
 }
@@ -377,10 +409,13 @@ const providerSelectOptions = computed(() => {
     { label: 'DeepSeek', value: 'deepseek' },
     { label: 'OpenAI', value: 'openai' },
     { label: 'Kimi For Coding', value: 'kimi' },
+    { label: 'OpenCode Go（订阅）', value: 'opencode-go' },
+    { label: 'OpenCode Zen（按量）', value: 'opencode' },
     { label: '第三方（OpenAI 兼容）', value: 'third-party' },
   ];
+  const known = ['deepseek', 'openai', 'kimi', 'opencode-go', 'opencode', 'third-party'];
   const current = provider.value;
-  if (current && !['deepseek', 'openai', 'kimi', 'third-party'].includes(current)) {
+  if (current && !known.includes(current)) {
     options.push({ label: `${current}（现有配置）`, value: current });
   }
   return options;
