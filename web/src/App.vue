@@ -25,6 +25,7 @@ import {
   workspacePickIntent,
 } from './workspace';
 import ChatView from './components/ChatView.vue';
+import CompactionIndicator from './components/CompactionIndicator.vue';
 // 首屏瘦身（2026-10 审计修复）：设置视图（3400+ 行，含 5 个子设置页）、
 // Shell 详情与分支弹窗改为按需加载——不进聊天首屏的代码不进首包，
 // vite 自动按 import() 边界分包。
@@ -656,7 +657,12 @@ watch(
 
       <!-- 顶部栏中：连接状态已迁入右侧边栏「连接状态」卡（2026-09-23）——
            面板级信息与业务导航分离；断连提示也放到了最显眼的卡片里。
-           顶栏此段保留为空（布局三段结构不破坏）。 -->
+           现放**压缩/归档进度指示器**（2026-10）：压缩要跑几分钟，而唯一的
+           详细视图「上下文」是个覆盖层——关掉面板就再无反馈。顶栏是唯一
+           在聊天/设置/Shell 三个视图下都常驻的位置。 -->
+      <template #header-center>
+        <CompactionIndicator />
+      </template>
 
       <!-- 顶部栏右：导航 -->
       <template #header-right>

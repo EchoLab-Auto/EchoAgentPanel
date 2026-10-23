@@ -15,7 +15,11 @@ import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
 import PanelIcon from './PanelIcon.vue';
 import LoadHint from './LoadHint.vue';
 import { confirmDialog } from '../confirm';
-import { isCompactionTerminal } from '../protocol';
+import {
+  compactionCountText,
+  compactionPhaseLabel,
+  visibleCompaction,
+} from '../compaction';
 
 const { addToast } = useToast();
 
@@ -222,15 +226,13 @@ async function archiveHistory() {
 //
 // - 进行中：进度条 + 阶段文案 + `done/total`，并把「压缩」「归档」按钮置灰
 //   （重复点击会撞上 Core 的 `compact_lock`，看起来像毫无反应）；
-// - 终态：显示结果，**定时收掉**（`RESULT_VISIBLE_MS`）——否则"已压缩"会
-//   一直挂在面板上，下次压缩前都没法回到正常视图；
-// - 兜底：超过 `STALE_MS` 没有新进度就判为"状态可能已过期"（连接断了/事件
-//   丢了），而不是让进度条永远转下去。
-
-/** 终态文案的保留时长（够读两行，又不至于一直占着）。 */
-const RESULT_VISIBLE_MS = 12_000;
-/** 多久没有新进度就认为"这条进度已经不可信"（单组 LLM 摘要最长约 2–3 分钟）。 */
-const STALE_MS = 5 * 60_000;
+// - 终态：显示结果，**定时收掉**（`COMPACTION_RESULT_VISIBLE_MS`）——否则
+//   "已压缩"会一直挂在面板上，下次压缩前都没法回到正常视图；
+// - 兜底：超过 `COMPACTION_STALE_MS` 没有新进度就判为"状态可能已过期"
+//   （连接断了/事件丢了），而不是让进度条永远转下去。
+//
+// 判定口径住在 `compaction.ts`，与顶栏全局指示器共用同一份——两处各写一份
+// 会让阈值悄悄漂移成"顶栏说在跑、面板说已失败"。
 
 const compactionKey = computed(() => sessionKey(targetCore.value, targetTeamId.value ?? ''));
 const compactionRaw = computed(() => state.compactions[compactionKey.value] ?? null);
@@ -246,54 +248,22 @@ onUnmounted(() => {
 });
 
 /**
- * 当前要展示的压缩状态。
+ * 当前要展示的压缩状态（判定口径见 `compaction.ts::visibleCompaction`）。
  *
- * 三种"不展示"的情形：
- * - 没有记录（从未压缩过）；
- * - 终态且已超过 `RESULT_VISIBLE_MS`（结果读完了）；
- * - 进行中但已超过 `STALE_MS` 没有更新 → 转成一条 `failed` 提示（见下）。
+ * **与快照无关**：压缩期间 Core 重载会话会让快照短暂为 null，进度条不该
+ * 跟着消失——它是动作的反馈，不是上下文内容的一部分。
  */
-const compaction = computed(() => {
-  const run = compactionRaw.value;
-  if (!run) return null;
-  const age = nowTick.value - run.at;
-  if (isCompactionTerminal(run.phase)) {
-    return age <= RESULT_VISIBLE_MS ? run : null;
-  }
-  if (age > STALE_MS) {
-    // 断线/丢事件的兜底：不能让进度条永远转（用户会以为还在跑）。
-    return {
-      ...run,
-      phase: 'failed' as const,
-      message: '压缩进度已停止更新（连接可能中断）——请刷新后确认结果',
-    };
-  }
-  return run;
-});
-
+const compactionView = computed(() => visibleCompaction(compactionRaw.value, nowTick.value));
+const compaction = computed(() => compactionView.value?.run ?? null);
 /** 是否正在跑（据此禁用「压缩」「归档」按钮）。 */
-const compacting = computed(
-  () => !!compaction.value && !isCompactionTerminal(compaction.value.phase),
-);
-
+const compacting = computed(() => compactionView.value?.running ?? false);
 /** 进度条百分比；`total === 0`（长度不确定的阶段）返回 0 并画不确定条。 */
-const compactionPct = computed(() => {
-  const run = compaction.value;
-  if (!run || run.total === 0) return 0;
-  return Math.min(100, Math.round((run.done / run.total) * 100));
-});
-
-/** 阶段名（人话）。 */
-const COMPACTION_PHASE_LABEL: Record<string, string> = {
-  preview: '准备',
-  archive: '归档快照',
-  summarize: '生成摘要',
-  apply: '写入历史',
-  done: '完成',
-  failed: '失败',
-};
-const compactionPhaseLabel = computed(() =>
-  compaction.value ? (COMPACTION_PHASE_LABEL[compaction.value.phase] ?? compaction.value.phase) : '',
+const compactionPct = computed(() => compactionView.value?.pct ?? 0);
+const compactionPhaseLabelText = computed(() =>
+  compaction.value ? compactionPhaseLabel(compaction.value.phase) : '',
+);
+const compactionCount = computed(() =>
+  compaction.value ? compactionCountText(compaction.value) : '',
 );
 
 /** 进度条配色：失败红、完成绿、其余主色。 */
@@ -302,15 +272,6 @@ const compactionVariant = computed(() => {
   if (phase === 'failed') return 'error' as const;
   if (phase === 'done') return 'success' as const;
   return 'primary' as const;
-});
-
-/** 计数文案：`3/7 组`；长度不确定时为会话数或空。 */
-const compactionCountText = computed(() => {
-  const run = compaction.value;
-  if (!run) return '';
-  if (run.total > 0) return `${run.done}/${run.total} 组`;
-  if (run.sessions > 0) return `共 ${run.sessions} 组`;
-  return '';
 });
 
 // 压缩是**全人格**操作（Core 按会话独立分组摘要）——文案如实描述，
@@ -394,9 +355,9 @@ async function compactHistory() {
       aria-live="polite"
     >
       <div class="ctx-compaction-head">
-        <span class="ctx-compaction-phase">{{ compactionPhaseLabel }}</span>
-        <span v-if="compactionCountText" class="ctx-compaction-count">
-          {{ compactionCountText }}
+        <span class="ctx-compaction-phase">{{ compactionPhaseLabelText }}</span>
+        <span v-if="compactionCount" class="ctx-compaction-count">
+          {{ compactionCount }}
         </span>
         <!-- 只在**长度确定**的阶段显示百分比：不确定阶段（如"正在计算压缩
              计划…"）写"0%"是误导，进度条本身已经表达了"还在跑"。 -->

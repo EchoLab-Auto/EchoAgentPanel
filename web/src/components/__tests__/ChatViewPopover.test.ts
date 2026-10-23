@@ -14,6 +14,7 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import { defineComponent, h, nextTick } from 'vue';
 import ChatView from '../ChatView.vue';
 import { state } from '../../store';
+import { entryOverlay } from '../../overlays';
 
 const WorkspacePanelStub = defineComponent({
   name: 'WorkspacePanel',
@@ -49,6 +50,10 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = null;
   document.body.innerHTML = '';
+  // `entryOverlay` 是**模块级**共享状态（顶栏进度指示器也要能打开「上下文」
+  // ——2026-10 从组件内 ref 提出去）：不重置就会串到下一个用例，表现为
+  // "点击打开"变成"点击关闭"，断言 1 个覆盖面板却拿到 0。
+  entryOverlay.value = null;
 });
 
 describe('ChatView 入口弹层（PanelPopover）', () => {

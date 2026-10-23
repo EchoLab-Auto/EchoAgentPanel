@@ -38,6 +38,7 @@ import SessionOverlay, { type OverlayInset } from './SessionOverlay.vue';
 import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
+import { entryOverlay, type EntryOverlayId } from '../overlays';
 import { railDragEngaged } from '../rail-drag';
 import { claimReasoningAnimation } from '../reasoning-anim';
 import {
@@ -203,15 +204,9 @@ const connected = computed(() => state.connected);
 // 用户要求：「入口行除 Agent 切换以外的弹层统一成一种样式（大小 = 会话消息
 // 区），并且唤起一个就关掉另一个」。互斥不靠「打开前逐个关」——那样每加一个
 // 弹层就要改 N 处；这里只留**一个** id，任何时刻最多一个为真，互斥是结构性的。
-type EntryOverlayId =
-  | 'config'
-  | 'context'
-  | 'checklist'
-  | 'sessions'
-  | 'workspace'
-  | 'instance'
-  | 'tasks';
-const entryOverlay = ref<EntryOverlayId | null>(null);
+//
+// 状态本体住在 `overlays.ts`（2026-10 提出去）：顶栏的压缩进度指示器也要能
+// 打开「上下文」面板，而它与本组件是兄弟——写不了这里的内部 ref。
 
 /**
  * 覆盖面板**打开前**要立刻发出的数据请求（与 chunk 下载并行）。
@@ -232,15 +227,24 @@ function prefetchOverlayData(id: EntryOverlayId): void {
 
 /** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。 */
 function toggleOverlay(id: EntryOverlayId) {
-  const opening = entryOverlay.value !== id;
-  if (opening) prefetchOverlayData(id);
-  entryOverlay.value = opening ? id : null;
+  entryOverlay.value = entryOverlay.value === id ? null : id;
 }
 
 /** 无条件关闭（点面板外 / Esc / 选择后）。 */
 function closeOverlay() {
   entryOverlay.value = null;
 }
+
+// 数据预热改挂在状态变化上（而不是 `toggleOverlay` 里）：`entryOverlay` 现在
+// 是模块级状态，顶栏的进度指示器也能打开「上下文」面板——预热若仍写在本组件
+// 的点击回调里，那条路径就会漏掉（面板打开后才开始拉数据）。
+watch(
+  entryOverlay,
+  (id) => {
+    if (id) prefetchOverlayData(id);
+  },
+  { flush: 'sync' },
+);
 // 入口按钮固定与输入框间距 12px：观察输入框高度变化（auto-resize），
 // bottom = composerHeight + 12(margin) + 12(gap)。
 const composerFloatRef = ref<HTMLElement | null>(null);
