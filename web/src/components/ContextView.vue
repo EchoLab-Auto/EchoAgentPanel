@@ -420,7 +420,11 @@ async function compactHistory() {
           <span v-if="compactionCountText" class="ctx-compaction-count">
             {{ compactionCountText }}
           </span>
-          <span v-if="compacting" class="ctx-compaction-pct">{{ compactionPct }}%</span>
+          <!-- 只在**长度确定**的阶段显示百分比：不确定阶段（如"正在计算压缩
+               计划…"）写"0%"是误导，进度条本身已经表达了"还在跑"。 -->
+          <span v-if="compacting && compaction.total > 0" class="ctx-compaction-pct">
+            {{ compactionPct }}%
+          </span>
         </div>
         <NeumorphismProgress
           v-if="compacting || compaction.phase === 'done'"

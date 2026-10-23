@@ -157,6 +157,19 @@ describe('ContextView 压缩进度', () => {
     wrapper.unmount();
   });
 
+  it('长度不确定的阶段不显示百分比（不写"0%"误导）', async () => {
+    // `total === 0` = 该阶段长度未知（预览/写快照），进度条画不确定态；
+    // 此时写"0%"会让人以为"一点都没动"。
+    seed('preview', 0, 0);
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 's1', core: 'core-a' },
+    });
+    const box = wrapper.find('.ctx-compaction');
+    expect(box.text()).toContain('准备');
+    expect(box.text()).not.toContain('%');
+    wrapper.unmount();
+  });
+
   it('别的 agent 的进度不会串显到本面板', async () => {
     state.compactions['core-a\u0000someone-else'] = {
       phase: 'summarize',
