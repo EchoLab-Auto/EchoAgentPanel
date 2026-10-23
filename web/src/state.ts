@@ -21,6 +21,7 @@ import type {
   ApiMetricsEntry,
   ApiProfileInfo,
   BackendEvent,
+  CompactionPhase,
   ContextBlockInfo,
   ContextMessageInfo,
   SessionInfo,
@@ -302,6 +303,20 @@ export interface BranchTab {
   status: 'running' | 'completed' | 'cancelled' | 'failed';
   finalContent: string | null;
   msgs: BranchMsg[];
+}
+
+/** 一次压缩/归档的进行态（`state.compactions` 的值）。 */
+export interface CompactionRun {
+  /** 阶段（线上契约，见 `protocol.ts::CompactionPhase`）。 */
+  phase: CompactionPhase;
+  done: number;
+  total: number;
+  /** 本次操作涉及的会话数（`summarize` 阶段 `total` 同源）。 */
+  sessions: number;
+  /** Core 给的用户文案（直接显示，不自己拼）。 */
+  message: string;
+  /** 收到这条进度的时间（ms）。用于超时兜底——见 `compactionStale`。 */
+  at: number;
 }
 
 export type AgentPhase = 'thinking' | 'tool' | 'subagent' | 'completed' | 'failed';
@@ -980,6 +995,16 @@ export interface AppState {
    * `sessionKey(core, '')`。
    */
   contexts: Record<string, ContextSnapshotData>;
+  /**
+   * 压缩 / 归档的**进行态**（复合键 `(core, team_id)` → 最近一次进度）。
+   *
+   * 为什么按 (core, team) 存：压缩是 per-persona 的操作，多上游 + 多人格时
+   * A 的压缩进度不该显示在 B 的上下文面板上。键与 `sessionKey` 同构。
+   *
+   * 终态（`done` / `failed`）也留在这里：面板要先显示"已压缩 42 条…"再自己
+   * 决定何时收掉（见 `ContextView`），而不是靠另一条 `Error` 事件猜。
+   */
+  compactions: Record<string, CompactionRun>;
   /** 运行中的临时回复分支（branch_id → tab） */
   branchTabs: Record<string, BranchTab>;
   /**
@@ -1046,6 +1071,7 @@ export function initialState(): AppState {
     shellSessions: [],
     shellTerminals: {},
     contexts: {},
+    compactions: {},
     branchTabs: {},
     teamTimelines: {},
     trunkTeamId: null,
@@ -1536,6 +1562,34 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
           const done = items.filter((item) => item.done).length;
           return { name: list.name, items, done, total: items.length };
         });
+      return state;
+    }
+    case 'CompactionProgress': {
+      const e = (
+        event as {
+          CompactionProgress: {
+            team_id?: string | null;
+            phase: CompactionPhase;
+            done?: number;
+            total?: number;
+            sessions?: number;
+            message: string;
+          };
+        }
+      ).CompactionProgress;
+      const core = evtCore(e);
+      // 按 (core, team) 归档：压缩是 per-persona 操作，A 的进度不该出现在
+      // B 的面板上（与 `contexts` 的复合键同一套理由）。
+      // team_id 缺失（旧 Core / 无人格归属）时落 `sessionKey(core, '')`。
+      const key = sessionKey(core, e.team_id ?? '');
+      state.compactions[key] = {
+        phase: e.phase,
+        done: e.done ?? 0,
+        total: e.total ?? 0,
+        sessions: e.sessions ?? 0,
+        message: e.message,
+        at: Date.now(),
+      };
       return state;
     }
     case 'ContextSnapshot': {

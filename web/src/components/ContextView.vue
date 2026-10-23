@@ -15,6 +15,7 @@ import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
 import PanelIcon from './PanelIcon.vue';
 import LoadHint from './LoadHint.vue';
 import { confirmDialog } from '../confirm';
+import { isCompactionTerminal } from '../protocol';
 
 const { addToast } = useToast();
 
@@ -213,6 +214,105 @@ async function archiveHistory() {
   });
 }
 
+// ── 压缩 / 归档进度（2026-10）────────────────────────────────────────────
+//
+// Core 在 `CompactHistory` / `ArchiveHistory` 执行期间持续推送
+// `CompactionProgress`（`preview → archive → summarize → apply → done`），
+// 按 `(core, team)` 归档到 `state.compactions`。这里只负责**展示**：
+//
+// - 进行中：进度条 + 阶段文案 + `done/total`，并把「压缩」「归档」按钮置灰
+//   （重复点击会撞上 Core 的 `compact_lock`，看起来像毫无反应）；
+// - 终态：显示结果，**定时收掉**（`RESULT_VISIBLE_MS`）——否则"已压缩"会
+//   一直挂在面板上，下次压缩前都没法回到正常视图；
+// - 兜底：超过 `STALE_MS` 没有新进度就判为"状态可能已过期"（连接断了/事件
+//   丢了），而不是让进度条永远转下去。
+
+/** 终态文案的保留时长（够读两行，又不至于一直占着）。 */
+const RESULT_VISIBLE_MS = 12_000;
+/** 多久没有新进度就认为"这条进度已经不可信"（单组 LLM 摘要最长约 2–3 分钟）。 */
+const STALE_MS = 5 * 60_000;
+
+const compactionKey = computed(() => sessionKey(targetCore.value, targetTeamId.value ?? ''));
+const compactionRaw = computed(() => state.compactions[compactionKey.value] ?? null);
+
+/** 每秒推进一次的"现在"，用于判定终态过期与进行中超时（不需要精确）。 */
+const nowTick = ref(Date.now());
+let nowTimer: number | undefined;
+onMounted(() => {
+  nowTimer = window.setInterval(() => (nowTick.value = Date.now()), 1_000);
+});
+onUnmounted(() => {
+  if (nowTimer) window.clearInterval(nowTimer);
+});
+
+/**
+ * 当前要展示的压缩状态。
+ *
+ * 三种"不展示"的情形：
+ * - 没有记录（从未压缩过）；
+ * - 终态且已超过 `RESULT_VISIBLE_MS`（结果读完了）；
+ * - 进行中但已超过 `STALE_MS` 没有更新 → 转成一条 `failed` 提示（见下）。
+ */
+const compaction = computed(() => {
+  const run = compactionRaw.value;
+  if (!run) return null;
+  const age = nowTick.value - run.at;
+  if (isCompactionTerminal(run.phase)) {
+    return age <= RESULT_VISIBLE_MS ? run : null;
+  }
+  if (age > STALE_MS) {
+    // 断线/丢事件的兜底：不能让进度条永远转（用户会以为还在跑）。
+    return {
+      ...run,
+      phase: 'failed' as const,
+      message: '压缩进度已停止更新（连接可能中断）——请刷新后确认结果',
+    };
+  }
+  return run;
+});
+
+/** 是否正在跑（据此禁用「压缩」「归档」按钮）。 */
+const compacting = computed(
+  () => !!compaction.value && !isCompactionTerminal(compaction.value.phase),
+);
+
+/** 进度条百分比；`total === 0`（长度不确定的阶段）返回 0 并画不确定条。 */
+const compactionPct = computed(() => {
+  const run = compaction.value;
+  if (!run || run.total === 0) return 0;
+  return Math.min(100, Math.round((run.done / run.total) * 100));
+});
+
+/** 阶段名（人话）。 */
+const COMPACTION_PHASE_LABEL: Record<string, string> = {
+  preview: '准备',
+  archive: '归档快照',
+  summarize: '生成摘要',
+  apply: '写入历史',
+  done: '完成',
+  failed: '失败',
+};
+const compactionPhaseLabel = computed(() =>
+  compaction.value ? (COMPACTION_PHASE_LABEL[compaction.value.phase] ?? compaction.value.phase) : '',
+);
+
+/** 进度条配色：失败红、完成绿、其余主色。 */
+const compactionVariant = computed(() => {
+  const phase = compaction.value?.phase;
+  if (phase === 'failed') return 'error' as const;
+  if (phase === 'done') return 'success' as const;
+  return 'primary' as const;
+});
+
+/** 计数文案：`3/7 组`；长度不确定时为会话数或空。 */
+const compactionCountText = computed(() => {
+  const run = compaction.value;
+  if (!run) return '';
+  if (run.total > 0) return `${run.done}/${run.total} 组`;
+  if (run.sessions > 0) return `共 ${run.sessions} 组`;
+  return '';
+});
+
 // 压缩是**全人格**操作（Core 按会话独立分组摘要）——文案如实描述，
 // 不再写「压缩当前会话历史」（误导用户以为只影响当前会话）。
 async function compactHistory() {
@@ -247,8 +347,24 @@ async function compactHistory() {
       >
         {{ confirmClear ? '确认清理？不可恢复' : '清理历史记忆' }}
       </button>
-      <NeumorphismButton variant="glass" size="small" @click="archiveHistory">归档</NeumorphismButton>
-      <NeumorphismButton variant="glass" size="small" @click="compactHistory">压缩</NeumorphismButton>
+      <NeumorphismButton
+        variant="glass"
+        size="small"
+        :disabled="compacting"
+        :title="compacting ? '正在压缩/归档中，请等待完成' : '归档当前会话的历史快照'"
+        @click="archiveHistory"
+      >
+        归档
+      </NeumorphismButton>
+      <NeumorphismButton
+        variant="glass"
+        size="small"
+        :disabled="compacting"
+        :title="compacting ? '正在压缩/归档中，请等待完成' : '压缩该人格全部会话的历史'"
+        @click="compactHistory"
+      >
+        压缩
+      </NeumorphismButton>
       <NeumorphismButton variant="glass" size="small" title="重新发现技能目录中的 SKILL.md 并刷新注入" @click="reloadSkills">重载技能</NeumorphismButton>
       <NeumorphismButton
         variant="glass"
@@ -286,6 +402,36 @@ async function compactHistory() {
       </span>
     </div>
     <template v-else>
+      <!-- 压缩 / 归档进度：放在最上面——它是**动作的反馈**，用户点完按钮
+           第一眼就要看到；塞在底部与"暂无快照"的提示同级只会被忽略。 -->
+      <div
+        v-if="compaction"
+        class="ctx-compaction"
+        :class="{
+          'ctx-compaction--running': compacting,
+          'ctx-compaction--done': compaction.phase === 'done',
+          'ctx-compaction--failed': compaction.phase === 'failed',
+        }"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="ctx-compaction-head">
+          <span class="ctx-compaction-phase">{{ compactionPhaseLabel }}</span>
+          <span v-if="compactionCountText" class="ctx-compaction-count">
+            {{ compactionCountText }}
+          </span>
+          <span v-if="compacting" class="ctx-compaction-pct">{{ compactionPct }}%</span>
+        </div>
+        <NeumorphismProgress
+          v-if="compacting || compaction.phase === 'done'"
+          :model-value="compactionPct"
+          :variant="compactionVariant"
+          :indeterminate="compacting && compaction.total === 0"
+          size="small"
+        />
+        <p class="ctx-compaction-msg">{{ compaction.message }}</p>
+      </div>
+
       <div class="ctx-summary">
         <NeumorphismProgress :model-value="pct" :variant="gaugeVariant" show-label />
         <div class="ctx-summary-stats">
@@ -378,6 +524,57 @@ async function compactHistory() {
 </template>
 
 <style scoped>
+/* ── 压缩 / 归档进度条（2026-10）─────────────────────────────────────────
+   位置在面板最上方（模板里排在 ctx-summary 之前）：它是"点完按钮之后发生了什么"
+   的唯一反馈，必须在首屏就能看到。
+   三态用左边框与底色区分，不加图标——同一套玻璃配方里塞图标会显得比正文还重。 */
+.ctx-compaction {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--nm-border-color);
+  border-left: 3px solid var(--panel-accent, #546200);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
+}
+.ctx-compaction--done {
+  border-left-color: var(--panel-ok, #2ea46e);
+}
+.ctx-compaction--failed {
+  border-left-color: var(--nm-color-error, #d9534f);
+}
+.ctx-compaction-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.ctx-compaction-phase {
+  font-weight: 700;
+  color: var(--nm-text-primary);
+}
+.ctx-compaction-count {
+  color: var(--nm-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+/* 百分比推到最右（`margin-left: auto` 比 justify-content 更稳：中间的计数
+   文案在某些阶段为空，用 space-between 会让百分比忽左忽右）。 */
+.ctx-compaction-pct {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--nm-text-primary);
+}
+.ctx-compaction-msg {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--nm-text-secondary);
+  /* 摘要路径可能很长（归档文件路径）：折行而不是撑破面板 */
+  overflow-wrap: anywhere;
+}
+
 /* 无快照时的三态容器：连接中 / 骨架 / 超时（text-align 与间距） */
 .ctx-state {
   display: flex;

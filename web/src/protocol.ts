@@ -698,6 +698,24 @@ export type BackendCommand =
 
 // ── BackendEvent（外部标签枚举）────────────────────────────────────────────
 
+/**
+ * 压缩 / 归档的阶段。与 Core 的 `CompactionPhase` 一一对应
+ * （`echo-session/src/compaction.rs::CompactionPhase::as_str`）——
+ * 是**线上契约**，改名要两端同步。
+ */
+export type CompactionPhase =
+  | 'preview'
+  | 'archive'
+  | 'summarize'
+  | 'apply'
+  | 'done'
+  | 'failed';
+
+/** 终态：面板据此停止转圈（`apply` 之后还有 `done`，不能提前收）。 */
+export function isCompactionTerminal(phase: CompactionPhase): boolean {
+  return phase === 'done' || phase === 'failed';
+}
+
 export type BackendEvent =
   | { InstanceStateChanged: { instance_name: string; connected: boolean; self_id: string | null } }
   | {
@@ -785,6 +803,23 @@ export type BackendEvent =
         revision?: string | null;
         message?: string | null;
         updated_at?: string | null;
+      };
+    }
+  // 压缩 / 归档的**进度**（Core 在 `CompactHistory` / `ArchiveHistory` 执行
+  // 期间推送，可能持续数分钟）。`phase` 走线固定：
+  // `preview → archive → summarize → apply → done`（失败时最后一步 `failed`）；
+  // `total === 0` 表示该阶段长度不确定（画不确定进度条），否则画 `done/total`。
+  //
+  // 注：注释写在 `| {` **之前**，不要在 arm 内部加注释——`protocol-sync`
+  // 测试的变体提取正则假设名字紧跟 `{`（57 个 arm 全部如此）。
+  | {
+      CompactionProgress: {
+        team_id?: string | null;
+        phase: CompactionPhase;
+        done: number;
+        total: number;
+        sessions: number;
+        message: string;
       };
     }
   | {

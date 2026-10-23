@@ -60,6 +60,120 @@ async function clickArchive(wrapper: ReturnType<typeof mount>) {
   await button!.trigger('click');
 }
 
+/**
+ * 压缩 / 归档进度条（2026-10）。
+ *
+ * 契约：Core 推 `CompactionProgress` → 面板**在首屏可见处**画出阶段与
+ * `done/total`；进行中禁用两个动作按钮（重复点击会撞 Core 的 compact_lock，
+ * 看起来像毫无响应）；终态定时收掉；进度停更超时后转成失败提示（不能让
+ * 进度条永远转下去）。
+ */
+describe('ContextView 压缩进度', () => {
+  // 复合键是 `core\u0000id`（见 keys.ts::scopedKey），不是 `::`——写错了
+  // 这条测试只会"恰好通过"（取不到记录 → 不渲染），什么都测不到。
+  const key = 'core-a\u0000alix';
+  const snapshot = {
+    session_id: 's1',
+    messages: [],
+    blocks: [],
+    total_tokens: 0,
+    limit_tokens: 1000,
+  };
+
+  beforeEach(() => {
+    vi.mocked(sendCommand).mockClear();
+    state.connected = true;
+    state.contexts = {};
+    state.compactions = {};
+    // 快照存在 → 进度条所在的 v-else 分支才会渲染
+    state.contexts['core-a\u0000s1'] = snapshot as never;
+  });
+
+  function seed(phase: string, done = 0, total = 0) {
+    state.compactions[key] = {
+      phase: phase as never,
+      done,
+      total,
+      sessions: total,
+      message: `阶段 ${phase}`,
+      at: Date.now(),
+    };
+  }
+
+  it('进行中：显示阶段、3/7 组与百分比', async () => {
+    seed('summarize', 3, 7);
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 's1', core: 'core-a' },
+    });
+    const box = wrapper.find('.ctx-compaction');
+    expect(box.exists(), '应渲染压缩进度块').toBe(true);
+    expect(box.text()).toContain('生成摘要');
+    expect(box.text()).toContain('3/7 组');
+    expect(box.text()).toContain('43%');
+    wrapper.unmount();
+  });
+
+  it('进行中：禁用「归档」与「压缩」（避免撞 Core 的 compact_lock）', async () => {
+    seed('summarize', 1, 4);
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 's1', core: 'core-a' },
+    });
+    const archive = wrapper.findAll('button').find((b) => b.text().includes('归档'));
+    const compact = wrapper.findAll('button').find((b) => b.text().includes('压缩'));
+    expect(archive!.attributes('disabled')).toBeDefined();
+    expect(compact!.attributes('disabled')).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('终态：显示结果且不再禁用按钮（可以再压一次）', async () => {
+    seed('done', 5, 5);
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 's1', core: 'core-a' },
+    });
+    const box = wrapper.find('.ctx-compaction');
+    expect(box.exists()).toBe(true);
+    expect(box.classes()).toContain('ctx-compaction--done');
+    const compact = wrapper.findAll('button').find((b) => b.text().includes('压缩'));
+    expect(compact!.attributes('disabled')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('进度停更超过阈值：转成失败提示（不让进度条永远转）', async () => {
+    // 5 分钟前的一条"生成摘要中"，之后再无事件（断线/丢帧）。
+    state.compactions[key] = {
+      phase: 'summarize',
+      done: 2,
+      total: 9,
+      sessions: 9,
+      message: '正在生成摘要 2/9…',
+      at: Date.now() - 6 * 60_000,
+    };
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 's1', core: 'core-a' },
+    });
+    const box = wrapper.find('.ctx-compaction');
+    expect(box.classes()).toContain('ctx-compaction--failed');
+    expect(box.text()).toContain('进度已停止更新');
+    wrapper.unmount();
+  });
+
+  it('别的 agent 的进度不会串显到本面板', async () => {
+    state.compactions['core-a\u0000someone-else'] = {
+      phase: 'summarize',
+      done: 1,
+      total: 2,
+      sessions: 2,
+      message: '别人的压缩',
+      at: Date.now(),
+    };
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 's1', core: 'core-a' },
+    });
+    expect(wrapper.find('.ctx-compaction').exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
 describe('ContextView 清理历史记忆（会话范围契约）', () => {
   beforeEach(() => {
     vi.mocked(sendCommand).mockClear();

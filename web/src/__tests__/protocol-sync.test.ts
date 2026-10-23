@@ -87,8 +87,11 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // → 57（2026-11 联邦自动发现 P2：+FederationDirectory——应答节点报出
     //   自己的直接邻居（node_id/名称/两套地址/在线/panel_ready）；Panel 汇总
     //   各节点目录得到全网拓扑，并用 Panel 身份密钥逐个补接入点）。
+    // → 58（2026-10 压缩进度：+CompactionProgress——此前压缩只在开始/结束各
+    //   发一句话（还借用 `Error`），中间几分钟面板零反馈；现在带阶段与
+    //   done/total，面板画进度条）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(57);
+    expect(variants.size).toBe(58);
   });
 
   it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {
