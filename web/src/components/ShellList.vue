@@ -7,7 +7,7 @@ import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButt
 import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
 import { sessionKey } from '../keys';
-import { regionLabel } from '../state';
+import { coreDisplay } from '../state';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 
@@ -84,12 +84,15 @@ onUnmounted(() => releasePending('shell:sessions'));
     <div v-for="session in sessions" :key="sessionKey(session.core, session.session_id)" class="shell-row">
       <span class="shell-row__dot" />
       <span class="shell-row__id">{{ session.session_id }}</span>
+      <!-- 徽标主名 = 上游**配置名**（与设置页、会话列表徽标、命令路由键一致）；
+           区域名放 title 副注——行内空间只有几十像素，塞第二个名字会把
+           session_id 挤掉（见 `state.ts::coreDisplay`）。 -->
       <span
         v-if="showRegion && session.core"
         class="shell-row__core"
-        :title="`所属区域：${regionLabel(state, session.core)}`"
+        :title="coreDisplay(state, session.core).title"
       >
-        {{ regionLabel(state, session.core) }}
+        {{ coreDisplay(state, session.core).name }}
       </span>
       <span class="shell-row__meta" :title="session.workdir">
         {{ session.workdir }} · {{ session.exec_count }} 条

@@ -201,6 +201,29 @@ describe('SettingsView · 智能体 × 多 Core', () => {
     });
   });
 
+  it('运行区域下拉的选项 = 配置名 + 区域副注（与设置页/路由键同一口径）', async () => {
+    // 2026-10 用户报告：同一台 Core 在设置页写 `core`、会话徽标显示 `core`、
+    // 连接状态却显示 `evence-4090-24` —— 三个名字对不上。统一走
+    // `state.ts::coreDisplay()` 后，下拉这种有空间的地方给**双名**
+    // （`配置名 · 区域 区域名`），一眼能同时认出"键"与"那台机器"。
+    state.regions = {
+      'core-a': { id: 'node-a', name: 'evence-4090-24' },
+      'core-b': { id: 'node-b', name: 'ubuntu24' },
+    };
+    const wrapper = mount(SettingsView);
+    await wrapper.findAll('.caps-nav-item').find((n) => n.text().includes('智能体'))!.trigger('click');
+    await buttonByText(wrapper, '新建智能体')!.trigger('click');
+
+    const select = wrapper.findComponent({ name: 'NeumorphismSelect' });
+    const options = (select.props('options') ?? []) as Array<{ label: string; value: string }>;
+    const labels = options.map((o) => o.label);
+    // 主名 = 配置名，副注 = 区域名
+    expect(labels).toContain('core-a · 区域 evence-4090-24');
+    expect(labels).toContain('core-b · 区域 ubuntu24');
+    // value 仍是路由键（下发的 core 参数不能变成显示名）
+    expect(options.map((o) => o.value)).toEqual(['core-a', 'core-b']);
+  });
+
   it('编辑时改运行区域 = 迁移：目标区域 SaveTeam（带表单内容）+ 源区域 DeleteTeam', async () => {
     const wrapper = await openTeam('Alix', 'core-b');
     const select = wrapper.findComponent({ name: 'NeumorphismSelect' });

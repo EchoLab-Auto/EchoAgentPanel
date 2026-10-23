@@ -54,14 +54,40 @@ describe('ConnectionStatusCard 上游 Core 状态', () => {
     expect(rows[1].text()).toContain('认证失败');
   });
 
-  it('区域行展示「运行区域」展示名（region_name）', () => {
+  it('上游行主名用**配置名**（= 会话徽标 = 命令路由键），不是区域名', () => {
+    // 2026-10 用户报告：连接状态显示的是 region_name（「本机」），而设置页里
+    // 配的是 `core`——同一个上游三个名字对不上，排查时无法对应。
     state.regions = {
       core: { id: 'node-1', name: '本机' },
       ai_station: { id: 'node-2', name: 'AI 站' },
     };
     const wrapper = mount(ConnectionStatusCard);
     const rows = wrapper.findAll('.conn-row--core');
-    expect(rows[0].text()).toContain('本机');
-    expect(rows[1].text()).toContain('AI 站');
+    // 主名必须是配置名
+    expect(rows[0].find('.conn-row__label').text()).toContain('core');
+    expect(rows[1].find('.conn-row__label').text()).toContain('ai_station');
+    // 区域名作为副注保留（两者不同 → 显示）
+    expect(rows[0].find('.conn-row__region').text()).toBe('本机');
+    expect(rows[1].find('.conn-row__region').text()).toBe('AI 站');
+  });
+
+  it('区域名与配置名相同时不重复显示（避免一行两个名字）', () => {
+    // region_name 缺省时 Core 会回落成上游名——此时副注没有信息量。
+    state.regions = { core: { id: 'node-1', name: 'core' } };
+    state.upstreams = [upstream({ name: 'core' })];
+    const wrapper = mount(ConnectionStatusCard);
+    const row = wrapper.find('.conn-row--core');
+    expect(row.find('.conn-row__region').exists()).toBe(false);
+    expect(row.find('.conn-row__label').text()).toBe('core');
+  });
+
+  it('悬停详情依次给出配置名 / 区域名 / 地址或最近错误', () => {
+    state.regions = { core: { id: 'node-1', name: '本机' } };
+    state.upstreams = [upstream({ name: 'core', url: 'ws://127.0.0.1:3132' })];
+    const wrapper = mount(ConnectionStatusCard);
+    const title = wrapper.find('.conn-row--core').attributes('title') ?? '';
+    expect(title).toContain('core');
+    expect(title).toContain('区域 本机');
+    expect(title).toContain('ws://127.0.0.1:3132');
   });
 });

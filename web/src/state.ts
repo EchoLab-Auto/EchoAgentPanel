@@ -54,9 +54,48 @@ function failover_enabled_initial(): boolean {
   }
 }
 
-export function regionLabel(state: AppState, region: string | null | undefined): string {
-  if (!region) return '本机';
-  return state.regions[region]?.name || region;
+/** 上游（Core）的展示口径。 */
+export interface CoreDisplay {
+  /** 配置名（`[cores].name`）：会话徽标与命令路由键同源，**永远是主名**。 */
+  name: string;
+  /**
+   * 区域名（Core 载荷的 `region_name`，如「本机」「AI 站」）。
+   * 与配置名相同（或尚未学到）时为 `null` —— 副注只在有信息量时出现。
+   */
+  region: string | null;
+  /** 悬停文案：`配置名 · 区域 X`（区域与主名相同时省略后半段）。 */
+  title: string;
+}
+
+/**
+ * 上游的**统一展示口径：配置名 + 区域副注**（2026-10 用户报告修复）。
+ *
+ * 背景：同一台 Core 在三个地方各有一个名字，且互相看不出关系——
+ * - **配置名**（`[cores].name`）：用户在设置页填的，也是会话列表的 core 徽标、
+ *   以及命令信封 `{core: "<name>"}` 里的**路由键**；
+ * - **区域名**（`region_name`）：那台机器自称的名字（如 `evence-4090-24`）。
+ *
+ * 此前「连接状态」卡与 Shell 视图的徽标用的是 `regionLabel()`（区域名），
+ * 于是设置页写 `core`、会话徽标显示 `core`、连接状态却显示 `evence-4090-24`
+ * ——排查时无法把它们对应起来。
+ *
+ * 现在所有"展示一个上游"的地方都走本函数：**主名恒为配置名**（它是键，必须
+ * 与路由一致），区域名作副注（人对那台机器的称呼，仍有信息量，但不抢主名）。
+ */
+export function coreDisplay(
+  state: AppState,
+  core: string | null | undefined,
+): CoreDisplay {
+  if (!core) return { name: '本机', region: null, title: '本机' };
+  const region = state.regions[core]?.name || null;
+  // 区域名与配置名相同 = 没有额外信息（Core 侧 `region_name` 缺省时会回落成
+  // 上游名，这种部署占多数）——副注不显示，免得一行出现两个一样的名字。
+  const distinct = region != null && region !== core;
+  return {
+    name: core,
+    region: distinct ? region : null,
+    title: distinct ? `${core} · 区域 ${region}` : core,
+  };
 }
 
 /** 某 team id 出现在哪些 core 上（去重；null = 单上游/未标注）。 */

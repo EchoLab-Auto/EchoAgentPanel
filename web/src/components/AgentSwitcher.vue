@@ -8,7 +8,7 @@ import { computed, ref } from 'vue';
 import NeumorphismStatusDot from '@echolab-auto/ui-frame/components/NeumorphismStatusDot';
 import PanelPopover from './PanelPopover.vue';
 import { state } from '../store';
-import { regionLabel } from '../state';
+import { coreDisplay } from '../state';
 
 const props = defineProps<{ activeTeamId: string | null }>();
 const emit = defineEmits<{ select: [id: string | null, core: string | null] }>();
@@ -98,8 +98,15 @@ function select(id: string, core: string | null) {
       </span>
       <span v-else class="agent-card__avatar agent-card__avatar--off">?</span>
       <span class="agent-card__name">{{ current?.name ?? '未配置' }}</span>
-      <span v-if="showRegion(current?.core)" class="agent-card__region">
-        {{ regionLabel(state, current?.core) }}
+      <!-- 统一口径：主名 = 上游**配置名**（与设置页 / 会话徽标 / 命令路由键
+           一致），区域名作 title 副注——卡片徽标只有 10px 字号，塞不下第二
+           个名字（见 `state.ts::coreDisplay`）。 -->
+      <span
+        v-if="showRegion(current?.core)"
+        class="agent-card__region"
+        :title="coreDisplay(state, current?.core).title"
+      >
+        {{ coreDisplay(state, current?.core).name }}
       </span>
       <span v-if="currentModel(current)" class="agent-card__model" :title="currentModel(current)!">
         {{ currentModel(current) }}
@@ -150,8 +157,12 @@ function select(id: string, core: string | null) {
             {{ avatarText(team.name) }}
           </span>
           <span class="agent-menu__name">{{ team.name }}</span>
-          <span v-if="showRegion(team.core)" class="agent-menu__core">
-            {{ regionLabel(state, team.core) }}
+          <span
+            v-if="showRegion(team.core)"
+            class="agent-menu__core"
+            :title="coreDisplay(state, team.core).title"
+          >
+            {{ coreDisplay(state, team.core).name }}
           </span>
           <span v-if="teamModel(team)" class="agent-menu__model" :title="teamModel(team)!">
             {{ teamModel(team) }}

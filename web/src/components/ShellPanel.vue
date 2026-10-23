@@ -7,7 +7,7 @@ import { state } from '../store';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import { sessionKey } from '../keys';
-import { regionLabel } from '../state';
+import { coreDisplay } from '../state';
 import LoadHint from './LoadHint.vue';
 
 /** 详情视图（2026-09-19 起）：`sessionId` + 所属 `core` 必填，只展示该会话的终端。
@@ -114,8 +114,10 @@ watch(shellTailSignature, () => {
       <div class="shell-head__text">
         <h2>
           Shell · {{ session?.session_id ?? props.sessionId }}
-          <span v-if="showRegion" class="shell-head__core" :title="`所属区域：${regionLabel(state, targetCore)}`">
-            {{ regionLabel(state, targetCore) }}
+          <!-- 同 ShellList：主名 = 上游配置名，区域名作 title 副注
+               （见 `state.ts::coreDisplay`）。 -->
+          <span v-if="showRegion" class="shell-head__core" :title="coreDisplay(state, targetCore).title">
+            {{ coreDisplay(state, targetCore).name }}
           </span>
         </h2>
         <p class="shell-head__sub">

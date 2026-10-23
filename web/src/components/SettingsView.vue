@@ -41,7 +41,7 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import PanelIcon from './PanelIcon.vue';
 import { confirmDialog } from '../confirm';
 import { state } from '../store';
-import { regionLabel, type PluginEventEntry } from '../state';
+import { coreDisplay, type PluginEventEntry } from '../state';
 import { moveAgentToRegion } from '../agent-placement';
 import {
   PACKAGE_DISPLAY_NAMES,
@@ -1186,8 +1186,11 @@ async function doMoveRegion() {
   const team = selectedTeam.value;
   const target = moveTargetRegion.value || otherRegions.value[0] || '';
   if (!team || !target) return;
-  const from = regionLabel(state, team.core);
-  const to = regionLabel(state, target);
+  // 统一口径：用**配置名**（`[cores].name`）——它是命令路由键，也是设置页里
+  // 用户自己填的值；区域名（`evence-4090-24` 之类）放 `coreDisplay().title`
+  // 里，在需要时悬停可见（见 `state.ts::coreDisplay`）。
+  const from = coreDisplay(state, team.core).name;
+  const to = coreDisplay(state, target).name;
   const ok = await confirmDialog(
     `把「${team.name}」的运行区域从「${from}」改为「${to}」？\n\n` +
       `· 在目标区域创建/更新该 agent\n` +
@@ -1393,7 +1396,7 @@ const teamBasicSummary = computed(() => {
   }`;
   // 多区域部署下把区域并进摘要：「这个 agent 在哪台机器上」是一等信息，
   // 不该只藏在折叠分区里的选择器里（列表行同样带徽标，见 teamList 渲染）。
-  return multiRegion.value ? `${base} · ${regionLabel(state, teamFormCore.value)}` : base;
+  return multiRegion.value ? `${base} · ${coreDisplay(state, teamFormCore.value).name}` : base;
 });
 /** 分区摘要：提示词（自定义/继承 + 系统技能数） */
 const teamPromptSummary = computed(() => {
@@ -1529,10 +1532,10 @@ async function saveTeam() {
   const moving = teamFormIsEdit.value && !!selectedTeam.value && (target ?? null) !== from;
   if (moving) {
     const ok = await confirmDialog(
-      `把「${teamFormName.value.trim() || id}」的运行区域从「${regionLabel(state, from)}」` +
-        `改为「${regionLabel(state, target)}」？\n\n` +
+      `把「${teamFormName.value.trim() || id}」的运行区域从「${coreDisplay(state, from).name}」` +
+        `改为「${coreDisplay(state, target).name}」？\n\n` +
         `· 在目标区域创建/更新该智能体（保存当前表单内容）\n` +
-        `· 从「${regionLabel(state, from)}」删除\n\n` +
+        `· 从「${coreDisplay(state, from).name}」删除\n\n` +
         `注意：会话历史仍留在原区域，不会随迁移搬走。`,
       { title: '迁移运行区域', danger: true, confirmText: '迁移并保存' },
     );
@@ -1553,7 +1556,7 @@ async function deleteTeam(team: TeamInfo) {
   // 之后再无入口切过去）。
   if (teamsInCore(team.core) <= 1) {
     addToast({
-      message: `「${regionLabel(state, team.core)}」至少保留一个智能体，不能删除该区域最后一个。`,
+      message: `「${coreDisplay(state, team.core).name}」至少保留一个智能体，不能删除该区域最后一个。`,
       type: 'warning',
       duration: 5000,
     });
@@ -1561,7 +1564,7 @@ async function deleteTeam(team: TeamInfo) {
   }
   if (
     !(await confirmDialog(
-      `确定删除智能体「${team.name}」（${regionLabel(state, team.core)}）？该成员的记忆与系统提示词将被移除，此操作不可恢复。`,
+      `确定删除智能体「${team.name}」（${coreDisplay(state, team.core).name}）？该成员的记忆与系统提示词将被移除，此操作不可恢复。`,
       { title: '删除智能体', danger: true, confirmText: '删除' },
     ))
   )
@@ -2104,7 +2107,7 @@ watch(
       </div>
 
       <div v-else-if="activeCategory === 'plugin'" class="caps-filters">
-        <NeumorphismSelect :model-value="pluginCoreEffective ?? ''" :options="pluginCoreOptions.map(core => ({ label: regionLabel(state, core), value: core }))" size="small" aria-label="管理节点" @update:model-value="pluginCore = String($event ?? '') || null; selectedPlugin = null; sendPending('RequestPluginsList', 'settings:plugins', pluginCoreEffective ?? undefined)" />
+        <NeumorphismSelect :model-value="pluginCoreEffective ?? ''" :options="pluginCoreOptions.map(core => ({ label: coreDisplay(state, core).title, value: core }))" size="small" aria-label="管理节点" @update:model-value="pluginCore = String($event ?? '') || null; selectedPlugin = null; sendPending('RequestPluginsList', 'settings:plugins', pluginCoreEffective ?? undefined)" />
         <NeumorphismInput
           v-model="pluginSearch"
           placeholder="搜索名称 / ID / 描述"
@@ -2469,8 +2472,12 @@ watch(
               @click="selectTeamItem(t)"
             >
               <span class="caps-list-item__name">{{ t.name }}</span>
-              <span v-if="showTeamRegion(t.core)" class="caps-mark" :title="`运行区域：${regionLabel(state, t.core)}`">
-                {{ regionLabel(state, t.core) }}
+              <span
+                v-if="showTeamRegion(t.core)"
+                class="caps-mark"
+                :title="`运行区域：${coreDisplay(state, t.core).title}`"
+              >
+                {{ coreDisplay(state, t.core).name }}
               </span>
               <span v-if="!t.enabled" class="muted caps-list-item__flag">已禁用</span>
             </div>
@@ -2789,7 +2796,7 @@ watch(
             <div class="detail-field">
               <span>运行区域</span>
               <NeumorphismTag variant="info" size="small">
-                {{ regionLabel(state, selectedTeam.core) }}
+                {{ coreDisplay(state, selectedTeam.core).name }}
               </NeumorphismTag>
             </div>
             <div v-if="otherRegions.length" class="detail-field">
@@ -2797,7 +2804,7 @@ watch(
               <div class="team-move">
                 <select v-model="moveTargetRegion" class="team-move__select">
                   <option v-for="r in otherRegions" :key="r" :value="r">
-                    {{ regionLabel(state, r) }}
+                    {{ coreDisplay(state, r).title }}
                   </option>
                 </select>
                 <NeumorphismButton size="small" variant="glass" @click="doMoveRegion">
@@ -2892,7 +2899,7 @@ watch(
                   <NeumorphismFormItem v-if="multiRegion" label="运行区域">
                     <NeumorphismSelect
                       :model-value="teamFormCore ?? regionOptions[0] ?? ''"
-                      :options="regionOptions.map((r) => ({ label: regionLabel(state, r), value: r }))"
+                      :options="regionOptions.map((r) => ({ label: coreDisplay(state, r).title, value: r }))"
                       size="small"
                       aria-label="运行区域"
                       @update:model-value="teamFormCore = String($event ?? '') || null"
