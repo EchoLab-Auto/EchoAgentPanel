@@ -389,4 +389,49 @@ describe('WorkRunGroup', () => {
       style.match(/^\.work-run-group__detail-name--reasoning\s*\{/gm) ?? [];
     expect(reasoningNameRules.length).toBe(1);
   });
+  // ── 性能契约（2026-10：工作行多了就卡）─────────────────────────────────
+  it('chip 材质不含 backdrop-filter（每个 chip 一层合成层的代价）', () => {
+    const raw = readFileSync(join(here, '..', 'WorkRunGroup.vue'), 'utf-8');
+    // 去掉注释再断言：规则上方的解释性注释会提到 backdrop-filter，不该算命中
+    const style = (raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    );
+    const chipRule = style.match(/\n\.work-run-group__chip\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    expect(chipRule, 'chip rule 必须存在').toBeTruthy();
+    // chip 坐在实色托盘上，blur 纯色 = 原色（视觉等价），但每个 chip 会因此
+    // 获得独立合成层：工作行上百个时滚动/重绘都要回读背景。
+    expect(chipRule).not.toMatch(/backdrop-filter/);
+    // 等价合成：托盘色 + 40% surface-raised（与原来半透明叠加结果同色）
+    expect(chipRule).toMatch(
+      /background:\s*color-mix\(in srgb, var\(--nm-surface-raised\) 40%, var\(--nm-chat-tray-bg\)\)/,
+    );
+  });
+
+  it('呼吸动画不参与 box-shadow 关键帧（每帧重绘 → 改伪元素 opacity）', () => {
+    const raw = readFileSync(join(here, '..', 'WorkRunGroup.vue'), 'utf-8');
+    const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    // 关键帧内只许改 opacity/transform 这类可合成的属性
+    for (const m of style.matchAll(/@keyframes ([\w-]+)\s*\{([\s\S]*?)\n\}/g)) {
+      const body = m[2] ?? '';
+      expect(body, `关键帧 ${m[1]} 不应改写 box-shadow`).not.toMatch(/box-shadow/);
+    }
+    // 光晕改由伪元素承载（静态 shadow + opacity 动画）
+    expect(style).toMatch(/\.work-run-group__chip::after\s*\{/);
+  });
+
+  it('读秒下沉到叶子组件：组内不再有 50ms 定时器（tick 不带整行重渲染）', () => {
+    const raw = readFileSync(join(here, '..', 'WorkRunGroup.vue'), 'utf-8');
+    // 同样先剔注释（头注里会提到旧的 setInterval 实现）
+    const script = (raw.match(/<script setup[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? '').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    ).replace(/^\s*\/\/.*$/gm, '');
+    // 组内不得再持有 now ref / setInterval —— 否则每次 tick 都会重渲染整行 chip
+    expect(script).not.toMatch(/setInterval/);
+    expect(script).not.toMatch(/const now = ref\(/);
+    // 读秒改由 ElapsedText 承担，且角标/详情头都走它
+    expect(raw).toMatch(/import ElapsedText from '\.\/ElapsedText\.vue'/);
+    expect(raw).toMatch(/<ElapsedText[\s\S]{0,200}compact/);
+  });
 });

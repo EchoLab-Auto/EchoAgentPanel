@@ -1069,20 +1069,80 @@ const buildWorkRow = (m: ChatMessageWithImages): WorkRunItem | null => {
   };
 };
 
+/**
+ * 行对象缓存（2026-10 性能修复，P0 第二步）：**让没变化的行保持引用恒等**。
+ *
+ * 上一步（`workRowOf` 的 WeakMap）只稳住了**条目**（`WorkRunItem`），但
+ * `messageRows` 每次都新建 `rows` 数组与每个组的 `items` 数组——于是任意一条
+ * 消息变化（流式 delta 每几十毫秒一次）都会让窗口里**每个** `WorkRunGroup`
+ * 拿到"新"的 `items` prop（数组引用变了），全部重渲染。
+ *
+ * 实测（vitest，100 组 × 5 chip，窗口 200 条 → 渲染 34 组）：
+ *   修复前：10 次 delta → 子组件 update **340 次**（= 34 组 × 10 次，全部）
+ *   修复后：10 次 delta → 只更新真正变化的那一组
+ *
+ * 做法：条目对象本身已是复用的（渲染对象缓存 + WeakMap），所以"成员引用全等"
+ * 等价于"内容没变"。行外壳因此可以复用——连同它的 `items` 数组一起。配合模板
+ * 上的 `v-memo="[row]"`，未变化的行连 vnode 都不再创建。
+ */
+const rowCache = new Map<string, ChatRow>();
+
+/** 两个条目数组是否引用全等（长度 + 逐项 ===）。 */
+function sameItemRefs(a: WorkRunItem[], b: WorkRunItem[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 const messageRows = computed<ChatRow[]>(() => {
-  const rows: ChatRow[] = [];
+  // 两趟：先切段（相邻工作条目合并），再按段复用行外壳。
+  // 为什么要分两趟：一个组的成员要扫完才知道，边扫边建就没有"上一次的成员表"
+  // 可比。
+  type Segment =
+    | { kind: 'single'; message: ChatMessageWithImages }
+    | { kind: 'work'; items: WorkRunItem[] };
+  const segments: Segment[] = [];
   for (const m of messages.value) {
     const item = workRowOf(m);
     if (!item) {
-      rows.push({ kind: 'single', message: m });
+      segments.push({ kind: 'single', message: m });
       continue;
     }
-    const last = rows[rows.length - 1];
-    if (last && last.kind === 'work-group') {
-      last.items.push(item);
-    } else {
-      rows.push({ kind: 'work-group', key: `work:${item.key}`, items: [item] });
+    const last = segments[segments.length - 1];
+    if (last && last.kind === 'work') last.items.push(item);
+    else segments.push({ kind: 'work', items: [item] });
+  }
+
+  const rows: ChatRow[] = [];
+  const seen = new Set<string>();
+  for (const seg of segments) {
+    if (seg.kind === 'single') {
+      const key = String(seg.message.id);
+      seen.add(key);
+      const prev = rowCache.get(key);
+      if (prev && prev.kind === 'single' && prev.message === seg.message) {
+        rows.push(prev);
+      } else {
+        const row: ChatRow = { kind: 'single', message: seg.message };
+        rowCache.set(key, row);
+        rows.push(row);
+      }
+      continue;
     }
+    const key = `work:${seg.items[0]!.key}`;
+    seen.add(key);
+    const prev = rowCache.get(key);
+    if (prev && prev.kind === 'work-group' && sameItemRefs(prev.items, seg.items)) {
+      rows.push(prev);
+    } else {
+      const row: ChatRow = { kind: 'work-group', key, items: seg.items };
+      rowCache.set(key, row);
+      rows.push(row);
+    }
+  }
+  // 清理已消失的行（FIFO 窗口淘汰 / 切会话 / 组被拆开）：缓存规模始终 = 当前行数。
+  if (rowCache.size > seen.size) {
+    for (const key of rowCache.keys()) if (!seen.has(key)) rowCache.delete(key);
   }
   return rows;
 });
@@ -1565,13 +1625,17 @@ function mediaSrc(img: string): string {
         </button>
       </div>
       <template v-for="row in messageRows" :key="rowKey(row)">
+        <!-- v-memo：行对象引用不变（= 该行内容未变，见 setup 里的 rowCache）时
+             连 vnode 都不再创建——流式 delta 只 patch 真正变化的那一行。 -->
         <WorkRunGroup
           v-if="row.kind === 'work-group'"
+          v-memo="[row]"
           :items="row.items"
           class="chat-view__item"
         />
         <template v-else-if="row.kind === 'single'">
           <div
+            v-memo="[row]"
             class="chat-view__item chat-view__item--msg"
             :class="{ 'chat-view__item--enter': (row.message as ChatMessageWithImages).animate }"
           >

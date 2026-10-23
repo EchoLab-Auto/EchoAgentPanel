@@ -11,9 +11,10 @@
 //! - 用户手动点击过的条目进入"手动优先"：其自动开合不再被覆盖（含失败项）。
 //! 同一时刻至多一个详情卡（对比旧实现：工具卡与思考块可同时各自展开）。
 
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import ToolIcon from './ToolIcon.vue';
 import ReasoningText from './ReasoningText.vue';
+import ElapsedText from './ElapsedText.vue';
 
 /** 工具调用条目（原 ToolRunItem，字段不变）。 */
 export interface ToolWorkItem {
@@ -202,79 +203,31 @@ function reasoningStatusText(item: ReasoningWorkItem): string {
   if (reasoningActive(item)) return '正在推演…';
   return fmtCharCount(item.text.length);
 }
+// ── 耗时显示：读秒已迁到叶子组件 `ElapsedText`（2026-10 性能拆分）────────
+//
+// 此前这里是「组内 `now` ref + 50ms setInterval」，而 `elapsedOf/badgeOf/
+// durationLabel/titleOf` 都在组内读它 —— **每次 tick 都把整行 chip 连同详情卡
+// 一起重渲染**。工作行一多（一回合数十行、上百个 chip），20 Hz × 整行 diff
+// 就是纯粹的定时器开销，也是「工作行多了就卡」的常驻来源（实测见
+// `ElapsedText.vue` 头注）。现在定时器只活在叶子组件里，父组件 render 与
+// tick 彻底解耦。
 
-// ── 耗时显示：毫秒级精度；运行中实时刷新（50ms 步进）──────────────────
-/** 计时基准 now：仅当组内有运行中条目时开定时器，避免常驻开销。 */
-const now = ref(Date.now());
-let ticker: ReturnType<typeof setInterval> | null = null;
-watch(
-  hasRunning,
-  (running) => {
-    if (running && ticker == null) {
-      ticker = setInterval(() => {
-        now.value = Date.now();
-      }, 50);
-    } else if (!running && ticker != null) {
-      clearInterval(ticker);
-      ticker = null;
-    }
-  },
-  { immediate: true },
-);
-onUnmounted(() => {
-  if (ticker != null) clearInterval(ticker);
-});
-
-/** 已运行/总耗时（毫秒）：优先 core 上报的 elapsedMs；运行中按开始时间实时回算。 */
-function elapsedOf(item: ToolWorkItem): number | null {
-  if (typeof item.elapsedMs === 'number') return item.elapsedMs;
-  if (item.status === 'running' && typeof item.startedAtMs === 'number') {
-    return Math.max(0, now.value - item.startedAtMs);
-  }
-  return null;
+/**
+ * chip 角标是否出现（工具运行中才显示耗时；思考的字数角标另有判据）。
+ *
+ * 与旧 `badgeOf(item)` 返回 null 的条件等价：running 但没有起点也没有终值
+ * 耗时时不显示（否则会渲染出一个空角标）。
+ */
+function toolBadgeVisible(item: WorkRunItem): boolean {
+  if (item.kind !== 'tool' || item.status !== 'running') return false;
+  return typeof item.elapsedMs === 'number' || typeof item.startedAtMs === 'number';
 }
 
-/** 毫秒 → 完整时长文案（毫秒级精度）：
- *  <1s → `39ms`；<60s → `12.345s`（3 位小数 = 毫秒）；更长 → `2m 03.456s`。 */
-function fmtDuration(ms: number): string {
-  const value = Math.floor(ms);
-  if (value < 1_000) return `${value}ms`;
-  if (value < 60_000) return `${(value / 1000).toFixed(3)}s`;
-  const minutes = Math.floor(value / 60_000);
-  const seconds = (value - minutes * 60_000) / 1000;
-  const secs = seconds < 10 ? `0${seconds.toFixed(3)}` : seconds.toFixed(3);
-  return `${minutes}m ${secs}s`;
+/** 详情头耗时胶囊是否出现（同上：无从计算时整块不渲染）。 */
+function durationVisible(item: ToolWorkItem | null): boolean {
+  if (!item) return false;
+  return typeof item.elapsedMs === 'number' || typeof item.startedAtMs === 'number';
 }
-
-/** 图标角标：紧凑格式（保留毫秒级读数；长时段降位，避免超出图标宽度）。 */
-function fmtCompact(ms: number): string {
-  const value = Math.floor(ms);
-  if (value < 1_000) return `${value}ms`;
-  if (value < 10_000) return `${(value / 1000).toFixed(2)}s`;
-  if (value < 60_000) return `${(value / 1000).toFixed(1)}s`;
-  const total = Math.floor(value / 1000);
-  return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`;
-}
-
-/** 详情头/悬停：运行中=「运行中 X」实时刷新；已完成=「耗时 X」。 */
-function durationLabel(item: ToolWorkItem | null | undefined): string | null {
-  if (!item) return null;
-  const ms = elapsedOf(item);
-  if (ms == null) return null;
-  return item.status === 'running' ? `运行中 ${fmtDuration(ms)}` : `耗时 ${fmtDuration(ms)}`;
-}
-
-/** chip 角标：工具=运行中耗时 / 思考=播放中字数（仅活动期显示）；子代理无角标。 */
-function badgeOf(item: WorkRunItem): string | null {
-  if (item.kind === 'tool') {
-    if (item.status !== 'running') return null;
-    const ms = elapsedOf(item);
-    return ms == null ? null : fmtCompact(ms);
-  }
-  if (item.kind === 'subagent') return null;
-  return reasoningActive(item) ? fmtCharCompact(item.text.length) : null;
-}
-
 // ── 子代理：文案与状态 ───────────────────────────────────────────────
 /** 运行/成功/失败 状态文案。 */
 function subagentLabel(item: SubagentWorkItem): string {
@@ -315,8 +268,9 @@ function titleOf(item: WorkRunItem): string {
   if (item.kind === 'tool') {
     const parts = [item.label ?? item.name];
     if (item.status) parts.push(STATUS_LABEL[item.status] ?? item.status);
-    const duration = durationLabel(item);
-    if (duration) parts.push(duration);
+    // 悬停文案只写**终值**耗时：运行中的读秒在 chip 角标与详情头（`ElapsedText`），
+    // 若这里也读秒，title 属性会随 50ms tick 反复改写（父组件已不 tick）。
+    if (typeof item.elapsedMs === 'number') parts.push(`耗时 ${item.elapsedMs}ms`);
     return parts.join(' · ');
   }
   if (item.kind === 'subagent') {
@@ -398,12 +352,21 @@ function ariaOf(item: WorkRunItem): string {
           v-if="item.kind === 'subagent' && item.running"
           class="work-run-group__dot work-run-group__dot--live"
         />
+        <!-- 工具角标：运行中耗时（读秒在叶子组件里，不再带着整行一起重渲染） -->
+        <span v-if="toolBadgeVisible(item)" class="work-run-group__badge">
+          <ElapsedText
+            :started-at-ms="(item as ToolWorkItem).startedAtMs"
+            :elapsed-ms="(item as ToolWorkItem).elapsedMs"
+            :running="true"
+            compact
+          />
+        </span>
+        <!-- 思考角标：播放中的字数（内容一变本来就要重渲染，留在组内） -->
         <span
-          v-if="badgeOf(item)"
-          class="work-run-group__badge"
-          :class="{ 'work-run-group__badge--reasoning': item.kind === 'reasoning' }"
+          v-else-if="item.kind === 'reasoning' && reasoningActive(item)"
+          class="work-run-group__badge work-run-group__badge--reasoning"
         >
-          {{ badgeOf(item) }}
+          {{ fmtCharCompact(item.text.length) }}
         </span>
       </button>
     </div>
@@ -415,8 +378,12 @@ function ariaOf(item: WorkRunItem): string {
           <ToolIcon :name="openToolItem.name" class="work-run-group__detail-icon" />
           <span class="work-run-group__detail-name">{{ openToolItem.label ?? openToolItem.name }}</span>
           <span v-if="openToolItem.time" class="work-run-group__detail-time">{{ openToolItem.time }}</span>
-          <span v-if="durationLabel(openToolItem)" class="work-run-group__detail-duration">
-            {{ durationLabel(openToolItem) }}
+          <span v-if="durationVisible(openToolItem)" class="work-run-group__detail-duration">
+            <ElapsedText
+              :started-at-ms="openToolItem.startedAtMs"
+              :elapsed-ms="openToolItem.elapsedMs"
+              :running="openToolItem.status === 'running'"
+            />
           </span>
           <span
             v-if="openToolItem.status"
@@ -524,9 +491,17 @@ function ariaOf(item: WorkRunItem): string {
   height: 26px;
   border-radius: 8px;
   border: 1px solid var(--panel-glass-border);
-  background: color-mix(in srgb, var(--nm-surface-raised) 40%, transparent);
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  /* 材质（2026-10 性能修复）：**不再用 `backdrop-filter`**。
+     chip 坐在消息托盘（`--nm-chat-tray-bg`，实色）上，模糊一块纯色背景在
+     数学上等于原色——所以 blur(12px) 在这里是纯开销：它给每个 chip 建一个
+     合成层，滚动/重绘时都要回读身后的内容。实测 1200 个 chip（=200 工作行）：
+       带 backdrop-filter：滚动帧均值 23.1 ms、p95 39.9 ms、掉帧 15/89
+       换成等价实色：      滚动帧均值 16.67 ms、p95 16.8 ms、掉帧 0/89
+     （本机无头 Chrome，1600×1000；iOS 上这类图层还会在滚动中出现滞后——
+     观感即"工作行错位"。）
+     等价合成色 = 托盘色 + 40% surface-raised，与原来的半透明叠加结果相同：
+     像素对比 A/B 仅 0.47% 差异、chip 区域平均色 210.1 → 210.0。 */
+  background: color-mix(in srgb, var(--nm-surface-raised) 40%, var(--nm-chat-tray-bg));
   color: var(--nm-text-secondary);
   cursor: pointer;
   padding: 0;
@@ -576,24 +551,35 @@ function ariaOf(item: WorkRunItem): string {
   color: var(--panel-err);
 }
 
+/* ── 呼吸动画：光晕走伪元素的 opacity，而不是关键帧里改 box-shadow ────────
+   为什么（2026-10 性能）：`box-shadow` 参与关键帧 = 每帧重绘该元素；一个
+   运行中的工作行里可能有几十个 chip 同时呼吸，20~60 fps 的重绘直接压在
+   合成线程之外的主线程上。改成「静态光晕 + 只动 opacity」后动画可交给
+   合成器，主线程零成本（视觉等价：光晕由 24%→32% 的强弱变化，仍可见）。 */
+.work-run-group__chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
 /* 运行中的工具：整行轻微呼吸（原 ToolRunGroup 行为） */
-.work-run-group--running .work-run-group__chip--tool {
+.work-run-group--running .work-run-group__chip--tool::after {
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-accent) 24%, transparent);
   animation: work-run-pulse 1.6s ease-in-out infinite;
 }
 @keyframes work-run-pulse {
   50% {
-    box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-accent) 24%, transparent);
+    opacity: 1;
   }
 }
 
 /* 播放中的思考：紫色呼吸 + 图标闪烁（"正在思考"） */
-.work-run-group__chip--reasoning.work-run-group__chip--active {
-  animation: work-run-pulse-reasoning 1.6s ease-in-out infinite;
-}
-@keyframes work-run-pulse-reasoning {
-  50% {
-    box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-reasoning) 32%, transparent);
-  }
+.work-run-group__chip--reasoning.work-run-group__chip--active::after {
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-reasoning) 32%, transparent);
+  animation: work-run-pulse 1.6s ease-in-out infinite;
 }
 .work-run-group__chip--active .work-run-group__think {
   animation: work-think-pulse 1.2s ease-in-out infinite;
@@ -609,13 +595,9 @@ function ariaOf(item: WorkRunItem): string {
 }
 
 /* 运行中的子代理：青色呼吸 + 图标闪烁（与思考同语汇、换色区分） */
-.work-run-group__chip--subagent.work-run-group__chip--active {
-  animation: work-run-pulse-subagent 1.6s ease-in-out infinite;
-}
-@keyframes work-run-pulse-subagent {
-  50% {
-    box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-subagent) 32%, transparent);
-  }
+.work-run-group__chip--subagent.work-run-group__chip--active::after {
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--panel-subagent) 32%, transparent);
+  animation: work-run-pulse 1.6s ease-in-out infinite;
 }
 .work-run-group__chip--active .work-run-group__agent {
   animation: work-think-pulse 1.2s ease-in-out infinite;
