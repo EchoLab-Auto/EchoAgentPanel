@@ -217,6 +217,17 @@ export function resolvePendingEvent(event: object, core: string | null = null): 
   }
 }
 
+/**
+ * 该 key 是否**正在等待**（已登记、尚未销账）。
+ *
+ * 用途：避免同一条数据被并发请求两次——例如"点开面板时预取"与"面板挂载时
+ * 补拉"恰好落在同一个 tick，两边都发就成了两个请求、两条等待，其中一个的
+ * 响应还会被当成"多余的一帧"。
+ */
+export function isPending(key: string): boolean {
+  return entries[key] !== undefined;
+}
+
 /** 释放登记（组件卸载时调用；超时态 error 面板会保留到此时）。 */
 export function releasePending(key: string): void {
   drop(key);

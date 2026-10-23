@@ -32,6 +32,7 @@ import {
 } from '../workspace';
 import DirectoryPicker from './DirectoryPicker.vue';
 import { confirmDialog } from '../confirm';
+import { ensureWorkspaceSessions, WORKSPACE_SESSIONS_KEY } from '../workspace-prefetch';
 
 const props = defineProps<{ teamId: string | null }>();
 
@@ -68,25 +69,24 @@ watch(
 
 function requestSessions(): void {
   if (!props.teamId) return; // 未选择智能体：不发（Core 会拒绝无 team_id 的会话类命令）
-  sendPending({ RequestWorkspaceSessions: { team_id: props.teamId } }, 'workspace:sessions');
+  sendPending({ RequestWorkspaceSessions: { team_id: props.teamId } }, WORKSPACE_SESSIONS_KEY);
 }
 
 /**
- * 仅在**本地还没有本 agent 的数据**时才发请求。
+ * 挂载时按需补拉：**本地已有本 agent 的新鲜数据、或已有请求在飞时都不发**。
  *
- * 为什么要这个判断：`App.vue` 在切换 agent 时已经拉过一次（`RequestWorkspaceSessions`），
- * 打开面板又无条件重发一次 —— 内容其实早就在 `state.workspaceSessions` 里，重发
- * 只是把 `LoadHint` 点亮。实测（3G）：面板 961ms 出现时 5 张卡片、50 个按钮全都
- * 已渲染，却在 1127ms 挂上「正在加载工作区会话…」，6.8 秒后才消失 —— 一次完全
- * 没有必要的"假加载"，而这段提示还落在列表下方（见模板注释）。
+ * 为什么不能无条件发：`App.vue` 在切换 agent 时已经拉过一次；打开面板再发一次
+ * 只是把 `LoadHint` 点亮。实测（3G）：面板 961ms 出现时 5 张卡片、50 个按钮全
+ * 都已渲染，却在 1127ms 挂上「正在加载工作区会话…」，6.8 秒后才消失 —— 一次
+ * 完全没有必要的"假加载"。
  *
- * 判据用 `fresh`（team + core 都对得上）：跨 agent / 跨 core 的旧数据不算数，
- * 那种情况必须重拉。「刷新」按钮仍然无条件重发（用户显式要求）。
+ * 判据与「点开前的意图预取」共用 `workspace-prefetch.ts`（team + core 都要对
+ * 得上；跨 agent / 跨 core 的旧数据不算新鲜）。「刷新」按钮仍无条件重发。
  */
 function requestSessionsIfStale(): void {
-  if (!props.teamId) return;
-  if (fresh.value && state.workspaceSessions.length > 0) return;
-  requestSessions();
+  // 判定与「点开前的意图预取」共用一处（`workspace-prefetch.ts`）：本地已新鲜
+  // 或已有请求在飞时都不再发。否则预取与挂载会各发一次，白挂两条等待。
+  ensureWorkspaceSessions(props.teamId, state.activeRegion ?? null);
 }
 
 // ── 选中 ──
@@ -301,7 +301,7 @@ async function removeConversation(session: WorkspaceSessionInfo, conv: Workspace
   saveConversations(session, rest, last, true);
 }
 
-const { phase: sessionsPhase } = usePending('workspace:sessions');
+const { phase: sessionsPhase } = usePending(WORKSPACE_SESSIONS_KEY);
 
 /**
  * 首屏骨架：**正在等第一批数据**且本地一条都没有时才显示。
@@ -338,7 +338,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  releasePending('workspace:sessions');
+  releasePending(WORKSPACE_SESSIONS_KEY);
   if (actionTimer) window.clearTimeout(actionTimer);
 });
 

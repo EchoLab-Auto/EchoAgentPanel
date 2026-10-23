@@ -11,6 +11,7 @@
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { lazy, preloadLazy } from '../lazy';
+import { ensureWorkspaceSessions } from '../workspace-prefetch';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
@@ -98,6 +99,9 @@ function warmFromEvent(event: Event): void {
   if (!id) return;
   const scope = WARM_BY_OVERLAY[id];
   if (scope) warmOverlayChunks(scope);
+  // 数据也一起提前（chunk 与数据并行）：指针停在按钮上的那几百毫秒足够
+  // 把一个 WS 往返跑完，真正点下去时卡片已经能直接画出来。
+  prefetchOverlayData(id);
 }
 
 /**
@@ -209,9 +213,28 @@ type EntryOverlayId =
   | 'tasks';
 const entryOverlay = ref<EntryOverlayId | null>(null);
 
+/**
+ * 覆盖面板**打开前**要立刻发出的数据请求（与 chunk 下载并行）。
+ *
+ * 背景：面板的数据请求原本都在 `onMounted` 里发 —— 那是 chunk 下载**之后**。
+ * 两个网络往返互不依赖却串行，弱网（800ms RTT / 200kbps）下点开工作区要
+ * 5552ms 才看到卡片里的按钮（其中 chunk 只占 1102ms）。
+ *
+ * 目前只有工作区需要（其余面板的数据要么随 `RequestState` 快照已到，要么在
+ * 面板里按实例/会话按需拉）。要加新的一项时：这里加一行 + 面板侧的补拉也走
+ * 同一个 `ensure*` 函数（它自带"已有数据/已在飞就不发"的去重）。
+ */
+function prefetchOverlayData(id: EntryOverlayId): void {
+  if (id === 'workspace') {
+    ensureWorkspaceSessions(props.activeTeamId ?? null, state.activeRegion ?? null);
+  }
+}
+
 /** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。 */
 function toggleOverlay(id: EntryOverlayId) {
-  entryOverlay.value = entryOverlay.value === id ? null : id;
+  const opening = entryOverlay.value !== id;
+  if (opening) prefetchOverlayData(id);
+  entryOverlay.value = opening ? id : null;
 }
 
 /** 无条件关闭（点面板外 / Esc / 选择后）。 */
