@@ -22,6 +22,7 @@ vi.mock('../../connection', () => {
 
 import WorkspacePanel from '../WorkspacePanel.vue';
 import { state } from '../../store';
+import { releasePending, trackRequest } from '../../pending';
 import { sendCommand } from '../../connection';
 import type { WorkspaceSessionInfo } from '../../protocol';
 
@@ -40,10 +41,9 @@ describe('WorkspacePanel 工作区会话', () => {
     seed([]);
   });
 
-  it('打开面板只请求会话列表（git 状态归边栏 Git 卡片，本面板不再请求）', async () => {
-    seed([
-      { id: 'core', name: '框架', directories: ['/srv/core', '/srv/panel'] },
-    ]);
+  it('没有本地数据时才请求会话列表（git 状态归边栏 Git 卡片，本面板不再请求）', async () => {
+    // 空列表 = 确实没有数据 → 发请求
+    seed([]);
     const wrapper = mount(WorkspacePanel, { props: { teamId: 'EchoCode' } });
     await nextTick();
     const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0]);
@@ -58,6 +58,62 @@ describe('WorkspacePanel 工作区会话', () => {
     ).toBe(false);
     expect(wrapper.text()).not.toContain('git 状态 ·');
     wrapper.unmount();
+  });
+
+  it('已有本 agent 的新鲜数据时**不**重发（否则会白挂一条"正在加载"）', async () => {
+    // 背景：切换 agent 时 App.vue 已经拉过一次；打开面板再发一次只是把
+    // LoadHint 点亮 —— 实测 3G 下有 6.8 秒的假加载，而内容早已在本地。
+    seed([{ id: 'core', name: '框架', directories: ['/srv/core', '/srv/panel'] }]);
+    const wrapper = mount(WorkspacePanel, { props: { teamId: 'EchoCode' } });
+    await nextTick();
+    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0]);
+    expect(
+      calls.some((c) => typeof c === 'object' && 'RequestWorkspaceSessions' in (c as object)),
+    ).toBe(false);
+    // 内容照常渲染（不因为跳过请求就空掉）
+    expect(wrapper.text()).toContain('框架');
+    wrapper.unmount();
+  });
+
+  it('本地数据属于别的 agent 时仍要重拉（陈旧快照不算数）', async () => {
+    seed([{ id: 'core', name: '框架', directories: ['/srv/core'] }], null, 'Alice');
+    const wrapper = mount(WorkspacePanel, { props: { teamId: 'EchoCode' } });
+    await nextTick();
+    const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0]);
+    expect(
+      calls.some((c) => typeof c === 'object' && 'RequestWorkspaceSessions' in (c as object)),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('首屏无数据时先铺骨架卡，数据到达后原地换成真卡片', async () => {
+    // 背景：此前只有一行 LoadHint，列表区仍是一片空白 —— 感知上"什么都没发生"。
+    // 骨架先把卡片形状铺出来（3 张占位），数据到达后被真卡片替换。
+    vi.useFakeTimers();
+    try {
+      seed([]);
+      vi.mocked(sendCommand).mockClear();
+      // 真正的登记发生在 sendPending 里，而本测试把 `connection` 整个 mock 掉了
+      // ——这里直接调 pending 的 trackRequest 复现"请求在飞"的状态。
+      trackRequest('workspace:sessions', { RequestWorkspaceSessions: { team_id: 'EchoCode' } });
+      const wrapper = mount(WorkspacePanel, { props: { teamId: 'EchoCode' } });
+      await nextTick();
+      // 150ms 内不闪加载态（pending.ts::PENDING_VISIBLE_AFTER_MS）
+      expect(wrapper.findAll('.ws-card--skeleton')).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(300);
+      await nextTick();
+      expect(wrapper.findAll('.ws-card--skeleton').length).toBe(3);
+
+      // 数据到达：骨架消失、真卡片出现（同一份 DOM 不要同时有两种卡）
+      seed([{ id: 'core', name: '框架', directories: ['/srv/core'] }]);
+      await nextTick();
+      expect(wrapper.findAll('.ws-card--skeleton')).toHaveLength(0);
+      expect(wrapper.text()).toContain('框架');
+      wrapper.unmount();
+      releasePending('workspace:sessions');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('team 未选择（null）时不发任何命令', async () => {

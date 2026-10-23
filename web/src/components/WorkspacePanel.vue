@@ -66,9 +66,27 @@ watch(
   { immediate: true },
 );
 
-function requestSessions() {
+function requestSessions(): void {
   if (!props.teamId) return; // 未选择智能体：不发（Core 会拒绝无 team_id 的会话类命令）
   sendPending({ RequestWorkspaceSessions: { team_id: props.teamId } }, 'workspace:sessions');
+}
+
+/**
+ * 仅在**本地还没有本 agent 的数据**时才发请求。
+ *
+ * 为什么要这个判断：`App.vue` 在切换 agent 时已经拉过一次（`RequestWorkspaceSessions`），
+ * 打开面板又无条件重发一次 —— 内容其实早就在 `state.workspaceSessions` 里，重发
+ * 只是把 `LoadHint` 点亮。实测（3G）：面板 961ms 出现时 5 张卡片、50 个按钮全都
+ * 已渲染，却在 1127ms 挂上「正在加载工作区会话…」，6.8 秒后才消失 —— 一次完全
+ * 没有必要的"假加载"，而这段提示还落在列表下方（见模板注释）。
+ *
+ * 判据用 `fresh`（team + core 都对得上）：跨 agent / 跨 core 的旧数据不算数，
+ * 那种情况必须重拉。「刷新」按钮仍然无条件重发（用户显式要求）。
+ */
+function requestSessionsIfStale(): void {
+  if (!props.teamId) return;
+  if (fresh.value && state.workspaceSessions.length > 0) return;
+  requestSessions();
 }
 
 // ── 选中 ──
@@ -284,6 +302,22 @@ async function removeConversation(session: WorkspaceSessionInfo, conv: Workspace
 }
 
 const { phase: sessionsPhase } = usePending('workspace:sessions');
+
+/**
+ * 首屏骨架：**正在等第一批数据**且本地一条都没有时才显示。
+ *
+ * 为什么不只用 `LoadHint`：提示条是一行文字 + 转圈，列表区仍是空白，视觉上
+ * 依旧"什么都没发生"。骨架先把卡片的形状铺出来（标题条 + 两行说明），等数据
+ * 到达原地替换——感知延迟从"等"变成"内容正在成形"。
+ *
+ * 条件里的 `!sessions.length` 很关键：已有数据时的刷新**不能**用骨架盖住内容
+ * （那会把"刷新"变成"清空再重画"，比不动更糟）。
+ */
+const showSkeleton = computed(
+  () =>
+    sessions.value.length === 0 &&
+    (sessionsPhase.value === 'pending' || sessionsPhase.value === 'slow'),
+);
 watch(sessions, (list) => {
   const key = actionPending.value;
   if (key?.startsWith('save:') || key?.startsWith('delete:') || key?.startsWith('conversation:')) {
@@ -300,7 +334,7 @@ watch(sessions, (list) => {
 
 onMounted(() => {
   if (!state.connected) return;
-  requestSessions();
+  requestSessionsIfStale();
 });
 
 onUnmounted(() => {
@@ -311,6 +345,8 @@ onUnmounted(() => {
 watch(
   () => state.connected,
   (connected) => {
+    // 重连：本地快照可能已过期（Core 可能重启过），故这里**无条件**重拉
+    // ——与 `onMounted` 的"有数据就不打扰"是两种场景。
     if (connected) requestSessions();
   },
 );
@@ -336,6 +372,13 @@ watch(
         </NeumorphismButton>
       </div>
     </div>
+
+    <!-- 加载 / 慢 / 超时重试：**必须在列表之前**（2026-10 修复）。
+         此前它在 `.ws-list` 之后：实测 5 张卡片内容 1717px、可视 654px，
+         提示条落在 ~1710px 处——要向下滚 1000 多像素才看得到，于是"正在加载"
+         与"超时重试"在用户眼里**等于不存在**，面板就是一片空白卡片区。
+         `sticky` 让它在长列表里也始终贴着面板顶边。 -->
+    <LoadHint :phase="sessionsPhase" label="工作区会话" @retry="requestSessions" />
 
     <p v-if="!teamId" class="muted ws-hint">（请先在上方选择智能体）</p>
 
@@ -375,8 +418,16 @@ watch(
       </div>
     </div>
 
+    <!-- 首屏骨架：等第一批数据时先铺出卡片形状（见 `showSkeleton` 注释）。 -->
+    <div v-if="showSkeleton" class="ws-list ws-list--skeleton" aria-hidden="true">
+      <div v-for="n in 3" :key="n" class="ws-card ws-card--skeleton">
+        <div class="ws-skeleton__line ws-skeleton__line--title"></div>
+        <div class="ws-skeleton__line"></div>
+        <div class="ws-skeleton__line ws-skeleton__line--short"></div>
+      </div>
+    </div>
     <!-- 会话列表 -->
-    <div class="ws-list">
+    <div v-else class="ws-list">
       <div
         v-for="session in sessions"
         :key="session.id"
@@ -495,7 +546,6 @@ watch(
           <NeumorphismButton size="small" variant="glass" :disabled="!!actionPending" @click="remove(session)">删除</NeumorphismButton>
         </div>
       </div>
-      <LoadHint :phase="sessionsPhase" label="工作区会话" @retry="requestSessions" />
       <div v-if="teamId && !sessions.length && sessionsPhase === 'idle'" class="muted ws-empty">
         （暂无工作区会话，点击「新建」创建第一个）
       </div>
@@ -532,6 +582,27 @@ watch(
 .ws-head__actions { display: flex; gap: 6px; flex: 0 0 auto; }
 
 .ws-hint { margin: 0; font-size: 12px; }
+
+/* 加载提示：贴住面板顶边（长列表里滚动了也看得见）。
+   子组件根元素会带上本组件的 scope id，这里可以直接选中。 */
+.ws-pane--main > .load-hint {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* ── 首屏骨架（见 showSkeleton 注释） ──
+   只用背景色块，不用动画条：等待通常只有几百毫秒，扫光动画反而更"闹"。
+   色块用 `--nm-border-color` 的低透明度，深浅主题自动跟随。 */
+.ws-list--skeleton { pointer-events: none; }
+.ws-card--skeleton { cursor: default; gap: 8px; }
+.ws-skeleton__line {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nm-border-color) 55%, transparent);
+}
+.ws-skeleton__line--title { height: 14px; width: 42%; }
+.ws-skeleton__line--short { width: 64%; }
 
 .ws-form {
   display: flex;

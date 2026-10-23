@@ -78,6 +78,32 @@ describe('重连引导命令（去主智能体）', () => {
     }
   });
 
+  it('sendPending 拒发时不登记等待（否则白挂 20 秒"正在加载"）', async () => {
+    // 背景：多上游下解析不出目标时 `sendCommand` 拒发（弹 toast、return false），
+    // 命令根本没出去。若此前已 `trackRequest` 登记，这条等待没人销账，
+    // `usePending` 会一路推到 timeout（20s）——面板显示"正在加载"、内容空白。
+    const { startConnection, sendPending } = await import('../connection');
+    const { state } = await import('../store');
+    const { usePending } = await import('../pending');
+    startConnection();
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    ws.triggerOpen();
+
+    // 制造"多上游但解析不出目标"：knownCores > 1 且无 activeRegion/会话归属。
+    state.knownCores.clear();
+    state.knownCores.add('core-a');
+    state.knownCores.add('core-b');
+    state.activeRegion = null;
+    state.sessions = [];
+
+    const before = ws.sent.length;
+    sendPending({ RequestWorkspaceSessions: { team_id: null } }, 'test:rejected');
+    // 拒发：没有新帧出站
+    expect(ws.sent.length).toBe(before);
+    // 且没有留下等待登记
+    expect(usePending('test:rejected').phase.value).toBe('idle');
+  });
+
   it('不预取实例管理数据（连接建立不动实例通道）', async () => {
     const sent = await bootstrapCommands();
     // 旧 QQ 命令已随泛化删除；新通道（InvokeInstanceOp）同样不在握手期预取。

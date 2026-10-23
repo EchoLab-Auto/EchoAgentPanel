@@ -324,10 +324,19 @@ function broadcastEnvelope(command: BackendCommand): string {
  * （02a S3：实例 op 通道恒显式传 core）；缺省沿用命令自身解析。
  */
 export function sendPending(command: BackendCommand, key: string, targetCore?: string): void {
+  // **先发再登记**（2026-10 修复）：`sendCommand` 可能**拒发**——多上游下解析
+  // 不出目标时不猜、直接弹 toast 并返回 false，命令根本没出去。此前先登记后
+  // 发送：拒发时那条等待没人销账，`usePending` 会一路推到 `timeout`
+  // （20s），期间面板显示"正在加载…"、内容区空白。用户看到的就是「点开是空
+  // 的，过很久才提示，刷新一下又好了」。
+  //
+  // 现在拒发即不登记：视图当场停在 `idle`（配合各视图的空态文案），
+  // toast 已经把原因说清楚了。
+  const sent = sendCommand(command, targetCore);
+  if (!sent) return;
   // 登记时带上解析出的目标 core：多上游下广播/竞态响应不会误销账别的 core
   // 的等待（见 pending.ts::resolvePendingEvent）。
   trackRequest(key, command, resolveTargetCore(command, targetCore) ?? null);
-  sendCommand(command, targetCore);
 }
 
 /** 解一帧下行消息：多上游信封拆壳（core 名 + 内层事件），无壳 = 单上游。 */

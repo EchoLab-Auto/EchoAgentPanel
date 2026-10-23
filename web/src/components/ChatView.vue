@@ -10,7 +10,7 @@
 //! 多模态：支持图片粘贴 / 文件选择，data URL 随消息发送给 Core。
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { lazy } from '../lazy';
+import { lazy, preloadLazy } from '../lazy';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
@@ -46,12 +46,95 @@ import {
 } from '../chat-message-cache';
 // 弹层按需加载（2026-10 审计修复）：入口行弹层与配置/上下文覆盖层首次
 // 打开时才加载对应 chunk（此前全部静态进首包——不打开也付加载成本）。
-const AgentConfigModal = lazy(() => import('./AgentConfigModal.vue'), 'AgentConfigModal');
-const ContextView = lazy(() => import('./ContextView.vue'), 'ContextView');
-const InstancePanel = lazy(() => import('./InstancePanel.vue'), 'InstancePanel');
-const WorkspacePanel = lazy(() => import('./WorkspacePanel.vue'), 'WorkspacePanel');
-const SessionSwitcher = lazy(() => import('./SessionSwitcher.vue'), 'SessionSwitcher');
-const TasksPanel = lazy(() => import('./TasksPanel.vue'), 'TasksPanel');
+//
+// 2026-10 补预热（**为什么不满足于"按需"**）：按需下载意味着点开那一刻才开始
+// 拉 chunk，而覆盖层是 `v-if="open"` —— 下载期间是一片**空玻璃壳**（连标题栏
+// 都在 chunk 里）。实测点开工作区：4G 258ms / 3G 871ms / 弱网(800ms RTT)
+// 2104ms 的纯空白，观感与"卡死/按钮不见了"完全一致。
+// 现在两条预热时机（见 `warmOverlayChunks`）：入口行首次交互（hover/focus/
+// touch）立刻预热，以及首屏空闲时预热全部——按需加载的成本优势保留（不点就
+// 不下载），但把等待挪到了用户真正需要之前。
+const loaders = {
+  agentConfig: () => import('./AgentConfigModal.vue'),
+  context: () => import('./ContextView.vue'),
+  instance: () => import('./InstancePanel.vue'),
+  workspace: () => import('./WorkspacePanel.vue'),
+  sessions: () => import('./SessionSwitcher.vue'),
+  tasks: () => import('./TasksPanel.vue'),
+} as const;
+
+const AgentConfigModal = lazy(loaders.agentConfig, 'AgentConfigModal');
+const ContextView = lazy(loaders.context, 'ContextView');
+const InstancePanel = lazy(loaders.instance, 'InstancePanel');
+const WorkspacePanel = lazy(loaders.workspace, 'WorkspacePanel');
+const SessionSwitcher = lazy(loaders.sessions, 'SessionSwitcher');
+const TasksPanel = lazy(loaders.tasks, 'TasksPanel');
+
+/** 入口行按钮 → 对应的 chunk 键（按 `toggleOverlay` 的 id 一一对应）。 */
+const WARM_BY_OVERLAY: Record<EntryOverlayId, keyof typeof loaders> = {
+  config: 'agentConfig',
+  context: 'context',
+  checklist: 'context', // 清单与上下文同属 ContextView 侧栏，共用一份 chunk
+  sessions: 'sessions',
+  workspace: 'workspace',
+  instance: 'instance',
+  tasks: 'tasks',
+};
+
+/**
+ * 入口行上的「用户意图」事件 → 预热对应 chunk。
+ *
+ * 挂在容器上而不是每个按钮：入口行最多 8 个控件、还会随插件能力增减，逐个绑
+ * 监听每加一个按钮都要改；容器上取一次 `closest` 即可，且 `pointerover` 会
+ * 冒泡到容器（`pointerenter` 不冒泡，不能用）。
+ *
+ * 只处理**认识**的按钮（`data-overlay` 标记），其余（Agent 切换是锚定浮层、
+ * 已在首包）忽略。
+ */
+function warmFromEvent(event: Event): void {
+  const target = event.target as HTMLElement | null;
+  const host = target?.closest('[data-overlay]') as HTMLElement | null;
+  const id = host?.dataset.overlay as EntryOverlayId | undefined;
+  if (!id) return;
+  const scope = WARM_BY_OVERLAY[id];
+  if (scope) warmOverlayChunks(scope);
+}
+
+/**
+ * 预热覆盖面板 chunk。
+ *
+ * `scope`：
+ * - `'all'`：首屏空闲时调一次（`requestIdleCallback`，退回 setTimeout）——
+ *   页面加载完、浏览器不忙时把 6 个 chunk 拉下来，点开即开；
+ * - `'workspace'` 等：入口行 hover/focus 该按钮时**只**预热它那一份（用户
+ *   意图已经很明确，立刻给最高优先级）。
+ *
+ * 幂等且静默失败：见 `lazy.ts::preloadLazy`。
+ */
+function warmOverlayChunks(scope: keyof typeof loaders | 'all'): void {
+  if (scope === 'all') {
+    for (const loader of Object.values(loaders)) preloadLazy(loader);
+    return;
+  }
+  preloadLazy(loaders[scope]);
+}
+
+/** 首屏空闲预热（只跑一次；页面隐藏时推迟到可见）。 */
+let warmed = false;
+function scheduleIdleWarmup(): void {
+  if (warmed) return;
+  const run = () => {
+    if (warmed) return;
+    if (document.visibilityState === 'hidden') return; // 后台标签页别抢带宽
+    warmed = true;
+    warmOverlayChunks('all');
+  };
+  const ric = (window as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (ric) ric(run, { timeout: 3000 });
+  else window.setTimeout(run, 1200);
+}
 
 const props = defineProps<{
   sessionId: string;
@@ -442,6 +525,7 @@ watch(
   () => void nextTick(syncEntryScroll),
 );
 onMounted(() => {
+  scheduleIdleWarmup();
   syncEntryScroll();
   window.addEventListener('resize', syncEntryScroll, { passive: true });
 });
@@ -1182,7 +1266,14 @@ function mediaSrc(img: string): string {
 <template>
   <div ref="viewRootRef" class="chat-view" :class="{ 'chat-view--overlay-open': anyOverlayOpen }" @paste="onPaste">
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
-    <div ref="entryRowRef" class="entry-row" @scroll.passive="syncEntryScroll">
+    <div
+      ref="entryRowRef"
+      class="entry-row"
+      @scroll.passive="syncEntryScroll"
+      @pointerover="warmFromEvent"
+      @focusin="warmFromEvent"
+      @touchstart.passive="warmFromEvent"
+    >
       <AgentSwitcher
         :active-team-id="props.activeTeamId ?? null"
         @select="(id, core) => emit('selectTeam', id, core)"
@@ -1194,6 +1285,7 @@ function mediaSrc(img: string): string {
         shape="pill"
         size="small"
         title="配置当前 Agent（系统提示词 / 能力白名单 / 禁用工具等）"
+        data-overlay="config"
         @click="toggleOverlay('config')"
       >
         <svg
@@ -1218,6 +1310,7 @@ function mediaSrc(img: string): string {
         shape="pill"
         size="small"
         title="查看上下文占用"
+        data-overlay="context"
         @click="toggleOverlay('context')"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1237,6 +1330,7 @@ function mediaSrc(img: string): string {
           shape="pill"
           size="small"
           title="任务清单"
+          data-overlay="checklist"
           @click="toggleOverlay('checklist')"
         >
           <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1253,6 +1347,7 @@ function mediaSrc(img: string): string {
         shape="pill"
         size="small"
         title="切换会话（每个群/私聊独立上下文）"
+        data-overlay="sessions"
         @click="toggleOverlay('sessions')"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1267,6 +1362,7 @@ function mediaSrc(img: string): string {
         shape="pill"
         size="small"
         title="工作区会话（多会话 / 多目录 / git 状态；文件浏览器常驻右侧边栏）"
+        data-overlay="workspace"
         @click="toggleWorkspace"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1281,6 +1377,7 @@ function mediaSrc(img: string): string {
         shape="pill"
         size="small"
         title="平台实例"
+        data-overlay="instance"
         @click="toggleOverlay('instance')"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1301,6 +1398,7 @@ function mediaSrc(img: string): string {
           shape="pill"
           size="small"
           title="任务（Subagent / 后台 / 分支，仅当前会话）"
+          data-overlay="tasks"
           @click="toggleOverlay('tasks')"
         >
           <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

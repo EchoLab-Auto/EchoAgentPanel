@@ -90,7 +90,25 @@ describe('移动端布局 v2：Sheet 互斥', () => {
 
 describe('移动端布局 v2：入口行横滚提示', () => {
   it('入口行滚动容器挂了 ref 与 scroll 监听', () => {
-    expect(chatVue).toMatch(/<div ref="entryRowRef" class="entry-row" @scroll\.passive="syncEntryScroll">/);
+    // 多行写法（2026-10 加预热监听后属性增多）：ref / class / scroll 必须同在
+    // 同一个 `.entry-row` 容器上——它是横向滚动与「还有更多」提示的宿主。
+    const tag = chatVue.match(/<div[^>]*ref="entryRowRef"[^>]*>/);
+    expect(tag, '应存在 ref="entryRowRef" 的元素').toBeTruthy();
+    expect(tag![0]).toContain('class="entry-row"');
+    expect(tag![0]).toContain('@scroll.passive="syncEntryScroll"');
+  });
+
+  it('入口行按「用户意图」预热覆盖面板 chunk（hover / focus / touch）', () => {
+    // 覆盖面板是 v-if，chunk 若不预热会有数百毫秒到数秒的空玻璃壳
+    // （实测 3G 871ms / 弱网 2104ms，与"卡死"无法区分）。
+    const tag = chatVue.match(/<div[^>]*ref="entryRowRef"[^>]*>/);
+    expect(tag![0]).toContain('@pointerover="warmFromEvent"');
+    expect(tag![0]).toContain('@focusin="warmFromEvent"');
+    expect(chatVue).toContain('preloadLazy');
+    // 每个覆盖面板按钮都带 data-overlay，预热才能识别目标
+    for (const id of ['config', 'context', 'workspace', 'sessions', 'instance', 'tasks']) {
+      expect(chatVue, `${id} 按钮缺 data-overlay`).toContain(`data-overlay="${id}"`);
+    }
   });
 
   it('提示只在「可滚且未到底」时渲染', () => {
