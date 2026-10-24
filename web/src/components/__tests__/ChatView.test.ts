@@ -407,6 +407,9 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     state.trunk = [];
     state.activities = {};
     state.sessionApiOverrides = {};
+    // teams 也清空：徽标现在会读当前 agent 的 `api_profile`（见下方
+    // 「agent 的 profile 优先于全局 active_api」用例），残留的 teams 会串味。
+    state.teams = [];
     state.api = null;
   });
 
@@ -498,7 +501,8 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     wrapper.unmount();
   });
 
-  // 状态行左侧的「当前会话正在用的 API」：会话级覆盖 → persona 激活 → 顶层默认
+  // 状态行左侧的「当前会话正在用的 API」：会话级覆盖 → agent api_profile
+  // → 全局 active_api → 顶层默认（与 Core 的解析顺序一致）
   it('API 徽标：会话级覆盖优先于 persona 级 active_api', async () => {
     state.api = {
       provider: 'deepseek',
@@ -532,6 +536,57 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     wrapper.unmount();
   });
 
+  // ── 回归：徽标漏掉 agent 级 api_profile（2026-10 用户报「API 徽标有 bug」）──
+  //
+  // 实测故障（CDP 直测线上面板）：切到 EchoCode（`api_profile =
+  // deepseek-self-1`）后，入口行卡片显示 `deepseek-flash`，而徽标仍是全局
+  // `kimi / k3.1-pro` —— 同一界面对"这条回答用哪个 API"给出两个矛盾答案。
+  // 根因：徽标只解析 会话覆盖 → 全局 active_api → 顶层，漏掉了 Core 真正
+  // 生效的那一层 `[agent.teams.*].api_profile`（`apply_named_profile`）。
+  it('API 徽标：agent 的 api_profile 优先于全局 active_api，且切 agent 即改判', async () => {
+    state.api = {
+      provider: 'kimi',
+      model: 'k3.1-pro',
+      active_api: 'kimi',
+      profiles: [
+        { name: 'kimi', provider: 'kimi', model: 'k3.1-pro' },
+        { name: 'deepseek-self-1', provider: 'deepseek', model: 'deepseek-flash' },
+      ],
+    } as unknown as typeof state.api;
+    state.teams = [
+      { id: 'Alice', name: 'Alice', enabled: true, sessions: 0, api_profile: 'kimi' },
+      { id: 'EchoCode', name: 'EchoCode', enabled: true, sessions: 0, api_profile: 'deepseek-self-1' },
+      // 没有 api_profile 的 agent：跟随全局 active_api
+      { id: 'plain', name: 'plain', enabled: true, sessions: 0 },
+    ] as never;
+
+    const wrapper = mount(ChatView, {
+      props: { sessionId: SESSION, activeTeamId: 'Alice' },
+      global: { stubs: { MessageItem: MessageItemStub, ChatComposer: ChatComposerStub } },
+    });
+    expect(wrapper.find('.chat-status__api').text()).toBe('kimi / k3.1-pro');
+
+    // 切到 api_profile 与全局 active_api 不同的 agent → 徽标必须跟着变
+    await wrapper.setProps({ activeTeamId: 'EchoCode' });
+    expect(wrapper.find('.chat-status__api').text()).toBe('deepseek / deepseek-flash');
+    const title = wrapper.find('.chat-status__api').attributes('title') ?? '';
+    expect(title).toContain('agent「EchoCode」');
+    expect(title).toContain('deepseek-self-1');
+
+    // agent 没有 api_profile → 回落全局 active_api（并如实标注层级）
+    await wrapper.setProps({ activeTeamId: 'plain' });
+    expect(wrapper.find('.chat-status__api').text()).toBe('kimi / k3.1-pro');
+    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('全局激活');
+
+    // 会话级覆盖仍最高优先（即便 agent 自己有 profile）
+    await wrapper.setProps({ activeTeamId: 'EchoCode' });
+    state.sessionApiOverrides[SESSION] = 'kimi';
+    await nextTick();
+    expect(wrapper.find('.chat-status__api').text()).toBe('kimi / k3.1-pro');
+    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('本会话覆盖');
+    wrapper.unmount();
+  });
+
   it('API 徽标在相位文案左边（DOM 顺序 = 视觉顺序）', () => {
     // beforeEach 把 api 清成 null（徽标不渲染），这里必须先放一份配置
     state.api = {
@@ -547,6 +602,32 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     expect(kids[0]).toContain('chat-status__api');
     expect(kids[1]).toContain('chat-status__live');
     wrapper.unmount();
+  });
+
+  // 徽标截断契约（2026-10 像素实测修正）：`text-overflow: ellipsis` 只对
+  // **块容器**生效。此前写成 `display: inline-flex`，文本成了匿名 flex item，
+  // 超长 provider/model 名会被**硬切在半个字形上**、一个「…」都不画。
+  // headless Chrome 像素对照（90px 宽 / 11px 字号）：
+  //   block      → 停在 x≈88 并画出「…」三点
+  //   inline-flex → 字形画到裁剪边 x≈100，无省略号
+  // happy-dom 没有排版引擎，量不到渲染结果，故锁 CSS 契约。
+  it('API 徽标是块容器：省略号才真的生效（不得写成 flex 容器）', () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../ChatView.vue'),
+      'utf-8',
+    );
+    const styleBlock = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    // 先剥注释：规则块的说明文字里会引用 `display: inline-flex` 这个反例。
+    const stripped = styleBlock.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = stripped.match(/\.chat-status__api\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    expect(rule, '.chat-status__api 规则缺失').not.toBe('');
+    expect(rule).toMatch(/overflow:\s*hidden/);
+    expect(rule).toMatch(/white-space:\s*nowrap/);
+    expect(rule).toMatch(/text-overflow:\s*ellipsis/);
+    // 关键：不能是 flex 容器（含 inline-flex）
+    expect(rule).not.toMatch(/display:\s*(inline-)?flex/);
+    // 高度仍由 line-height 单一来源给出（③ 徽标 → 外壳下边框 的等距契约）
+    expect(rule).toMatch(/line-height:\s*var\(--chat-status-h\)/);
   });
 });
 

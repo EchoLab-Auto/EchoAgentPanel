@@ -762,22 +762,41 @@ const activityText = computed(() => {
 });
 
 /**
- * 状态行左侧的「当前会话正在用的 API」：`provider / model`。
+ * **当前会话真正生效的** API profile：`{ name, scope }`。
  *
- * 解析顺序与会话弹层里的「会话级 API」下拉严格同源（`SessionSwitcher`）：
- *   会话级覆盖 `state.sessionApiOverrides[sessionId]`
- *   → persona 级 `state.api.active_api`
- *   → 顶层默认配置（`state.api.provider` / `state.api.model`）
+ * 解析顺序与 Core 完全一致（会话级覆盖 → persona 引用 → 全局激活 → 顶层默认）：
  *
- * 为什么要放在状态行：忙碌时用户最想知道"这条回答是谁在产出"，而入口行的
- * 「模型」按钮显示的是 **persona 级** active_api —— 当本会话被会话级覆盖
- * （工作区对话可以单独指定 profile）时，两者会不一致，看按钮会看错。
+ *   ① 会话级覆盖 `state.sessionApiOverrides[sessionId]`
+ *      （工作区对话自己的 `api_profile`，Core 侧 `set_session_provider`）
+ *   ② 当前 agent 的 `[agent.teams.*].api_profile`
+ *      （Core `apply_named_profile`：把该 profile 的 provider/model **合入**
+ *      这个 persona 自己的顶层字段，只影响该 agent 的会话）
+ *   ③ 全局 `active_api`（`[agent].active_api`，`apply_active_profile`）
+ *   ④ 都没有 → 顶层默认配置（`[agent].provider` / `[agent].model`）
+ *
+ * 为什么第 ② 层必须在这里（2026-10 修 bug）：徽标此前只解析 ①③④，于是切到
+ * `api_profile` 与全局 `active_api` 不同的 agent 时——本机「EchoCode」
+ * （`deepseek-self-1` / `deepseek-flash`）对全局 `kimi`——**入口行卡片写着
+ * `deepseek-flash`、徽标却仍显示 `kimi / k3.1-pro`**：同一个界面对"这条回答
+ * 用哪个 API"给出两个互相矛盾的答案，用户无从判断哪个是真的。
+ * 现在 ② 与 `AgentSwitcher.resolveModel` 同源，卡片与徽标不可能再打架。
  */
+const apiEffective = computed<{ name: string; scope: string }>(() => {
+  const override = state.sessionApiOverrides[props.sessionId] ?? '';
+  if (override) return { name: override, scope: '本会话覆盖' };
+  const team = currentTeam.value ?? state.teams[0] ?? null;
+  const persona = team?.api_profile ?? '';
+  if (persona) return { name: persona, scope: `agent「${team?.name || team?.id || ''}」` };
+  const global = state.api?.active_api ?? '';
+  if (global) return { name: global, scope: '全局激活' };
+  return { name: '', scope: '顶层默认配置' };
+});
+
+/** 徽标文案：`provider / model`（profile 取不到时回落顶层，与 Core 同语义）。 */
 const apiLabel = computed(() => {
   const api = state.api;
   if (!api) return '';
-  const override = state.sessionApiOverrides[props.sessionId] ?? '';
-  const name = override || api.active_api || '';
+  const { name } = apiEffective.value;
   const profile = name ? api.profiles?.find((x) => x.name === name) : undefined;
   const provider = profile?.provider || api.provider || '';
   const model = profile?.model || api.model || '';
@@ -787,12 +806,16 @@ const apiLabel = computed(() => {
   return `${provider} / ${model}`;
 });
 
-/** apiLabel 的悬停说明：profile 名 + 是否会话级覆盖（按钮上看不到这两层）。 */
+/** apiLabel 的悬停说明：profile 名 + 生效层级（徽标上看不到这两层）。 */
 const apiTitle = computed(() => {
-  const override = state.sessionApiOverrides[props.sessionId] ?? '';
-  const name = override || state.api?.active_api || '';
-  const scope = override ? '本会话覆盖' : state.api?.active_api ? 'persona 激活' : '顶层默认配置';
-  return name ? `API：${apiLabel.value || '未知'}\n来源：${scope} · profile「${name}」` : `API：${apiLabel.value || '未知'}\n来源：${scope}`;
+  const { name, scope } = apiEffective.value;
+  // 引用悬空（profile 被删/改名）：Core 的 apply_named_profile 会保留顶层值，
+  // 徽标也回落到顶层——但得说明白，否则用户会以为徽标在骗人。
+  const missing = !!name && !!state.api && !state.api.profiles?.some((p) => p.name === name);
+  const note = missing ? '（供应商池中无此 profile，实际回落顶层默认）' : '';
+  return name
+    ? `API：${apiLabel.value || '未知'}\n来源：${scope} · profile「${name}」${note}`
+    : `API：${apiLabel.value || '未知'}\n来源：${scope}`;
 });
 
 /** 推理消息所属会话当前是否仍在输出（thinking / tool / subagent）——打字机准入条件之一。 */
@@ -1919,8 +1942,9 @@ function mediaSrc(img: string): string {
                但不会打断用户正在输入的内容（live region 只包相位文案）。 -->
           <div v-if="apiLabel || activityText" class="chat-status">
             <!-- 左：当前会话生效的 provider / model。**常显**（不随忙碌消失）——
-                 用户要"随时能看出这条回答是哪个 API 产出的"。会话级覆盖与
-                 persona 级 active_api 可能不同，以本会话实际生效者为准。 -->
+                 用户要"随时能看出这条回答是哪个 API 产出的"。三层来源（会话
+                 覆盖 / agent 的 api_profile / 全局 active_api）取最靠前的一层
+                 ——即本会话实际生效者，见 setup 里的 `apiEffective`。 -->
             <span v-if="apiLabel" class="chat-status__api" :title="apiTitle">{{ apiLabel }}</span>
             <!-- 右：相位文案，仅忙碌时存在。live region 只包这一段——API 名是
                  静态信息，重复播报只会吵。 -->
@@ -2706,10 +2730,18 @@ function mediaSrc(img: string): string {
   max-width: 55%;
   font-size: 11px;
   /* 盒子高度 = 行高（不是 15px 的紧凑行盒）：这样徽标的下边缘就是本行的
-     下边缘，③「徽标 → 外壳下边框」才精确等于 __body 的 padding-bottom。 */
+     下边缘，③「徽标 → 外壳下边框」才精确等于 __body 的 padding-bottom。
+     line-height 已让单行文本在盒内垂直居中，故无需 flex 居中。 */
   line-height: var(--chat-status-h);
-  display: inline-flex;
-  align-items: center;
+  /* **必须是块容器，不能用 inline-flex**（2026-10 实测修正）：`text-overflow:
+     ellipsis` 只对块容器生效——写成 inline-flex 时文本成了匿名 flex item，
+     超长 provider 名会被**硬切在半个字形上**，一个「…」都不画（与下面那行
+     注释的承诺相反）。像素对照（headless Chrome，90px 宽、11px 字号）：
+       display: block      → 末尾停在 x≈88 并画出「…」三点
+       display: inline-flex → 字形一直画到裁剪边 x≈100，无省略号
+     块级盒子在父 flex 行里靠 align-items:center 垂直居中（父已有），
+     高度仍等于 line-height → ③ 的等距契约不变。 */
+  display: block;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
