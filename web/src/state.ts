@@ -507,6 +507,10 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   const result: DisplayMessage[] = [];
   // 快照下标 → result 下标（补丁要用；-1 = 尚未输出）
   const resultOf = new Int32Array(out.length).fill(-1);
+  // 快照下标 → 已被某行实时副本认领（1:1 消费计数，见 `coveredByContent`）。
+  // 与 `resultOf` 分开：条目可能已被批量铺出，但仍可被认领（此时实时副本
+  // 直接丢弃，不再追加）。
+  const claimed = new Uint8Array(out.length);
   let snap = 0; // 下一个待输出的快照条目下标
   let cursorEstablished = false;
 
@@ -538,9 +542,17 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
     // 全文与 timeline 里的截断文本无法"完全相等"，strict 会把同一条判成
     // 两条 → 重复显示。
     const strict = withinWatermark && w.role !== 'reasoning';
-    const coveredIndex = coveredInIndex(out, w, strict, index);
+    let coveredIndex = coveredInIndex(out, w, strict, index);
+    if (coveredIndex < 0 && seq === 0) {
+      // 兜底身份（2026-10 顺序错乱根治）：实时推送行不带条目级 seq，而 Core
+      // 派生历史与实时推送的 `time` 口径不同（carry-forward vs 到达时刻），
+      // `(role, time)` 因此常常落空 → 同一条回答被追加成第二份并插到靠后
+      // 位置。这里按内容认领，并靠 `claimed` 保证 1:1 消费。
+      coveredIndex = coveredByContent(w, index, (i) => claimed[i] === 0);
+    }
     if (coveredIndex >= 0) {
-      flushThrough(coveredIndex);
+      claimed[coveredIndex] = 1;
+      flushThrough(coveredIndex); // 已铺出过则是空操作（游标不回退）
       cursorEstablished = true;
       continue;
     }
@@ -608,15 +620,57 @@ interface SnapshotIndex {
   byToolCallId: Map<string, number>;
   /** 工具名 → 最后一个 `running` 工具行的下标（名字兜底用）。 */
   byToolNameRunning: Map<string, number>;
+  /**
+   * 内容签名 → 快照下标列表（升序）。**`(role, time)` 失效时的兜底身份**
+   * （见 `coveredByContent`）：两侧的 `time` 语义并不一致——派生历史里
+   * backend / subagent 用 carry-forward（沿用最近一条带时间的事件），而
+   * 实时推送用到达时刻，实测同一回合能差 **2251 秒**。此时只有内容还认得出
+   * 是同一条。
+   */
+  bySignature: Map<string, number[]>;
 }
 
 const roleTimeKey = (role: string, time: number): string => `${role}|${time}`;
+
+/**
+ * 内容签名：角色 + 归一化正文（**全文**，不截断——截断会把同一段长回答的
+ * 不同段落判成两条）。
+ *
+ * 为什么需要它（2026-10 会话区顺序错乱根治）：`(role, time)` 这个身份建立
+ * 在"两侧时间同源"的假设上，而 Core 的两条投影路径给的 `time` 语义不同：
+ *   · `SessionHistory`（按会话派生）：backend / subagent 用 carry-forward
+ *     （沿用最近一条带时间的事件，通常是上一个工具的 started_at_ms）；
+ *   · `TrunkTimeline` 与实时推送：`Utc::now()`（到达时刻）。
+ * 于是同一条回答在两侧"时间不同 → 身份不成立 → 判成新条目 → 追加到合并
+ * 游标处"，表现为**同一条回答显示两次、其中一份插在靠后的位置**，以及
+ * "思考小方块跑到别的回合里"。内容不依赖任何时间，是这类跨口径对齐唯一
+ * 稳的身份。
+ *
+ * 归一化只做空白折叠 + 去首尾：Core 两侧都不改写正文，这一步纯粹为了容忍
+ * JSON 往返与行尾差异。
+ */
+/**
+ * "正文可作身份"的最小长度（归一化后，含角色前缀之外的正文长度）。
+ *
+ * 60 这个量级的依据：短回答（`ok` / `收到` / `好的` / `继续` 之类）在真实
+ * 会话里会重复出现，而它们的内容不携带任何身份信息；一段 ≥60 字的完整
+ * 回答或子代理报告在同一会话里重复出现，只可能是同一条被投影了两次。
+ * 阈值的作用是把"不可判"的短文本排除在内容匹配之外——代价是极短回答的
+ * 重复仍可能留在界面上（可见、可读、用户能判断），而不是冒"吞掉一条真实
+ * 回答"的风险。
+ */
+const CONTENT_IDENTITY_MIN_CHARS = 60;
+
+function contentSignature(role: string, content: string | undefined): string {
+  return `${role}|${(content ?? '').replace(/\s+/g, ' ').trim()}`;
+}
 
 function buildSnapshotIndex(list: DisplayMessage[]): SnapshotIndex {
   const index: SnapshotIndex = {
     byRoleTime: new Map(),
     byToolCallId: new Map(),
     byToolNameRunning: new Map(),
+    bySignature: new Map(),
   };
   for (let i = 0; i < list.length; i++) {
     const m = list[i]!;
@@ -629,7 +683,14 @@ function buildSnapshotIndex(list: DisplayMessage[]): SnapshotIndex {
       // 存**最后一个**：原判据自后向前找（后到的是同一 call 的最新态）。
       if (tool.toolCallId) index.byToolCallId.set(tool.toolCallId, i);
       if (tool.status === 'running') index.byToolNameRunning.set(tool.name, i);
+      // 工具行不进内容索引：同名工具连排是常态，`content` 只是工具名、
+      // 不具身份性（配对一律走 tool_call_id，见 `findToolEntryInIndex`）。
+      continue;
     }
+    const sig = contentSignature(m.role, m.content);
+    const sigBucket = index.bySignature.get(sig);
+    if (sigBucket) sigBucket.push(i);
+    else index.bySignature.set(sig, [i]);
   }
   return index;
 }
@@ -688,6 +749,54 @@ function coveredInIndex(
     const h = snapshot[i]!;
     if (h.role !== live.role || h.time !== live.time) continue; // 下标被补丁换过
     if (coveredBy(h, live, strict)) return i;
+  }
+  return -1;
+}
+
+/**
+ * 内容兜底匹配：`(role, time)` 没命中时的第二道身份（2026-10 顺序错乱根治）。
+ *
+ * 适用条件（缺一不可，保守是刻意的）：
+ * - 只对**实时推送行**（`seq === 0`）生效。带 seq 的条目由水位线
+ *   （`seq <= baseSeq`）判定归属，不需要也不应该走内容匹配——同文重复的
+ *   新回答会被误吞。
+ * - 只认**归一化全文相等**。不做前缀兼容：前缀匹配（`coveredBy` 里给流式
+ *   副本用的那条）在兜底场景里会把"新回答恰好以旧回答开头"判定成重复，
+ *   而丢一条回答比多一条严重得多。
+ * - 正文必须**足够长**（`CONTENT_IDENTITY_MIN_CHARS`）。这不是省事的门槛，
+ *   而是语义边界：短文本（`ok` / `收到` / `好的`）**不具身份性**——模型对
+ *   同样的问题完全可能给出同样的短回答，此时"快照那条"和"实时这条"在
+ *   数据上**不可区分**（同样的角色、同样的正文、时间又不可信）。长文本
+ *   反过来近似唯一：一段完整回答/子代理报告重复出现，只可能是同一条被
+ *   投影了两次。宁可让极短的重复留在界面上（用户一眼看出是两条回答），
+ *   也不能把一条真实回答吞掉。
+ * - 候选必须**未被认领**（`available(i)`，见调用处的 `claimed`）。这一条
+ *   保证 1:1 消费：同一条快照条目不会被两行实时副本各领一次。
+ *
+ * ⚠️ 判据必须是"未被认领"而非"尚未输出"（实测修正）：快照条目在合并过程
+ * 中是**成批铺出**的（`flushThrough` 会把中间那些一次输出），所以一条实时
+ * 副本要认领的孪生条目往往**已经铺出去了**——此时它的内容早就在列表的正确
+ * 位置上，实时副本只需**丢弃**（不改游标），绝不能再追加一份。用"尚未输出"
+ * 当判据会漏掉这一大类（真实数据上 10 条重复只消掉 6 条，剩 4 条正是这批）。
+ *
+ * 为什么不能只靠 `(role, time)`：Core 的两条投影路径时间口径不同（派生用
+ * carry-forward、实时用到达时刻），实测偏差可达数十分钟，见
+ * `contentSignature` 的说明。
+ */
+function coveredByContent(
+  live: DisplayMessage,
+  index: SnapshotIndex,
+  available: (i: number) => boolean,
+): number {
+  if (live.role === 'tool') return -1; // 工具行走 tool_call_id 配对
+  const signature = contentSignature(live.role, live.content);
+  if (signature.length < CONTENT_IDENTITY_MIN_CHARS) return -1; // 短文本不具身份性
+  const bucket = index.bySignature.get(signature);
+  if (!bucket) return -1;
+  // 桶内升序：取最小的"尚未输出"下标 = 最靠前的同名条目（1:1 消费）。
+  for (const i of bucket) {
+    if (!available(i)) continue;
+    return i;
   }
   return -1;
 }
