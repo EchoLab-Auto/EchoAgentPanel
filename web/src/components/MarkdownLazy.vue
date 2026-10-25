@@ -13,6 +13,11 @@
 //!   chunk 到达后无跳变地增强为完整 Markdown。
 //!
 //! 同一模块的多次加载由 ESM 缓存共享（全页仅一次网络请求）。
+//!
+//! 2026-10：公式渲染（KaTeX）随本模块一起按需加载（`katex/dist/katex.min.css`
+//! 并入同一 loader）。公式本身由 `<doc 模块 MarkdownRenderer>` 的延迟管线
+//! 渲染（占位 → 挂载后 `import('katex')`），未装 katex 的宿主导出的是 TeX
+//! 原文而非空白，见 ui-frame `composites/doc/math.ts`。
 
 import { defineAsyncComponent, defineComponent, h } from 'vue';
 import { isChunkLoadError, tryAutoReload } from '../lazy';
@@ -33,7 +38,13 @@ const PlainFallback = defineComponent({
 
 const LazyMarkdown = defineAsyncComponent({
   loader: () =>
-    import('@echolab-auto/ui-frame/doc').then((m) => m.MarkdownRenderer),
+    Promise.all([
+      import('@echolab-auto/ui-frame/doc'),
+      // 数学公式（KaTeX）样式：与 Markdown 模块同批按需加载 —— 既不进首屏
+      // 关键路径，也不必等公式出现才请求。字体文件由 CSS 的 url() 声明，
+      // 浏览器只为实际用到的字族下载 woff2（多数会话一条都不下载）。
+      import('katex/dist/katex.min.css'),
+    ]).then(([m]) => m.MarkdownRenderer),
   loadingComponent: PlainFallback,
   // 立即显示回退（慢网络下消息文本先行）；不设 delay，避免回退出现前
   // 的空白帧。

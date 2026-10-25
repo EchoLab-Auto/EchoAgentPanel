@@ -107,7 +107,7 @@ import '../index.css';const A = {
       ])
     ], 34));
   }
-}), pe = /* @__PURE__ */ x(J, [["__scopeId", "data-v-40cb81b3"]]), Q = { class: "nm-chat-fold__head" }, W = ["aria-expanded"], X = {
+}), pe = /* @__PURE__ */ x(J, [["__scopeId", "data-v-fdad595b"]]), Q = { class: "nm-chat-fold__head" }, W = ["aria-expanded"], X = {
   class: "nm-chat-fold__caret",
   "aria-hidden": "true"
 }, Y = {

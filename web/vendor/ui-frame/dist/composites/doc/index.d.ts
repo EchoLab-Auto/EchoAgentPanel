@@ -55,6 +55,7 @@ export type { TocItem, TocNode, UseMarkdownTocReturn } from './useMarkdownToc';
 export { useScrollSpy, getScrollBehavior } from './useScrollSpy';
 export type { UseScrollSpyOptions, UseScrollSpyReturn } from './useScrollSpy';
 export { highlightCode } from './highlight';
+export { mathExtensions, renderMath, stripMathDelimiters, matchBlockDollar, matchBlockBracket, matchInlineDollar, matchInlineDoubleDollar, matchInlineBracket, matchInlineParen, MATH_MOUNT_CLASS, MATH_SOURCE_CLASS, MATH_STATE_ATTR, } from './math';
 export type { ProDocNode, DocTree, ProDocOptions } from './types.js';
 export type { ProDocFlowDirection, ProDocFlowNodeShape, ProDocFlowNode, ProDocFlowEdge, ProDocFlowError, ProDocFlowGraph, } from './types.js';
 export { parseFrontmatter, pathToId, extractTitle, createNode, buildDocTree } from './parser.js';
