@@ -1114,7 +1114,7 @@ function Pn(e) {
 function Bn(e) {
   if (e[0] !== "$" || e[1] === "$") return null;
   const t = e[1];
-  if (t === void 0 || /\s/.test(t) || /[0-9]/.test(t)) return null;
+  if (t === void 0 || /\s/.test(t)) return null;
   for (let n = 1; n < e.length; n += 1) {
     const s = e[n];
     if (s === "\\") {
@@ -1126,7 +1126,7 @@ function Bn(e) {
     if (s !== "$") continue;
     if (/\s/.test(e[n - 1] ?? "") || /[0-9]/.test(e[n + 1] ?? "")) return null;
     const d = e.slice(1, n);
-    return d.trim() ? { tex: d, raw: e.slice(0, n + 1) } : null;
+    return !d.trim() || /[`，。、；：！？…]/.test(d) ? null : { tex: d, raw: e.slice(0, n + 1) };
   }
   return null;
 }
