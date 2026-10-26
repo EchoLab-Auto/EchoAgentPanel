@@ -69,7 +69,11 @@ const snapshot = computed(() => railDrag.snapshot);
 <style scoped>
 .rail-ghost {
   position: fixed;
-  z-index: 200; /* 高于会话区悬浮元素（rail z-index 4 / 输入区 5），低于库模态 */
+  /* 宿主自绘层取值域：按 ui-frame 集成约定用 0–99（库浮层从 100 起：
+     dropdown 100 < tooltip 200 < popover 300 < overlay 400 < toast 500）。
+     90 = 高于 Panel 自身所有层（rail 4 / 输入区 5 / 入口行 6 / 浮层 30–60），
+     低于库最底的下拉层，拖影不会盖住库下拉与提示。 */
+  z-index: 90;
   pointer-events: none;
   /* 位移全走 transform：提前提升为合成层，拖动期间不触发布局/重绘 */
   will-change: transform, opacity;

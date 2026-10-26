@@ -2848,7 +2848,7 @@ watch(
           <!-- 智能体编辑 / 新建表单（分区折叠：基础 / 提示词 / 能力 / 禁用） -->
           <div v-else-if="activeCategory === 'team' && teamEditing" class="caps-detail team-editor">
             <!-- 头部信息卡：头像 + 名称 + 状态标签（ui-frame NeumorphismCard） -->
-            <NeumorphismCard :elevation="2" radius="large" no-padding class="team-hero">
+            <NeumorphismCard :elevation="2" :radius="24" no-padding class="team-hero">
               <div class="team-hero__body">
                 <div class="team-hero__avatar">{{ teamAvatarText }}</div>
                 <div class="team-hero__main">

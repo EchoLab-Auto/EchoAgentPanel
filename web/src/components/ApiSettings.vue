@@ -932,7 +932,7 @@ watch(
         v-for="profile in api?.profiles"
         :key="profile.name"
         :elevation="2"
-        radius="large"
+        :radius="24"
         hoverable="bulge"
         no-padding
         class="profile-card"

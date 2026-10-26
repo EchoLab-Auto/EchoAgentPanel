@@ -94,14 +94,33 @@ npm run ui-frame:diff -- 1.3.2   # 对比指定版本 / 标签
   切到 npm 模式会移除它们。
 - CI 用 `npm ci` + 提交的 vendor 快照，无需任何切换动作。
 
+### ui-frame 升级适配（2026-10-26）
+
+快照已刷新到 ui-frame 源码 `db08388`（版本号仍是 `1.3.2-dev.4`，但含一批
+**尚未发版**的破坏性变更）。Panel 侧的适配口径与结果：
+
+| 上游变更 | Panel 处理 |
+| --- | --- |
+| `NeumorphismCard.radius` 由四档字符串改为 px 数字，档位类删除 | 三处 `radius="large"` → `:radius="24"`（`large` 即 24，视觉零变化） |
+| `size` 与单维几何量（StatusDot / Modal / Logo / Spinner / AsciiArt）全面收 px 数字 | 存量 `size="small"` 等字符串**保留**——上游明确降级为 `@deprecated` 兼容别名，逐像素等价锚点数字；新代码按数字写 |
+| 浮层（Tooltip / Menu / Dropdown / NavMenu）全部 teleport 到 body，宿主持有 z-index `0–99` 保留域（库浮层 `100+`） | `RailDragGhost` 自绘拖影 `z-index: 200 → 90`；其余 Panel 自绘层（1–60）本就在域内 |
+| 库 Tooltip 不再被祖先 `overflow` 裁剪 | `WorkspaceFileBrowser` 的绝对路径速览仍自绘（库 tooltip 是 `nowrap` 单行 + 库定样式，长路径换行/等宽字体做不到），仅修正注释口径 |
+| Button `glass` prop 并入 `variant="glass"`；Card 玻璃三档、Tag 字号、Progress 厚度、Textarea 抬升等修正 | Panel 早已用 `variant="glass"`；其余为库侧修正，无需补偿 |
+
+验证结果：`vue-tsc` 零错误、`npm test` 105 文件 / 950 用例全通过、
+`npm run lint:styles` 令牌守卫通过（对照上游 `tokens.scss` 414 个令牌）、
+`npm run layout:mobile` 160/160 几何断言通过、dev server 控制台零告警。
+
 ### 前端质量脚本（`web/`）
 
 ```bash
 cd web
 npm test              # vitest（70 文件 / 570 用例）
 npm run lint:styles   # 样式令牌守卫：幻影令牌 / --nf-* 禁用命名空间 / 拼写错
+npm test              # vitest（105 文件 / 950 用例）
+npm run lint:styles   # 样式令牌守卫：幻影令牌 / --nf-* 禁用命名空间 / 拼写错
+npm run layout:mobile # 移动端真视口几何断言（无头 Chrome + CDP，无浏览器则跳过）
 npm run build         # vue-tsc + vite 生产构建（视图与弹层按 import() 自动分包）
-```
 
 **样式令牌纪律（2026-10 起）**：只用 ui-frame 真实存在的 `--nm-*` 令牌与 Panel
 的 `--panel-*` 语义色；禁止自造令牌名（历史上 37 处幻影令牌曾导致主题切换静默

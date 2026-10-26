@@ -15,7 +15,7 @@ const emit = defineEmits<{ toggle: [] }>();
 </script>
 
 <template>
-  <NeumorphismCard :elevation="2" radius="large" hoverable no-padding class="sidebar-card">
+  <NeumorphismCard :elevation="2" :radius="24" hoverable no-padding class="sidebar-card">
     <template #header>
       <div class="sidebar-card-head" @click="emit('toggle')">
         <span class="sidebar-card-title">

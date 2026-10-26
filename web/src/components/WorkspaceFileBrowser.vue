@@ -13,9 +13,11 @@
 //!
 //! 目录根行的悬停速览（绝对路径）：根行只显示目录 basename，多根同名时
 //! （如两个 `source/`）无法区分；悬停显示**绝对路径**。自绘 + Teleport，
-//! 不复用原生 `title`（约 1s 延迟、样式不可控、长路径被系统截断），也不复用
-//! 库 `NeumorphismTooltip`（相对定位不 Teleport，会被 rail 卡体的
-//! `overflow-y: auto` 裁剪）。
+//! 不复用原生 `title`（约 1s 延迟、样式不可控、长路径被系统截断）。
+//! 也不复用库 `NeumorphismTooltip`：它自 ui-frame 1.3.2 起已 teleport 到 body
+//! （不再被祖先 `overflow` 裁剪，当年的裁剪问题已消失），但内容仍是单行
+//! `white-space: nowrap` 的字符串 + 库定样式——长路径不换行、非等宽字体、
+//! 宽度不可调，给不出「整条绝对路径一次看全」的效果，故仍自绘。
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
