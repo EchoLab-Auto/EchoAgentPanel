@@ -1,11 +1,21 @@
 import { FormRule } from '../../composables/useFormValidation';
 
 export type { FormRule };
+export type FormSize = 'small' | 'medium' | 'large';
 export interface NeumorphismFormProps {
     model?: Record<string, unknown>;
     rules?: Record<string, FormRule[]>;
     labelWidth?: string;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 子字段尺寸——px 最小高度（数字，主几何量），或三档预设名。
+     *
+     * Form 自身不画几何量：size 只做级联，原样下发给子字段（Input / Select / …），
+     * 由子组件按各自的三锚点插值，所以这里既不做换算也不做插值。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | FormSize;
     direction?: 'horizontal' | 'vertical';
 }
 declare function validateField(name: string): boolean;

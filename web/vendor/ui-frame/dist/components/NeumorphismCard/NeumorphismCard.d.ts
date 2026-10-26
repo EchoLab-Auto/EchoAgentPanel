@@ -37,8 +37,14 @@ export interface NeumorphismCardProps {
     variant?: CardVariant;
     /** @deprecated Use `elevation` magnitude (1–4) instead. */
     depth?: CardDepth;
-    /** Border radius level */
-    radius?: 'small' | 'medium' | 'large' | 'xl';
+    /**
+     * 圆角半径（px，直接就是像素值）。
+     *
+     * 例：`0` 直角、`8` 紧凑、`24`（默认）、`40` 胶囊感。
+     * 支持全局配置 `card.radius` 级联；组件把它写到 `--nm-card-radius`，样式侧
+     * 消费该变量，所以消费方也能用 CSS 覆盖（见 `.nm-card` 规则）。
+     */
+    radius?: number;
     /** Whether the card has no padding */
     noPadding?: boolean;
     /**
@@ -97,8 +103,8 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     squircle: boolean;
     clipPath: undefined;
 }>>> & Readonly<{}>, {
-    clipPath: string;
     glass: boolean | CardGlass;
+    clipPath: string;
     noPadding: boolean;
     hoverable: boolean | "bulge" | "sink";
     squircle: boolean | number;

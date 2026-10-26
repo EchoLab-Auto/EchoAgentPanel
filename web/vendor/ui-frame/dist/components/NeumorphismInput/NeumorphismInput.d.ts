@@ -6,7 +6,17 @@ export interface NeumorphismInputProps {
     disabled?: boolean;
     readonly?: boolean;
     required?: boolean;
-    size?: InputSize;
+    /**
+     * 尺寸——px 最小高度（数字，主几何量），或三档预设名。
+     *
+     * 数字即「最小高度」：字号、内距与前后缀内距按三锚点（36 / 48 / 60）
+     * 分段线性插值，所以 `:size="36"` 与 `size="small"` 逐像素相同，
+     * `:size="42"` 落在两者之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | InputSize;
     maxlength?: number | string;
     minlength?: number | string;
     name?: string;

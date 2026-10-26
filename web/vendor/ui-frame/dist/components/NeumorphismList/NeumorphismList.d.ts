@@ -1,3 +1,4 @@
+export type ListSize = 'small' | 'medium' | 'large';
 export interface NeumorphismListProps<T> {
     /** Data array to render (when not using manual slot) */
     items?: T[];
@@ -5,8 +6,16 @@ export interface NeumorphismListProps<T> {
     bordered?: boolean;
     /** Show dividers between items */
     split?: boolean;
-    /** Size variant controlling padding and font */
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 字号（数字，主几何量），或三档预设名。
+     *
+     * 数字即「字号」：行内距与头尾内距按三锚点（12 / 14 / 15）分段线性插值，
+     * 所以 `:size="14"` 与 `size="medium"` 逐像素相同，`:size="14.5"` 落在两者之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | ListSize;
     /** Enable hover effect on items */
     hoverable?: boolean;
     /** Show loading state */

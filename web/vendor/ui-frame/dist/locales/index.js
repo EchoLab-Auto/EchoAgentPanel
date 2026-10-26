@@ -21,6 +21,7 @@ const e = {
   canvasLabel: "画布视口,方向键平移,加减键缩放,0 重置",
   artLabel: "动态效果画布",
   asciiArtLabel: "字符画",
+  dotArtLabel: "波点画",
   // GraphView
   graphLabel: "节点图：方向键切换节点，Enter 选中，加减键缩放，0 适应视图",
   graphZoomIn: "放大",
@@ -200,6 +201,7 @@ const e = {
   canvasLabel: "Canvas viewport, arrow keys to pan, plus/minus to zoom, 0 to reset",
   artLabel: "Generative art canvas",
   asciiArtLabel: "ASCII art",
+  dotArtLabel: "Dot pattern",
   // GraphView
   graphLabel: "Node graph: arrow keys to move selection, Enter to select, +/- to zoom, 0 to fit",
   graphZoomIn: "Zoom in",

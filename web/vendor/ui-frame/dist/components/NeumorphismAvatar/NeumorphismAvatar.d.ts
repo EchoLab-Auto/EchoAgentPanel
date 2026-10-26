@@ -2,7 +2,16 @@ export type AvatarSize = 'small' | 'medium' | 'large';
 export interface NeumorphismAvatarProps {
     src?: string;
     alt?: string;
-    size?: AvatarSize;
+    /**
+     * 尺寸——px 直径（数字，主几何量），或三档预设名。
+     *
+     * 数字即「直径」：字号按三锚点（32 / 44 / 64）分段线性插值，
+     * 所以 `:size="44"` 与 `size="medium"` 逐像素相同。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | AvatarSize;
     shape?: 'circle' | 'rounded';
     initials?: string;
     icon?: string;

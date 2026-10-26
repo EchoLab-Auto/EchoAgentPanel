@@ -1,6 +1,8 @@
 import { StepItem, StepStatus } from '../../composables/useSteps';
 
 export type { StepItem, StepStatus };
+/** 档位别名（字符串通道）。数字为一等公民，档位仅兼容保留 */
+export type StepsSize = 'small' | 'medium' | 'large';
 export interface NeumorphismStepsProps {
     /** Step definitions. */
     steps?: StepItem[];
@@ -8,8 +10,16 @@ export interface NeumorphismStepsProps {
     current?: number;
     /** Layout direction. */
     direction?: 'horizontal' | 'vertical';
-    /** Size preset for step circles and fonts. */
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 序号圆直径（数字，主几何量），或三档预设名。
+     *
+     * 数字即「序号圆直径」：序号字号按三锚点（28 / 36 / 48）分段线性插值，
+     * 所以 `:size="36"` 与 `size="medium"` 逐像素相同。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | StepsSize;
     /** When true, title and description are centered below the step circle. */
     center?: boolean;
 }

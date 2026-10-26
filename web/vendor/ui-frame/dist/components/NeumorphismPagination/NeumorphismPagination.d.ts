@@ -1,8 +1,19 @@
+export type PaginationSize = 'small' | 'medium' | 'large';
 export interface NeumorphismPaginationProps {
     modelValue?: number;
     total?: number;
     pageSize?: number;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 页码按钮高（数字，主几何量），或三档预设名。
+     *
+     * 数字即「页码按钮高」：按钮最小宽度与字号按三锚点（30 / 38 / 46）
+     * 分段线性插值，所以 `:size="38"` 与 `size="medium"` 逐像素相同，
+     * `:size="42"` 落在 medium / large 之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | PaginationSize;
     showTotal?: boolean;
     showJumper?: boolean;
     maxVisiblePages?: number;

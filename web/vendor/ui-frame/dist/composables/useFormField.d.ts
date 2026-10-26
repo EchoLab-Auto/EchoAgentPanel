@@ -1,8 +1,14 @@
-export type FieldSize = 'small' | 'medium' | 'large';
+/**
+ * 字段尺寸：数字 = 主几何量（最小高度）px，字符串 = 兼容档位别名。
+ *
+ * 数字与档位是两条互斥的渲染路径：数字走 `--sized` 类 + 内联 CSS 变量
+ * （见 `utils/controlScale`），档位继续用三档 class，锚点处两者逐像素一致。
+ */
+export type FieldSize = number | 'small' | 'medium' | 'large';
 export interface FormFieldConfig {
     /** 组件 props */
     id?: string;
-    size: 'small' | 'medium' | 'large';
+    size: FieldSize;
     disabled: boolean;
     error?: string | boolean;
     /** generateId 前缀  */

@@ -26,6 +26,7 @@ export interface LocaleMessages {
     canvasLabel?: string;
     artLabel?: string;
     asciiArtLabel?: string;
+    dotArtLabel?: string;
     /** GraphView */
     graphLabel?: string;
     graphZoomIn?: string;

@@ -1,12 +1,18 @@
 import { LogoMode as PixelLogoMode } from '../../composables/usePixelLogoAnimation';
 
 export type LogoMode = PixelLogoMode;
+/** @deprecated 旧尺寸档位（字符串）——保留仅为兼容映射，新代码请用 `width` 或数字 */
 export type LogoSize = 'small' | 'medium' | 'large';
 export interface NeumorphismLogoProps {
     /** Animation mode. */
     mode?: LogoMode;
-    /** Component size. */
-    size?: LogoSize;
+    /**
+     * 宽度（px，直接就是像素值）；与 `width` 同义，`width` 优先。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）已弃用，仅按
+     * small=120 / medium=220 / large=360（px 宽）兼容映射；新代码请用 `width`。
+     */
+    size?: number | LogoSize;
     /** SVG width (CSS value or number in px). */
     width?: string | number;
     /** Whether the gooey filter is enabled. */

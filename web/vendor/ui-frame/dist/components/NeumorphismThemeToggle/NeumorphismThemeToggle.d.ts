@@ -1,10 +1,19 @@
 import { Theme } from '../../composables/useTheme';
 
+export type ThemeToggleSize = 'small' | 'medium' | 'large';
 export interface NeumorphismThemeToggleProps {
     /** v-model binding: 'light' | 'dark' | 'auto' */
     modelValue?: Theme;
-    /** Size variant */
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——内层按钮的上下内距 px（数字，主几何量），或三档预设名。
+     *
+     * 数字即「按钮上下内距」：图标、左右内距、外层内距按锚点表（5 / 6 / 8）
+     * 分段线性插值，尺寸施加在内部 `.nm-theme-toggle__btn` / `__icon` 上。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | ThemeToggleSize;
     /** Whether to disable auto mode option */
     disableAuto?: boolean;
     /** Whether the toggle is disabled */

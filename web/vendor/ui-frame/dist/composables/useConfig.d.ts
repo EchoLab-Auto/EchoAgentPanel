@@ -3,23 +3,25 @@ import { ComputedRef, InjectionKey } from 'vue';
 export interface NeumorphismGlobalConfig {
     /** Default button props applied to all NeumorphismButton instances */
     button?: {
-        variant?: 'raised' | 'pressed';
-        size?: 'small' | 'medium' | 'large';
+        /**
+         * 默认视觉预设。玻璃是其中一档（`glass` / `glass-raised` / `glass-pressed`），
+         * 这里一并放开，否则「全站默认玻璃」无从配置。
+         */
+        variant?: 'raised' | 'pressed' | 'primary' | 'glow' | 'glass' | 'glass-raised' | 'glass-pressed';
+        size?: number | 'small' | 'medium' | 'large';
         shape?: 'rounded' | 'pill' | 'circle';
-        /** 默认玻璃拟态档位：true / 'float' / 'raised' / 'pressed' */
-        glass?: boolean | 'float' | 'raised' | 'pressed';
     };
     /** Default input props applied to all NeumorphismInput instances */
     input?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
     };
     /** Default input number props applied to all NeumorphismInputNumber instances */
     inputNumber?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
     };
     /** Default date picker props */
     datePicker?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         format?: string;
         clearable?: boolean;
         firstDayOfWeek?: number;
@@ -27,7 +29,7 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default select props */
     select?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         clearable?: boolean;
         emptyText?: string;
         placeholder?: string;
@@ -39,7 +41,8 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default modal props */
     modal?: {
-        size?: 'small' | 'medium' | 'large';
+        /** 对话框宽度（px）；旧字符串档位仍接受（已弃用） */
+        size?: number | 'small' | 'medium' | 'large';
         maskClosable?: boolean;
         closable?: boolean;
         showClose?: boolean;
@@ -60,11 +63,11 @@ export interface NeumorphismGlobalConfig {
     /** Default tabs props */
     tabs?: {
         position?: 'top' | 'left' | 'right';
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
     };
     /** Default pagination props */
     pagination?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         showTotal?: boolean;
         showJumper?: boolean;
         maxVisiblePages?: number;
@@ -72,31 +75,31 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default collapse props */
     collapse?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         accordion?: boolean;
     };
     /** Default form props */
     form?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         labelWidth?: string;
         direction?: 'horizontal' | 'vertical';
     };
     /** Default tag props */
     tag?: {
         variant?: 'default' | 'primary' | 'success' | 'warning' | 'error' | 'info';
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         rounded?: boolean;
     };
     /** Default progress props */
     progress?: {
         variant?: 'primary' | 'success' | 'warning' | 'error';
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         showLabel?: boolean;
         effect?: 'default' | 'pulse' | 'flow' | 'wave' | 'stripes' | 'sparkle';
     };
     /** Default avatar props */
     avatar?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         shape?: 'circle' | 'rounded';
     };
     /** Default tree props */
@@ -119,13 +122,14 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default table props */
     table?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         striped?: boolean;
         hoverable?: boolean;
     };
     /** Default card props */
     card?: {
-        radius?: 'small' | 'medium' | 'large' | 'xl';
+        /** 默认圆角（px），如 `0` / `8` / `24` */
+        radius?: number;
         hoverable?: boolean | 'bulge' | 'sink';
         /** 默认玻璃拟态档位：true / 'float' / 'raised' / 'pressed' */
         glass?: boolean | 'float' | 'raised' | 'pressed';
@@ -138,25 +142,25 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default breadcrumb props */
     breadcrumb?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         separator?: string;
     };
     /** Default checkbox props */
     checkbox?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
     };
     /** Default radio props */
     radio?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
     };
     /** Default radio group props */
     radioGroup?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         direction?: 'horizontal' | 'vertical';
     };
     /** Default textarea props */
     textarea?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         rows?: number;
         autoResize?: boolean;
         showCount?: boolean;
@@ -184,7 +188,7 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default theme toggle props */
     themeToggle?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         disableAuto?: boolean;
     };
     /** Default canvas props */
@@ -214,19 +218,19 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default slider props */
     slider?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         showTooltip?: boolean;
         showStops?: boolean;
     };
     /** Default steps props */
     steps?: {
         direction?: 'horizontal' | 'vertical';
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         center?: boolean;
     };
     /** Default upload props */
     upload?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         drag?: boolean;
         showUploadList?: boolean;
         listType?: 'text' | 'picture' | 'picture-card';
@@ -236,13 +240,14 @@ export interface NeumorphismGlobalConfig {
     list?: {
         bordered?: boolean;
         split?: boolean;
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         hoverable?: boolean;
     };
     /** Default logo animation props */
     logo?: {
         mode?: 'pulse' | 'liquid' | 'wave' | 'pointer';
-        size?: 'small' | 'medium' | 'large';
+        /** Logo 宽度（px）；旧字符串档位仍接受（已弃用） */
+        size?: number | 'small' | 'medium' | 'large';
         goo?: boolean;
         autoplay?: boolean;
         floating?: boolean;
@@ -269,18 +274,18 @@ export interface NeumorphismGlobalConfig {
         duration?: number;
         icon?: boolean;
         bordered?: boolean;
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
     };
     /** Default menu props */
     menu?: {
         mode?: 'vertical' | 'horizontal';
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         selectable?: boolean;
     };
     /** Default nav menu props */
     navMenu?: {
         mode?: 'horizontal' | 'vertical';
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         showIndicator?: boolean;
     };
     /** Default popover props */
@@ -299,26 +304,27 @@ export interface NeumorphismGlobalConfig {
     };
     /** Default empty props */
     empty?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
     };
     /** Default autocomplete props */
     autoComplete?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         clearable?: boolean;
     };
     /** Default status dot props */
     statusDot?: {
         status?: 'online' | 'offline' | 'busy' | 'connecting';
-        size?: 'small' | 'medium' | 'large';
+        /** 圆点直径（px）；旧字符串档位仍接受（已弃用） */
+        size?: number | 'small' | 'medium' | 'large';
         pulse?: boolean;
     };
     /** Default spinner props */
     spinner?: {
-        size?: 'small' | 'medium' | 'large' | number;
+        size?: number | 'small' | 'medium' | 'large' | number;
     };
     /** Default segmented props */
     segmented?: {
-        size?: 'small' | 'medium' | 'large';
+        size?: number | 'small' | 'medium' | 'large';
         disabled?: boolean;
     };
     /** Locale configuration */

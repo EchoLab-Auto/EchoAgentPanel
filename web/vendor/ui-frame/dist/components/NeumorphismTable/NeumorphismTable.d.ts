@@ -1,6 +1,7 @@
 import { TableColumn, SortDirection } from '../../composables/useTable';
 
 export type { TableColumn };
+export type TableSize = 'small' | 'medium' | 'large';
 export interface NeumorphismTableProps {
     data?: Record<string, unknown>[];
     columns?: TableColumn[];
@@ -9,7 +10,17 @@ export interface NeumorphismTableProps {
     selectedKeys?: string[];
     loading?: boolean;
     emptyText?: string;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 单元格上下内距（数字，行密度），或三档预设名。
+     *
+     * 数字即「行密度」：上下内距是主几何量，左右内距与单元格字号按三锚点
+     * （8 / 12 / 16）分段线性插值，所以 `:size="12"` 与 `size="medium"` 逐像素
+     * 相同，`:size="10"` 落在 small / medium 之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | TableSize;
     striped?: boolean;
     hoverable?: boolean;
     showHeader?: boolean;

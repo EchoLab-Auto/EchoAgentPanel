@@ -7,7 +7,16 @@ export interface NeumorphismSegmentedProps {
     modelValue?: string | number;
     /** 可选项 */
     options: SegmentedOption[];
-    size?: SegmentedSize;
+    /**
+     * 尺寸——单段最小高度 px（数字，主几何量），或三档预设名。
+     *
+     * 数字即「单段最小高度」：字号与内距按锚点表（26 / 32 / 38）分段线性插值，
+     * 尺寸施加在内部 `.nm-segmented__item` 上（变量挂根节点）。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | SegmentedSize;
     disabled?: boolean;
     /** 无障碍组标签（默认取 locale segmentedLabel） */
     ariaLabel?: string;
@@ -29,7 +38,7 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     onChange?: ((value: string | number) => any) | undefined;
     "onUpdate:modelValue"?: ((value: string | number) => any) | undefined;
 }>, {
-    size: SegmentedSize;
+    size: number | SegmentedSize;
     disabled: boolean;
     ariaLabel: string;
     modelValue: string | number;

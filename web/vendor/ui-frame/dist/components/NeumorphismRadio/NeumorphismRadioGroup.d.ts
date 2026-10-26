@@ -1,7 +1,16 @@
+export type RadioGroupSize = 'small' | 'medium' | 'large';
 export interface NeumorphismRadioGroupProps {
     modelValue?: unknown;
     disabled?: boolean;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 整组尺寸——级联给每个子 `NeumorphismRadio`（子项自身的 size 被覆盖）。
+     *
+     * 数字 = 圆圈直径 px：Group 只负责把值原样透传，插值交给子 Radio 完成
+     * （见 `RADIO_SCALE`），这样单个 Radio 与 Group 走的是同一条数字通道。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留。
+     */
+    size?: number | RadioGroupSize;
     name?: string;
     direction?: 'horizontal' | 'vertical';
 }

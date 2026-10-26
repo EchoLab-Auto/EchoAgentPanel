@@ -1,7 +1,15 @@
+/** @deprecated 旧宽度档位（字符串）——保留仅为兼容映射，新代码请传数字（px） */
+export type ModalSize = 'small' | 'medium' | 'large';
 export interface NeumorphismModalProps {
     modelValue?: boolean;
     title?: string;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 对话框宽度（px，直接就是像素值）。默认 560。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）已弃用，仅按
+     * small=400 / medium=560 / large=720（px）兼容映射；新代码请传数字。
+     */
+    size?: number | ModalSize;
     closable?: boolean;
     maskClosable?: boolean;
     showClose?: boolean;

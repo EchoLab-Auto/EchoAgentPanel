@@ -1,56 +1,52 @@
-import { computed as e, ref as R, watch as g, getCurrentInstance as y, onBeforeUnmount as E } from "vue";
-import T from "./useReducedMotion.js";
-const x = {
-  small: 64,
-  medium: 120,
-  large: 160
-}, F = {
-  small: 4,
-  medium: 7,
-  large: 10
-}, L = 650;
-function N(a) {
-  return 1 - Math.pow(1 - a, 3);
+import { computed as e, ref as _, watch as g, getCurrentInstance as y, onBeforeUnmount as P } from "vue";
+import z from "./useReducedMotion.js";
+import { p as L, i as I, n as F, C as k } from "../chunks/controlScales-CPj0Htdh.js";
+const a = k.progress, x = { small: 0, medium: 1, large: 2 }, H = a.primary.md, U = a.metrics["--nm-progress-sz-circle"], q = a.metrics["--nm-progress-sz-stroke"], B = 650;
+function D(i) {
+  return 1 - Math.pow(1 - i, 3);
 }
-function q(a) {
-  const { modelValue: h, max: r, indeterminate: c, size: s } = a, { isReducedMotion: m } = T(), n = e(() => c.value || r.value <= 0 ? 0 : Math.min(100, Math.max(0, h.value / r.value * 100))), I = e(() => !c.value && n.value >= 100), o = R(n.value);
-  let t = null;
-  function d() {
-    t !== null && typeof window < "u" && (window.cancelAnimationFrame(t), t = null);
+function V(i) {
+  const { modelValue: R, max: c, indeterminate: l, size: S } = i, { isReducedMotion: m } = z(), t = e(() => l.value || c.value <= 0 ? 0 : Math.min(100, Math.max(0, R.value / c.value * 100))), h = e(() => !l.value && t.value >= 100), r = _(t.value);
+  let o = null;
+  function f() {
+    o !== null && typeof window < "u" && (window.cancelAnimationFrame(o), o = null);
   }
-  g(n, (i) => {
-    if (d(), m.value || typeof window > "u") {
-      o.value = i;
+  g(t, (n) => {
+    if (f(), m.value || typeof window > "u") {
+      r.value = n;
       return;
     }
-    const l = o.value;
-    if (l === i) return;
-    const O = performance.now(), M = (P) => {
-      const A = Math.min(1, (P - O) / L);
-      o.value = l + (i - l) * N(A), t = A < 1 ? window.requestAnimationFrame(M) : null;
+    const u = r.value;
+    if (u === n) return;
+    const N = performance.now(), O = (T) => {
+      const C = Math.min(1, (T - N) / B);
+      r.value = u + (n - u) * D(C), o = C < 1 ? window.requestAnimationFrame(O) : null;
     };
-    t = window.requestAnimationFrame(M);
+    o = window.requestAnimationFrame(O);
   });
-  const _ = e(() => Math.round(o.value)), f = e(() => x[s.value]), v = e(() => F[s.value]), p = e(() => (f.value - v.value) / 2), u = e(() => 2 * Math.PI * p.value), C = e(
-    () => u.value - n.value / 100 * u.value
+  const E = e(() => Math.round(r.value)), d = e(() => {
+    const n = S.value;
+    return typeof n == "string" ? x[n] ?? 1 : L(a.primary, F(n, H));
+  }), p = e(() => I(U, d.value)), v = e(() => I(q, d.value)), w = e(() => (p.value - v.value) / 2), s = e(() => 2 * Math.PI * w.value), M = e(
+    () => s.value - t.value / 100 * s.value
   );
-  function w() {
-    d();
+  function A() {
+    f();
   }
-  return y() && E(w), {
-    percentage: n,
-    isComplete: I,
-    displayPercentage: _,
+  return y() && P(A), {
+    percentage: t,
+    isComplete: h,
+    displayPercentage: E,
     isReducedMotion: m,
-    circleSize: f,
+    circleSize: p,
     strokeWidth: v,
-    radius: p,
-    circumference: u,
-    dashOffset: C,
-    stop: w
+    radius: w,
+    circumference: s,
+    dashOffset: M,
+    stop: A
   };
 }
 export {
-  q as default,
-  q as useProgress
+  V as default,
+  V as useProgress
 };

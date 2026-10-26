@@ -1,10 +1,22 @@
+import { ProgressSize } from '../../composables/useProgress';
+
 export type ProgressVariant = 'default' | 'primary' | 'success' | 'warning' | 'error';
 export type ProgressEffect = 'default' | 'pulse' | 'flow' | 'wave' | 'stripes' | 'sparkle';
 export interface NeumorphismProgressProps {
     modelValue?: number;
     max?: number;
     variant?: ProgressVariant;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 线形条厚度（数字，主几何量），或三档预设名。
+     *
+     * 数字即「线形条厚度」：环形直径与描边按三锚点（厚度 4 / 8 / 12）分段线性插值
+     * （直径 64 / 120 / 160、描边 4 / 7 / 10），所以 `:size="8"` 与 `size="medium"`
+     * 的线性条与环形都逐像素相同。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | ProgressSize;
     /** Progress shape: linear bar (default) or circular SVG ring */
     type?: 'line' | 'circle';
     showLabel?: boolean;

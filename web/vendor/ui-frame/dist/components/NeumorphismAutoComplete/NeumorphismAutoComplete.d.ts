@@ -1,6 +1,7 @@
 import { AutoCompleteOption } from '../../composables/useAutoComplete';
 
 export type { AutoCompleteOption as NeumorphismAutoCompleteOption };
+export type AutoCompleteSize = 'small' | 'medium' | 'large';
 export interface NeumorphismAutoCompleteProps {
     /** v-model value (the selected option's value) */
     modelValue?: string | number;
@@ -10,8 +11,16 @@ export interface NeumorphismAutoCompleteProps {
     placeholder?: string;
     /** Whether the autocomplete is disabled */
     disabled?: boolean;
-    /** Size variant */
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 最小高度（数字，主几何量），或三档预设名。
+     *
+     * 几何量由内嵌的 `NeumorphismInput` 按三锚点（36 / 48 / 60）分段线性插值，
+     * 所以 `:size="36"` 与 `size="small"` 逐像素相同，`:size="42"` 落在两者之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | AutoCompleteSize;
     /** Show a clear button when there is a value */
     clearable?: boolean;
     /** External loading state (for async search) */
@@ -54,7 +63,7 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     onBlur?: ((event: FocusEvent) => any) | undefined;
     "onUpdate:modelValue"?: ((value: string | number | undefined) => any) | undefined;
 }>, {
-    size: "small" | "medium" | "large";
+    size: number | AutoCompleteSize;
     disabled: boolean;
     placeholder: string;
     modelValue: string | number;

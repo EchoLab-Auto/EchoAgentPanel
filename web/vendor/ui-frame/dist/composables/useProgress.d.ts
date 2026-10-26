@@ -8,8 +8,13 @@ export interface UseProgressOptions {
     max: Ref<number>;
     /** Whether the progress is in indeterminate mode. */
     indeterminate: Ref<boolean>;
-    /** Resolved size — drives the circular geometry. */
-    size: Ref<ProgressSize>;
+    /**
+     * 尺寸 —— 数字 = 线形条厚度 px（主几何量），字符串为三档兼容别名。
+     *
+     * 环形几何（直径 / 描边）也由它推导：数字与档位走**同一条**三锚点插值，
+     * 所以 `:size="8"` 与 `size="medium"` 的环完全一致。
+     */
+    size: Ref<ProgressSize | number>;
 }
 export interface UseProgressReturn {
     /** Clamped percentage in [0, 100]. Always 0 while indeterminate. */

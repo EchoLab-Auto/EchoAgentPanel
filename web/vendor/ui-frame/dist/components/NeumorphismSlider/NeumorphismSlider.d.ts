@@ -16,8 +16,16 @@ export interface NeumorphismSliderProps {
     showStops?: boolean;
     /** Vertical orientation */
     vertical?: boolean;
-    /** Slider size */
-    size?: SliderSize;
+    /**
+     * 尺寸——轨道粗细 px（数字，主几何量），或三档预设名。
+     *
+     * 数字即「轨道粗细」：拇指按 `3 × 轨道 − 2px` 同步推导（三档 16/22/28 与
+     * 6/8/10 恰好是这条仿射关系），所以锚点处与档位别名逐像素一致。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | SliderSize;
 }
 declare const _default: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismSliderProps>, {
     showStops: undefined;

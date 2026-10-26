@@ -1,11 +1,21 @@
 import { TabItem } from '../../composables/useTabs';
 
 export type { TabItem };
+export type TabsSize = 'small' | 'medium' | 'large';
 export interface NeumorphismTabsProps {
     modelValue?: string;
     tabs?: TabItem[];
     position?: 'top' | 'left' | 'right';
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 标签字号（数字，主几何量），或三档预设名。
+     *
+     * 数字即「标签字号」：标签内距按三锚点（12 / 14 / 16）分段线性插值，
+     * 所以 `:size="14"` 与 `size="medium"` 逐像素相同，`:size="15"` 落在两者之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | TabsSize;
     navLabel?: string;
 }
 declare function __VLS_template(): {

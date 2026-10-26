@@ -89,12 +89,12 @@ declare const __VLS_component: import('vue').DefineComponent<import('vue').Extra
     "onUpdate:modelValue"?: ((value: string) => any) | undefined;
     onSend?: ((content: string) => any) | undefined;
 }>, {
+    glass: GlassValue;
     disabled: boolean;
     placeholder: string;
+    rows: number | string;
     modelValue: string;
     maxlength: number | string;
-    glass: GlassValue;
-    rows: number | string;
     cancelLabel: string;
     autoResize: boolean;
     cancelable: boolean;

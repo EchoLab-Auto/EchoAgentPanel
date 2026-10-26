@@ -1,7 +1,13 @@
+/** @deprecated 旧尺寸档位（字符串）——保留仅为兼容映射，新代码请传数字（px 直径） */
 export type SpinnerSize = 'small' | 'medium' | 'large';
 export interface NeumorphismSpinnerProps {
-    /** 尺寸档位，或具体像素值 */
-    size?: SpinnerSize | number;
+    /**
+     * 直径（px，直接就是像素值）。默认 20。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）已弃用，仅按
+     * small=14 / medium=20 / large=28（px）兼容映射；新代码请传数字。
+     */
+    size?: number | SpinnerSize;
     /** 无障碍标签（默认取 locale spinnerLoading） */
     label?: string;
 }
@@ -12,7 +18,7 @@ declare const _default: import('vue').DefineComponent<import('vue').ExtractPropT
     size: undefined;
     label: string;
 }>>> & Readonly<{}>, {
-    size: SpinnerSize | number;
+    size: number | SpinnerSize;
     label: string;
 }, {}, {}, {}, string, import('vue').ComponentProvideOptions, true, {}, any>;
 export default _default;

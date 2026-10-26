@@ -280,7 +280,7 @@ export declare const ICON_SIZE_PX: {
 };
 export type IconSize = keyof typeof ICON_SIZE_PX;
 /** 合法显示尺寸（§8 枚举档；数字入参须落在此集合）。 */
-export declare const ICON_SIZE_ALLOWED: Set<12 | 14 | 16 | 18 | 20 | 24 | 32>;
+export declare const ICON_SIZE_ALLOWED: Set<32 | 14 | 16 | 12 | 24 | 20 | 18>;
 /**
  * 线宽档位（§8 六档语义）：
  * - `2` 标准（绝大多数 14–23px 显示）

@@ -1,2 +1,2 @@
 export { default } from './NeumorphismTable';
-export type { NeumorphismTableProps, TableColumn } from './NeumorphismTable';
+export type { NeumorphismTableProps, TableColumn, TableSize } from './NeumorphismTable';

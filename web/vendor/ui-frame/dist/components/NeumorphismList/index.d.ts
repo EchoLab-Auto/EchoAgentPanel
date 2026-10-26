@@ -1,2 +1,2 @@
 export { default } from './NeumorphismList';
-export type { NeumorphismListProps } from './NeumorphismList';
+export type { NeumorphismListProps, ListSize } from './NeumorphismList';

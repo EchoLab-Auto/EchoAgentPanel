@@ -4,6 +4,12 @@
  * 核心计算保持纯函数，便于脱离 canvas 单测。
  */
 export type ArtEffectName = 'pixel-field' | 'particles' | 'waves' | 'goo' | 'ascii';
+/**
+ * 图片蒙版：把图片按亮度重绘成点阵时「每格画什么」。
+ * - `ascii`：字符梯度（` .·:-=+*#%@`）
+ * - `dots`：波点（半调网点，直径随亮度变化）
+ */
+export type ArtMaskName = 'ascii' | 'dots';
 export interface ArtPointer {
     x: number;
     y: number;
@@ -19,9 +25,20 @@ export interface ArtState {
     bg: string;
     /** 前景/文字色（主题 token，字符画等使用） */
     fg: string;
-    /** 图片资源地址（图片类效果使用，如字符画） */
+    /** 图片资源地址（图片类效果使用，如字符画 / 波点） */
     src?: string;
-    /** 密度倍率（像素格数 / 粒子数 / 波浪层数 / 色团数） */
+    /**
+     * 图片蒙版（`ascii` 效果内部生效）。缺省 `ascii`：
+     * `ascii` = 字符画，`dots` = 波点。
+     */
+    mask?: ArtMaskName;
+    /** 波点蒙版：暗部波点直径（px，density=1 时的值） */
+    dotMin?: number;
+    /** 波点蒙版：亮部波点直径（px，density=1 时的值） */
+    dotMax?: number;
+    /** 波点蒙版：网格占用（最大波点直径 / 单元格边长）；1 = 最亮处波点相切 */
+    occupancy?: number;
+    /** 密度倍率（像素格数 / 粒子数 / 波浪层数 / 色团数；波点蒙版为整体精细度倍率） */
     density: number;
     /** 速度倍率 */
     speed: number;

@@ -1,6 +1,7 @@
 import { AlertType } from '../../composables/useAlert';
 
 export type { AlertType };
+export type AlertSize = 'small' | 'medium' | 'large';
 export interface NeumorphismAlertProps {
     type?: AlertType;
     title?: string;
@@ -9,7 +10,16 @@ export interface NeumorphismAlertProps {
     duration?: number;
     icon?: boolean;
     bordered?: boolean;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 正文字号（数字，主几何量），或三档预设名。
+     *
+     * 数字即「正文字号」：标题字号与四周内距按三锚点（12 / 13 / 14）分段线性插值，
+     * 所以 `:size="13"` 与 `size="medium"` 逐像素相同，`:size="12.5"` 落在两者之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | AlertSize;
     /** Accessible label for the close button */
     closeLabel?: string;
 }

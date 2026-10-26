@@ -1,11 +1,21 @@
 import { CollapseItem } from '../../composables/useCollapse';
 
 export type { CollapseItem };
+export type CollapseSize = 'small' | 'medium' | 'large';
 export interface NeumorphismCollapseProps {
     modelValue?: string[];
     accordion?: boolean;
     items?: CollapseItem[];
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 标题字号（数字，主几何量），或三档预设名。
+     *
+     * 数字即「标题字号」：标题内距按三锚点（13 / 15 / 16）分段线性插值，
+     * 所以 `:size="15"` 与 `size="medium"` 逐像素相同，`:size="14"` 落在两者之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | CollapseSize;
 }
 declare function __VLS_template(): Partial<Record<`header-${string}`, (_: {
     item: CollapseItem;

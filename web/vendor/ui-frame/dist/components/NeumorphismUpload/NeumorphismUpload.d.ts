@@ -1,6 +1,7 @@
 import { UploadFile, UploadStatus } from '../../composables/useUpload';
 
 export type { UploadFile, UploadStatus };
+export type UploadSize = 'small' | 'medium' | 'large';
 export interface NeumorphismUploadProps {
     /** v-model bound file list */
     modelValue?: UploadFile[];
@@ -20,8 +21,16 @@ export interface NeumorphismUploadProps {
     listType?: 'text' | 'picture' | 'picture-card';
     /** Whether to show the file list */
     showUploadList?: boolean;
-    /** Component size */
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——拖拽触发区的最小高度 px（数字，主几何量），或三档预设名。
+     *
+     * 数字即「触发区最小高度」：锚点表里 Upload 只有这一个指标（72 / 100 / 140），
+     * 所以数字路径只影响拖拽区，非拖拽的按钮触发区仍按 medium 档的内距渲染。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | UploadSize;
     /** Whether to auto upload after file selection */
     autoUpload?: boolean;
     /** Override trigger label text */

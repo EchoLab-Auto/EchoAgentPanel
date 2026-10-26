@@ -1,4 +1,4 @@
-import { N as f } from "../../chunks/NeumorphismAvatar-BBQ1Wrjq.js";
+import { N as f } from "../../chunks/NeumorphismAvatar-DXF3SXCq.js";
 export {
   f as default
 };

@@ -2,7 +2,16 @@ export type EmptySize = 'small' | 'medium' | 'large';
 export interface NeumorphismEmptyProps {
     image?: string;
     description?: string;
-    size?: EmptySize;
+    /**
+     * 尺寸——px 插图边长（数字，主几何量），或三档预设名。
+     *
+     * 数字即「插图边长」：描述字号按三锚点（60 / 100 / 140）分段线性插值，
+     * 所以 `:size="100"` 与 `size="medium"` 逐像素相同。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | EmptySize;
 }
 declare function __VLS_template(): {
     image?(_: {}): any;

@@ -1,8 +1,18 @@
 export type TagVariant = 'default' | 'primary' | 'success' | 'warning' | 'error' | 'info';
+export type TagSize = 'small' | 'medium' | 'large';
 export interface NeumorphismTagProps {
     closable?: boolean;
     variant?: TagVariant;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 字号（数字，主几何量），或三档预设名。
+     *
+     * 数字即「字号」：内距与整体高度按三锚点（11 / 12 / 14）分段线性插值，
+     * 所以 `:size="12"` 与 `size="medium"` 逐像素相同，`:size="13"` 落在两者之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | TagSize;
     disabled?: boolean;
     rounded?: boolean;
     /** Accessible label for the close button */

@@ -1,8 +1,21 @@
+export type CheckboxSize = 'small' | 'medium' | 'large';
 export interface NeumorphismCheckboxProps {
     modelValue?: boolean;
     disabled?: boolean;
     label?: string;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——勾选框边长 px（数字，主几何量），或三档预设名。
+     *
+     * 数字即「方盒边长」：`--nm-checkbox-sz-*` 由锚点表按三档分段线性插值后
+     * 内联下发（见 `utils/controlScale`）——锚点 12 / 14 / 16 依次是
+     * `small` / `medium` / `large` 的别名值，`:size="15"` 落在后两档之间。
+     * （注意：档位类当前渲染的盒边长是 18 / 24 / 30，与锚点表存在历史差异，
+     * 见样式区 `--sized` 注释。）
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | CheckboxSize;
     name?: string;
     id?: string;
     indeterminate?: boolean;

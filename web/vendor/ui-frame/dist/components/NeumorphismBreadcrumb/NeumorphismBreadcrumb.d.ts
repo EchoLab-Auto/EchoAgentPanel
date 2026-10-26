@@ -1,3 +1,4 @@
+export type BreadcrumbSize = 'small' | 'medium' | 'large';
 export interface BreadcrumbItem {
     label: string;
     to?: string;
@@ -6,7 +7,16 @@ export interface BreadcrumbItem {
 export interface NeumorphismBreadcrumbProps {
     items?: BreadcrumbItem[];
     separator?: string;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 字号（数字，主几何量），或三档预设名。
+     *
+     * 数字即「字号」：按三锚点（12 / 14 / 16）定位，所以 `:size="14"` 与
+     * `size="medium"` 逐像素相同，`:size="15"` 落在 medium / large 之间。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | BreadcrumbSize;
 }
 declare const _default: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismBreadcrumbProps>, {
     items: () => never[];

@@ -1,6 +1,8 @@
 import { MenuItem } from '../../composables/useMenu';
 
 export type { MenuItem as NeumorphismMenuItemProps };
+/** 档位别名（字符串通道）。数字为一等公民，档位仅兼容保留 */
+export type NavMenuSize = 'small' | 'medium' | 'large';
 export interface NeumorphismNavMenuProps {
     /** Navigation menu items */
     items?: MenuItem[];
@@ -12,8 +14,16 @@ export interface NeumorphismNavMenuProps {
     showIndicator?: boolean;
     /** Theme override */
     theme?: 'light' | 'dark';
-    /** Size variant */
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——px 导航项字号（数字，主几何量），或三档预设名。
+     *
+     * 数字即「导航项字号」：内距、图标、项间距与指示条高度按三锚点（11 / 14 / 15）
+     * 分段线性插值，所以 `:size="14"` 与 `size="medium"` 逐像素相同。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | NavMenuSize;
 }
 declare const _default: import('vue').DefineComponent<import('vue').ExtractPropTypes<__VLS_WithDefaults<__VLS_TypePropsToRuntimeProps<NeumorphismNavMenuProps>, {
     showIndicator: undefined;

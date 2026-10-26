@@ -1,9 +1,19 @@
+export type RadioSize = 'small' | 'medium' | 'large';
 export interface NeumorphismRadioProps {
     modelValue?: unknown;
     value: unknown;
     disabled?: boolean;
     label?: string;
-    size?: 'small' | 'medium' | 'large';
+    /**
+     * 尺寸——圆圈（radio 圆点整体）直径 px（数字，主几何量），或三档预设名。
+     *
+     * 数字即「圆圈直径」：按锚点表（18 / 24 / 30）插值，内部圆点取圈的 50%，
+     * 所以 `:size="24"` 与 `size="medium"` 逐像素一致。
+     *
+     * @deprecated 字符串档位（`'small' | 'medium' | 'large'`）仅作兼容别名保留，
+     * 新代码请传数字。
+     */
+    size?: number | RadioSize;
     name?: string;
     id?: string;
 }
