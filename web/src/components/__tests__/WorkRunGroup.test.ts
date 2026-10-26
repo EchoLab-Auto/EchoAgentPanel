@@ -141,7 +141,7 @@ describe('WorkRunGroup', () => {
         ],
       },
     });
-    // 运行中：chip 右下角实时角标（仅 1 个；已完成项不显示）
+    // 运行中：chip 内部右侧的实时角标（仅 1 个；已完成项不显示）
     const badges = wrapper.findAll('.work-run-group__badge');
     expect(badges.length).toBe(1);
     expect(badges[0].text()).toMatch(/^\d+(\.\d+)?(ms|s)$/);
@@ -388,6 +388,46 @@ describe('WorkRunGroup', () => {
     const reasoningNameRules =
       style.match(/^\.work-run-group__detail-name--reasoning\s*\{/gm) ?? [];
     expect(reasoningNameRules.length).toBe(1);
+    expect(reasoningNameRules.length).toBe(1);
+  });
+
+  // ── 角标布局契约（2026-10-26 用户报「角标显示有问题」）───────────────────
+  it('角标在 chip 内部右侧：chip 宽度自适应，角标不再绝对定位压住图标', () => {
+    const raw = readFileSync(join(here, '..', 'WorkRunGroup.vue'), 'utf-8');
+    const style = (raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    );
+    const chipRule = style.match(/\n\.work-run-group__chip\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    const badgeRule = style.match(/\n\.work-run-group__badge\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    expect(chipRule, 'chip rule 必须存在').toBeTruthy();
+    expect(badgeRule, 'badge rule 必须存在').toBeTruthy();
+
+    // 1) chip 宽度必须由内容决定：只有 min-width 兜底（图标独在时仍是 30px），
+    //    不能有固定 `width: 30px` —— 否则角标无处可去，只能绝对定位压在图标上。
+    expect(chipRule).toMatch(/min-width:\s*30px/);
+    expect(chipRule, 'chip 不能再写死宽度').not.toMatch(/(^|\n)\s*width:/);
+    // 图标与角标并排需要间隙
+    expect(chipRule).toMatch(/gap:\s*4px/);
+
+    // 2) 角标必须是 chip 的行内 flex 子项（2026-10-26 前是
+    //    `position:absolute; right:1px; bottom:1px`：实测 23~40px 宽的角标
+    //    叠在 15px 图标上并溢出 chip 左边缘 7~12px）。
+    expect(badgeRule).not.toMatch(/position:\s*absolute/);
+    expect(badgeRule).not.toMatch(/(^|\n)\s*(right|bottom|left|top):/);
+    expect(badgeRule).toMatch(/flex:\s*0 0 auto/);
+
+    // 3) DOM 上角标是 chip 的直接子节点（不是某个绝对定位包裹层里的东西）
+    const wrapper = mount(WorkRunGroup, {
+      props: {
+        items: [tool({ key: 'a', name: 'bash', status: 'running', output: null, startedAtMs: Date.now() - 1000 })],
+      },
+    });
+    const chip = wrapper.find('.work-run-group__chip');
+    const badge = chip.element.children[chip.element.children.length - 1];
+    expect(badge.className).toContain('work-run-group__badge');
+    expect(wrapper.element.querySelector('.work-run-group__row > .work-run-group__chip > .work-run-group__badge')).not.toBeNull();
+    wrapper.unmount();
   });
   // ── 性能契约（2026-10：工作行多了就卡）─────────────────────────────────
   it('chip 材质不含 backdrop-filter（每个 chip 一层合成层的代价）', () => {

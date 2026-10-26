@@ -487,8 +487,14 @@ function ariaOf(item: WorkRunItem): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
+  /* 宽度自适应（2026-10-26 用户要求）：角标是 chip **内部**的行内元素，
+     有角标时向右撑开，没有时仍正好 30px（min-width 兜底、图标居中不变）。
+     此前是 `width: 30px` + 角标绝对定位 —— chip 恒 30 宽，而角标实测
+     23~40px（"0.8s"=25 / "1.234s"=35 / "12.345s"=40），只能压在 15px 的
+     图标上并溢出 chip 左边缘（实测左溢 7~12px），观感就是"角标糊住图标"。 */
+  min-width: 30px;
   height: 26px;
+  gap: 4px;
   border-radius: 8px;
   border: 1px solid var(--panel-glass-border);
   /* 材质（2026-10 性能修复）：**不再用 `backdrop-filter`**。
@@ -504,7 +510,9 @@ function ariaOf(item: WorkRunItem): string {
   background: color-mix(in srgb, var(--nm-surface-raised) 40%, var(--nm-chat-tray-bg));
   color: var(--nm-text-secondary);
   cursor: pointer;
-  padding: 0;
+  /* 左右各 4px：图标独在时内容 15+8=23 < min-width 30（居中，观感与旧版
+     完全一致）；带角标时角标不会贴到 chip 右边框上。 */
+  padding: 0 4px;
   box-shadow: 0 3px 8px var(--nm-shadow-dark, rgba(0, 0, 0, 0.25));
   transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
@@ -735,15 +743,20 @@ function ariaOf(item: WorkRunItem): string {
   margin-top: 4px;
 }
 
-/* chip 角标：工具=运行中实时耗时 / 思考=播放中字数（50ms 刷新） */
+/* chip 角标：工具=运行中实时耗时 / 思考=播放中字数（50ms 刷新）
+   ── 行内布局（2026-10-26 用户要求："角标要在 chip 内部的右边，横向撑宽
+   chip"）。此前是 `position: absolute; right/bottom: 1px`，即角标**浮在**
+   chip 右下角：chip 恒 30×26、图标 15px 居中，而角标本身 23~40px 宽，
+   实测必然盖住图标（overlapIcon=true）且向左溢出 chip 外 7~12px —— 读秒
+   越长越糊。改成 flex 子项后，chip 由内容决定宽度（min-width 兜底 30px），
+   图标与角标左右并排、互不遮挡。 */
 .work-run-group__badge {
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  padding: 0 3px;
+  flex: 0 0 auto;
+  padding: 0 4px;
   border-radius: 6px;
   font-size: 9px;
-  line-height: 1.35;
+  /* 固定行盒（12.6px 高）：角标出现/消失不会改变 chip 的高度，chip 只横向变化 */
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
   color: var(--panel-accent);
   background: color-mix(in srgb, var(--nm-bg-color) 78%, transparent);
