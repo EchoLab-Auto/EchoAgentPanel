@@ -39,6 +39,7 @@
 - API 设置（provider / model / base_url / api_key / profiles；system prompt 在智能体配置弹层 AgentConfigModal 中编辑）；DeepSeek 余额查询（含充值/赠送分账）+ **余额与用量图表**（近 7 天：总览对比图 + profile 卡内嵌 sparkline；数据由 Core 本地积累，含 token 费用估算）
 - 实例管理（描述符驱动，**Panel 无平台专属逻辑**：布局由插件 `InstanceStatus.ui` 声明、动作经 `InvokeInstanceOp` 透传、状态经 `InstanceState` 回推；当前在册的 `echo-agent.adapter.qq` 是**进程外插件**（实现在独立进程 `echo-adapter-qq`，不在 Core 内），它提供多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
 - 工作区会话管理（入口行「工作区」宽版面板：多会话 / 多工作区目录 / 各目录 git 状态；文件浏览器已迁至会话视图右侧边栏，2026-09-19；`echo-agent.workspace` 插件）
+- 边栏「Git」卡（2026-10）：工作区各目录 git 快照（分支 / 领先落后 / 变更总数），**点目录行展开后按「已暂存 / 已修改 / 未跟踪」分别展开文件清单**——计数本身就是开关，明细行带 porcelain 状态字符（`M`/`A`/`D`/`?`）；长路径优先保住文件名（目录前缀只留末两段）。分组依赖 Core 回传 `changed_entries`，老 Core 自动退回扁平路径列表
 - 插件工作台（设置·插件）：支持多 Core 节点聚合展示，按**运行位置**分组（内置 / 进程外），卡片标注运行形态与来源，可在线启停
 - 技能安装（设置·技能）：Git 来源安装/更新，克隆与构建进度实时可见（不再是长时间静默），失败自动清场并提示残留
 - 上下文快照、深浅主题

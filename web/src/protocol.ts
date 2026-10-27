@@ -188,12 +188,30 @@ export interface WorkspaceGitInfo {
   modified?: number;
   /** 未跟踪文件数。 */
   untracked?: number;
-  /** 变更文件路径（前若干条）。 */
+  /** 变更文件路径（前若干条；老 Core / 跨机老对端的兼容视图）。 */
   changed_files?: string[];
+  /**
+   * 变更文件明细（路径 + 两列状态字符，2026-10）。
+   *
+   * 分组展示要的是「哪个文件属于已暂存 / 已修改 / 未跟踪」，扁平路径表给不出，
+   * 所以由 Core 带状态一起回传。两列原样保留（`MM` 同时属两类），归类在前端。
+   * 老 Core 不发此字段 → 空表，卡片退回 `changed_files` 的扁平显示。
+   */
+  changed_entries?: WorkspaceChangedEntry[];
   /** 最近一次提交摘要（`<short-hash> <subject>`）。 */
   last_commit?: string | null;
   /** 采集失败原因（目录不存在 / 不是 git 仓库等）。 */
   error?: string | null;
+}
+
+/** 一条工作区变更（`git status --porcelain` v1 的两列状态 + 路径）。 */
+export interface WorkspaceChangedEntry {
+  /** 仓库相对路径（porcelain 原样，重命名形态是 `旧 -> 新`）。 */
+  path: string;
+  /** 索引区（第 1 列）状态字符：M/A/D/R/C/U；空格 = 索引区无变更。 */
+  index?: string;
+  /** 工作区（第 2 列）状态字符；`?` = 未跟踪。 */
+  worktree?: string;
 }
 
 export interface SessionInfo {

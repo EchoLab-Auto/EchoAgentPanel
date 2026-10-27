@@ -4,7 +4,9 @@
 //! 把 `state.workspaceGitBySession` 的快照渲染成**每目录一行**（点行展开细节）、
 //! 提供手动刷新。锁定：请求时机（挂载 / 切会话 / 重连 / 手动）、行式渲染
 //! （名称 / 分支 / 同步 / 变更数 / 非仓库错误）、展开态默认值（单目录展开、
-//! 多目录收起、点过之后以用户为准）、以及「加载态不挂死」。
+//! 多目录收起、点过之后以用户为准）、按类别展开明细（计数即开关、小改动自动
+//! 铺开、`MM` 同属两类、截断有提示、老 Core 退回扁平路径表）、以及「加载态
+//! 不挂死」。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { nextTick } from 'vue';
@@ -305,5 +307,158 @@ describe('WorkspaceGitCard（工作区 git 状态卡）', () => {
     expect(wrapper.text()).toContain('刷新');
     wrapper.unmount();
     vi.useRealTimers();
+  });
+
+  // ── 按类别展开明细（2026-10）────────────────────────────────────────
+
+  /** 三类各一条明细的快照（总数 3 ≤ 自动铺开阈值）。 */
+  function detail(over: Partial<WorkspaceGitInfo> = {}): WorkspaceGitInfo {
+    return info({
+      branch: 'main',
+      staged: 1,
+      modified: 1,
+      untracked: 1,
+      changed_entries: [
+        { path: 'web/src/components/WorkspaceGitCard.vue', index: 'A', worktree: ' ' },
+        { path: 'web/src/store.ts', index: ' ', worktree: 'M' },
+        { path: 'README.md', index: '?', worktree: '?' },
+      ],
+      ...over,
+    });
+  }
+
+  function mountWith(dirs: WorkspaceGitInfo[]) {
+    state.workspaceGitBySession = { [sessionKey(null, 'core')]: dirs };
+    return mount(WorkspaceGitCard, {
+      props: { teamId: 'EchoCode', session: workspace() },
+    });
+  }
+
+  it('计数即开关：小改动展开行后自动铺开，行首带 porcelain 状态字符', async () => {
+    const wrapper = mountWith([detail()]);
+    await nextTick();
+    // 三个类别各一个 chip（文案沿用旧口径，能被一眼扫到）
+    const chips = wrapper.findAll('.wgc-group').map((e) => e.text());
+    expect(chips.length).toBe(3);
+    expect(chips[0]).toContain('已暂存');
+    expect(chips[1]).toContain('已修改');
+    expect(chips[2]).toContain('未跟踪');
+    // 总数 3 ≤ 6 → 不需要再点一次，明细直接铺开
+    expect(wrapper.findAll('.wgc-file').length).toBe(3);
+    expect(wrapper.findAll('.wgc-file__st').map((e) => e.text())).toEqual(['A', 'M', '?']);
+    // 文件名永不参与收缩；目录前缀只留末两段（长路径的前段是信息量最低的）
+    const dirs = wrapper.findAll('.wgc-file__dir').map((e) => e.text());
+    // 两段以内原样保留（`web/src/` 不算长），超过才掐前段
+    expect(dirs).toEqual(['…/src/components/', 'web/src/', '']);
+    const names = wrapper.findAll('.wgc-file__name').map((e) => e.text());
+    expect(names).toEqual(['WorkspaceGitCard.vue', 'store.ts', 'README.md']);
+    // 全路径仍在 title 里（截图看不到、悬停看得到）
+    expect(wrapper.findAll('.wgc-file')[0].attributes('title')).toContain(
+      'web/src/components/WorkspaceGitCard.vue',
+    );
+    wrapper.unmount();
+  });
+
+  it('大改动默认折叠：点类别只列该类的文件，再点收起，多类可同开', async () => {
+    const wrapper = mountWith([
+      detail({
+        staged: 2,
+        modified: 2,
+        untracked: 7, // 合计 11 > 6 → 默认不铺开
+        changed_entries: [
+          { path: 'src/a.ts', index: 'A', worktree: ' ' },
+          { path: 'src/b.ts', index: 'A', worktree: ' ' },
+          { path: 'src/c.ts', index: ' ', worktree: 'M' },
+          { path: 'src/d.ts', index: ' ', worktree: 'M' },
+          ...Array.from({ length: 7 }, (_, i) => ({
+            path: `src/new-${i}.ts`,
+            index: '?',
+            worktree: '?',
+          })),
+        ],
+      }),
+    ]);
+    await nextTick();
+    expect(wrapper.findAll('.wgc-file').length).toBe(0);
+
+    const chip = (label: string) =>
+      wrapper.findAll('.wgc-group').find((c) => c.text().includes(label))!;
+    await chip('已修改').trigger('click');
+    expect(wrapper.findAll('.wgc-file__name').map((e) => e.text())).toEqual(['c.ts', 'd.ts']);
+    // 多类可同开（点一类不会把另一类关掉）
+    await chip('已暂存').trigger('click');
+    expect(wrapper.findAll('.wgc-file').length).toBe(4);
+    // 再点收起
+    await chip('已修改').trigger('click');
+    expect(wrapper.findAll('.wgc-file__name').map((e) => e.text())).toEqual(['a.ts', 'b.ts']);
+    wrapper.unmount();
+  });
+
+  it('`MM`（暂存后又改）同时出现在已暂存与已修改两类', async () => {
+    const wrapper = mountWith([
+      detail({
+        staged: 1,
+        modified: 1,
+        untracked: 0,
+        changed_entries: [{ path: 'both.txt', index: 'M', worktree: 'M' }],
+      }),
+    ]);
+    await nextTick();
+    // 两类各开一份（同一文件两行），状态字符分别取索引列 / 工作区列
+    expect(wrapper.findAll('.wgc-file__name').map((e) => e.text())).toEqual(['both.txt', 'both.txt']);
+    expect(wrapper.findAll('.wgc-file__st').map((e) => e.text())).toEqual(['M', 'M']);
+    wrapper.unmount();
+  });
+
+  it('明细被截断：计数取 Core 真数，并在清单末尾说明还有多少未列出', async () => {
+    const wrapper = mountWith([
+      detail({
+        staged: 0,
+        modified: 40,
+        untracked: 0,
+        changed_entries: Array.from({ length: 30 }, (_, i) => ({
+          path: `src/f-${i}.ts`,
+          index: ' ',
+          worktree: 'M',
+        })),
+      }),
+    ]);
+    await nextTick();
+    // chip 上是 40（真数），而不是 30（回传条数）
+    const chip = wrapper.findAll('.wgc-group').find((c) => c.text().includes('已修改'))!;
+    expect(chip.text()).toContain('40');
+    await chip.trigger('click');
+    expect(wrapper.findAll('.wgc-file').length).toBe(30);
+    expect(wrapper.text()).toContain('另有 10 个未列出');
+    wrapper.unmount();
+  });
+
+  it('老 Core 不发 changed_entries → 退回扁平路径表（同一套行式布局）', async () => {
+    const wrapper = mountWith([
+      info({ branch: 'main', modified: 2, changed_files: ['web/src/a.ts', 'b.rs'] }),
+    ]);
+    await nextTick();
+    // 没有类别 chip（无从归类），退回一句计数全称
+    expect(wrapper.findAll('.wgc-group').length).toBe(0);
+    expect(wrapper.text()).toContain('已修改 2');
+    expect(wrapper.findAll('.wgc-file').length).toBe(2);
+    expect(wrapper.findAll('.wgc-file__st').map((e) => e.text())).toEqual(['·', '·']);
+    expect(wrapper.findAll('.wgc-file__name').map((e) => e.text())).toEqual(['a.ts', 'b.rs']);
+    wrapper.unmount();
+  });
+
+  it('重命名路径只展示箭头右侧（旧名留在 title 里）', async () => {
+    const wrapper = mountWith([
+      detail({
+        staged: 1,
+        modified: 0,
+        untracked: 0,
+        changed_entries: [{ path: 'src/old.ts -> src/new.ts', index: 'R', worktree: ' ' }],
+      }),
+    ]);
+    await nextTick();
+    expect(wrapper.findAll('.wgc-file__name').map((e) => e.text())).toEqual(['new.ts']);
+    expect(wrapper.find('.wgc-file').attributes('title')).toContain('src/old.ts -> src/new.ts');
+    wrapper.unmount();
   });
 });
