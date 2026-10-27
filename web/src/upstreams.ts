@@ -12,7 +12,7 @@ import { pruneDiscovered, runDiscovery } from './federation-directory';
 import type { UpstreamStatus } from './state';
 
 /**
- * 上一帧上游快照：`name → connectivity`（diff 基准）。
+/** 上一帧上游快照：`name → connectivity`（diff 基准）。
  *
  * 离线/移除检测（02a §5.4-1）：条目从上游列表**消失** 或 `connectivity`
  * `online → offline` ⇒ `dropCoreInstanceChannel(name)` 清理该 core 的实例
@@ -21,8 +21,33 @@ import type { UpstreamStatus } from './state';
  */
 let lastUpstreams: Map<string, string> | null = null;
 
-/** 拉取一次上游状态并写入共享 state（失败保留上次结果，不弹错）。 */
-export async function refreshUpstreams(): Promise<void> {
+/**
+ * 在途请求（去重）。
+ *
+ * 轮询有两处入口：`main.ts` 的全局 8s 泵（连接状态卡等共用）、以及设置页
+ * 打开时的即时刷新。两处撞在一起就是两条并发的 `/api/upstreams`——同一个
+ * 后端健康表被拉两次、`state.upstreams` 被赋值两次，界面白抖一轮。共享
+ * 同一个 promise 即可，语义上仍是「最近一次快照」。
+ */
+let inflight: Promise<void> | null = null;
+
+/**
+ * 拉取一次上游状态并写入共享 state（失败保留上次结果，不弹错）。
+ *
+ * **内容没变就不写 state**（2026-10 修「Core 连接页闪烁」）：后端健康泵每
+ * 次探活都会更新 `last_checked`，但绝大多数轮询里 connectivity/auth 是不变
+ * 的；此前无条件 `state.upstreams = next` 会让整张列表每 3s 重渲染一次。
+ * 结构没变的轮询不该产生任何 DOM 变更。
+ */
+export function refreshUpstreams(): Promise<void> {
+  if (inflight) return inflight;
+  inflight = doRefreshUpstreams().finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
+
+async function doRefreshUpstreams(): Promise<void> {
   try {
     const res = await panelFetch('/api/upstreams');
     if (!res.ok) return;
@@ -30,14 +55,18 @@ export async function refreshUpstreams(): Promise<void> {
     const next = Array.isArray(list) ? list : [];
     if (lastUpstreams) {
       for (const [name, connectivity] of lastUpstreams) {
-        const now = next.find(u => u.name === name)?.connectivity;
+        const now = next.find((u) => u.name === name)?.connectivity;
         if (now === undefined || (connectivity === 'online' && now === 'offline')) {
           dropCoreInstanceChannel(name);
         }
       }
     }
-    lastUpstreams = new Map(next.map(u => [u.name, u.connectivity]));
-    state.upstreams = next;
+    lastUpstreams = new Map(next.map((u) => [u.name, u.connectivity]));
+    // 只在**有实质变化**时替换：结构没变就不碰 state（结构没变 → 不重渲染）。
+    // `last_checked` 参与比较是有意的——它变了说明后端刚探活过，时间该跟着走。
+    if (JSON.stringify(next) !== JSON.stringify(state.upstreams)) {
+      state.upstreams = next;
+    }
     // 已配置上游即"已知运行区域"：区域集合不依赖是否已收到事件，
     // 多区域判定（命令必须显式落到某个区域）从配置起就成立。
     for (const u of next) state.knownCores.add(u.name);

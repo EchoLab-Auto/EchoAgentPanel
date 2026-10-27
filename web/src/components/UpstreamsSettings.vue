@@ -11,7 +11,7 @@
 //! - `DELETE /api/upstreams/{name}` → 删除
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import NeumorphismEmpty from '@echolab-auto/ui-frame/components/NeumorphismEmpty';
@@ -82,9 +82,20 @@ function addressOf(u: UpstreamStatus): string {
   return u.url || '（未配置地址）';
 }
 
-// 与连接状态卡共用同一份轮询结果（单一数据源）。
+/** 上游快照的唯一数据源（与连接状态卡共用）。 */
 const list = computed(() => state.upstreams);
+
+/**
+ * 首屏加载态——**只**用于「列表还没有数据」时的文案。
+ *
+ * 历史教训（2026-10 修「Core 连接页一直在闪」）：此前每次 `refresh()` 都把它
+ * 翻成 true，模板里 `<div v-if="loading">` 于是每 3s 往列表里插一块
+ * spinner、300ms 后再摘掉——实测下方 5 张卡片整体上下跳 46px，观感就是整页
+ * 一直在闪。现在只有首屏用它，后台轮询完全静默。
+ */
 const loading = ref(false);
+/** 手动刷新中（按钮自己的 loading 态，不占布局）。 */
+const refreshing = ref(false);
 const error = ref('');
 
 const showAdd = ref(false);
@@ -104,19 +115,34 @@ const formSshMediaDir = ref('');
 const formError = ref('');
 const saving = ref(false);
 
-async function refresh() {
-  loading.value = true;
+/**
+ * 拉一次上游快照。
+ *
+ * @param opts.silent 静默刷新（列表已在屏上时的重新拉取）：**不动任何加载态**。
+ *   原则是「结构没变的刷新不该有 DOM 变更」——加载指示只出现在用户主动触发
+ *   的动作上（首屏 / 点刷新 / 保存后），否则就是闪烁。
+ */
+async function refresh(opts: { silent?: boolean } = {}) {
+  if (!opts.silent) {
+    if (list.value.length === 0) loading.value = true;
+    else refreshing.value = true;
+  }
   error.value = '';
   try {
     await refreshUpstreams();
-    // knownCores 与管理面同步（徽标显示/命令路由候选）。
+    // knownCores 与管理面同步（徽标显示 / 命令路由候选）。
     for (const u of state.upstreams) state.knownCores.add(u.name);
-    if (state.upstreams.length === 0) error.value = '（未配置上游）';
   } catch (e) {
     error.value = `加载失败：${e}`;
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
+}
+
+/** 用户点「刷新」：看得见的动作，给按钮自己的 loading 态。 */
+function refreshNow() {
+  void refresh();
 }
 
 function resetForm() {
@@ -236,10 +262,12 @@ async function remove(name: string) {
 }
 
 onMounted(() => {
-  refresh();
-  // 健康轮询：连接状态随重连循环实时变化，3s 拉一次保持可视。
-  const timer = window.setInterval(refresh, 3000);
-  onUnmounted(() => window.clearInterval(timer));
+  // 首屏：本地还没有快照时给一次性「读取中」文案；已有则静默补一次。
+  void refresh({ silent: list.value.length > 0 });
+  // **不在这里起第二条轮询**（2026-10 修闪烁）：`main.ts` 的全局 8s 泵
+  // （`startUpstreamsPolling`）已经在维护同一份 `state.upstreams`，页面里
+  // 再挂一个 3s 定时器等于把请求量翻近三倍，而且每轮都重渲染整张列表。
+  // 要更即时的一次，卡头有「刷新」按钮。
 });
 </script>
 
@@ -254,7 +282,7 @@ onMounted(() => {
         </div>
       </div>
       <div class="up-actions">
-        <NeumorphismButton size="small" @click="refresh">刷新</NeumorphismButton>
+        <NeumorphismButton :size="32" :loading="refreshing" @click="refreshNow">刷新</NeumorphismButton>
         <NeumorphismButton size="small" variant="primary" @click="openAdd">添加 Core</NeumorphismButton>
       </div>
     </div>
@@ -329,56 +357,49 @@ onMounted(() => {
       </div>
     </NeumorphismCard>
 
-    <!-- 列表 -->
-    <div class="up-list">
+    <!-- 列表：紧凑网格（2026-10 布局改）——每个上游一格，宽屏 2-3 列。
+         此前每张卡片独占一整行且内部三行（名称/地址/健康块外加 32px 固定
+         占位）≈100px，5 个上游要 500px+，一屏装不下还全是空白。 -->
+    <div v-if="!list.length && !loading" class="up-empty">
       <NeumorphismEmpty
-        v-if="!list.length && !loading"
         size="medium"
         description="尚未配置 Core 连接。点「添加 Core」填入对端 management WS 地址或 SSH 信息即可上线。"
       />
-      <div v-if="loading" class="up-loading"><NeumorphismSpinner size="small" /></div>
-      <NeumorphismCard
-        v-for="u in list"
-        :key="u.name"
-        class="up-item"
-      >
-        <NeumorphismStatusDot :status="connectivityMeta(u).status" size="small" />
-        <div class="up-item-main">
-          <div class="up-item-name">
-            {{ u.name }}
-            <NeumorphismTag v-if="u.access === 'ssh'" variant="default" size="small">SSH</NeumorphismTag>
-            <!-- 自动发现（P2）：由联邦节点目录派生，不是人工配置。
-                 标签的意义是"我知道它从哪来"——删掉它不会影响真实节点，
-                 下一个巡检周期若它仍在联邦里会被重新发现。 -->
-            <NeumorphismTag
-              v-if="u.source === 'discovered'"
-              variant="success"
-              size="small"
-              title="由联邦节点目录自动发现（删除后若仍在联邦中会被重新发现）"
-            >自动</NeumorphismTag>
-          </div>
-          <div class="up-item-url">{{ addressOf(u) }}</div>
-          <!-- 健康详情（2026-10 连通性/认证可视性）：固定高度+占位，
-               状态变化不引起布局跳动 -->
-          <div class="up-item-health">
-            <span class="up-health-label">
-              <NeumorphismSpinner v-if="u.connectivity === 'connecting'" size="small" class="up-health-spinner" />
-              {{ connectivityMeta(u).label }}
-              <template v-if="u.access === 'ssh'">· {{ sshPhaseMeta(u).label }}</template>
-            </span>
-            <span class="up-health-time">{{ u.last_checked ? `· ${formatChecked(u.last_checked)}` : '' }}</span>
-            <div class="up-health-error" :class="{ 'up-health-error--empty': !u.last_error }" :title="u.last_error ?? ''">
-              {{ u.last_error ?? '\u00a0' }}
-            </div>
+    </div>
+    <div v-else-if="!list.length" class="up-loading-hint">正在读取 Core 连接…</div>
+    <div v-else class="up-grid">
+      <NeumorphismCard v-for="u in list" :key="u.name" no-padding class="up-item">
+        <!-- 第一行：状态点 · 名称 · 来源标签 …… 操作 -->
+        <div class="up-item__head">
+          <NeumorphismStatusDot :status="connectivityMeta(u).status" size="small" />
+          <span class="up-item__name" :title="u.name">{{ u.name }}</span>
+          <NeumorphismTag v-if="u.access === 'ssh'" variant="default" size="small">SSH</NeumorphismTag>
+          <!-- 自动发现（P2）：由联邦节点目录派生，不是人工配置。
+               标签的意义是"我知道它从哪来"——删掉它不影响真实节点，
+               下一个巡检周期若它仍在联邦里会被重新发现。 -->
+          <NeumorphismTag
+            v-if="u.source === 'discovered'"
+            variant="success"
+            size="small"
+            title="由联邦节点目录自动发现（删除后若仍在联邦中会被重新发现）"
+          >自动</NeumorphismTag>
+          <span class="up-item__grow" />
+          <div class="up-item__actions">
+            <NeumorphismButton :size="26" @click="openEdit(u)">编辑</NeumorphismButton>
+            <NeumorphismButton :size="26" @click="remove(u.name)">删除</NeumorphismButton>
           </div>
         </div>
-        <NeumorphismTag :variant="authMeta(u).variant" size="small">
-          {{ authMeta(u).label }}
-        </NeumorphismTag>
-        <div class="up-item-actions">
-          <NeumorphismButton size="small" @click="openEdit(u)">编辑</NeumorphismButton>
-          <NeumorphismButton size="small" @click="remove(u.name)">删除</NeumorphismButton>
+        <!-- 第二行：地址 · 连通性 · 认证 · 探活时间（单行，地址让位） -->
+        <div class="up-item__meta">
+          <span class="up-item__url" :title="addressOf(u)">{{ addressOf(u) }}</span>
+          <span class="up-item__health" :title="`探活时间 ${formatChecked(u.last_checked) || '—'}`">
+            <NeumorphismSpinner v-if="u.connectivity === 'connecting'" size="small" />
+            {{ connectivityMeta(u).label }}<template v-if="u.access === 'ssh'">·{{ sshPhaseMeta(u).label }}</template>
+          </span>
+          <NeumorphismTag :variant="authMeta(u).variant" size="small">{{ authMeta(u).label }}</NeumorphismTag>
         </div>
+        <!-- 错误只在真有的时候占一行（占位式隐藏会让卡片高度在有无错误间跳） -->
+        <div v-if="u.last_error" class="up-item__err" :title="u.last_error">{{ u.last_error }}</div>
       </NeumorphismCard>
     </div>
   </div>
@@ -401,45 +422,86 @@ onMounted(() => {
 .up-hint { font-size: 12px; color: var(--nm-text-secondary, #888); line-height: 1.5; }
 .up-error { color: var(--nm-color-error); font-size: 12px; }
 .up-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.up-list { display: flex; flex-direction: column; gap: 8px; }
-.up-loading { display: flex; justify-content: center; padding: 12px; }
-.up-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; min-height: 68px; }
-.up-item > :first-child { transition: opacity 0.3s ease; }
-.up-item--active { outline: 1px solid var(--nm-primary-color); }
-.up-item-main { flex: 1; min-width: 0; }
-.up-item-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
-.up-item-url { font-size: 12px; color: var(--nm-text-secondary, #888); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.up-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
-
-.up-item-health {
+/* 紧凑网格（2026-10 布局改）：宽屏一列放 2-3 个上游。
+   `minmax(min(100%, 340px), 1fr)` 让窄屏自动退化为单列，不需要媒体查询。 */
+.up-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 8px;
+  align-items: start;
+}
+.up-empty { display: flex; justify-content: center; }
+.up-loading-hint {
   font-size: 12px;
-  opacity: 0.75;
-  margin-top: 2px;
-  min-height: 32px; /* 两行（状态+错误占位）固定高度——无错误时不塌 */
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  color: var(--nm-text-secondary, #888);
+  padding: 10px 2px;
 }
 
-.up-health-label { display: inline-flex; align-items: center; gap: 6px; }
-.up-health-spinner { opacity: 0.8; }
-
-.up-health-error {
-  color: var(--nm-color-error, #d64545);
-  font-size: 11px;
-  margin-top: 2px;
-  max-width: 320px;
+/* 单个上游：两行（名称行 + 元信息行），错误只在有时加一行。
+   高度 ≈ 26（名称行，按钮 26px 撑开）+ 18（元信息行）+ padding 16 ≈ 60px，
+   旧的固定 32px 健康占位与 68px min-height 都已去掉。 */
+.up-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 10px;
+  min-width: 0;
+}
+.up-item__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.up-item__name {
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: opacity 0.3s ease;
+  max-width: 46%;
+}
+.up-item__grow { flex: 1 1 auto; min-width: 4px; }
+.up-item__actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.up-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--nm-text-secondary, #888);
+  /* 标签（20px）比这一行文字高：固定行高免得随标签有无而抖 */
+  min-height: 20px;
+}
+/* 地址是第一让位者：窄了就省略，悬停有全量 */
+.up-item__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--nm-font-mono, monospace);
+  opacity: 0.85;
+}
+.up-item__health {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.up-item__err {
+  font-size: 11px;
+  color: var(--nm-color-error, #d64545);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.up-health-error--empty {
-  visibility: hidden; /* 占位但不可见——布局高度保持稳定 */
-}
-
-.up-item-name, .up-item-url, .up-item-health {
-  transition: color 0.3s ease, opacity 0.3s ease;
+/* 窄屏（手机/窄侧栏）：单列，且两行里的次要信息允许换行不挤成一坨 */
+@media (max-width: 520px) {
+  .up-item__meta { flex-wrap: wrap; row-gap: 2px; }
+  .up-item__name { max-width: 40%; }
 }
 </style>
