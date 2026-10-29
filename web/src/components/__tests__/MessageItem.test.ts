@@ -144,16 +144,17 @@ describe('MessageItem 消息行', () => {
   // 动机：气泡的阴影此前是面板手写的两条 box-shadow，与库的台阶高度模型
   // （elevation 1–4）各写一套，深浅不成体系、改一处要同步两处。改为把壳交给
   // 卡片组件后，面板不再出现 box-shadow —— 下面几条把这个契约钉住。
-  it('外壳是卡片组件：根节点带 nm-card + 凸起档 + no-padding，圆角经变量下发', () => {
+  it('外壳是卡片组件且材质零覆盖：不传 elevation / radius（走组件默认档）', () => {
     const wrapper = mountItem(message({ role: 'agent', content: 'hi' }));
     const bubble = wrapper.find('.msg-item__bubble');
     expect(bubble.classes()).toContain('nm-card');
-    // 凸起（非凹陷 pressed）：elevation=1
-    expect(bubble.classes()).toContain('nm-card--elevation-1');
-    // padding 归面板（库 body 留白 24px 对气泡过大）
+    // 默认档（variant medium → elevation 2）；面板不指定档位
+    expect(bubble.classes()).toContain('nm-card--elevation-2');
+    expect(bubble.classes().some((c) => /--elevation-[134]$/.test(c))).toBe(false);
+    // padding 归面板（库 body 留白 24px 对气泡过大）——这是版面，不是材质
     expect(bubble.classes()).toContain('nm-card--no-padding');
-    // radius=16 经 CSS 变量下发（与 --nm-border-radius-md 同源）
-    expect(bubble.attributes('style') ?? '').toContain('--nm-card-radius: 16px');
+    // 圆角走组件默认：`--nm-card-radius` 由组件自己写到 24px（面板没传 radius）
+    expect(bubble.attributes('style') ?? '').toContain('--nm-card-radius: 24px');
   });
 
   it('角色语义仍在根节点：user 居右 / agent 居左，无障碍注解透传', () => {
@@ -172,7 +173,7 @@ describe('MessageItem 消息行', () => {
     expect(bubble.classes()).not.toContain('nm-card--elevation-1');
   });
 
-  it('样式契约：面板不再写 box-shadow（材质全归卡片），padding 保留在根节点', () => {
+  it('样式契约：面板零材质声明（无阴影 / 背景 / 圆角），只留版面', () => {
     const raw = require('fs').readFileSync(
       require('path').resolve(__dirname, '../MessageItem.vue'),
       'utf-8',
@@ -180,11 +181,25 @@ describe('MessageItem 消息行', () => {
     const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
     // 只看声明本身：注释里会提到 box-shadow / border-radius 之类字样
     const decls = style.replace(/\/\*[\s\S]*?\*\//g, '');
-    // 手写阴影已移除 —— 否则会以更高特异性压掉 `.nm-card--elevation-*` 的台阶阴影
-    expect(decls).not.toMatch(/box-shadow/);
-    expect(decls).toMatch(/\.msg-item__bubble\s*\{[^}]*padding:/s);
-    // 圆角全归卡片（四角等值）：面板不再覆盖任何角 —— 覆盖会以更高特异性
-    // 压掉 `.nm-card` 的 `--nm-card-radius`，而角色方向已由对齐 + 色调表达。
-    expect(decls).not.toMatch(/border-radius/);
+    /** 取某个选择器块的声明体（CSS 是扁平的，够用） */
+    const blockOf = (sel: string): string =>
+      new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 's').exec(
+        decls,
+      )?.[1] ?? '';
+    // 材质零覆盖（2026-10-29 用户要求「用组件原生的」）：气泡的三个自有类里
+    // 不得出现任何材质声明——阴影、底色、圆角全部由 NeumorphismCard 决定。
+    for (const sel of ['.msg-item__bubble', '.msg-item__bubble--user', '.msg-item__bubble--agent']) {
+      const body = blockOf(sel);
+      expect(body, sel).not.toBe('');
+      expect(body, sel).not.toMatch(/box-shadow/);
+      expect(body, sel).not.toMatch(/border-radius/);
+      expect(body, sel).not.toMatch(/background/);
+      expect(body, sel).not.toMatch(/filter|backdrop-filter/);
+    }
+    // 版面仍在面板侧
+    expect(blockOf('.msg-item__bubble')).toMatch(/padding:/);
+    expect(blockOf('.msg-item__bubble')).toMatch(/max-width:\s*100%/);
+    expect(blockOf('.msg-item__bubble--user')).toMatch(/align-self:\s*flex-end/);
+    expect(blockOf('.msg-item__bubble--agent')).toMatch(/align-self:\s*flex-start/);
   });
 });

@@ -1,19 +1,19 @@
 <script setup lang="ts">
 //! 消息行（user / agent / system）——面板自组（2026-09-30；2026-10-13 吸收气泡壳；
-//! 2026-10-29 外壳改由 ui-frame `NeumorphismCard` 的**凸起档**承担）。
+//! 2026-10-29 外壳改由 ui-frame `NeumorphismCard` 承担，材质零覆盖）。
 //!
 //! 背景：ui-frame 已移除 chat 组合组件（ChatMessageItem 等）——聊天组合属
-//! 产品语义，由宿主自行组装。本组件把「壳」交给库的卡片组件（`elevation=1`
-//! 的凸起台阶：ambient 落影 + 双向双阴影 + **四角等值圆角** + 裁剪），面板侧
-//! 只保留**角色语义**两件事：对齐（`align-self`）、色调（用户主色染色 /
-//! Agent 抬升一档）。正文由延迟加载的
+//! 产品语义，由宿主自行组装。本组件把「壳」整个交给库的卡片组件
+//! （`NeumorphismCard`，**材质零覆盖**：不动阴影档位、底色、圆角），面板侧
+//! 只保留**版面**（宽度 / padding）与**对齐**（`align-self`）——
+//! 角色区分靠左右对齐一重。正文由延迟加载的
 //! `MarkdownLazy` 渲染（2026-10 首屏优化：doc 模块不再静态进入首屏关键路径）；
 //! 工作条目行（工具调用 + 思考 + 子代理）由 ChatView 分派给 WorkRunGroup
 //! （统一 chip 行）。
 //!
 //! 语义与迁移前一致：
-//! - user 居右主色气泡、agent 居左中性气泡（正文走 Markdown）、system 居中
-//!   平铺（细线夹文本）；
+//! - user 居右、agent 居左（两者同一套卡片材质；正文走 Markdown）、system
+//!   居中平铺（细线夹文本，不套卡片）；
 //! - 头部：agent 显示角色名，消息带来源（QQ/本地）时附「实例 · 群 · 用户名」，
 //!   其后是时间；悬停浮现复制按钮（`ChatCopyButton`，保留的原子组件）。
 
@@ -81,18 +81,18 @@ const timeLabel = computed(() => {
       <span v-if="timeLabel" class="msg-item__system-time">{{ timeLabel }}</span>
     </div>
   </div>
-  <!-- 外壳 = ui-frame NeumorphismCard **凸起档**（elevation=1）：ambient 落影 +
-       双向双阴影 + 圆角/裁剪全归库，面板不再自己写 box-shadow。
-       `no-padding` + 根节点 padding：padding 属版面（面板控），库的 body 留白
-       属组件默认（24px，对气泡过大）。`role` / `aria-label` 经 attrs 透传到
+  <!-- 外壳 = ui-frame NeumorphismCard，**材质全部走组件默认**（2026-10-29 用户
+       要求「不要另外加阴影，用组件原生的」）：不传 elevation / radius，不覆盖
+       背景与阴影——阴影 = 组件默认档（elevation 2：ambient + 8px/20px 暗侧 +
+       4px/12px 亮侧），底色 = `--nm-surface-color`，圆角 = 默认 24px。
+       面板只做**版面**两件事：`no-padding`（库 body 留白 24px 对气泡过大）+
+       根节点 padding 与 `align-self`。`role` / `aria-label` 经 attrs 透传到
        卡片根节点，无障碍语义不变。 -->
   <NeumorphismCard
     v-else
     no-padding
     class="msg-item__bubble"
     :class="isUser ? 'msg-item__bubble--user' : 'msg-item__bubble--agent'"
-    :elevation="1"
-    :radius="16"
     role="article"
     :aria-label="isUser ? t('chatRoleUser') : t('chatRoleAgent')"
   >
@@ -114,14 +114,12 @@ const timeLabel = computed(() => {
 </template>
 
 <style scoped>
-/* ── 气泡壳（2026-10-29 改由 ui-frame NeumorphismCard 凸起档承担）──────────
-   **材质（阴影 / 圆角 / 裁剪）全归库的卡片组件**：`.nm-card--elevation-1`
-   给 ambient `0 1px 2px` + 暗侧 `4px 4px 10px` + 亮侧 `-2px -2px 6px`；
-   `.nm-card` 的圆角取自卡片组件下发的 `--nm-card-radius` 变量（本处
-   `radius=16`）——**四角等值**，面板不覆盖任何一个角（2026-10-29
-   用户要求：卡片就是四角同半径）；`overflow: hidden` 顺带把超宽 Markdown
-   内容裁在气泡内。
-   面板在此只负责**角色语义**两件事：对齐、色调。 */
+/* ── 气泡壳 = ui-frame `NeumorphismCard` **原生材质**（2026-10-29）─────────
+   本样式块**不出现任何材质声明**：没有 box-shadow、没有 background-color、
+   没有 border-radius。阴影档位、底色（`--nm-surface-color`）、圆角（默认
+   24px，四角等值）、`overflow: hidden` 裁剪全部由卡片组件自己决定——
+   面板想调外观就该去改 ui-frame，而不是在宿主里叠一层。
+   面板在此只负责**版面**：宽度、内边距、对齐。 */
 .msg-item__bubble {
   /* 宽度动态化（2026-09-30 语义保持）：解除库默认上限 min(78%, 640px)——
      短消息贴内容收紧，长消息/代码/表格随**消息列可用宽度**伸展（列宽本身
@@ -131,17 +129,14 @@ const timeLabel = computed(() => {
   padding: var(--nm-spacing-sm) var(--nm-spacing-14);
 }
 
-/* 色调：用户 = 主色染色；Agent = 抬升一档表面（覆盖卡片的 --nm-surface-color，
-   与背后托盘 --nm-chat-tray-bg 拉开亮度，凸起才读得出来）。 */
+/* 对齐仅对 flex 列容器（.chat-view__item--msg）生效，见 ChatView。
+   角色区分只剩「左右对齐」这一重——色调与圆角都交回组件的统一材质。 */
 .msg-item__bubble--user {
-  /* 对齐仅对 flex 列容器（.chat-view__item--msg）生效，见 ChatView。 */
   align-self: flex-end;
-  background-color: var(--nm-chat-user-bg);
 }
 
 .msg-item__bubble--agent {
   align-self: flex-start;
-  background-color: var(--nm-chat-agent-bg);
 }
 
 /* system：居中平铺（细线夹文本），无气泡 */
