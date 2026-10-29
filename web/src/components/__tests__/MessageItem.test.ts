@@ -1,13 +1,16 @@
-//! MessageItem（面板自组消息行）契约测试（2026-09-30；2026-10-13 气泡壳收敛）。
+//! MessageItem（面板自组消息行）契约测试（2026-09-30；2026-10-13 气泡壳收敛；
+//! 2026-10-29 外壳改由 ui-frame `NeumorphismCard` 凸起档承担）。
 //!
 //! 背景：ui-frame 移除了 chat 组合组件（ChatMessageItem 等）；2026-10-13
 //! 原库 `ChatBubble` 元组件亦被解散（角色→样式映射烘进壳），气泡壳样式
-//! 改由面板 CSS 配方承担。本测试锁定角色 → 气泡形态的映射，
+//! 改由面板 CSS 配方承担；2026-10-29 起**材质（阴影/圆角/裁剪）交回库的卡片
+//! 组件**（`elevation=1` 凸起台阶），面板只保留角色语义（对齐 / 色调 / 非对称
+//! 圆角开向）。本测试锁定角色 → 气泡形态的映射、卡片外壳的存在性，
 //! 以及头部（角色名 / 来源 / 时间）与 Markdown 渲染的分派：
 //! - user：居右主色气泡、纯文本；
 //! - agent：居左中性气泡、正文走 MarkdownLazy（2026-10 起为延迟加载的
 //!   Markdown 渲染包装，内部异步加载 doc 模块——测试以 stub 拦截）；
-//! - system：居中平铺。
+//! - system：居中平铺（不套卡片）。
 
 import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
@@ -135,5 +138,51 @@ describe('MessageItem 消息行', () => {
     const wrapper = mountItem(message({ role: 'user', content: '你好', streaming: true }));
     expect(wrapper.find('.msg-item__stream').exists()).toBe(false);
     expect(wrapper.find('.md-stub').exists()).toBe(false);
+  });
+
+  // ── 外壳 = ui-frame NeumorphismCard 凸起档（2026-10-29）─────────────────
+  // 动机：气泡的阴影此前是面板手写的两条 box-shadow，与库的台阶高度模型
+  // （elevation 1–4）各写一套，深浅不成体系、改一处要同步两处。改为把壳交给
+  // 卡片组件后，面板不再出现 box-shadow —— 下面几条把这个契约钉住。
+  it('外壳是卡片组件：根节点带 nm-card + 凸起档 + no-padding，圆角经变量下发', () => {
+    const wrapper = mountItem(message({ role: 'agent', content: 'hi' }));
+    const bubble = wrapper.find('.msg-item__bubble');
+    expect(bubble.classes()).toContain('nm-card');
+    // 凸起（非凹陷 pressed）：elevation=1
+    expect(bubble.classes()).toContain('nm-card--elevation-1');
+    // padding 归面板（库 body 留白 24px 对气泡过大）
+    expect(bubble.classes()).toContain('nm-card--no-padding');
+    // radius=16 经 CSS 变量下发（与 --nm-border-radius-md 同源）
+    expect(bubble.attributes('style') ?? '').toContain('--nm-card-radius: 16px');
+  });
+
+  it('角色语义仍在根节点：user 居右 / agent 居左，无障碍注解透传', () => {
+    const user = mountItem(message({ role: 'user', content: 'a' })).find('.msg-item__bubble');
+    expect(user.classes()).toEqual(
+      expect.arrayContaining(['nm-card', 'msg-item__bubble', 'msg-item__bubble--user']),
+    );
+    expect(user.attributes('role')).toBe('article');
+    expect(user.attributes('aria-label')).toBe('用户');
+  });
+
+  it('system 行不套卡片（居中平铺 + 细线夹文本，无凸起材质）', () => {
+    const wrapper = mountItem(message({ role: 'system', content: '定时器触发' }));
+    const bubble = wrapper.find('.msg-item__bubble');
+    expect(bubble.classes()).not.toContain('nm-card');
+    expect(bubble.classes()).not.toContain('nm-card--elevation-1');
+  });
+
+  it('样式契约：面板不再写 box-shadow（材质全归卡片），padding 保留在根节点', () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../MessageItem.vue'),
+      'utf-8',
+    );
+    const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    // 手写阴影已移除 —— 否则会以更高特异性压掉 `.nm-card--elevation-*` 的台阶阴影
+    expect(style).not.toMatch(/box-shadow/);
+    expect(style).toMatch(/\.msg-item__bubble\s*\{[^}]*padding:/s);
+    // 非对称圆角开向仍在（方向线索不依赖颜色）
+    expect(style).toMatch(/\.msg-item__bubble--user\s*\{[^}]*border-radius/s);
+    expect(style).toMatch(/\.msg-item__bubble--agent\s*\{[^}]*border-radius/s);
   });
 });

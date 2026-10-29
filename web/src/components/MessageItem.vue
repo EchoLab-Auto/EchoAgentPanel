@@ -1,13 +1,15 @@
 <script setup lang="ts">
-//! 消息行（user / agent / system）——面板自组（2026-09-30；2026-10-13 吸收气泡壳）。
+//! 消息行（user / agent / system）——面板自组（2026-09-30；2026-10-13 吸收气泡壳；
+//! 2026-10-29 外壳改由 ui-frame `NeumorphismCard` 的**凸起档**承担）。
 //!
 //! 背景：ui-frame 已移除 chat 组合组件（ChatMessageItem 等）——聊天组合属
-//! 产品语义，由宿主自行组装。本组件用**面板自有 CSS 配方**（2026-10-13 起
-//! 吸收原库 `ChatBubble` 元组件的壳样式：对齐 / 色调 / 非对称圆角——
-//! 该组装件因"角色→样式映射烘进壳"被解散）+ 延迟加载的 Markdown 渲染
-//! （`MarkdownLazy`，2026-10 首屏加载优化：doc 模块不再静态进入首屏关键
-//! 路径）实现面板的消息行；工作条目行（工具调用 + 思考 + 子代理）由
-//! ChatView 分派给 WorkRunGroup（统一 chip 行）。
+//! 产品语义，由宿主自行组装。本组件把「壳」交给库的卡片组件（`elevation=1`
+//! 的凸起台阶：ambient 落影 + 双向双阴影 + 库统一圆角/裁剪），面板侧只保留
+//! **角色语义**：对齐（`align-self`）、色调（用户主色染色 / Agent 抬升一档）、
+//! 非对称圆角开向（靠内一侧收成 4px，形状线索不依赖颜色）。正文由延迟加载的
+//! `MarkdownLazy` 渲染（2026-10 首屏优化：doc 模块不再静态进入首屏关键路径）；
+//! 工作条目行（工具调用 + 思考 + 子代理）由 ChatView 分派给 WorkRunGroup
+//! （统一 chip 行）。
 //!
 //! 语义与迁移前一致：
 //! - user 居右主色气泡、agent 居左中性气泡（正文走 Markdown）、system 居中
@@ -18,6 +20,7 @@
 import { computed } from 'vue';
 import { useLocale } from '@echolab-auto/ui-frame/composables/useLocale';
 import { ChatCopyButton } from '@echolab-auto/ui-frame/chat';
+import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import MarkdownLazy from './MarkdownLazy.vue';
 import type { ChatMessageWithImages } from '../chat-adapter';
 
@@ -78,10 +81,18 @@ const timeLabel = computed(() => {
       <span v-if="timeLabel" class="msg-item__system-time">{{ timeLabel }}</span>
     </div>
   </div>
-  <div
+  <!-- 外壳 = ui-frame NeumorphismCard **凸起档**（elevation=1）：ambient 落影 +
+       双向双阴影 + 圆角/裁剪全归库，面板不再自己写 box-shadow。
+       `no-padding` + 根节点 padding：padding 属版面（面板控），库的 body 留白
+       属组件默认（24px，对气泡过大）。`role` / `aria-label` 经 attrs 透传到
+       卡片根节点，无障碍语义不变。 -->
+  <NeumorphismCard
     v-else
+    no-padding
     class="msg-item__bubble"
     :class="isUser ? 'msg-item__bubble--user' : 'msg-item__bubble--agent'"
+    :elevation="1"
+    :radius="16"
     role="article"
     :aria-label="isUser ? t('chatRoleUser') : t('chatRoleAgent')"
   >
@@ -99,27 +110,34 @@ const timeLabel = computed(() => {
       <MarkdownLazy v-else-if="!isUser" :content="message.content" />
       <template v-else>{{ message.content }}</template>
     </div>
-  </div>
+  </NeumorphismCard>
 </template>
 
 <style scoped>
-/* ── 气泡壳（2026-10-13 自 ChatBubble 吸收）：对齐 × 色调正交组合 ──────────
-   宽度动态化（2026-09-30 语义保持）：解除库默认上限 min(78%, 640px)——
-   短消息贴内容收紧，长消息/代码/表格随**消息列可用宽度**伸展（列宽本身
-   随左右侧栏卡片显隐动态变化，见 ChatView 的托盘 padding）。 */
+/* ── 气泡壳（2026-10-29 改由 ui-frame NeumorphismCard 凸起档承担）──────────
+   **材质（阴影/圆角/裁剪）不再由面板写**：`.nm-card--elevation-1` 提供
+   ambient `0 1px 2px` + 暗侧 `4px 4px 10px` + 亮侧 `-2px -2px 6px`，
+   `overflow: hidden` 顺带把 Markdown 超宽内容裁在气泡内。
+   面板在此只负责**角色语义**三件事：宽度、对齐、色调 + 非对称圆角开向。 */
 .msg-item__bubble {
+  /* 宽度动态化（2026-09-30 语义保持）：解除库默认上限 min(78%, 640px)——
+     短消息贴内容收紧，长消息/代码/表格随**消息列可用宽度**伸展（列宽本身
+     随左右侧栏卡片显隐动态变化，见 ChatView 的托盘 padding）。 */
   max-width: 100%;
+  /* padding 属版面（卡片带 no-padding，body 留白为 0）：8px 14px */
   padding: var(--nm-spacing-sm) var(--nm-spacing-14);
+  /* 兜底圆角；角色规则再用非对称 shorthand 覆盖（特异性：本类 + 作用域属性
+     > 库的 `.nm-card`，层叠顺序无关）。卡片 `radius=16` 写进
+     `--nm-card-radius`，两处取值同源，将来开 squircle 时量测一致。 */
   border-radius: var(--nm-border-radius-md);
 }
 
+/* 色调：用户 = 主色染色；Agent = 抬升一档表面（覆盖卡片的 --nm-surface-color，
+   与背后托盘 --nm-chat-tray-bg 拉开亮度，凸起才读得出来）。 */
 .msg-item__bubble--user {
   /* 对齐仅对 flex 列容器（.chat-view__item--msg）生效，见 ChatView。 */
   align-self: flex-end;
   background-color: var(--nm-chat-user-bg);
-  box-shadow:
-    3px 3px 10px var(--nm-shadow-dark),
-    -2px -2px 8px var(--nm-shadow-light);
   /* 非对称圆角暗示方向：居右压右下角 */
   border-radius: var(--nm-border-radius-md) var(--nm-border-radius-md) var(--nm-border-radius-xs)
     var(--nm-border-radius-md);
@@ -128,9 +146,6 @@ const timeLabel = computed(() => {
 .msg-item__bubble--agent {
   align-self: flex-start;
   background-color: var(--nm-chat-agent-bg);
-  box-shadow:
-    3px 3px 10px var(--nm-shadow-dark),
-    -2px -2px 8px var(--nm-shadow-light);
   /* 居左压左下角 */
   border-radius: var(--nm-border-radius-md) var(--nm-border-radius-md) var(--nm-border-radius-md)
     var(--nm-border-radius-xs);
