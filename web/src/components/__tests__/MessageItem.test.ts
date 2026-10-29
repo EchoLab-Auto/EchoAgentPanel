@@ -178,11 +178,13 @@ describe('MessageItem 消息行', () => {
       'utf-8',
     );
     const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    // 只看声明本身：注释里会提到 box-shadow / border-radius 之类字样
+    const decls = style.replace(/\/\*[\s\S]*?\*\//g, '');
     // 手写阴影已移除 —— 否则会以更高特异性压掉 `.nm-card--elevation-*` 的台阶阴影
-    expect(style).not.toMatch(/box-shadow/);
-    expect(style).toMatch(/\.msg-item__bubble\s*\{[^}]*padding:/s);
-    // 非对称圆角开向仍在（方向线索不依赖颜色）
-    expect(style).toMatch(/\.msg-item__bubble--user\s*\{[^}]*border-radius/s);
-    expect(style).toMatch(/\.msg-item__bubble--agent\s*\{[^}]*border-radius/s);
+    expect(decls).not.toMatch(/box-shadow/);
+    expect(decls).toMatch(/\.msg-item__bubble\s*\{[^}]*padding:/s);
+    // 圆角全归卡片（四角等值）：面板不再覆盖任何角 —— 覆盖会以更高特异性
+    // 压掉 `.nm-card` 的 `--nm-card-radius`，而角色方向已由对齐 + 色调表达。
+    expect(decls).not.toMatch(/border-radius/);
   });
 });

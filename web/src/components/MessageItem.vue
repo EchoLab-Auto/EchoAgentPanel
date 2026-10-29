@@ -4,9 +4,9 @@
 //!
 //! 背景：ui-frame 已移除 chat 组合组件（ChatMessageItem 等）——聊天组合属
 //! 产品语义，由宿主自行组装。本组件把「壳」交给库的卡片组件（`elevation=1`
-//! 的凸起台阶：ambient 落影 + 双向双阴影 + 库统一圆角/裁剪），面板侧只保留
-//! **角色语义**：对齐（`align-self`）、色调（用户主色染色 / Agent 抬升一档）、
-//! 非对称圆角开向（靠内一侧收成 4px，形状线索不依赖颜色）。正文由延迟加载的
+//! 的凸起台阶：ambient 落影 + 双向双阴影 + **四角等值圆角** + 裁剪），面板侧
+//! 只保留**角色语义**两件事：对齐（`align-self`）、色调（用户主色染色 /
+//! Agent 抬升一档）。正文由延迟加载的
 //! `MarkdownLazy` 渲染（2026-10 首屏优化：doc 模块不再静态进入首屏关键路径）；
 //! 工作条目行（工具调用 + 思考 + 子代理）由 ChatView 分派给 WorkRunGroup
 //! （统一 chip 行）。
@@ -115,10 +115,13 @@ const timeLabel = computed(() => {
 
 <style scoped>
 /* ── 气泡壳（2026-10-29 改由 ui-frame NeumorphismCard 凸起档承担）──────────
-   **材质（阴影/圆角/裁剪）不再由面板写**：`.nm-card--elevation-1` 提供
-   ambient `0 1px 2px` + 暗侧 `4px 4px 10px` + 亮侧 `-2px -2px 6px`，
-   `overflow: hidden` 顺带把 Markdown 超宽内容裁在气泡内。
-   面板在此只负责**角色语义**三件事：宽度、对齐、色调 + 非对称圆角开向。 */
+   **材质（阴影 / 圆角 / 裁剪）全归库的卡片组件**：`.nm-card--elevation-1`
+   给 ambient `0 1px 2px` + 暗侧 `4px 4px 10px` + 亮侧 `-2px -2px 6px`；
+   `.nm-card` 的圆角取自卡片组件下发的 `--nm-card-radius` 变量（本处
+   `radius=16`）——**四角等值**，面板不覆盖任何一个角（2026-10-29
+   用户要求：卡片就是四角同半径）；`overflow: hidden` 顺带把超宽 Markdown
+   内容裁在气泡内。
+   面板在此只负责**角色语义**两件事：对齐、色调。 */
 .msg-item__bubble {
   /* 宽度动态化（2026-09-30 语义保持）：解除库默认上限 min(78%, 640px)——
      短消息贴内容收紧，长消息/代码/表格随**消息列可用宽度**伸展（列宽本身
@@ -126,10 +129,6 @@ const timeLabel = computed(() => {
   max-width: 100%;
   /* padding 属版面（卡片带 no-padding，body 留白为 0）：8px 14px */
   padding: var(--nm-spacing-sm) var(--nm-spacing-14);
-  /* 兜底圆角；角色规则再用非对称 shorthand 覆盖（特异性：本类 + 作用域属性
-     > 库的 `.nm-card`，层叠顺序无关）。卡片 `radius=16` 写进
-     `--nm-card-radius`，两处取值同源，将来开 squircle 时量测一致。 */
-  border-radius: var(--nm-border-radius-md);
 }
 
 /* 色调：用户 = 主色染色；Agent = 抬升一档表面（覆盖卡片的 --nm-surface-color，
@@ -138,17 +137,11 @@ const timeLabel = computed(() => {
   /* 对齐仅对 flex 列容器（.chat-view__item--msg）生效，见 ChatView。 */
   align-self: flex-end;
   background-color: var(--nm-chat-user-bg);
-  /* 非对称圆角暗示方向：居右压右下角 */
-  border-radius: var(--nm-border-radius-md) var(--nm-border-radius-md) var(--nm-border-radius-xs)
-    var(--nm-border-radius-md);
 }
 
 .msg-item__bubble--agent {
   align-self: flex-start;
   background-color: var(--nm-chat-agent-bg);
-  /* 居左压左下角 */
-  border-radius: var(--nm-border-radius-md) var(--nm-border-radius-md) var(--nm-border-radius-md)
-    var(--nm-border-radius-xs);
 }
 
 /* system：居中平铺（细线夹文本），无气泡 */
