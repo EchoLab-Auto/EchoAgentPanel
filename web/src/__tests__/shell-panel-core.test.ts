@@ -59,8 +59,10 @@ describe('ShellPanel · 多 Core 定位与命令定向', () => {
     await input.setValue('ls -l');
     await input.trigger('keyup.enter');
 
+    // `team_id` = 请求者人格（2026-10 作用域普查）：Core 据此做归属校验，
+    // 不允许跨人格操作别人的 shell。测试环境无激活人格 → null。
     expect(sendCommand).toHaveBeenCalledWith(
-      { ShellExec: { session_id: 'sh-1', command: 'ls -l' } },
+      { ShellExec: { session_id: 'sh-1', command: 'ls -l', team_id: null } },
       'core-a',
     );
   });
@@ -70,7 +72,10 @@ describe('ShellPanel · 多 Core 定位与命令定向', () => {
     const stop = wrapper.findAll('button').find((b) => b.text().includes('停止会话'));
     expect(stop).toBeTruthy();
     void stop!.trigger('click');
-    expect(sendCommand).toHaveBeenCalledWith({ ShellStop: { session_id: 'sh-1' } }, 'core-a');
+    expect(sendCommand).toHaveBeenCalledWith(
+      { ShellStop: { session_id: 'sh-1', team_id: null } },
+      'core-a',
+    );
   });
 
   it('缺省 core（旧调用点）回落 activeRegion，行为与改造前一致', () => {

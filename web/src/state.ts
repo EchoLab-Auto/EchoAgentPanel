@@ -348,6 +348,16 @@ export interface BranchTab {
 export interface CompactionRun {
   /** 阶段（线上契约，见 `protocol.ts::CompactionPhase`）。 */
   phase: CompactionPhase;
+  /** 归属人格（顶栏指示器显示"谁在压缩"）。 */
+  teamId?: string | null;
+  /**
+   * 归属会话。
+   *
+   * 压缩/归档都是**会话级**操作（2026-10 作用域普查修正了此前的全人格
+   * 语义）。顶栏指示器据此只在本窗口正在看的会话上显示——否则 A 窗口压缩
+   * 会话 A，B 窗口也画进度条，用户会以为自己那格也在被压缩。
+   */
+  sessionId?: string | null;
   done: number;
   total: number;
   /** 本次操作涉及的会话数（`summarize` 阶段 `total` 同源）。 */
@@ -1127,6 +1137,16 @@ export interface AppState {
    * null = 单上游裸帧 / 未标注。
    */
   activeRegion: string | null;
+  /**
+   * 本窗口**当前正在看的会话**（App.vue 在 `setActiveSession` 时写入）。
+   *
+   * 用途：Core 的会话级操作回执（`BackendEvent::Notice`）会广播给所有连接。
+   * 没有这个字段，A 窗口压缩会话 A 时，B 窗口也会弹「已压缩 N 条」——
+   * 用户会以为自己的会话也被改了（2026-10 用户报告的直接诱因）。
+   * reducer 在收到带 `session_id` 的回执时只对**本窗口会话**展示。
+   * 与 `activeRegion` 一样是 per-window 派生量，不参与任何路由决策。
+   */
+  windowSessionId: string | null;
   /// **主节点失效转移**开关（P3，2026-11）：`true`（默认）= primary 连续离线
   /// 阈值后自动切到在线候选节点（语义是**换节点、换会话**，不是会话迁移）；
   /// `false` = 只提示不切（原 `activeRegion` 不动，等它恢复）。
@@ -1215,6 +1235,7 @@ export function initialState(): AppState {
     sessionApiOverrides: {},
     activeTeamId: null,
     activeRegion: null,
+    windowSessionId: null,
     failoverEnabled: failover_enabled_initial(),
     shellSessions: [],
     shellTerminals: {},
@@ -1733,6 +1754,8 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       const key = sessionKey(core, e.session_id ?? e.team_id ?? '');
       state.compactions[key] = {
         phase: e.phase,
+        teamId: e.team_id ?? null,
+        sessionId: e.session_id ?? null,
         done: e.done ?? 0,
         total: e.total ?? 0,
         sessions: e.sessions ?? 0,
@@ -2314,15 +2337,38 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       pushToast(state, e.message, e.ok ? 'success' : 'error');
       return state;
     }
+    case 'Notice': {
+      // 会话级**操作回执**（清理 / 归档 / 压缩 / 会话 API 切换）。与 `Error`
+      // 分开的两条理由（2026-10 作用域普查）：
+      // 1. 回执不代表回合失败——绝不能冻结流式行/收尾工具行；
+      // 2. 回执带 `session_id`，只该在**发起它的那个窗口**展示。Core 把事件
+      //    广播给所有连接，其他窗口弹出"已压缩 120 条"会被误读成"我的会话
+      //    也被改了"（用户报告的原话）。`session_id` 为空的回执是人格级/
+      //    全局操作，所有窗口都该看到。
+      const e = (
+        event as {
+          Notice: {
+            team_id?: string | null;
+            session_id?: string | null;
+            ok?: boolean;
+            message: string;
+          };
+        }
+      ).Notice;
+      const scope = payloadCore(event);
+      const mine = state.windowSessionId;
+      if (e.session_id && mine && e.session_id !== mine) return state;
+      // 多上游：A 节点上同名会话的回执不该出现在看 B 节点的窗口。
+      if (e.session_id && scope && state.activeRegion && scope !== state.activeRegion) return state;
+      pushToast(state, e.message, e.ok === false ? 'error' : 'success');
+      return state;
+    }
     case 'Error': {
       const e = (event as { Error: { session_id: string | null; message: string } }).Error;
-      // 会话级 API 切换回执（Core `SetSessionApi` / `ClearSessionApi` 用
-      // `Error{session_id}` 回报结果，见 `agent/commands.rs`）：这是**操作
-      // 结果**而非会话错误——不能冻结流式行/收尾工具行，否则用户在回合
-      // 进行中切换模型会把正在输出的回答"冻住"（2026-10）。
-      const apiKind = sessionApiNoticeKind(e.message);
-      // 流式：错误中断当前步——冻结该会话流式行（保留已显示的部分文本）。
-      if (e.session_id && !apiKind) {
+      // 会话级操作回执已迁到 `Notice`（2026-10 作用域普查）：`Error{session_id}`
+      // 现在只剩**真正的回合/会话错误**，一律按错误处理（冻结流式行、收尾
+      // 工具行）。此前"按文案识别会话 API 回执"的补丁已删除。
+      if (e.session_id) {
         freezeStreams(state, e.session_id);
         // 错误同样中断本轮：残留 running 工具行一并收尾（否则永久读秒）。
         settleRunningTools(state, e.session_id);
@@ -2335,7 +2381,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       if (!e.session_id && isWorkspaceActivationNotice(e.message) && !hasRecentLocalActivateIntent()) {
         return state;
       }
-      pushToast(state, e.message, apiKind ?? 'info');
+      pushToast(state, e.message, 'error');
       return state;
     }
     default:
@@ -2490,29 +2536,6 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
  */
 function isWorkspaceActivationNotice(message: string): boolean {
   return message.startsWith('已激活工作区会话') || message.startsWith('已取消工作区会话激活');
-}
-
-/**
- * 是否为「会话级 API 切换」的操作回执（Core 侧 `agent/commands.rs` 的
- * `SetSessionApi` / `ClearSessionApi`，两者都用 `BackendEvent::Error` 回报）。
- *
- * 返回值即 toast 语气：切换成功 → success；profile 不存在/构建失败 → error；
- * 不是这类回执 → undefined（按普通 info 处理）。
- *
- * 文案（Core 原文）：
- * - `会话 {id} 已切换到 API: {profile}`
- * - `会话 {id} 已恢复跟随 persona 级配置`
- * - `会话 {id} 切换 API 失败（profile 不存在或构建失败）`
- */
-function sessionApiNoticeKind(
-  message: string,
-): 'success' | 'error' | undefined {
-  if (!message.startsWith('会话 ')) return undefined;
-  if (message.includes('切换 API 失败')) return 'error';
-  if (message.includes('已切换到 API: ') || message.includes('已恢复跟随 persona 级配置')) {
-    return 'success';
-  }
-  return undefined;
 }
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {

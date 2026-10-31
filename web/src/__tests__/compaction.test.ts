@@ -178,3 +178,31 @@ describe('CompactionProgress 的窗口隔离', () => {
     expect(state.compactions[sessionKey(null, 'win-b')]?.message).toBe('完成 B');
   });
 });
+
+describe('顶栏指示器的会话隔离', () => {
+  it('别的会话在压缩：本窗口顶栏不亮灯', () => {
+    const state = {
+      compactions: { 'core-a\u0000win-b': run({ at: 4_000, sessionId: 'win-b', teamId: 'alix' }) },
+      windowSessionId: 'win-a',
+    } as unknown as AppState;
+    expect(activeCompactions(state, 5_000)).toHaveLength(0);
+  });
+
+  it('本窗口会话在压缩：亮灯且带人格名（不是会话 id）', () => {
+    const state = {
+      compactions: { 'core-a\u0000win-a': run({ at: 4_000, sessionId: 'win-a', teamId: 'alix' }) },
+      windowSessionId: 'win-a',
+    } as unknown as AppState;
+    const active = activeCompactions(state, 5_000);
+    expect(active).toHaveLength(1);
+    expect(active[0].teamId).toBe('alix');
+  });
+
+  it('无人格归属的旧记录（无 sessionId）：照常显示，不因过滤而消失', () => {
+    const state = {
+      compactions: { 'core-a\u0000alix': run({ at: 4_000 }) },
+      windowSessionId: 'win-a',
+    } as unknown as AppState;
+    expect(activeCompactions(state, 5_000)).toHaveLength(1);
+  });
+});

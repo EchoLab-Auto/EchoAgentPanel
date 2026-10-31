@@ -102,8 +102,17 @@ export function activeCompactions(state: AppState, now: number): ActiveCompactio
   for (const [key, run] of Object.entries(state.compactions)) {
     const view = visibleCompaction(run, now);
     if (!view?.running) continue;
-    const { core, teamId } = parseCompactionKey(key);
-    out.push({ key, core, teamId, view });
+    // 会话级操作只对**本窗口正在看的会话**亮灯（2026-10 作用域普查）：
+    // 压缩/归档是会话级的，别的窗口在压缩会话 B 与本窗口无关，画在顶栏就是
+    // "我这格也在压缩"的假象。`sessionId` 缺失（旧 Core/人格级操作）照常显示。
+    if (run.sessionId && state.windowSessionId && run.sessionId !== state.windowSessionId) {
+      continue;
+    }
+    const parsed = parseCompactionKey(key);
+    // `teamId` 字段由 reducer 显式写入；旧记录没有时退回键解析（键里曾是
+    // team id，现在放 session id——仅用于兜底显示，不影响过滤）。
+    const teamId = run.teamId ?? parsed.teamId;
+    out.push({ key, core: parsed.core, teamId, view });
   }
   return out.sort((a, b) => a.view.run.at - b.view.run.at);
 }

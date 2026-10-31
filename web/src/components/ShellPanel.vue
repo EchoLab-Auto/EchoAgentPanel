@@ -55,13 +55,19 @@ onUnmounted(() => releasePending('shell:panel:sessions'));
 // 不带 targetCore 就只能落到 activeRegion——切过区域后命令会打进别的机器
 // 的同号 shell（2026-10 多 Core 交互修复）。
 function stopSession(sessionId: string) {
-  sendCommand({ ShellStop: { session_id: sessionId } }, targetCore.value ?? undefined);
+  sendCommand(
+    { ShellStop: { session_id: sessionId, team_id: state.activeTeamId ?? null } },
+    targetCore.value ?? undefined,
+  );
 }
 
 function execCommand(sessionId: string) {
   const cmd = (inputBySession.value[sessionId] ?? '').trim();
   if (!cmd) return;
-  sendCommand({ ShellExec: { session_id: sessionId, command: cmd } }, targetCore.value ?? undefined);
+  sendCommand(
+    { ShellExec: { session_id: sessionId, command: cmd, team_id: state.activeTeamId ?? null } },
+    targetCore.value ?? undefined,
+  );
   inputBySession.value[sessionId] = '';
 }
 

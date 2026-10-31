@@ -90,8 +90,10 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // → 58（2026-10 压缩进度：+CompactionProgress——此前压缩只在开始/结束各
     //   发一句话（还借用 `Error`），中间几分钟面板零反馈；现在带阶段与
     //   done/total，面板画进度条）。
+    // → 59（2026-10 作用域普查：+Notice——会话级操作回执从 `Error` 独立出来，
+    //   带 session_id/ok，面板只在本窗口展示，且不再误冻结流式行）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(58);
+    expect(variants.size).toBe(59);
   });
 
   it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {

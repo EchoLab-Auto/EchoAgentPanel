@@ -663,9 +663,18 @@ export type BackendCommand =
   | { UpdateSkillFromGit: { name: string } }
   | { RemoveSkillSource: { name: string } }
   | { RequestShellSessions: { team_id?: string | null } }
-  | { ShellStart: { workdir?: string | null } }
-  | { ShellExec: { session_id: string; command: string; timeout_secs?: number } }
-  | { ShellStop: { session_id: string } }
+  // shell 命令带 `team_id`（2026-10 作用域普查）：新会话的归属人格 / 操作者
+  // 人格——Core 据此把会话记到正确的人格下，并拒绝跨人格操作别人的 shell。
+  | { ShellStart: { workdir?: string | null; team_id?: string | null } }
+  | {
+      ShellExec: {
+        session_id: string;
+        command: string;
+        timeout_secs?: number;
+        team_id?: string | null;
+      };
+    }
+  | { ShellStop: { session_id: string; team_id?: string | null } }
   | {
       ClearHistory: {
         team_id?: string | null;
@@ -964,6 +973,19 @@ export type BackendEvent =
   | { TeamsList: { teams: TeamInfo[] } }
   | { SystemPrompt: { text: string } }
   | { Error: { session_id: string | null; message: string } }
+  // 会话级**操作回执**（清理 / 归档 / 压缩 / 会话 API 切换）。与 `Error`
+  // 分开：回执不代表回合失败（不冻结流式行），且带 `session_id`——面板只在
+  // 本窗口、本会话展示，其他窗口不再弹出"别人的会话被压缩了"（2026-10 用户
+  // 报告的多窗口串台）。`session_id` 为空 = 人格级/全局回执，所有窗口可见。
+  | {
+      Notice: {
+        team_id?: string | null;
+        session_id?: string | null;
+        /** 操作是否成功（面板据此选 toast 配色，不解析文案）。 */
+        ok?: boolean;
+        message: string;
+      };
+    }
   | {
       SessionMigrated: {
         session_id: string;

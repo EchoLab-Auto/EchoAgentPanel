@@ -211,30 +211,38 @@ describe('取消/错误冻结', () => {
     expect(outputs()[0].content).toBe('写到一半');
   });
 
-  it('会话级 API 切换回执（Core 走 Error 事件）不冻结流式行、按成功提示', () => {
-    // Core `SetSessionApi` 用 `Error{session_id}` 回报结果（agent/commands.rs）：
-    // 用户在回合进行中切换模型，回答不能因此被"冻住"（2026-10）。
+  it('会话级操作回执（Notice）不冻结流式行、按成功提示', () => {
+    // 会话级操作（切模型 / 清理 / 归档 / 压缩）的回执走 `Notice`，不是 `Error`：
+    // 用户在回合进行中做这些操作，回答不能因此被"冻住"（2026-10 作用域普查）。
     dispatch(contentDelta('还在输出'));
     const before = state.toasts.length;
     dispatch({
-      Error: { session_id: SID, message: `会话 ${SID} 已切换到 API: kimi` },
+      Notice: { session_id: SID, ok: true, message: `会话 ${SID} 已切换到 API: kimi` },
     } as unknown as BackendEvent);
 
     expect(outputs()[0].streamState).toBe('streaming');
     expect(outputs()[0].content).toBe('还在输出');
-    const toast = state.toasts[state.toasts.length - 1];
     expect(state.toasts.length).toBe(before + 1);
-    expect(toast!.kind).toBe('success');
+    expect(state.toasts[state.toasts.length - 1]!.kind).toBe('success');
   });
 
-  it('会话级 API 切换失败回执：红字提示但同样不打断流式', () => {
+  it('会话级操作失败回执（Notice.ok=false）：红字提示但同样不打断流式', () => {
     dispatch(contentDelta('半截话'));
     dispatch({
-      Error: { session_id: SID, message: `会话 ${SID} 切换 API 失败（profile 不存在或构建失败）` },
+      Notice: { session_id: SID, ok: false, message: '压缩失败：历史不足' },
     } as unknown as BackendEvent);
 
     expect(outputs()[0].streamState).toBe('streaming');
-    const toast = state.toasts[state.toasts.length - 1];
-    expect(toast!.kind).toBe('error');
+    expect(state.toasts[state.toasts.length - 1]!.kind).toBe('error');
+  });
+
+  it('别的会话的操作回执不进本窗口（多窗口不再串台）', () => {
+    // 用户报告：A 窗口点「压缩」，B 窗口也弹「已压缩 N 条」→ 以为自己的会话也变了。
+    state.windowSessionId = SID;
+    const before = state.toasts.length;
+    dispatch({
+      Notice: { session_id: 'local:workspace:other', ok: true, message: '已压缩 120 条事件' },
+    } as unknown as BackendEvent);
+    expect(state.toasts.length).toBe(before);
   });
 });

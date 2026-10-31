@@ -231,6 +231,9 @@ const activeRegion = ref<string | null>(loadActiveTeamCore());
 // 过滤，会串显别人的会话（此前只在 onTeamSelect 里赋值，刷新即丢失）。
 state.activeTeamId = activeTeamId.value;
 state.activeRegion = activeRegion.value;
+// 本窗口正在看的会话：Core 的会话级操作回执（`Notice`）据此只在发起窗口展示
+// （否则 A 窗口压缩会话 A 时，B 窗口也会弹「已压缩…」——2026-10 用户报告）。
+state.windowSessionId = activeSessionId.value;
 
 
 
@@ -391,6 +394,8 @@ function setActiveSession(next: string, reason: string): void {
   activeSessionId.value = next;
   // 侧栏「文件浏览器」卡按本窗口会话解析所属工作区（见 rail-cards.ts）。
   railSessionId.value = next;
+  // 会话级操作回执只在本窗口展示（见 state.ts 的 `Notice` 分支）。
+  state.windowSessionId = next;
   // 严格 per-tab：只写 sessionStorage。若写进 localStorage，另一窗口重载后
   // 就会落到本窗口正在看的会话上（「跟着跳」的另一半）。
   writeTabOnly(SESSION_KEY, next);

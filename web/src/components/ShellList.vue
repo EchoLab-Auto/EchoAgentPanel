@@ -47,7 +47,11 @@ function refresh() {
 }
 /** 新建 shell：显式定向当前运行区域（不依赖 resolveTargetCore 的隐式兜底）。 */
 function startShell() {
-  sendCommand({ ShellStart: { workdir: null } }, state.activeRegion ?? undefined);
+  // team_id = 新会话的归属人格（Core 据此按人格过滤列表；缺省会让会话无归属）。
+  sendCommand(
+    { ShellStart: { workdir: null, team_id: state.activeTeamId ?? null } },
+    state.activeRegion ?? undefined,
+  );
 }
 // 断连守卫（2026-10 审计修复）：未连接时登记 pending 会 20s 后假"超时"，
 // 且重连后不补拉。挂载/team 变化仅在已连接时发起；由 connected 监听补拉。
