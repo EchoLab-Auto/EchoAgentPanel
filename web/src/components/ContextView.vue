@@ -218,24 +218,18 @@ async function archiveHistory() {
   });
 }
 
-// ── 压缩 / 归档进度（2026-10）────────────────────────────────────────────
-//
-// Core 在 `CompactHistory` / `ArchiveHistory` 执行期间持续推送
-// `CompactionProgress`（`preview → archive → summarize → apply → done`），
-// 按 `(core, team)` 归档到 `state.compactions`。这里只负责**展示**：
-//
-// - 进行中：进度条 + 阶段文案 + `done/total`，并把「压缩」「归档」按钮置灰
-//   （重复点击会撞上 Core 的 `compact_lock`，看起来像毫无反应）；
-// - 终态：显示结果，**定时收掉**（`COMPACTION_RESULT_VISIBLE_MS`）——否则
-//   "已压缩"会一直挂在面板上，下次压缩前都没法回到正常视图；
-// - 兜底：超过 `COMPACTION_STALE_MS` 没有新进度就判为"状态可能已过期"
-//   （连接断了/事件丢了），而不是让进度条永远转下去。
-//
-// 判定口径住在 `compaction.ts`，与顶栏全局指示器共用同一份——两处各写一份
-// 会让阈值悄悄漂移成"顶栏说在跑、面板说已失败"。
-
-const compactionKey = computed(() => sessionKey(targetCore.value, targetTeamId.value ?? ''));
-const compactionRaw = computed(() => state.compactions[compactionKey.value] ?? null);
+// ── 压缩 / 归档进度 ────────────────────────────────────────────
+// 新 Core 按 (core, session) 归档；旧 Core 没有人格以下维度时回退
+// (core, team)，兼容升级过程中的旧进度事件。
+const compactionKey = computed(() =>
+  sessionKey(targetCore.value, targetSessionId.value ?? targetTeamId.value ?? ''),
+);
+const compactionRaw = computed(
+  () =>
+    state.compactions[compactionKey.value] ??
+    state.compactions[sessionKey(targetCore.value, targetTeamId.value ?? '')] ??
+    null,
+);
 
 /** 每秒推进一次的"现在"，用于判定终态过期与进行中超时（不需要精确）。 */
 const nowTick = ref(Date.now());
@@ -247,17 +241,9 @@ onUnmounted(() => {
   if (nowTimer) window.clearInterval(nowTimer);
 });
 
-/**
- * 当前要展示的压缩状态（判定口径见 `compaction.ts::visibleCompaction`）。
- *
- * **与快照无关**：压缩期间 Core 重载会话会让快照短暂为 null，进度条不该
- * 跟着消失——它是动作的反馈，不是上下文内容的一部分。
- */
 const compactionView = computed(() => visibleCompaction(compactionRaw.value, nowTick.value));
 const compaction = computed(() => compactionView.value?.run ?? null);
-/** 是否正在跑（据此禁用「压缩」「归档」按钮）。 */
 const compacting = computed(() => compactionView.value?.running ?? false);
-/** 进度条百分比；`total === 0`（长度不确定的阶段）返回 0 并画不确定条。 */
 const compactionPct = computed(() => compactionView.value?.pct ?? 0);
 const compactionPhaseLabelText = computed(() =>
   compaction.value ? compactionPhaseLabel(compaction.value.phase) : '',
@@ -274,19 +260,32 @@ const compactionVariant = computed(() => {
   return 'primary' as const;
 });
 
-// 压缩是**全人格**操作（Core 按会话独立分组摘要）——文案如实描述，
-// 不再写「压缩当前会话历史」（误导用户以为只影响当前会话）。
+// 压缩只作用于当前会话；缺少会话标识时 fail-closed，绝不能退化为全人格压缩。
 async function compactHistory() {
   const ok = await confirmDialog(
-    '压缩该人格全部会话的历史？各会话的早期事件将替换为摘要（每会话保留最近 40 条；LLM 摘要生成可能需要数分钟）。',
+    '压缩当前会话的历史？早期事件将替换为摘要（保留最近 40 条；LLM 摘要生成可能需要数分钟），其他会话不受影响。',
     {
-      title: '压缩会话历史',
+      title: '压缩当前会话历史',
       danger: true,
       confirmText: '压缩',
     },
   );
   if (!ok) return;
-  sendCommand({ CompactHistory: { team_id: targetTeamId.value, keep_recent: 40 } });
+  if (!targetSessionId.value) {
+    addToast({
+      message: '当前会话尚未确定，无法执行压缩（防止误压其他会话）。请先选择会话。',
+      type: 'warning',
+      duration: 5000,
+    });
+    return;
+  }
+  sendCommand({
+    CompactHistory: {
+      team_id: targetTeamId.value,
+      session_id: targetSessionId.value,
+      keep_recent: 40,
+    },
+  });
 }
 </script>
 
@@ -321,7 +320,7 @@ async function compactHistory() {
         variant="glass"
         size="small"
         :disabled="compacting"
-        :title="compacting ? '正在压缩/归档中，请等待完成' : '压缩该人格全部会话的历史'"
+        :title="compacting ? '正在压缩/归档中，请等待完成' : '仅压缩当前会话的历史（其他会话不受影响）'"
         @click="compactHistory"
       >
         压缩

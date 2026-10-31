@@ -1717,6 +1717,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         event as {
           CompactionProgress: {
             team_id?: string | null;
+            session_id?: string | null;
             phase: CompactionPhase;
             done?: number;
             total?: number;
@@ -1729,7 +1730,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       // 按 (core, team) 归档：压缩是 per-persona 操作，A 的进度不该出现在
       // B 的面板上（与 `contexts` 的复合键同一套理由）。
       // team_id 缺失（旧 Core / 无人格归属）时落 `sessionKey(core, '')`。
-      const key = sessionKey(core, e.team_id ?? '');
+      const key = sessionKey(core, e.session_id ?? e.team_id ?? '');
       state.compactions[key] = {
         phase: e.phase,
         done: e.done ?? 0,

@@ -621,7 +621,14 @@ export type BackendCommand =
         session_id?: string | null;
       };
     }
-  | { CompactHistory: { team_id?: string | null; keep_recent?: number } }
+  | {
+      CompactHistory: {
+        team_id?: string | null;
+        /** 必填：只压缩当前会话；Core 对缺失值 fail-closed。 */
+        session_id?: string | null;
+        keep_recent?: number;
+      };
+    }
   | 'RequestState'
   | { RequestContext: { team_id?: string | null; session_id?: string | null } }
   | {
@@ -833,6 +840,7 @@ export type BackendEvent =
   | {
       CompactionProgress: {
         team_id?: string | null;
+        session_id?: string | null;
         phase: CompactionPhase;
         done: number;
         total: number;

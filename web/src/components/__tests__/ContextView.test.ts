@@ -1,15 +1,8 @@
-//! 上下文分块视图契约测试（2026-10 会话范围修复：ClearHistory / ArchiveHistory）。
+//! 上下文分块视图契约测试（ClearHistory / ArchiveHistory / CompactHistory）。
 //!
-//! 背景（用户报告）：面板「清理历史记忆」此前发送的 `ClearHistory` 只带
-//! `team_id`——Core 侧语义 = 清空该人格**全部会话**（事件日志 + 上下文
-//! 投影 + 显示时间线），把 QQ 群/私聊、其他 workspace 会话的记忆一并抹掉。
-//! 「归档」（`ArchiveHistory`）是同类漏网：不带 session_id 时 Core 走旧语义
-//! （整档归档 + 全量清空），点一次会清掉同人格下所有会话。
-//!
-//! 本测试钉住两条防线（各命令一组）：
-//!   1. 正常路径：命令**必须携带 session_id**（只影响当前会话）；
-//!   2. 会话未知时 fail-closed：不发命令（缺 session_id 在 Core 语义是
-//!      全量清空——与按钮「只清/只归档当前会话」的承诺不符）。
+//! 用户报告：这些按钮位于当前会话窗口，但此前只带 team_id，Core 会清理、
+//! 归档或压缩该人格的全部会话，波及其他窗口与 QQ 会话。
+//! 正常路径必须携带 session_id；会话未知时面板与 Core 均 fail-closed。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -299,5 +292,53 @@ describe('ContextView 归档（会话范围契约）', () => {
     await clickArchive(wrapper);
     await flushPromises();
     expect(archiveCalls()).toHaveLength(0);
+  });
+});
+
+function compactCalls() {
+  return vi
+    .mocked(sendCommand)
+    .mock.calls.filter(
+      ([c]) => typeof c === 'object' && c !== null && 'CompactHistory' in (c as object),
+    );
+}
+
+async function clickCompact(wrapper: ReturnType<typeof mount>) {
+  const button = wrapper.findAll('button').find((b) => b.text().includes('压缩'));
+  expect(button, '「压缩」按钮').toBeTruthy();
+  await button!.trigger('click');
+  await flushPromises();
+}
+
+describe('ContextView 压缩的会话作用域', () => {
+  beforeEach(() => {
+    vi.mocked(sendCommand).mockClear();
+    vi.mocked(confirmDialog).mockClear();
+  });
+
+  it('只压缩当前会话：命令同时携带 team_id 与 session_id', async () => {
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: 'local:workspace:proj/win-a:local_user', core: 'core-a' },
+    });
+    await clickCompact(wrapper);
+    expect(compactCalls()).toHaveLength(1);
+    expect(compactCalls()[0][0]).toEqual({
+      CompactHistory: {
+        team_id: 'alix',
+        session_id: 'local:workspace:proj/win-a:local_user',
+        keep_recent: 40,
+      },
+    });
+    expect(vi.mocked(confirmDialog).mock.calls[0][0]).toContain('其他会话不受影响');
+    wrapper.unmount();
+  });
+
+  it('会话未知时 fail-closed：不发 CompactHistory', async () => {
+    const wrapper = mount(ContextView, {
+      props: { teamId: 'alix', sessionId: null, core: 'core-a' },
+    });
+    await clickCompact(wrapper);
+    expect(compactCalls()).toHaveLength(0);
+    wrapper.unmount();
   });
 });
