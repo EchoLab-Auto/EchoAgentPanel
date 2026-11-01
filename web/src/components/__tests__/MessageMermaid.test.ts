@@ -4,7 +4,7 @@
 //! MessageItem → MarkdownLazy → MarkdownRenderer 链路，守住 Panel 的集成责任：
 //! 安装 mermaid 可选依赖、图表确实替换源码，以及单图失败时仍保留可读源码。
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import mermaid from 'mermaid';
 import MessageItem from '../MessageItem.vue';
@@ -12,6 +12,7 @@ import type { ChatMessageWithImages } from '../../chat-adapter';
 
 vi.mock('mermaid', () => ({
   default: {
+    initialize: vi.fn(),
     render: vi.fn(async () => ({
       svg: '<svg class="mermaid-test-svg" viewBox="0 0 120 40"><text>依赖图</text></svg>',
     })),
@@ -30,11 +31,16 @@ function mountItem(content: string) {
 
   return mount(MessageItem, {
     props: { message, formatTime: (t: number) => `T${t}` },
+    attachTo: document.body,
     global: { stubs: { ChatCopyButton: true } },
   });
 }
 
 describe('会话正文的 Mermaid 图表', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
   it('agent 消息中的 mermaid 代码块渲染为 SVG，而不是停留在源码', async () => {
     const wrapper = mountItem(
       '插件依赖如下：\n\n```mermaid\nflowchart LR\n  LLM["llm 服务"] --> Loop["loop 插件"]\n```',
@@ -45,7 +51,7 @@ describe('会话正文的 Mermaid 图表', () => {
     });
 
     const diagram = wrapper.find('.mermaid-diagram');
-    expect(diagram.attributes('data-processed')).toBe('true');
+    expect(diagram.attributes('data-mermaid-state')).toBe('done');
     expect(diagram.find('pre').exists()).toBe(false);
     expect(wrapper.text()).toContain('插件依赖如下');
 
@@ -68,7 +74,7 @@ describe('会话正文的 Mermaid 图表', () => {
 
     const diagram = wrapper.find('.mermaid-diagram');
     expect(diagram.find('pre code').text()).toContain('非法图源');
-    expect(diagram.attributes('data-processed')).toBeUndefined();
+    expect(diagram.attributes('data-mermaid-state')).toBe('error');
     expect(wrapper.text()).toContain('前文');
     expect(wrapper.text()).toContain('后文');
   }, MERMAID_TIMEOUT);
