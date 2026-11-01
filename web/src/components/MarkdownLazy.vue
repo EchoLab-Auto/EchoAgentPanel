@@ -71,4 +71,32 @@ const LazyMarkdown = defineAsyncComponent({
   font-size: inherit;
   line-height: inherit;
 }
+
+/* Mermaid 大图允许横向滚动，不能把聊天气泡或移动端视口撑宽。 */
+:deep(.mermaid-diagram) {
+  max-width: 100%;
+  margin: var(--nm-spacing-md, 12px) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+:deep(.mermaid-diagram[data-processed='true']) {
+  padding: var(--nm-spacing-md, 12px);
+  border: 1px solid var(--nm-border-subtle, transparent);
+  border-radius: var(--nm-border-radius-lg, 12px);
+  background: var(--nm-surface-color, transparent);
+}
+
+:deep(.mermaid-diagram > svg) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+:deep(.mermaid-diagram > pre) {
+  margin: 0;
+  white-space: pre;
+}
 </style>
