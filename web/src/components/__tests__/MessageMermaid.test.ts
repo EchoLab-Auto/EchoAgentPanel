@@ -41,23 +41,25 @@ describe('会话正文的 Mermaid 图表', () => {
     document.body.innerHTML = '';
   });
 
-  it('agent 消息中的 mermaid 代码块渲染为 SVG，而不是停留在源码', async () => {
+  it('agent 消息中的 flowchart 复用 ui-frame 原生图组件', async () => {
     const wrapper = mountItem(
       '插件依赖如下：\n\n```mermaid\nflowchart LR\n  LLM["llm 服务"] --> Loop["loop 插件"]\n```',
     );
 
-    await vi.waitFor(() => expect(wrapper.find('.mermaid-test-svg').exists()).toBe(true), {
+    await vi.waitFor(() => expect(wrapper.find('.mermaid-diagram .nm-flow').exists()).toBe(true), {
       timeout: MERMAID_TIMEOUT,
     });
 
     const diagram = wrapper.find('.mermaid-diagram');
     expect(diagram.attributes('data-mermaid-state')).toBe('done');
+    expect(diagram.attributes('data-mermaid-renderer')).toBe('ui-frame');
+    expect(diagram.findAll('.nm-flow__node')).toHaveLength(2);
+    expect(diagram.findAll('.nm-flow__edge')).toHaveLength(1);
     expect(diagram.find('pre').exists()).toBe(false);
     expect(wrapper.text()).toContain('插件依赖如下');
 
     const render = vi.mocked(mermaid.render);
-    expect(render).toHaveBeenCalled();
-    expect(render.mock.calls[0]?.[1]).toContain('LLM["llm 服务"] --> Loop["loop 插件"]');
+    expect(render).not.toHaveBeenCalled();
   });
 
   it('单图解析失败时保留源码回退，不影响同条消息的其他内容', async () => {
@@ -68,7 +70,7 @@ describe('会话正文的 Mermaid 图表', () => {
     });
     const wrapper = mountItem('前文\n\n```mermaid\nflowchart LR\n  非法图源\n```\n\n后文');
 
-    await vi.waitFor(() => expect(render.mock.calls.length).toBeGreaterThanOrEqual(2), {
+    await vi.waitFor(() => expect(render.mock.calls.length).toBeGreaterThanOrEqual(1), {
       timeout: MERMAID_TIMEOUT,
     });
 
