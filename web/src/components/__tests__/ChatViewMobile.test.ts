@@ -152,8 +152,17 @@ describe('ChatView 竖屏移动端', () => {
     );
     expect(composerRules).toMatch(/left: max\(var\(--composer-inset\)/);
     expect(composerRules).toMatch(/right: max\(var\(--composer-inset\)/);
-    expect(composerRules).toMatch(
-      /bottom: calc\(var\(--composer-inset\) \+ v-bind\(keyboardInsetPx\)\)/,
+    // 底部间隙单独一个变量（2026-10-29）：默认 = --composer-inset（等间隙），
+    // 键盘抬起时 `.chat-composer-float--keyboard` 把它归零 —— 否则卡片下沿停在
+    // 键盘上沿之上 3vw，中间那条露底色带就是用户报的「输入区下方一片灰色」。
+    expect(composerRules, '底部间隙走独立变量').toMatch(
+      /bottom: calc\(var\(--composer-bottom-gap\) \+ v-bind\(keyboardInsetPx\)\)/,
+    );
+    expect(composerRules, '底部间隙默认等于左右留白').toMatch(
+      /--composer-bottom-gap:\s*var\(--composer-inset\)/,
+    );
+    expect(styleBlock, '键盘态底部间隙归零').toMatch(
+      /\.chat-composer-float--keyboard\s*\{[^}]*--composer-bottom-gap:\s*0px/,
     );
     // 打字面字号 = 单一事实来源变量（2026-10-29 起不再硬编码 16px，
     // 否则改字号要改两处，漏一处就出现「打字面 16 / controlH 按 14 算」的错位）

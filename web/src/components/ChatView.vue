@@ -320,6 +320,16 @@ function updateComposerClip() {
   // rect.left 就是「输入区左边缘到屏幕左边」的真实距离，与 rect.width 同源；
   // 它含 env(safe-area-inset-left)（横屏刘海时 > 变量值），此时按真实位置
   // 画轮廓才是对的。变量是否**存在**仍作为「是否启用贴合模式」的开关。
+  // 键盘弹出时退回常规圆角卡片（2026-10-29）：贴角轮廓的下角是按
+  // 「屏幕物理圆角」画的（半径 43px @390 宽）。键盘一抬，卡片下沿悬在
+  // 键盘上沿，那对大圆角失去了贴合对象，反而在两侧各切出一块三角缺口，
+  // 露出底色 —— 观感比不做贴角更差。键盘态下没有任何屏幕角可贴，
+  // 交给库的 squircle 常规圆角（`--composer-radius` 24px）。
+  if (keyboardInset.value > 0) {
+    composerClip.value = 'none';
+    composerCornerR.value = '';
+    return;
+  }
   const insetDeclared = style.getPropertyValue('--composer-inset').trim();
   const inset = insetDeclared ? rect.left : 0;
   if (rect.width < 2 || rect.height < 2 || inset <= 0) {
@@ -371,14 +381,33 @@ function updateKeyboardInset() {
   const inset = Math.round(
     window.innerHeight - visualViewport.height - visualViewport.offsetTop,
   );
-  keyboardInset.value = inset > 80 ? inset : 0;
+  const next = inset > 80 ? inset : 0;
+  if (next === keyboardInset.value) return;
+  keyboardInset.value = next;
+  // 键盘开合改变「要不要贴屏角」：屏幕下角已经不在可视区，轮廓必须重算
+  // （updateComposerClip 内部会据 keyboardInset 退回常规圆角）。
+  updateComposerClip();
 }
 
 onMounted(() => {
   // 拖选监听：选区出现即临时关 blur（输入框未聚焦时也可能拖选已输入文本）。
   document.addEventListener('selectionchange', onSelectionChange);
-  // 软键盘：仅在移动端挂监听（桌面视觉视口恒等于窗口，无收益）
-  if (isMobile.value && window.visualViewport) {
+  // 软键盘：**不判断 isMobile**（2026-10-29 修复）。
+  //
+  // 这里曾经是 `if (isMobile.value && ...)`，而那是一个**从不成立**的条件：
+  // `isMobile` 来自 useTouchDevice，它的初值是 false，真值要等它自己的
+  // onMounted 里 `updateMobile()` 才写入；而 useTouchDevice() 在 setup 靠后
+  // （line ~587）才被调用，它的 onMounted 因此**注册在**本函数之后 ——
+  // Vue 按注册顺序执行 mounted 钩子，本函数先跑，此刻 isMobile 还是 false。
+  // 结果：键盘监听一次都没挂上，iOS 上键盘抬起时输入区纹丝不动、被键盘
+  // 整个盖住（实测：mock visualViewport 派发 resize/scroll 后，ChatView 根
+  // 节点的 keyboardInset 变量仍是 0px；mock 上 resize 监听计数只有 1，
+  // 来自 index.html 的 --app-h 脚本，本组件那两个（resize + scroll）从未注册）。
+  //
+  // 不判断也安全：updateKeyboardInset 有 80px 阈值，桌面 visualViewport
+  // 恒等于窗口 → inset 恒 0，等于没挂。用「阈值兜底」换取「不依赖任何
+  // 时序」，比在这里赌 isMobile 的初值可靠。
+  if (window.visualViewport) {
     visualViewport = window.visualViewport;
     visualViewport.addEventListener('resize', updateKeyboardInset);
     visualViewport.addEventListener('scroll', updateKeyboardInset);
@@ -1795,6 +1824,8 @@ function mediaSrc(img: string): string {
       :class="{
         'chat-composer-float--busy': composerBusy,
         'chat-composer-float--clipped': composerClip !== 'none',
+        // 键盘抬起 = 屏幕下角让位给键盘，底部留白随之归零（见 --composer-bottom-gap）
+        'chat-composer-float--keyboard': keyboardInset > 0,
       }"
       :style="composerStyle"
       @focusin="onComposerFocus"
@@ -2889,6 +2920,9 @@ function mediaSrc(img: string): string {
        注意变量都是 calc/clamp 表达式、computed 不求值：JS 侧一律用实测
        rect.left 当留白、用实测卡片高反推静止半高（见 updateComposerClip）。 */
     --composer-inset: calc(0.03 * 100vw);
+    /* 底部间隙的**默认**值：与左右一致（等间隙）。键盘态由
+       `.chat-composer-float--keyboard` 覆盖成 0。 */
+    --composer-bottom-gap: var(--composer-inset);
     --composer-span: calc(var(--panel-display-radius) - var(--composer-inset));
     --composer-padding: max(
       10px,
@@ -2899,7 +2933,17 @@ function mediaSrc(img: string): string {
 
     left: max(var(--composer-inset), env(safe-area-inset-left, 0px));
     right: max(var(--composer-inset), env(safe-area-inset-right, 0px));
-    bottom: calc(var(--composer-inset) + v-bind(keyboardInsetPx));
+    /* 底部间隙单独一个变量：默认与左右同宽（等间隙 + 贴屏角的前提），
+       键盘抬起时归零（见下一条规则）—— 否则卡片下沿停在键盘上沿之上
+       3vw（390 宽 = 11.7px）处，中间那条露底的灰带就是用户看到的「输入区
+       下方一片灰色」。键盘上没有屏幕角要贴，等间隙在这里没有意义。 */
+    bottom: calc(var(--composer-bottom-gap) + v-bind(keyboardInsetPx));
+  }
+
+  /* 键盘抬起：底部留白归零，卡片直接坐在键盘上沿。
+     左右留白保持不变（卡片宽度不跳变），只是底部不再等间隙。 */
+  .chat-composer-float--keyboard {
+    --composer-bottom-gap: 0px;
   }
   /* 打字面字号 = `--chat-field-font`（单一事实来源，别再抄一个 16px）。
      历史教训：上一版把 16px 硬编码在这里当 iOS 防缩放对策，于是「改字号」
