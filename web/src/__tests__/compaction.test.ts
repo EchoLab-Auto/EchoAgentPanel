@@ -150,7 +150,7 @@ describe('文案', () => {
 describe('CompactionProgress 的窗口隔离', () => {
   it('按 session_id 存储，A 窗口的进度不会覆盖 B 窗口', async () => {
     const { initialState, reduce } = await import('../state');
-    const { sessionKey } = await import('../keys');
+    const { sessionScopedKey } = await import('../keys');
     const state = initialState();
     reduce(state, {
       CompactionProgress: {
@@ -174,8 +174,8 @@ describe('CompactionProgress 的窗口隔离', () => {
         message: '完成 B',
       },
     });
-    expect(state.compactions[sessionKey(null, 'win-a')]?.message).toBe('压缩 A');
-    expect(state.compactions[sessionKey(null, 'win-b')]?.message).toBe('完成 B');
+    expect(state.compactions[sessionScopedKey(null, 'alix', 'win-a')]?.message).toBe('压缩 A');
+    expect(state.compactions[sessionScopedKey(null, 'alix', 'win-b')]?.message).toBe('完成 B');
   });
 });
 

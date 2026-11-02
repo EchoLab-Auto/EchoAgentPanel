@@ -22,7 +22,7 @@
 import { computed } from 'vue';
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
 import { state } from '../store';
-import { sessionKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import { sendCommand } from '../connection';
 import { sessionLabelsFor } from '../session-labels';
 import { type SessionInfo } from '../protocol';
@@ -142,8 +142,10 @@ const groups = computed(() => {
 });
 
 function isBusy(session: SessionInfo & { core?: string | null }): boolean {
-  // 活动态键是复合 (core, session_id)：同名跨 core 不串显"运行中"。
-  const activity = state.activities[sessionKey(session.core, session.id)];
+  // 活动态键是三元 (core, team, session_id)（2026-11 新 Core 口径）：同名
+  // 跨 core、跨人格都不串显"运行中"。session 自带 team_id（Core 会话对象）。
+  const activity =
+    state.activities[sessionScopedKey(session.core, session.team_id, session.id)];
   return !!activity && activity.phase !== 'completed';
 }
 

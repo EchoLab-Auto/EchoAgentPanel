@@ -38,7 +38,13 @@ export function pushTask(state: AppState, task: OrchActivity) {
   }
 }
 
-export function startSubagent(state: AppState, sessionId: string, core: string | null, task: string) {
+export function startSubagent(
+  state: AppState,
+  sessionId: string,
+  core: string | null,
+  task: string,
+  teamId: string | null = null,
+) {
   state.nextSubagentSeq += 1;
   const now = Date.now();
   const sequence = state.nextSubagentSeq;
@@ -47,6 +53,7 @@ export function startSubagent(state: AppState, sessionId: string, core: string |
     sequence: null,
     sessionId,
     core,
+    teamId,
     kind: 'subagent',
     objective: task,
     status: 'running',
@@ -71,12 +78,16 @@ export function completeSubagent(
   sessionId: string,
   core: string | null,
   success: boolean,
+  teamId: string | null = null,
 ) {
   for (let i = state.tasks.length - 1; i >= 0; i--) {
     const task = state.tasks[i];
     if (
       task.sessionId === sessionId &&
       (task.core ?? null) === core &&
+      // team 有值时精确匹配（2026-10 作用域普查）：同一 core 内多个人格都可能有
+      // 同名会话，只按 core 匹配会把 A 人格的任务收尾成 B 人格的。
+      (teamId == null || (task.teamId ?? null) === teamId) &&
       task.kind === 'subagent' &&
       task.status === 'running'
     ) {

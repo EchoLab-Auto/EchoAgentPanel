@@ -35,7 +35,7 @@ import type {
   WorkspaceSessionInfo,
 } from './protocol';
 
-import { checklistKey, scopedKey, sessionKey, teamKey } from './keys';
+import { checklistKey, scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
 import { hasRecentLocalActivateIntent } from './workspace';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -184,6 +184,12 @@ function evtCore(e: unknown): string | null {
   return (e as { core?: string | null } | null | undefined)?.core ?? null;
 }
 
+/** 从整帧事件里取载荷的 `team_id`（无人格归属的旧 Core → null）。 */
+function payloadTeam(event: unknown): string | null {
+  const body = Object.values(event as Record<string, unknown>)[0];
+  return (body as { team_id?: string | null } | null | undefined)?.team_id ?? null;
+}
+
 /** 从整帧事件里取载荷的 core（管理面过滤用，早于具体 cast）。 */
 function payloadCore(event: unknown): string | null {
   const body = Object.values(event as Record<string, unknown>)[0];
@@ -310,7 +316,6 @@ export interface DisplayMessage {
   } | null;
 }
 
-/** 临时回复分支内部的单条活动记录 */
 export interface BranchMsg {
   kind: 'reasoning' | 'tool' | 'content' | 'notice';
   text: string;
@@ -393,6 +398,8 @@ export interface OrchActivity {
   sessionId: string;
   /** 归属上游 core（多上游聚合；null = 单上游/未标注）。 */
   core?: string | null;
+  /** 归属人格（2026-10 作用域普查：同名会话跨人格不互相收尾/串显）。 */
+  teamId?: string | null;
   kind: OrchKind;
   objective: string;
   status: OrchStatus;
@@ -1345,7 +1352,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     case 'AgentThinking': {
       const e = (event as { AgentThinking: { session_id: string; team_id?: string | null } }).AgentThinking;
       if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
-      activity(state, sessionKey(evtCore(e), e.session_id));
+      activity(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id));
       return state;
     }
     case 'ActiveTurnsSnapshot': {
@@ -1392,7 +1399,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         }
       }
       for (const sessionId of e.session_ids) {
-        activity(state, sessionKey(core, sessionId));
+        activity(state, sessionScopedKey(core, e.team_id, sessionId));
       }
       return state;
     }
@@ -1426,13 +1433,22 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       return state;
     }
     case 'LlmRequest': {
-      const e = (event as { LlmRequest: { session_id: string } }).LlmRequest;
-      setPhase(state, sessionKey(evtCore(e), e.session_id), 'thinking', null);
+      const e = (event as { LlmRequest: { session_id: string; team_id?: string | null } }).LlmRequest;
+      // 运行态键 `(core, team, session)`：只按 (core, session) 时，多个人格
+      // 共用的 `local:tui::local_user` 会串显"正在思考"（2026-10 作用域普查）。
+      setPhase(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id), 'thinking', null);
       return state;
     }
     case 'LlmResponse': {
-      const e = (event as { LlmResponse: { session_id: string; prompt_tokens: number; completion_tokens: number } }).LlmResponse;
-      const act = activity(state, sessionKey(evtCore(e), e.session_id));
+      const e = (event as {
+        LlmResponse: {
+          session_id: string;
+          prompt_tokens: number;
+          completion_tokens: number;
+          team_id?: string | null;
+        };
+      }).LlmResponse;
+      const act = activity(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id));
       act.promptTokens += e.prompt_tokens;
       act.completionTokens += e.completion_tokens;
       return state;
@@ -1474,75 +1490,35 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       return state;
     }
     case 'SubagentStarted': {
-      const e = (event as { SubagentStarted: { session_id: string; task: string } }).SubagentStarted;
+      const e = (event as {
+        SubagentStarted: { session_id: string; task: string; team_id?: string | null };
+      }).SubagentStarted;
       const core = evtCore(e);
-      startSubagent(state, e.session_id, core, e.task);
+      // 别的人格的事件一律丢弃（2026-10 作用域普查）：此前不校验 team，
+      // A 人格派子代理会在 B 人格的窗口里也插一行"子代理运行中"并亮起运行态。
+      if (!belongsToActiveTeam(state, e.team_id, core)) return state;
+      startSubagent(state, e.session_id, core, e.task, e.team_id ?? null);
       // 派发位置插一行"子代理运行中"（执行过程就地可见；完成时就地改写为结果）。
       startSubagentRun(state, e.session_id, e.task);
-      setPhase(state, sessionKey(core, e.session_id), 'subagent', truncate(oneLine(e.task), 72));
+      setPhase(
+        state,
+        sessionScopedKey(core, e.team_id, e.session_id),
+        'subagent',
+        truncate(oneLine(e.task), 72),
+      );
       return state;
     }
     case 'SubagentCompleted': {
-      const e = (event as { SubagentCompleted: { session_id: string; success: boolean } }).SubagentCompleted;
+      const e = (event as {
+        SubagentCompleted: { session_id: string; success: boolean; team_id?: string | null };
+      }).SubagentCompleted;
       const core = evtCore(e);
-      completeSubagent(state, e.session_id, core, e.success);
-      const act = activity(state, sessionKey(core, e.session_id));
+      completeSubagent(state, e.session_id, core, e.success, e.team_id ?? null);
+      if (!belongsToActiveTeam(state, e.team_id, core)) return state;
+      const key = sessionScopedKey(core, e.team_id, e.session_id);
+      const act = activity(state, key);
       if (e.success) act.subagentsCompleted += 1;
-      setPhase(state, sessionKey(core, e.session_id), 'thinking', e.success ? '正在整合 subagent 结果' : 'subagent 失败，正在恢复');
-      return state;
-    }
-    case 'ReplyBranchStarted': {
-      const e = (event as { ReplyBranchStarted: { session_id: string; branch_id: string; message_sequence: number; task: string; target: string; started_at_ms: number } }).ReplyBranchStarted;
-      startReplyBranch(state, e.session_id, evtCore(e), e.branch_id, e.message_sequence, e.task, e.target, e.started_at_ms);
-      // 单开一个侧边临时会话标签：分支运行期间的活动都路由到这里，
-      // 不进入主会话 trunk。
-      state.branchTabs[scopedKey(evtCore(e), e.branch_id)] = {
-        sessionId: e.session_id,
-        core: evtCore(e),
-        branchId: e.branch_id,
-        task: e.task,
-        target: e.target,
-        startedAtMs: e.started_at_ms,
-        status: 'running',
-        finalContent: null,
-        msgs: [],
-      };
-      return state;
-    }
-    case 'ReplyBranchContent': {
-      const e = (event as { ReplyBranchContent: { branch_id: string; content: string } }).ReplyBranchContent;
-      const task = state.tasks.find((t) => t.id === e.branch_id && t.kind === 'reply');
-      if (task && task.branches[0]) {
-        task.branches[0].result = bounded(e.content, 4000);
-      }
-      const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
-      if (tab) {
-        tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
-      }
-      return state;
-    }
-    case 'ReplyBranchCompleted': {
-      const e = (event as { ReplyBranchCompleted: { session_id: string; branch_id: string; success: boolean; cancelled: boolean; completed_at_ms: number } }).ReplyBranchCompleted;
-      completeReplyBranch(state, e.branch_id, e.success, e.cancelled, e.completed_at_ms);
-      const core = evtCore(e);
-      if (
-        !state.tasks.some(
-          (t) =>
-            t.sessionId === e.session_id &&
-            (t.core ?? null) === core &&
-            t.kind === 'reply' &&
-            t.status === 'running',
-        )
-      ) {
-        setPhase(state, sessionKey(core, e.session_id), 'completed', null);
-      }
-      // 分支结束：主时间线已实时展示推理/工具/回答（时序交错），
-      // 不再归档折叠合并块（避免重复内容）；仅清理临时标签。
-      const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
-      if (tab) {
-        tab.status = e.cancelled ? 'cancelled' : e.success ? 'completed' : 'failed';
-        delete state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
-      }
+      setPhase(state, key, 'thinking', e.success ? '正在整合 subagent 结果' : 'subagent 失败，正在恢复');
       return state;
     }
     case 'ToolCall': {
@@ -1582,50 +1558,17 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
           });
         }
       }
-      if (tab) {
-        tab.msgs.push({
-          kind: 'tool',
-          text: e.tool_name,
-          time: Math.floor(Date.now() / 1000),
-          toolName: e.tool_name,
-          toolCallId: e.tool_call_id || undefined,
-          input: summarizeArguments(e.arguments),
-          status: 'running',
-          startedAtMs,
-        });
-      }
       return state;
     }
     case 'ToolResult': {
       const e = (event as { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null; elapsed_ms?: number } }).ToolResult;
-      // 工具结果实时回填主时间线（与 ToolCall 精确配对）；分支 tab 同步更新。
-      const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
+      // 工具结果实时回填主时间线（与 ToolCall 精确配对）。
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out, e.elapsed_ms, entry);
       }
-      if (tab) {
-        const failed = e.timed_out === true || e.result.trimStart().startsWith('error:');
-        for (let i = tab.msgs.length - 1; i >= 0; i--) {
-          const msg = tab.msgs[i];
-          if (msg.kind !== 'tool' || msg.status !== 'running') continue;
-          const matched = e.tool_call_id
-            ? msg.toolCallId === e.tool_call_id
-            : msg.toolName === e.tool_name;
-          if (!matched) continue;
-          msg.output = bounded(e.result, 4000);
-          msg.status = failed ? 'failed' : 'succeeded';
-          msg.elapsedMs =
-            typeof e.elapsed_ms === 'number'
-              ? e.elapsed_ms
-              : msg.startedAtMs != null
-                ? Math.max(0, Date.now() - msg.startedAtMs)
-                : undefined;
-          break;
-        }
-      }
-      const act = activity(state, sessionKey(evtCore(e), e.session_id));
+      const act = activity(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id));
       if (e.tool_name !== 'run_subagent') act.toolsCompleted += 1;
-      setPhase(state, sessionKey(evtCore(e), e.session_id), 'thinking', null);
+      setPhase(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id), 'thinking', null);
       return state;
     }
     case 'ChecklistUpdated': {
@@ -1661,7 +1604,9 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       // 按 (core, team) 归档：压缩是 per-persona 操作，A 的进度不该出现在
       // B 的面板上（与 `contexts` 的复合键同一套理由）。
       // team_id 缺失（旧 Core / 无人格归属）时落 `sessionKey(core, '')`。
-      const key = sessionKey(core, e.session_id ?? e.team_id ?? '');
+      // `(core, team, session)`：只按 (core, session) 时，多个人格共用的
+      // `local:tui::local_user` 会互相覆盖进度（2026-10 作用域普查）。
+      const key = sessionScopedKey(core, e.team_id ?? null, e.session_id ?? '');
       state.compactions[key] = {
         phase: e.phase,
         teamId: e.team_id ?? null,
@@ -1676,9 +1621,11 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     }
     case 'ContextSnapshot': {
       const e = (event as { ContextSnapshot: ContextSnapshotData }).ContextSnapshot;
-      // 按 (core, session_id) 复合键存：多 core 下不同 core 的响应不互相
-      // 覆盖。session_id 缺失（旧 Core 全局口径）时归入 `sessionKey(core, '')`。
-      const key = sessionKey(evtCore(e), e.session_id ?? '');
+      // 按 `(core, team, session)` 复合键存（2026-10 作用域普查）：只按
+      // (core, session) 时，多个人格共用的 `local:tui::local_user` 会互相覆盖
+      // ——切人格后上下文面板显示别人的人格 tokens/消息。
+      // team/session 缺失（旧 Core）时自然退化成更短的键，读侧同样回退。
+      const key = sessionScopedKey(evtCore(e), payloadTeam(event), e.session_id ?? '');
       state.contexts[key] = e;
       return state;
     }
@@ -1834,14 +1781,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
           });
         }
       }
-      if (e.branch_id) {
-        const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
-        if (tab) {
-          tab.finalContent = e.content;
-          tab.msgs.push({ kind: 'content', text: e.content, time: Math.floor(Date.now() / 1000) });
-        }
-      }
-      const act = state.activities[sessionKey(evtCore(e), e.session_id)];
+      const act = state.activities[sessionScopedKey(evtCore(e), e.team_id, e.session_id)];
       if (act && act.phase !== 'completed' && act.phase !== 'failed') {
         act.phase = 'completed';
         act.detail = null;
@@ -2359,13 +2299,18 @@ function reduceMessage(
 }
 
 /** 乐观取消：立即中断当前会话的活动动画/任务/工具运行态，
- * 不等后端确认（后端随后会发 AgentCompleted/ReplyBranchCompleted 对齐）。 */
-export function cancelSessionWork(state: AppState, sessionId: string, core: string | null = null) {
+ * 不等后端确认（后端随后会发 AgentCompleted 对齐）。 */
+export function cancelSessionWork(
+  state: AppState,
+  sessionId: string,
+  core: string | null = null,
+  teamId: string | null = state.activeTeamId,
+) {
   // 0) 流式：取消即冻结——保留已显示的部分文本，不再等待终值。
   freezeStreams(state, sessionId);
   // 1) 活动 phase → completed：活动浮条/取消按钮立即消失
-  //    活动态键是复合 (core, session_id)：同名跨 core 不误伤。
-  const act = state.activities[sessionKey(core, sessionId)];
+  //    活动态键是三元 (core, team, session_id)：同名跨 core/人格不误伤。
+  const act = state.activities[sessionScopedKey(core, teamId, sessionId)];
   if (act && act.phase !== 'completed' && act.phase !== 'failed') {
     act.phase = 'completed';
     act.detail = null;

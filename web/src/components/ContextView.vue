@@ -8,7 +8,7 @@ import NeumorphismSkeleton from '@echolab-auto/ui-frame/components/NeumorphismSk
 import NeumorphismSpinner from '@echolab-auto/ui-frame/components/NeumorphismSpinner';
 import { ChatFold } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
-import { sessionKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
@@ -97,12 +97,14 @@ const connected = computed(() => state.connected);
 const { phase: ctxPhase, loading: ctxLoading, failed: ctxFailed } = usePending('context');
 
 const snapshot = computed(() => {
-  // 快照按 (core, session_id) 复合键存储（2026-10 多上游修复）——写入侧已
-  // 隔离归属，直接按当前（core, 会话）取；取不到再回退全局口径键
-  // （session_id 缺失时 reducer 归入 `sessionKey(core, '')`）。
+  // 快照按 (core, team, session) 三元键存储（2026-10 作用域普查）：同一 core
+  // 内多个人格都有 `local:tui::local_user`，按二维键取会串显。只支持新 Core
+  // （2026-11 起 Core 一律带 team_id），不再回退二维键——回退会让"键写错"
+  // 表现成"读到别人的快照"。
   return (
-    state.contexts[sessionKey(targetCore.value, targetSessionId.value ?? '')] ??
-    null
+    state.contexts[
+      sessionScopedKey(targetCore.value, targetTeamId.value, targetSessionId.value ?? '')
+    ] ?? null
   );
 });
 const blocks = computed(() => snapshot.value?.blocks ?? []);
@@ -219,17 +221,12 @@ async function archiveHistory() {
 }
 
 // ── 压缩 / 归档进度 ────────────────────────────────────────────
-// 新 Core 按 (core, session) 归档；旧 Core 没有人格以下维度时回退
-// (core, team)，兼容升级过程中的旧进度事件。
+// 键口径与 `snapshot` 一致：按 (core, team, session) 归档。
 const compactionKey = computed(() =>
-  sessionKey(targetCore.value, targetSessionId.value ?? targetTeamId.value ?? ''),
+  // 与快照同一键口径：(core, team, session)。旧 Core 回退已移除（2026-11）。
+  sessionScopedKey(targetCore.value, targetTeamId.value, targetSessionId.value ?? ''),
 );
-const compactionRaw = computed(
-  () =>
-    state.compactions[compactionKey.value] ??
-    state.compactions[sessionKey(targetCore.value, targetTeamId.value ?? '')] ??
-    null,
-);
+const compactionRaw = computed(() => state.compactions[compactionKey.value] ?? null);
 
 /** 每秒推进一次的"现在"，用于判定终态过期与进行中超时（不需要精确）。 */
 const nowTick = ref(Date.now());

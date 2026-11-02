@@ -155,7 +155,7 @@ describe('SessionSwitcher 会话切换', () => {
 
   it('运行中会话显示忙碌点', () => {
     state.activities = {
-      'qq:dm::1828980067': { phase: 'thinking', detail: null, startedAt: 1, toolsCompleted: 0, subagentsCompleted: 0, promptTokens: 0, completionTokens: 0 },
+      'alix\u0000qq:dm::1828980067': { phase: 'thinking', detail: null, startedAt: 1, toolsCompleted: 0, subagentsCompleted: 0, promptTokens: 0, completionTokens: 0 },
     } as typeof state.activities;
     const wrapper = mountSwitcher();
     const evence = wrapper.findAll('.sw-item').find((b) => b.text().includes('Evence'));

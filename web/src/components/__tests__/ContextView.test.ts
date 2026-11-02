@@ -62,9 +62,9 @@ async function clickArchive(wrapper: ReturnType<typeof mount>) {
  * 进度条永远转下去）。
  */
 describe('ContextView 压缩进度', () => {
-  // 复合键是 `core\u0000id`（见 keys.ts::scopedKey），不是 `::`——写错了
+  // 复合键是 `core\u0000team\u0000session`（见 keys.ts::sessionScopedKey），不是 `::`——写错了
   // 这条测试只会"恰好通过"（取不到记录 → 不渲染），什么都测不到。
-  const key = 'core-a\u0000alix';
+  const key = 'core-a\u0000alix\u0000s1';
   const snapshot = {
     session_id: 's1',
     messages: [],
@@ -79,7 +79,7 @@ describe('ContextView 压缩进度', () => {
     state.contexts = {};
     state.compactions = {};
     // 快照仅用于常规内容；进度块**不再**依赖它（见「无快照」用例）。
-    state.contexts['core-a\u0000s1'] = snapshot as never;
+    state.contexts['core-a\u0000alix\u0000s1'] = snapshot as never;
   });
 
   function seed(phase: string, done = 0, total = 0) {

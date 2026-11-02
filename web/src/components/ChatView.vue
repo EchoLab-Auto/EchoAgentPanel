@@ -26,7 +26,7 @@ import { checklistsForSession, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
-import { checklistKey, sessionKey, teamKey } from '../keys';
+import { checklistKey, sessionKey, sessionScopedKey, teamKey } from '../keys';
 import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
@@ -450,7 +450,7 @@ watch(checklistAvailable, (available) => {
   if (!available) {
     if (entryOverlay.value === 'checklist') closeOverlay();
     // 清单已不可用：丢弃当前会话的本地快照（其他会话/core 的不动）。
-    // 两种键形态都清（新键带 team 维度、旧键退化形态）。
+    // 键形态带 team 维度（2026-11 起只支持新 Core）。
     delete state.checklists[checklistKey(state.activeRegion, state.activeTeamId, props.sessionId)];
     delete state.checklists[sessionKey(state.activeRegion, props.sessionId)];
   }
@@ -650,7 +650,9 @@ const anyOverlayOpen = computed(() => entryOverlay.value !== null);
 
 // 当前会话是否在运行任务（用于显示"取消任务"按钮）
 const busy = computed(() => {
-  const a = state.activities[sessionKey(state.activeRegion, props.sessionId)];
+  const a = state.activities[
+    sessionScopedKey(state.activeRegion, state.activeTeamId, props.sessionId)
+  ];
   return !!a && ['thinking', 'tool', 'subagent'].includes(a.phase);
 });
 
@@ -736,7 +738,9 @@ const configTeam = computed(() => {
 // 活动指示浮条：思考/调用工具/子代理 的实时状态，让用户知道 agent 在干什么
 const activityText = computed(() => {
   if (!busy.value) return '';
-  const a = state.activities[sessionKey(state.activeRegion, props.sessionId)];
+  const a = state.activities[
+    sessionScopedKey(state.activeRegion, state.activeTeamId, props.sessionId)
+  ];
   switch (a?.phase) {
     case 'thinking':
       return a.detail ? `正在思考：${a.detail}…` : '正在思考…';
@@ -814,7 +818,8 @@ const apiTitle = computed(() => {
 /** 推理消息所属会话当前是否仍在输出（thinking / tool / subagent）——打字机准入条件之一。 */
 function reasoningSessionRunning(sessionId: string | undefined): boolean {
   if (!sessionId) return false;
-  const phase = state.activities[sessionKey(state.activeRegion, sessionId)]?.phase;
+  const phase =
+    state.activities[sessionScopedKey(state.activeRegion, state.activeTeamId, sessionId)]?.phase;
   return phase === 'thinking' || phase === 'tool' || phase === 'subagent';
 }
 

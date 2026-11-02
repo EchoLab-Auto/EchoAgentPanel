@@ -3,7 +3,7 @@
 // sh-1 起）跨 core 相同，必须用复合键，否则运行态/终端/时间线互相覆盖。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { state, dispatch } from '../store';
-import { sessionKey, teamKey } from '../keys';
+import { sessionKey, sessionScopedKey, teamKey } from '../keys';
 import type { BackendEvent, TeamInfo } from '../protocol';
 
 function team(id: string, core: string | null): TeamInfo {
@@ -27,7 +27,7 @@ describe('Phase 0：运行态/缓存按 (core, id) 隔离', () => {
     state.trunk = [];
   });
 
-  it('activities 用 sessionKey：同名会话跨 core 各自独立', () => {
+  it('activities 用三元键（core, team, session）：同名会话跨 core 各自独立', () => {
     dispatch(
       { AgentThinking: { session_id: SID, team_id: 'default' } } as unknown as BackendEvent,
       'core-a',
@@ -38,7 +38,7 @@ describe('Phase 0：运行态/缓存按 (core, id) 隔离', () => {
       'core-b',
     );
     expect(Object.keys(state.activities).sort()).toEqual(
-      [sessionKey('core-a', SID), sessionKey('core-b', SID)].sort(),
+      [sessionScopedKey('core-a', 'default', SID), sessionScopedKey('core-b', 'default', SID)].sort(),
     );
   });
 
