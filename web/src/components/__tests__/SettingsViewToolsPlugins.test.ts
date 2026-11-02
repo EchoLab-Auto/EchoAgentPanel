@@ -86,6 +86,7 @@ function seed() {
       enabled: true,
       builtin: true,
       package: 'echo-agent.tools.builtin',
+      gating: 'persona',
     },
     {
       id: 'echo-agent.adapter.qq',
@@ -98,6 +99,7 @@ function seed() {
       enabled: true,
       builtin: true,
       package: 'echo-agent.adapter.qq',
+      gating: 'persona',
     },
     {
       id: 'echo-agent.management.panel',
@@ -110,6 +112,7 @@ function seed() {
       enabled: true,
       builtin: true,
       package: 'echo-agent.management.panel',
+      gating: 'process',
     },
     {
       id: 'echo-agent.loop.single',
@@ -122,6 +125,7 @@ function seed() {
       enabled: true,
       builtin: true,
       package: 'echo-agent.loop.single',
+      gating: 'process',
     },
     {
       id: 'echo-agent.provider.llm',
@@ -134,6 +138,7 @@ function seed() {
       enabled: true,
       builtin: true,
       package: 'echo-agent.provider.llm',
+      gating: 'process',
     },
   ] as typeof state.plugins;
   state.teams = [
@@ -262,6 +267,7 @@ describe('SettingsView 插件工作台', () => {
         enabled: true,
         builtin: false,
         package: 'example.external',
+        gating: 'process',
       },
     ];
     const wrapper = await openCategory('插件');
@@ -513,6 +519,7 @@ describe('SettingsView 插件工作台', () => {
         builtin: false,
         runtime: 'in_process',
         package: 'data.plugin',
+        gating: 'process',
       },
     ] as typeof state.plugins;
     const wrapper = await openCategory('插件');
@@ -596,6 +603,7 @@ describe('SettingsView 插件工作台', () => {
         builtin: false,
         runtime: 'subprocess',
         package: 'example-ext',
+        gating: 'process',
         state: 'ready',
       },
     ] as typeof state.plugins;
@@ -622,6 +630,7 @@ describe('SettingsView 插件工作台', () => {
         builtin: false,
         runtime: 'subprocess',
         package: 'example-ext',
+        gating: 'process',
         state: 'failed',
         error: 'spawn failed: No such file or directory',
         source_path: '/home/me/.config/echo-agent-core/plugins.toml',

@@ -45,10 +45,10 @@ import { coreDisplay, type PluginEventEntry } from '../state';
 import { moveAgentToRegion } from '../agent-placement';
 import {
   PACKAGE_DISPLAY_NAMES,
-  PACKAGE_GATED_PLUGIN_IDS,
   PLUGIN_KIND_LABELS,
   isPluginCheckboxVisible,
   isInstancePluginKind,
+  pluginCheckboxState,
 } from '../capabilities';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
@@ -790,7 +790,9 @@ const PLUGIN_SEMANTIC_LABELS: Record<string, string> = {
 function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
   if (p.kind === 'loop') return 'mode';
   if (isInstancePluginKind(p.kind) || p.kind === 'management') return 'channel';
-  if ((PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(p.id)) return 'gated';
+  // 「包维度门控」= Core 判定的 persona 作用域（旧 Core 无该字段时退回 false，
+  // 与删除清单前的行为一致：那时也不在清单里就不会是 gated）。
+  if (p.gating === 'persona') return 'gated';
   return 'other';
 }
 
@@ -1279,10 +1281,19 @@ const teamFormModel = computed(() => ({
 const capabilityPluginOptions = computed(() =>
   state.plugins
     .filter((p) => isPluginCheckboxVisible(p))
-    .map((p) => ({
-      key: p.id,
-      label: `${p.name}（${PLUGIN_KIND_LABELS[p.kind] ?? p.kind}）`,
-    })),
+    .map((p) => {
+      const readonly = pluginCheckboxState(p) === 'readonly';
+      return {
+        key: p.id,
+        readonly,
+        // 只读项在标签上直接说明"为什么勾不动"，省掉一次点击才发现。
+        label: `${p.name}（${PLUGIN_KIND_LABELS[p.kind] ?? p.kind}${readonly ? ' · 进程级' : ''}）`,
+      };
+    }),
+);
+/** 可写的键（只读项不进白名单——它们从来不受人格控制）。 */
+const capabilityPluginWritableKeys = computed(() =>
+  capabilityPluginOptions.value.filter((o) => !o.readonly).map((o) => o.key),
 );
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
 // 包显示名单一来源 = capabilities.ts::PACKAGE_DISPLAY_NAMES。
@@ -2969,19 +2980,31 @@ watch(
                 <template #caps>
                   <div class="sec-sub">插件</div>
                   <p class="muted caps-hint">
-                    勾选该智能体可用的能力块（实例/交互/管理面）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
+                    勾选该智能体可用的能力块（平台实例 + 能力型插件）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
                   </p>
                   <div class="caps-checkbox-grid caps-checkbox-grid--grid">
                     <NeumorphismCheckbox
                       v-for="opt in capabilityPluginOptions"
                       :key="opt.key"
                       size="small"
-                      :model-value="isWhitelisted(teamFormEnabledPlugins, opt.key)"
+                      :disabled="opt.readonly"
+                      :model-value="
+                        opt.readonly || isWhitelisted(teamFormEnabledPlugins, opt.key)
+                      "
                       :label="opt.label"
-                      @update:model-value="teamFormEnabledPlugins = toggleAllowlist(teamFormEnabledPlugins, capabilityPluginOptions.map(o => o.key), opt.key)"
+                      @update:model-value="
+                        teamFormEnabledPlugins = toggleAllowlist(
+                          teamFormEnabledPlugins,
+                          capabilityPluginWritableKeys,
+                          opt.key,
+                        )
+                      "
                     />
                     <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
                   </div>
+                  <p v-if="capabilityPluginOptions.some((o) => o.readonly)" class="muted caps-hint">
+                    标「进程级」的能力对所有人格始终生效——它不受本白名单控制，要停用请到「插件」页禁用该插件。
+                  </p>
 
                   <NeumorphismDivider dashed inset />
                   <div class="sec-sub">包（Package）</div>

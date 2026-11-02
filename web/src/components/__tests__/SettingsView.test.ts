@@ -47,10 +47,11 @@ function seed() {
     { name: 'workspace', description: 'd', parameters: null, category: 'builtin', enabled: true, package: 'echo-agent.workspace' },
   ] as typeof state.tools;
   state.plugins = [
-    { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin' },
+    { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin', gating: 'persona' },
     { id: 'echo-agent.adapter.qq', name: 'QQ 实例', version: '1', kind: 'instance', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.adapter.qq' },
-    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace' },
-    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.future-interaction' },
+    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace', gating: 'persona' },
+    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.future-interaction', gating: 'process' },
+    { id: 'echo-agent.management.panel', name: '管理面', version: '1', kind: 'management', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.management.panel', gating: 'process' },
   ] as typeof state.plugins;
 }
 
@@ -116,16 +117,24 @@ describe('SettingsView 智能体编辑器', () => {
     expect(capsPanel.text()).toContain('send_private_msg');
   });
 
-  it('插件勾选区包含包维度门控插件（工作区会话），工作区包聚合显示', async () => {
+  it('插件勾选区只显示 Core 判定为 persona 作用域的插件', async () => {
     const wrapper = await openTeamEditor();
     const triggers = wrapper.findAll('.nm-collapse__trigger');
     await triggers[2].trigger('click');
     const capsPanel = wrapper.findAll('.nm-collapse__panel')[2];
-    // 工作区插件是包维度门控插件：出现在「插件」勾选区（回归：曾因
-    // kind=tool 且不在允许清单而被隐藏）
+    // 工作区会话（kind=tool → persona）：出现在「插件」勾选区。
+    // 回归：曾因 kind=tool 且不在 Panel 自己那份清单里而被隐藏。
     expect(capsPanel.text()).toContain('工作区会话（工具）');
-    // interaction 类插件：勾选区标签显示中文 kind 名「交互」
-    expect(capsPanel.text()).toContain('交互示例（交互）');
+    expect(capsPanel.text()).toContain('内置工具集（工具）');
+    // 平台实例（kind=instance → persona）：整类能力开关，按 kind 即应可见。
+    expect(capsPanel.text()).toContain('QQ 实例（平台实例）');
+    // 进程级的「管理面/交互面」：**显示但置灰**。
+    // 2026-11 语义：它们对所有人格始终生效，藏起来会让用户以为能力不存在；
+    // 显示成不可勾 + 标签注明「进程级」，比给一个勾了不生效的假开关诚实。
+    expect(capsPanel.text()).toContain('交互示例（交互 · 进程级）');
+    expect(capsPanel.text()).toContain('管理面（管理面 · 进程级）');
+    // 提示语存在（解释它们为什么勾不动）
+    expect(capsPanel.text()).toContain('对所有人格始终生效');
     // 包维度聚合展示（工作区包 = 其工具集合）
     expect(capsPanel.text()).toContain('工作区会话');
     expect(capsPanel.text()).toContain('workspace');

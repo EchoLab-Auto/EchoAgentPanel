@@ -23,7 +23,7 @@ import { activeTeam, type AppState } from './state';
  * 因此框架里没有任何平台名；本文件的对应实现就是 `isPluginCheckboxVisible`
  * 的 kind 判定。这样新增平台（`echo-agent.instance.<platform>`）两侧都自动
  * 生效、无需改清单（2026-10 实例解耦后 QQ 已从两侧清单移除，本清单与 Core
- * `GATED_PLUGIN_IDS` 的 4 项逐项镜像）。任务清单（checklist）已降级为普通
+ * `GATED_PLUGIN_IDS` 的 5 项逐项镜像 + session/transcript 两项**待 Core 侧接线**）。任务清单（checklist）已降级为普通
  * 工具，不再有插件维度，其开关在工具白/黑名单里进行。
  *
  * 维护规则（对应 Core 端 `echo-agent/src/plugins.rs::GATED_PLUGIN_IDS`）：
@@ -38,12 +38,22 @@ import { activeTeam, type AppState } from './state';
  *      加入 `isPluginCheckboxVisible` 的 kind 类判定。**
  * 回归测试见 `src/__tests__/capabilities.test.ts`。
  */
-export const PACKAGE_GATED_PLUGIN_IDS = [
-  'echo-agent.tools.builtin',
-  'echo-agent.skills.dir',
-  'echo-agent.workspace',
-  'echo-agent.subagent',
-] as const;
+/**
+ * **已删除**：这里曾有一份 `PACKAGE_GATED_PLUGIN_IDS` 插件清单（最多长到 18 项），
+ * 用来决定「哪些插件出现在启用勾选区」。
+ *
+ * 它删掉的原因是它**必然漂移**：Core 侧 `GATED_PLUGIN_IDS` 与本清单是同一件事
+ * 的两份手写真相，跨仓库改一处忘另一处就出错。实测错过两轮——
+ *
+ * - `echo-agent.shell` 从 `tools.builtin` 拆出后 Core 补了、这里没补
+ *   → 面板上**没有 shell 开关**，用户无法通过 UI 给任何 persona 启用 `bash-*`；
+ * - `session` / `transcript` 这里加了、Core 没加
+ *   → 两个**勾了不生效**的假开关。
+ *
+ * 现在判据只有一处：Core 按 manifest 的 `kind` 算作用域（
+ * `echo_agent::plugins::scope::KIND_SCOPE`），随 `PluginInfo.gating` 下发。
+ * Panel 只读不算——新增插件不可能再造成跨仓漂移。
+ */
 
 /**
  * 包/插件的中文显示名（工具·技能按包分组、插件勾选区、插件列表共用）。
@@ -62,6 +72,9 @@ export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
   'echo-agent.skills.dir': '技能目录',
   'echo-agent.workspace': '工作区会话',
   'echo-agent.subagent': 'Subagent 委派',
+  'echo-agent.session': '会话',
+  'echo-agent.transcript': '显示层',
+  'echo-agent.shell': 'Shell 会话',
 };
 
 /**
@@ -78,25 +91,64 @@ export function isInstancePluginKind(kind: string): boolean {
 }
 
 /**
- * 插件是否属于「启用插件」勾选区（kind 类 + 包维度门控清单）。
+ * 勾选区里一个插件的三态。
  *
- * kind 类 = instance / adapter（同一类的新旧 wire 名）、management、
- * interaction——这三类的存在方式就是「整类能力开关」（平台实例进程、管理
- * 通道、人在环交互通道），按 kind 即应出现在勾选区；其余 kind 需要显式列入
- * 包维度门控清单。实例类**不进清单**：新增平台两侧都零改动。
+ * - `enabled`：可勾可取消。勾选写 `enabled_plugins` 白名单，取消即真的关掉
+ *   该包的工具/技能/实例（= Core 判定 `gating === 'persona'`）；
+ * - `readonly`：**显示但不可改**。进程级能力（管理面 WS、显示/交互面）对
+ *   每个人格都始终生效，把它藏起来会让用户以为"这插件不存在"——所以显示成
+ *   勾住且置灰，并注明"进程级"；
+ * - `hidden`：完全不显示（循环模式由分段控件管理、provider 由 API 设置管理
+ *   ——它们的开关在别处）。
  */
-export function isPluginCheckboxVisible(plugin: {
+export type PluginCheckboxState = 'enabled' | 'readonly' | 'hidden';
+
+/**
+ * 「进程级但值得显示」的 kind：管理面与交互面。
+ *
+ * 判据是**能力类别**（用户心智里"这个人格有没有管理/交互能力"），不是
+ * "能不能关"——它们关不掉，但看得见。
+ */
+const READONLY_PLUGIN_KINDS = ['management', 'interaction'] as const;
+
+/**
+ * 插件在勾选区里的三态。**只读 Core 的判定**（`PluginInfo.gating`）。
+ *
+ * 不自己按 id/kind 猜：跨仓库各写一份判据必然漂移——见上面那段
+ * `PACKAGE_GATED_PLUGIN_IDS` 的墓志铭。
+ *
+ * 旧 Core 不带 `gating` 字段时退回 2026-11 之前的 kind 类判定（且一律可勾）：
+ * 宁可多显示一个可能无效的开关，也不要让老 Core 的插件在 UI 里凭空消失。
+ */
+export function pluginCheckboxState(plugin: {
   id: string;
   kind: string;
-}): boolean {
+  gating?: string;
+}): PluginCheckboxState {
+  if (plugin.gating === 'persona') return 'enabled';
+  if (plugin.gating === 'process') {
+    return (READONLY_PLUGIN_KINDS as readonly string[]).includes(plugin.kind)
+      ? 'readonly'
+      : 'hidden';
+  }
+  // ── 旧 Core 兼容（无 gating 字段）──
   if (
     isInstancePluginKind(plugin.kind) ||
     plugin.kind === 'management' ||
     plugin.kind === 'interaction'
   ) {
-    return true;
+    return 'enabled';
   }
-  return (PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(plugin.id);
+  return 'hidden';
+}
+
+/** 插件是否出现在勾选区（含只读项）。 */
+export function isPluginCheckboxVisible(plugin: {
+  id: string;
+  kind: string;
+  gating?: string;
+}): boolean {
+  return pluginCheckboxState(plugin) !== 'hidden';
 }
 
 /** 插件 kind 的中文显示名（设置视图插件列表 / 勾选区标签共用，单一来源）。 */
@@ -109,6 +161,7 @@ export const PLUGIN_KIND_LABELS: Record<string, string> = {
   /** 旧 wire 名（2026-10 去适配器化前的 `adapter`）。 */
   adapter: '平台实例',
   orchestration: '编排',
+  session: '会话',
   management: '管理面',
   interaction: '交互',
 };

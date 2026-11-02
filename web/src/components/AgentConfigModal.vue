@@ -22,7 +22,11 @@ import PanelIcon from './PanelIcon.vue';
 import SessionOverlay from './SessionOverlay.vue';
 import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
-import { PACKAGE_DISPLAY_NAMES, isPluginCheckboxVisible } from '../capabilities';
+import {
+  PACKAGE_DISPLAY_NAMES,
+  isPluginCheckboxVisible,
+  pluginCheckboxState,
+} from '../capabilities';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
@@ -115,6 +119,8 @@ interface GroupedItem {
   description: string;
   /** 所属分组（pkg 名或类别/空 = 未分组） */
   group?: string;
+  /** 只读项：显示成"已勾选且不可改"（进程级能力，如管理面/交互面）。 */
+  readonly?: boolean;
 }
 
 /** 工具：按 package 分组（无 package 按 category） */
@@ -146,12 +152,22 @@ const PLUGIN_GROUP_LABELS: Record<string, string> = {
 const pluginItems = computed<GroupedItem[]>(() =>
   state.plugins
     .filter((p) => isPluginCheckboxVisible(p))
-    .map((p) => ({
-      key: p.id,
-      name: p.name,
-      description: p.description || '（无描述）',
-      group: PLUGIN_GROUP_LABELS[p.kind] ?? '管理面',
-    })),
+    .map((p) => {
+      const readonly = pluginCheckboxState(p) === 'readonly';
+      return {
+        key: p.id,
+        name: p.name,
+        readonly,
+        description: readonly
+          ? `${p.description || '（无描述）'} —— 进程级，对所有人格始终生效`
+          : p.description || '（无描述）',
+        group: PLUGIN_GROUP_LABELS[p.kind] ?? '管理面',
+      };
+    }),
+);
+/** 可写的键（只读项不进白名单——它们从来不受人格控制）。 */
+const pluginWritableKeys = computed(() =>
+  pluginItems.value.filter((i) => !i.readonly).map((i) => i.key),
 );
 /** 按分组聚合成表格模型（组名 + 成员；无分组归入「其他」） */
 interface GroupedTable {
@@ -180,26 +196,35 @@ const pluginGroups = computed(() => groupBy(pluginItems.value));
 function isItemOn(list: string[], key: string): boolean {
   return list.length === 0 || list.includes(key);
 }
-/** 组内全部启用？ */
+/** 组内是否全部可写项都已启用（只读项恒为"开"，不参与判定）。 */
 function isGroupOn(list: string[], group: GroupedTable): boolean {
-  return list.length === 0 || group.items.every((i) => list.includes(i.key));
+  const writable = group.items.filter((i) => !i.readonly);
+  if (!writable.length) return true; // 整组只读 → 恒显示为勾住
+  return list.length === 0 || writable.every((i) => list.includes(i.key));
 }
 /** 组内部分启用（用于 checkbox 的 indeterminate 态） */
 function isGroupPartial(list: string[], group: GroupedTable): boolean {
   if (list.length === 0) return false;
-  const on = group.items.filter((i) => list.includes(i.key)).length;
-  return on > 0 && on < group.items.length;
+  const writable = group.items.filter((i) => !i.readonly);
+  if (!writable.length) return false;
+  const on = writable.filter((i) => list.includes(i.key)).length;
+  return on > 0 && on < writable.length;
+}
+/** 整组是否只读（禁用组级勾选框）。 */
+function isGroupReadonly(group: GroupedTable): boolean {
+  return group.items.every((i) => i.readonly);
 }
 /** 切换单项（白名单为空时先以全量初始化再切换） */
 function toggleItem(list: string[], all: string[], key: string): string[] {
   const base = list.length ? list : [...all];
   return base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
 }
-/** 切换整组 */
+/** 切换整组（只读项不写进白名单——它们从来不受人格控制）。 */
 function toggleGroup(list: string[], all: string[], group: GroupedTable): string[] {
+  const keys = group.items.filter((i) => !i.readonly).map((i) => i.key);
+  if (!keys.length) return list;
   const base = list.length ? list : [...all];
-  const keys = group.items.map((i) => i.key);
-  const on = group.items.every((i) => base.includes(i.key));
+  const on = keys.every((k) => base.includes(k));
   if (on) return base.filter((k) => !keys.includes(k));
   return [...new Set([...base, ...keys])];
 }
@@ -219,12 +244,16 @@ function rowKeyOf(row: Record<string, unknown>): string {
   return String(row.key ?? '');
 }
 function isRowOn(list: string[], row: Record<string, unknown>): boolean {
+  // 只读行恒显示为勾住（它是进程级能力，"这个人格能不能用"不由白名单决定）。
+  if (row.readonly === true) return true;
   return isItemOn(list, rowKeyOf(row));
 }
 function toggleRow(list: string[], all: GroupedItem[], row: Record<string, unknown>): string[] {
+  // 只读行：勾不动。它是进程级能力，"这个人格能不能用"不由白名单决定。
+  if (row.readonly === true) return list;
   return toggleItem(
     list,
-    all.map((i) => i.key),
+    all.filter((i) => !i.readonly).map((i) => i.key),
     rowKeyOf(row),
   );
 }
@@ -388,9 +417,10 @@ function save() {
                 <NeumorphismCheckbox
                   :model-value="isGroupOn(enabledPlugins, g)"
                   :indeterminate="isGroupPartial(enabledPlugins, g)"
+                  :disabled="isGroupReadonly(g)"
                   :label="`${g.group}（${g.items.length}）`"
                   size="small"
-                  @update:model-value="enabledPlugins = toggleGroup(enabledPlugins, pluginItems.map((i) => i.key), g)"
+                  @update:model-value="enabledPlugins = toggleGroup(enabledPlugins, pluginWritableKeys, g)"
                 />
               </div>
               <NeumorphismTable
@@ -409,6 +439,7 @@ function save() {
                 <template #cell-check="{ row }">
                   <NeumorphismCheckbox
                     :model-value="isRowOn(enabledPlugins, row)"
+                    :disabled="row.readonly === true"
                     size="small"
                     @update:model-value="enabledPlugins = toggleRow(enabledPlugins, pluginItems, row)"
                   />

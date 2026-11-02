@@ -10,9 +10,9 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  PACKAGE_GATED_PLUGIN_IDS,
   PACKAGE_DISPLAY_NAMES,
   PLUGIN_KIND_LABELS,
+  pluginCheckboxState,
   isInstancePluginKind,
   isPluginCheckboxVisible,
   teamPluginEnabled,
@@ -21,18 +21,60 @@ import {
 import type { TeamInfo } from '../protocol';
 
 describe('包维度门控插件清单（单一来源）', () => {
-  it('包含全部包维度门控插件（对齐 Core GATED_PLUGIN_IDS 的 4 项）', () => {
-    // Core 侧 echo-agent/src/plugins.rs::GATED_PLUGIN_IDS 的镜像：
-    // 增删任一侧都必须两边同改（此处防回归）。
-    // 实例**不在**两侧清单里——按 kind 运行期推导（见下一个用例）。
-    expect([...PACKAGE_GATED_PLUGIN_IDS].sort()).toEqual(
-      [
-        'echo-agent.skills.dir',
-        'echo-agent.subagent',
-        'echo-agent.tools.builtin',
-        'echo-agent.workspace',
-      ].sort(),
+  it('勾选区只读 Core 下发的 gating，不再维护自己的插件清单', () => {
+    // 曾经这里是 `PACKAGE_GATED_PLUGIN_IDS` 的镜像断言——那份清单与 Core 的
+    // `GATED_PLUGIN_IDS` 是同一件事的两份手写真相，实测错过两轮
+    // （shell 漏列 → 面板没有 shell 开关；session/transcript 多列 → 假开关）。
+    // 现在判据在 Core（按 manifest.kind 派生），随 PluginInfo.gating 下发。
+    expect(isPluginCheckboxVisible({ id: 'x', kind: 'tool', gating: 'persona' })).toBe(true);
+    // 进程级插件即使 kind 看着像能力型也不显示（以 Core 为准）。
+    expect(isPluginCheckboxVisible({ id: 'x', kind: 'tool', gating: 'process' })).toBe(false);
+    // 旧 Core 不发该字段：退回 kind 类判定，不让插件在 UI 里凭空消失。
+    expect(isPluginCheckboxVisible({ id: 'echo-agent.shell', kind: 'tool' })).toBe(false);
+    expect(isPluginCheckboxVisible({ id: 'echo-agent.instance.qq', kind: 'instance' })).toBe(
+      true,
     );
+  });
+
+  it('三态判定：persona 可勾 / process 里 management+interaction 只读 / 其余隐藏', () => {
+    // 可勾 = Core 说 persona
+    expect(pluginCheckboxState({ id: 'x', kind: 'tool', gating: 'persona' })).toBe('enabled');
+    // 进程级但值得显示：用户心智里"这个人格有没有管理/交互能力"
+    expect(pluginCheckboxState({ id: 'x', kind: 'management', gating: 'process' })).toBe(
+      'readonly',
+    );
+    expect(pluginCheckboxState({ id: 'x', kind: 'interaction', gating: 'process' })).toBe(
+      'readonly',
+    );
+    // 进程级且开关在别处 → 干脆不显示
+    expect(pluginCheckboxState({ id: 'x', kind: 'loop', gating: 'process' })).toBe('hidden');
+    expect(pluginCheckboxState({ id: 'x', kind: 'provider', gating: 'process' })).toBe('hidden');
+    expect(pluginCheckboxState({ id: 'x', kind: 'session', gating: 'process' })).toBe('hidden');
+  });
+
+  it('只读项仍然出现在勾选区（只是勾不动）', () => {
+    // `isPluginCheckboxVisible` 是"显示与否"，不是"能不能改"——两者分开，
+    // 否则把 management 藏起来会让用户以为这个能力不存在。
+    expect(isPluginCheckboxVisible({ id: 'x', kind: 'management', gating: 'process' })).toBe(
+      true,
+    );
+    expect(isPluginCheckboxVisible({ id: 'x', kind: 'loop', gating: 'process' })).toBe(false);
+  });
+
+  it('旧 Core（无 gating）三态全部退回可勾，不产生只读态', () => {
+    // 老 Core 不告诉我们作用域，Panel 不该凭空造出一个"置灰"的开关。
+    for (const kind of ['instance', 'management', 'interaction']) {
+      expect(pluginCheckboxState({ id: 'x', kind }), kind).toBe('enabled');
+    }
+    expect(pluginCheckboxState({ id: 'x', kind: 'tool' })).toBe('hidden');
+  });
+
+  it('shell 是能力型插件：Core 下发 persona 后它必须出现在勾选区', () => {
+    // 回归 2026-11：shell 从 tools.builtin 拆出时 Panel 清单没跟着加，
+    // 面板上没有 shell 开关，用户无法通过 UI 给任何 persona 启用 bash-*。
+    expect(
+      isPluginCheckboxVisible({ id: 'echo-agent.shell', kind: 'tool', gating: 'persona' }),
+    ).toBe(true);
   });
 
   it('实例类 kind 新旧 wire 名都可见（instance / adapter）', () => {
@@ -54,32 +96,53 @@ describe('包维度门控插件清单（单一来源）', () => {
     // telegram / discord 等新平台插件，不改任何清单也会出现在勾选区。
     for (const platform of ['qq', 'telegram', 'discord']) {
       const id = `echo-agent.instance.${platform}`;
-      expect((PACKAGE_GATED_PLUGIN_IDS as readonly string[]).includes(id), id).toBe(false);
-      expect(isPluginCheckboxVisible({ id, kind: 'instance' }), id).toBe(true);
+      // 不再有"清单里没有它"这回事——判据是 Core 下发的 gating。
+      expect(
+        isPluginCheckboxVisible({ id, kind: 'instance', gating: 'persona' }),
+        id,
+      ).toBe(true);
     }
   });
 
-  it('每个门控插件都有中文显示名（工具/包分组可读性）', () => {
-    for (const id of PACKAGE_GATED_PLUGIN_IDS) {
+  it('能力型插件都有中文显示名（工具/包分组可读性）', () => {
+    // 清单删了，改为按 Core 的 kind 作用域枚举（persona 级的三类 kind）。
+    // 新增 persona 级插件而忘了加显示名时，这里红。
+    const personaScoped = [
+      'echo-agent.tools.builtin',
+      'echo-agent.shell',
+      'echo-agent.workspace',
+      'echo-agent.subagent',
+      'echo-agent.skills.dir',
+    ];
+    for (const id of personaScoped) {
       expect(PACKAGE_DISPLAY_NAMES[id], `缺少显示名: ${id}`).toBeTruthy();
     }
   });
 
-  it('勾选可见性：kind 类 + 门控清单 + 其余不可见', () => {
-    // instance / management / interaction 类恒可见（整类能力开关）
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.adapter.qq', kind: 'instance' })).toBe(true);
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.management.panel', kind: 'management' })).toBe(true);
-    // interaction 类不在门控清单里也可见（kind 判定生效）
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.future-interaction', kind: 'interaction' })).toBe(true);
-    // 包维度门控（kind=tool）可见
-    for (const id of PACKAGE_GATED_PLUGIN_IDS) {
-      expect(isPluginCheckboxVisible({ id, kind: 'tool' }), id).toBe(true);
+  it('勾选可见性完全由 Core 的 gating 决定', () => {
+    // Core 说 persona → 显示；说 process → 不显示。Panel 没有第二套判据。
+    for (const id of [
+      'echo-agent.tools.builtin',
+      'echo-agent.skills.dir',
+      'echo-agent.workspace',
+      'echo-agent.subagent',
+      'echo-agent.shell',
+      'echo-agent.instance.qq',
+    ]) {
+      expect(isPluginCheckboxVisible({ id, kind: 'tool', gating: 'persona' }), id).toBe(true);
     }
-    // 循环互斥插件与名义挂载插件不在勾选区（由循环模式分段 / 重启生效）
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.loop.single', kind: 'loop' })).toBe(false);
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.loop.parallel', kind: 'loop' })).toBe(false);
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.orchestration', kind: 'orchestration' })).toBe(false);
-    expect(isPluginCheckboxVisible({ id: 'echo-agent.provider.llm', kind: 'provider' })).toBe(false);
+    for (const id of [
+      'echo-agent.loop.single',
+      'echo-agent.loop.parallel',
+      'echo-agent.provider.llm',
+      'echo-agent.selfupdate',
+      'echo-agent.federation',
+      'echo-agent.session',
+      'echo-agent.transcript',
+      'echo-agent.management.panel',
+    ]) {
+      expect(isPluginCheckboxVisible({ id, kind: 'tool', gating: 'process' }), id).toBe(false);
+    }
   });
 
   it('插件 kind 中文显示名覆盖 Core PluginKind 全部 wire 名（含 interaction=交互）', () => {

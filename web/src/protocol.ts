@@ -350,6 +350,19 @@ export interface PluginInfo {
   /** 所属包 id（横跨 plugin+tool+skill 的组合标签；未声明 = 插件 id） */
   package?: string;
   /**
+   * 作用域：**谁能决定这个插件在某份人格里生效**（由 Core 计算下发）。
+   *
+   * - `persona`：能力型（向模型暴露工具/技能）——出现在「启用插件」勾选区，
+   *   勾选写 `enabled_plugins` 白名单；
+   * - `process`：进程级/基础设施——勾选区不显示（勾了也不生效）。
+   *
+   * **Panel 不自己算**：跨仓库各写一份判据必然漂移（Core 的
+   * `GATED_PLUGIN_IDS` 与 Panel 的 `PACKAGE_GATED_PLUGIN_IDS` 已经错过两轮：
+   * `shell` 漏列导致面板没有 shell 开关；`session`/`transcript` 多列导致两个
+   * 勾了不生效的假开关）。旧 Core 缺失该字段 = 按"可显示"兼容。
+   */
+  gating?: string;
+  /**
    * 挂载失败原因（Core 的 `PluginDescriptor::error`）。
    *
    * 区分「用户主动禁用」与「装配失败被跳过」——两者 `enabled` 都是 false，

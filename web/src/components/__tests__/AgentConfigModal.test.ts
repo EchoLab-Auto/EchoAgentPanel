@@ -34,9 +34,10 @@ function seed() {
     { name: 'bash', description: 'd', parameters: null, category: 'builtin', enabled: true, package: 'echo-agent.tools.builtin' },
   ] as typeof state.tools;
   state.plugins = [
-    { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin' },
-    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace' },
-    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.future-interaction' },
+    { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin', gating: 'persona' },
+    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace', gating: 'persona' },
+    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.future-interaction', gating: 'process' },
+    { id: 'echo-agent.management.panel', name: '管理面', version: '1', kind: 'management', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.management.panel', gating: 'process' },
   ] as typeof state.plugins;
 }
 
@@ -110,6 +111,18 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
     // 回归：分组曾按「非实例即管理面」粗分，把交互类插件归入管理面。
     expect(wrapper.text()).toContain('交互（1）');
     expect(wrapper.text()).toContain('交互示例');
+  });
+
+  it('进程级能力（管理面/交互面）显示但置灰，且不写进白名单', async () => {
+    const wrapper = mountModal();
+    // 描述里直说"进程级"，标签上也有分组名——用户看得到为什么勾不动
+    expect(wrapper.text()).toContain('进程级，对所有人格始终生效');
+    // 这些行的勾选框 disabled（Core 判 process）；库的修饰类名是 --disabled
+    expect(wrapper.findAll('.nm-checkbox--disabled').length).toBeGreaterThan(0);
+    // 分组仍列出这两个能力（"管理面"组里既有 tool 插件也有 management 插件，
+    // 组头不禁用——组内还有可写的项；只读只作用于那一行）
+    expect(wrapper.text()).toContain('交互（1）');
+    expect(wrapper.text()).toContain('管理面（3）');
   });
 
   it('能力区用库 Collapse + Table + Checkbox 渲染（插件黑名单已移除）', () => {
