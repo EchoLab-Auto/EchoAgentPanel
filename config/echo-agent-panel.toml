@@ -52,7 +52,7 @@ access_token = ""
 # 连接读取远端日志（日志页可选该上游）与媒体文件（聊天图片同源回源）。
 # 认证：私钥文件 → ssh-agent → 默认密钥 → 密码（后两者可选）。
 # 主机密钥：默认 TOFU（首连写入 ~/.ssh/known_hosts；之后变更一律拒绝）。
-# 注意：ssh_user 须为运行 Core 的用户（读日志/媒体依赖其权限）。
+# 注意：user（SSH 登录用户）须为运行 Core 的用户（读日志/媒体依赖其权限）。
 # SSH 模式下建议远端 Core 把 management_address 绑回 127.0.0.1（配合隧道更安全）。
 # [[cores]]
 # name = "cloud"

@@ -42,10 +42,10 @@
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
 - 工具调用、思考（推理）与子代理完成统一为 chip 行（连续工作条目合并为一排小圆角矩形图标、点击展开详情；2026-10 一般化）、临时回复分支面板（入口行「任务」弹层，按当前会话过滤）、清单面板
 - API 设置（provider / model / base_url / api_key / profiles；system prompt 在智能体配置弹层 AgentConfigModal 中编辑）；DeepSeek 余额查询（含充值/赠送分账）+ **余额与用量图表**（近 7 天：总览对比图 + profile 卡内嵌 sparkline；数据由 Core 本地积累，含 token 费用估算）
-- 实例管理（描述符驱动，**Panel 无平台专属逻辑**：布局由插件 `InstanceStatus.ui` 声明、动作经 `InvokeInstanceOp` 透传、状态经 `InstanceState` 回推；当前在册的 `echo-agent.adapter.qq` 是**进程外插件**（实现在独立进程 `echo-adapter-qq`，不在 Core 内），它提供多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表）、适配器启停
+- 实例管理（描述符驱动，**Panel 无平台专属逻辑**：布局由插件 `InstanceStatus.ui` 声明、动作经 `InvokeInstanceOp` 透传、状态经 `InstanceState` 回推；当前在册的 `echo-agent.instance.qq` 是**进程外插件**（实现在独立进程 `echo-adapter-qq`，不在 Core 内），它提供多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表；启停走实例命令 `StartInstance` / `StopInstance`——2026-10 去适配器化后**已无适配器专用命令**）
 - 工作区会话管理（入口行「工作区」宽版面板：多会话 / 多工作区目录 / 各目录 git 状态；文件浏览器已迁至会话视图右侧边栏，2026-09-19；`echo-agent.workspace` 插件）
 - 边栏「Git」卡（2026-10）：工作区各目录 git 快照（分支 / 领先落后 / 变更总数），**点目录行展开后按「已暂存 / 已修改 / 未跟踪」分别展开文件清单**——计数本身就是开关，明细行带 porcelain 状态字符（`M`/`A`/`D`/`?`）；长路径优先保住文件名（目录前缀只留末两段）。分组依赖 Core 回传 `changed_entries`，老 Core 自动退回扁平路径列表
-- 插件工作台（设置·插件）：支持多 Core 节点聚合展示，按**运行位置**分组（内置 / 进程外），卡片标注运行形态与来源，可在线启停
+- 插件工作台（设置·插件）：支持多 Core 节点聚合展示，按**运行位置**分组（内部 / 外部），卡片标注运行形态与来源，可在线启停
 - 技能安装（设置·技能）：Git 来源安装/更新，克隆与构建进度实时可见（不再是长时间静默），失败自动清场并提示残留
 - 上下文快照、深浅主题
 - Core 连接（设置·Core 连接，2026-10 末联邦并入本页）：连接管理统一入口——
@@ -121,9 +121,7 @@ npm run ui-frame:diff -- 1.3.2   # 对比指定版本 / 标签
 
 ```bash
 cd web
-npm test              # vitest（70 文件 / 570 用例）
-npm run lint:styles   # 样式令牌守卫：幻影令牌 / --nf-* 禁用命名空间 / 拼写错
-npm test              # vitest（105 文件 / 950 用例）
+npm test              # vitest（107 个测试文件；数字以实际为准，不在此处维护）
 npm run lint:styles   # 样式令牌守卫：幻影令牌 / --nf-* 禁用命名空间 / 拼写错
 npm run layout:mobile # 移动端真视口几何断言（无头 Chrome + CDP，无浏览器则跳过）
 npm run build         # vue-tsc + vite 生产构建（视图与弹层按 import() 自动分包）
@@ -193,18 +191,18 @@ curl -fsSL https://raw.githubusercontent.com/EchoLab-Auto/EchoAgentPanel/main/sc
 本仓库文档已合并到 EchoAgentCore 仓库的文档群（`document/`，ProDoc 格式）：
 
 - `document/panel/panel.md` — Panel 前端（仓库布局、中继模型、状态管理与数据流）
-- `document/panel/panel-interaction.md` — 交互定义总入口（模块树与索引）
-- `document/panel/panel-desktop-layout.md` — 电脑端布局（外壳几何、层叠秩序、双侧边栏、卡片、连接生命周期）
-- `document/panel/panel-mobile-layout.md` — 移动端布局（<768px：顶栏与视图菜单、入口行横滚提示、卡片 Sheet、软键盘与安全区）
-- `document/panel/panel-chat.md` — 会话视图（消息列表、工具卡、推理块、输入区）
-- `document/panel/panel-modals.md` — 模态与覆盖层
-- `document/panel/panel-settings.md` — 设置视图外壳（八分类菜单、资源工作区通用契约、界面元素树）+ 七篇分类子文档：
-  `panel-settings-api` / `-skills` / `-tools` / `-plugins` / `-agents` / `-cores` / `-logs`
+- `document/panel/interaction.md` — 交互定义总入口（模块树与索引）
+- `document/panel/desktop-layout.md` — 电脑端布局（外壳几何、层叠秩序、双侧边栏、卡片、连接生命周期）
+- `document/panel/desktop-overlays.md` / `mobile-overlays.md` — 模态与覆盖层（按端分篇：z-index 秩序、Esc 关闭语义、遮罩命中）
+- `document/panel/mobile-layout.md` — 移动端布局（<768px：顶栏与视图菜单、入口行横滚提示、卡片 Sheet、软键盘与安全区）
+- `document/panel/chat.md` — 会话视图（入口；细分篇见 `chat-list` / `chat-messages` / `chat-input` / `chat-timeline` / `chat-tools` / `chat-reasoning` / `chat-rail` / `chat-work` / `chat-entry` / `chat-history`）
+- `document/panel/settings.md` — 设置视图外壳（八分类菜单、资源工作区通用契约、界面元素树）+ 七篇分类子文档：
+  `settings-api` / `settings-skills` / `settings-tools` / `settings-plugins` / `settings-agents` / `settings-cores` / `settings-logs`
   （API 设置、技能与 Git 安装、工具、插件工作台、智能体、Core 连接与联邦、日志与系统）
-- `document/panel/panel-instance-tasks.md` — 实例弹层（描述符驱动，与平台无关）、任务弹层、Shell 视图、HTTP 通道
-- `document/panel/panel-system.md` — 系统交互（Toast、键盘、常量速查）
+- `document/panel/instance-tasks.md` — 实例弹层（描述符驱动，与平台无关）、任务弹层、Shell 视图、HTTP 通道
+- `document/panel/system.md` — 系统交互（Toast、键盘、常量速查）
 - `document/protocol/protocol.md` — 线协议与数据流（命令/事件、时间线同步、事件流连续性）
-- `document/ops/ops-deploy.md` — Panel 安装 / 更新 / 卸载（与 Core 同篇）
+- `document/ops/deploy.md` — Panel 安装 / 更新 / 卸载（与 Core 同篇）
 
 ## 工作区同步契约（2026-10）
 
