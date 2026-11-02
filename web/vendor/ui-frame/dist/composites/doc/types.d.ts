@@ -67,6 +67,13 @@ export interface ProDocFlowEdge {
     from: string;
     to: string;
     label?: string;
+    /**
+     * 加重边（Mermaid 的 `==>`）。
+     *
+     * 语义是"这条关系更强/更主要"，只影响描边粗细与箭头大小，不改变拓扑——
+     * 布局、层级、可拖拽性都与普通边一致。
+     */
+    thick?: boolean;
 }
 /** 流程图语法容错记录 */
 export interface ProDocFlowError {

@@ -1,23 +1,14 @@
 //! 会话正文的 Mermaid 图表渲染。
 //!
-//! ui-frame 已负责把 `mermaid` 代码块转换成图表占位并延迟渲染；本测试走完整的
-//! MessageItem → MarkdownLazy → MarkdownRenderer 链路，守住 Panel 的集成责任：
-//! 安装 mermaid 可选依赖、图表确实替换源码，以及单图失败时仍保留可读源码。
+//! ui-frame 已负责把 `mermaid` 代码块转换成图表占位并交给原生画布渲染；本测试
+//! 走完整的 MessageItem → MarkdownLazy → MarkdownRenderer 链路，守住 Panel 的
+//! 集成责任：flowchart 变成原生画布（`.nm-flow`）、粗箭头 `==>` 不再降级、
+//! 画不出来的图保留可读源码，且 Panel **不再安装** mermaid 官方渲染器。
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
-import mermaid from 'mermaid';
 import MessageItem from '../MessageItem.vue';
 import type { ChatMessageWithImages } from '../../chat-adapter';
-
-vi.mock('mermaid', () => ({
-  default: {
-    initialize: vi.fn(),
-    render: vi.fn(async () => ({
-      svg: '<svg class="mermaid-test-svg" viewBox="0 0 120 40"><text>依赖图</text></svg>',
-    })),
-  },
-}));
 
 const MERMAID_TIMEOUT = 15000;
 
@@ -57,27 +48,85 @@ describe('会话正文的 Mermaid 图表', () => {
     expect(diagram.findAll('.nm-flow__edge')).toHaveLength(1);
     expect(diagram.find('pre').exists()).toBe(false);
     expect(wrapper.text()).toContain('插件依赖如下');
-
-    const render = vi.mocked(mermaid.render);
-    expect(render).not.toHaveBeenCalled();
   });
 
-  it('单图解析失败时保留源码回退，不影响同条消息的其他内容', async () => {
-    const render = vi.mocked(mermaid.render);
-    render.mockClear();
-    render.mockImplementation(async () => {
-      throw new Error('bad diagram');
-    });
-    const wrapper = mountItem('前文\n\n```mermaid\nflowchart LR\n  非法图源\n```\n\n后文');
+  it('`==>` 粗箭头同样进原生画布，并画出加重边', async () => {
+    const wrapper = mountItem(
+      '根与人格层：\n\n```mermaid\nflowchart TB\n  ROOT["根作用域"] ==> P["人格子作用域"]\n```',
+    );
 
-    await vi.waitFor(() => expect(render.mock.calls.length).toBeGreaterThanOrEqual(1), {
+    await vi.waitFor(() => expect(wrapper.find('.mermaid-diagram .nm-flow').exists()).toBe(true), {
       timeout: MERMAID_TIMEOUT,
     });
 
     const diagram = wrapper.find('.mermaid-diagram');
-    expect(diagram.find('pre code').text()).toContain('非法图源');
-    expect(diagram.attributes('data-mermaid-state')).toBe('error');
+    expect(diagram.attributes('data-mermaid-state')).toBe('done');
+    expect(diagram.findAll('.nm-flow__node')).toHaveLength(2);
+    expect(diagram.find('.nm-flow__edge--thick').exists()).toBe(true);
+  });
+
+  it('画不出来的图保留源码回退，不影响同条消息的其他内容', async () => {
+    // `direction` 是 Mermaid 合法语法、原生画布不支持——触发源码回退。
+    const wrapper = mountItem(
+      '前文\n\n```mermaid\nflowchart LR\n  A[开始] --> B[结束]\n  direction BT\n```\n\n后文',
+    );
+
+    await vi.waitFor(
+      () =>
+        expect(wrapper.find('.mermaid-diagram').attributes('data-mermaid-state')).toBe('error'),
+      { timeout: MERMAID_TIMEOUT },
+    );
+
+    const diagram = wrapper.find('.mermaid-diagram');
+    expect(diagram.find('pre code').text()).toContain('direction BT');
+    expect(diagram.find('svg').exists()).toBe(false);
     expect(wrapper.text()).toContain('前文');
     expect(wrapper.text()).toContain('后文');
+  }, MERMAID_TIMEOUT);
+
+  it('sequenceDiagram 渲染成原生时序图', async () => {
+    const wrapper = mountItem(
+      '时序：\n\n```mermaid\nsequenceDiagram\n  participant A\n  participant B\n  A->>B: 请求\n```',
+    );
+
+    await vi.waitFor(() => expect(wrapper.find('.mermaid-diagram .nm-seq').exists()).toBe(true), {
+      timeout: MERMAID_TIMEOUT,
+    });
+
+    const diagram = wrapper.find('.mermaid-diagram');
+    expect(diagram.attributes('data-mermaid-graph')).toBe('sequence');
+    expect(diagram.attributes('data-mermaid-state')).toBe('done');
+    expect(diagram.findAll('.nm-seq__head')).toHaveLength(2);
+    expect(diagram.findAll('.nm-seq__message')).toHaveLength(1);
+  }, MERMAID_TIMEOUT);
+
+  it('gantt 渲染成原生甘特图', async () => {
+    const wrapper = mountItem(
+      '排期：\n\n```mermaid\ngantt\n  dateFormat YYYY-MM-DD\n  section 开发\n  实现 :a, 2026-01-01, 5d\n```',
+    );
+
+    await vi.waitFor(() => expect(wrapper.find('.mermaid-diagram .nm-gantt').exists()).toBe(true), {
+      timeout: MERMAID_TIMEOUT,
+    });
+
+    const diagram = wrapper.find('.mermaid-diagram');
+    expect(diagram.attributes('data-mermaid-graph')).toBe('gantt');
+    expect(diagram.attributes('data-mermaid-state')).toBe('done');
+    expect(diagram.findAll('.nm-gantt__bar')).toHaveLength(1);
+  }, MERMAID_TIMEOUT);
+
+  it('既没有原生实现、也不知道的图型保留源码（Panel 不装官方渲染器）', async () => {
+    const wrapper = mountItem('饼图：\n\n```mermaid\npie\n  "A" : 30\n```');
+
+    await vi.waitFor(
+      () =>
+        expect(wrapper.find('.mermaid-diagram').attributes('data-mermaid-state')).toBe('error'),
+      { timeout: MERMAID_TIMEOUT },
+    );
+
+    const diagram = wrapper.find('.mermaid-diagram');
+    expect(diagram.attributes('data-mermaid-graph')).toBe('other');
+    expect(diagram.find('svg').exists()).toBe(false);
+    expect(diagram.find('pre code').text()).toContain('pie');
   }, MERMAID_TIMEOUT);
 });

@@ -11,6 +11,8 @@ export interface FlowLayoutEdge {
     from: string;
     to: string;
     label?: string;
+    /** 加重边（`==>`）：描边更粗，拓扑与布局不受影响 */
+    thick?: boolean;
     /** SVG path d（三次贝塞尔） */
     path: string;
     /** 边标签定位点 */
