@@ -28,7 +28,6 @@ import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-a
 import AgentSwitcher from './AgentSwitcher.vue';
 import { checklistKey, sessionKey, teamKey } from '../keys';
 import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
-import { loopModeOf } from '../protocol';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
 import ChecklistSidebar from './ChecklistSidebar.vue';
@@ -144,14 +143,12 @@ function scheduleIdleWarmup(): void {
 const props = defineProps<{
   sessionId: string;
   activeTeamId?: string | null;
-  activeBranchId?: string | null;
 }>();
 const emit = defineEmits<{
   send: [content: string, images: string[]];
   cancel: [];
   selectTeam: [id: string | null, core: string | null];
   selectSession: [id: string];
-  selectBranch: [id: string];
   openShellDetail: [sessionId: string, core: string | null];
 }>();
 
@@ -506,12 +503,8 @@ const teamSessions = computed(() => {
   return state.sessions.filter((s) => (s.team_id ?? null) === active);
 });
 
-/** 会话按钮显隐：可切换（>1 个会话）或并行多会话模式（含「全局」入口）时显示。 */
-const sessionSwitcherAvailable = computed(() => {
-  if (teamSessions.value.length > 1) return true;
-  const team = state.teams.find((t) => t.id === (props.activeTeamId ?? state.teams[0]?.id));
-  return loopModeOf(team) === 'parallel';
-});
+/** 会话按钮显隐：当前人格有多个可切换会话时显示。 */
+const sessionSwitcherAvailable = computed(() => teamSessions.value.length > 1);
 
 /**
  * 入口行横向滚动的「还有更多」提示（2026-10 移动端布局 v2）。
@@ -1733,9 +1726,7 @@ function mediaSrc(img: string): string {
       >
         <PanelSidebar
           side="left"
-          :active-branch-id="props.activeBranchId ?? null"
           :team-id="props.activeTeamId ?? null"
-          @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
@@ -1749,9 +1740,7 @@ function mediaSrc(img: string): string {
       >
         <PanelSidebar
           side="right"
-          :active-branch-id="props.activeBranchId ?? null"
           :team-id="props.activeTeamId ?? null"
-          @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
@@ -1776,9 +1765,7 @@ function mediaSrc(img: string): string {
           v-if="railHasCards('left')"
           side="left"
           :drag-enabled="false"
-          :active-branch-id="props.activeBranchId ?? null"
           :team-id="props.activeTeamId ?? null"
-          @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
@@ -1786,9 +1773,7 @@ function mediaSrc(img: string): string {
           v-if="railHasCards('right')"
           side="right"
           :drag-enabled="false"
-          :active-branch-id="props.activeBranchId ?? null"
           :team-id="props.activeTeamId ?? null"
-          @select-branch="(id) => emit('selectBranch', id)"
           @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />

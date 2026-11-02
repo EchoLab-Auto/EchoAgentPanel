@@ -25,7 +25,7 @@ import { state } from '../store';
 import { sessionKey } from '../keys';
 import { sendCommand } from '../connection';
 import { sessionLabelsFor } from '../session-labels';
-import { loopModeOf, type SessionInfo } from '../protocol';
+import { type SessionInfo } from '../protocol';
 
 const props = defineProps<{
   /** 当前智能体 id（只显示归属该智能体的会话）。 */
@@ -147,12 +147,6 @@ function isBusy(session: SessionInfo & { core?: string | null }): boolean {
   return !!activity && activity.phase !== 'completed';
 }
 
-/** 「全局」入口：并行多会话模式显示（跨会话合并视图，取代旧侧栏入口）。 */
-const globalVisible = computed(() => {
-  const team = state.teams.find((t) => t.id === (props.activeTeamId ?? state.teams[0]?.id));
-  return loopModeOf(team) === 'parallel';
-});
-
 function pick(session: SessionInfo & { core?: string | null }) {
   // 运行区域由 App.onSessionPick 依据会话归属同步（派生量，不在这里手动设）。
   emit('select', session.id);
@@ -161,10 +155,6 @@ function pick(session: SessionInfo & { core?: string | null }) {
 /** 会话来源 Core（多上游聚合视图；null = 单上游不显示徽标）。 */
 function coreBadge(session: SessionInfo & { core?: string | null }): string | null {
   return state.knownCores.size > 0 && session.core ? session.core : null;
-}
-
-function pickGlobal() {
-  emit('select', 'global');
 }
 
 /** 是否工作区通道（会话级 API 仅对其开放：覆盖写入工作区对话持久化）。 */
@@ -207,17 +197,6 @@ function onApiChange(session: SessionInfo & { core?: string | null }, value: unk
 
     <div v-if="!groups.length" class="muted sw-empty">（当前智能体暂无会话）</div>
 
-    <div v-if="globalVisible" class="sw-group">
-      <button
-        class="sw-item"
-        :class="{ 'is-active': props.activeSessionId === 'global' }"
-        title="全局视图：显示全部会话的消息"
-        @click="pickGlobal"
-      >
-        <span class="sw-tag tag-global">全局</span>
-        <span class="sw-label">全部消息</span>
-      </button>
-    </div>
 
     <div v-for="group in groups" :key="group.key" class="sw-group">
       <div class="sw-group__title">{{ group.label }}</div>
@@ -315,7 +294,6 @@ function onApiChange(session: SessionInfo & { core?: string | null }, value: unk
   background: var(--panel-hover);
   color: var(--nm-text-secondary);
 }
-.sw-tag.tag-global { color: #8b5cf6; }
 .sw-tag.tag-local { color: #0ea5e9; }
 .sw-tag.tag-workspace { color: #14b8a6; }
 .sw-tag.tag-dm { color: #2ea46e; }

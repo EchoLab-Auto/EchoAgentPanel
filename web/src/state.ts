@@ -1,11 +1,9 @@
-import { oneLine, truncate, summarizeArguments, summarizeTimerEvent, bounded } from './state_domains/helpers';
+import { oneLine, truncate, summarizeArguments, summarizeTimerEvent } from './state_domains/helpers';
 import {
   activity,
   setPhase,
   startSubagent,
   completeSubagent,
-  startReplyBranch,
-  completeReplyBranch,
 } from './state_domains/orchestration';
 import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessageAt, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
@@ -326,22 +324,6 @@ export interface BranchMsg {
   startedAtMs?: number;
   /** 执行总耗时（ms；core 上报） */
   elapsedMs?: number;
-}
-
-/** 运行中的临时回复分支（侧边临时会话标签） */
-export interface BranchTab {
-  sessionId: string;
-  /** 归属上游 core（多上游；null = 单上游/未标注）。 */
-  core?: string | null;
-  /** 分支 id（`branchTabs` 的键是 `scopedKey(core, branchId)`，快照回收
-   *  running 残留时要拿它去收尾对应任务，故显式留一份）。 */
-  branchId?: string;
-  task: string;
-  target: string;
-  startedAtMs: number;
-  status: 'running' | 'completed' | 'cancelled' | 'failed';
-  finalContent: string | null;
-  msgs: BranchMsg[];
 }
 
 /** 一次压缩/归档的进行态（`state.compactions` 的值）。 */
@@ -1173,8 +1155,6 @@ export interface AppState {
    * 决定何时收掉（见 `ContextView`），而不是靠另一条 `Error` 事件猜。
    */
   compactions: Record<string, CompactionRun>;
-  /** 运行中的临时回复分支（branch_id → tab） */
-  branchTabs: Record<string, BranchTab>;
   /**
    * 按 team 缓存的 timeline 全量快照（team_id → { seq, msgs }）。
    * 切换 agent 时先用缓存渲染（消除白屏/网络等待），再后台增量刷新。
@@ -1241,7 +1221,6 @@ export function initialState(): AppState {
     shellTerminals: {},
     contexts: {},
     compactions: {},
-    branchTabs: {},
     teamTimelines: {},
     trunkTeamId: null,
 
@@ -1377,74 +1356,10 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         ActiveTurnsSnapshot: {
           session_ids: string[];
           team_id?: string | null;
-          /** 运行中的回复分支（旧 Core 不发 → 空数组，退化到只有活动浮条）。 */
-          branches?: Array<{
-            session_id: string;
-            branch_id: string;
-            message_sequence: number;
-            task: string;
-            target: string;
-            started_at_ms: number;
-          }>;
         };
       }).ActiveTurnsSnapshot;
       if (!belongsToActiveTeam(state, e.team_id, evtCore(e))) return state;
       const core = evtCore(e);
-      // 分支快照：`ReplyBranchStarted` 只在分支开始那一刻发一次，重连/刷新
-      // 后拿不到它，而协议里没有"查运行分支"的命令 —— 不重建的话分支卡与
-      // 任务卡会一直是空的（只能等下一次分支开始）。这里按快照原地补建，
-      // 并用同一套 reducer（startReplyBranch + branchTabs）保证与实时事件
-      // 产生完全一致的状态形状。
-      const liveBranches = new Set(
-        (e.branches ?? []).map(b => scopedKey(core, b.branch_id)),
-      );
-      for (const b of e.branches ?? []) {
-        const key = scopedKey(core, b.branch_id);
-        if (!state.branchTabs[key]) {
-          state.branchTabs[key] = {
-            sessionId: b.session_id,
-            core,
-            branchId: b.branch_id,
-            task: b.task,
-            target: b.target,
-            startedAtMs: b.started_at_ms,
-            status: 'running',
-            finalContent: null,
-            msgs: [],
-          };
-        }
-        if (!state.tasks.some(t => t.id === b.branch_id && t.kind === 'reply')) {
-          startReplyBranch(
-            state,
-            b.session_id,
-            core,
-            b.branch_id,
-            b.message_sequence,
-            b.task,
-            b.target,
-            b.started_at_ms,
-          );
-        }
-      }
-      // 反向清理：本地仍标 running 的**分支**，若快照里没有它，说明它已经
-      // 结束（或 Core 重启过），就地收尾——否则重连后残留的"运行中"标签会
-      // 永远停在那里（正是 connection.ts 清空 branchTabs 想避免的问题，
-      // 只是清空会把**仍然在跑**的那些也一起抹掉）。
-      //
-      // ⚠️ 只在**字段存在**时清理：`branches === undefined` 是旧 Core（不发
-      // 该字段），此时"快照为空"不代表"没有分支在跑"——照清会把正在跑的
-      // 分支卡抹掉（旧 Core + 新前端的灰度期会踩）。
-      //
-      // 收尾口径与 `ReplyBranchCompleted` 一致（`completeReplyBranch` +
-      // 删临时标签），保证两条路径产出同样的状态。
-      for (const [key, tab] of e.branches === undefined ? [] : Object.entries(state.branchTabs)) {
-        if (tab.status !== 'running') continue;
-        if (core != null && (tab.core ?? null) !== core) continue;
-        if (liveBranches.has(key)) continue;
-        const branchId = tab.branchId ?? key.split('::').pop() ?? '';
-        completeReplyBranch(state, branchId, true, false, Date.now());
-        delete state.branchTabs[key];
-      }
       // activity 键是复合 (core, session_id)：同名跨 core 不互相误杀。
       const running = new Set(e.session_ids.map(id => sessionKey(core, id)));
       // 快照范围：只覆盖"本 core 的该 team"会话的 activity（其他 team/core
@@ -1539,10 +1454,6 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
             animate: true,
           });
         }
-      }
-      const tab = state.branchTabs[scopedKey(evtCore(e), e.branch_id)];
-      if (tab) {
-        tab.msgs.push({ kind: 'reasoning', text: content, time: Math.floor(Date.now() / 1000) });
       }
       return state;
     }
@@ -1644,9 +1555,8 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         role: 'backend',
         branch: e.branch_id || undefined,
       });
-      // 工具调用实时进主时间线（与推理交错）；分支 tab 同步记录供详情查看。
+      // 工具调用实时进主时间线（与推理交错）。
       // 仅当事件属于当前 team 时才进主时间线（跨 agent 不串显）。
-      const tab = e.branch_id ? state.branchTabs[scopedKey(evtCore(e), e.branch_id)] : undefined;
       if (belongsToActiveTeam(state, e.team_id, evtCore(e))) {
         // 幂等：同 id 的 ToolCall 已在时间线里（重放 / 重连补发 / 结果先到
         // 的乱序场景）就不再建第二条 running 行——否则会出现「一条已完成 +
@@ -1962,9 +1872,6 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
             t.sessionId === e.session_id &&
             (t.core ?? null) === core &&
             t.status === 'running',
-        ) ||
-        Object.values(state.branchTabs).some(
-          (tab) => tab.sessionId === e.session_id && tab.core === core && tab.status === 'running',
         );
       if (!stillBusy) settleRunningTools(state, e.session_id);
       // 兜底：turn 完成时若该会话仍无任何 backend（回答缺失），主动拉取
@@ -2483,18 +2390,7 @@ export function cancelSessionWork(state: AppState, sessionId: string, core: stri
       msg.tool.output = '（已取消）';
     }
   }
-  // 4) 分支 tab 同步标记
-  for (const tab of Object.values(state.branchTabs)) {
-    if (tab.sessionId === sessionId && (tab.core ?? null) === core && tab.status === 'running') {
-      tab.status = 'cancelled';
-      for (const m of tab.msgs) {
-        if (m.kind === 'tool' && m.status === 'running') {
-          m.status = 'failed';
-          m.output = '（已取消）';
-        }
-      }
-    }
-  }
+
 }
 
 /** 上游删除的会话清理（2026-10 🟡 修复）：该 core 名下的会话、

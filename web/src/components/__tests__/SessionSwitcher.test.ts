@@ -106,16 +106,6 @@ describe('SessionSwitcher 会话切换', () => {
     expect(wrapper.emitted('select')?.[0]).toEqual(['qq:dm::1828980067']);
   });
 
-  it('并行多会话模式：显示「全局（全部消息）」入口，点击选中 global', async () => {
-    state.teams = [
-      { id: 'alix', name: 'Alix', enabled: true, sessions: 0, loop_mode: 'parallel' } as never,
-    ];
-    const wrapper = mountSwitcher();
-    const globalItem = wrapper.findAll('.sw-item').find((b) => b.text().includes('全部消息'));
-    expect(globalItem).toBeTruthy();
-    await globalItem!.trigger('click');
-    expect(wrapper.emitted('select')?.[0]).toEqual(['global']);
-  });
 
   it('单会话模式：不显示全局入口', () => {
     const wrapper = mountSwitcher();
