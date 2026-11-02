@@ -2854,8 +2854,15 @@ function mediaSrc(img: string): string {
      ⑤ 键盘弹出时（keyboardInset > 0）面板浮在键盘上方，等间隙已无意义，
         但仍沿用同一轮廓（形状不跳变）。 */
   .chat-composer-float {
-    /* 输入字号 16px（iOS 聚焦防缩放） */
-    --chat-field-font: 16px;
+    /* 输入字号 14px（2026-10-29 用户要求「移动端输入框字号小一点」）。
+       原为 16px —— 那是 **iOS 聚焦防缩放** 的対策（Safari 对 <16px 的输入
+       控件聚焦时会自动放大页面）。改小后 iOS 上会出现该缩放行为，属已知
+       代价；规避只能靠 viewport 的 maximum-scale，而那是禁止用户双指缩放
+       （伤无障碍），故不采用。文末 iOS 段保留了「回退到 16px」的开关说明。
+       字号变化会连带 controlH（45.6 → 42.4）；`--composer-padding` 的
+       max() 用 controlH 反推，会自动把差额补进 padding，卡片外轮廓高度
+       与四角贴屏角的几何**完全不变**（见下方闭环公式 ③）。 */
+    --chat-field-font: 14px;
 
     /* ── 四角等大 + 下角贴屏角：三个量互相约束，公式必须闭环 ──────────
 
@@ -2894,10 +2901,11 @@ function mediaSrc(img: string): string {
     right: max(var(--composer-inset), env(safe-area-inset-right, 0px));
     bottom: calc(var(--composer-inset) + v-bind(keyboardInsetPx));
   }
-  /* iOS 聚焦自动缩放对策：输入字号提至 16px（<16px 聚焦必缩放）。
-     只放大打字面，不改工具栏按钮/占位字号观感。 */
+  /* 打字面字号 = `--chat-field-font`（单一事实来源，别再抄一个 16px）。
+     历史教训：上一版把 16px 硬编码在这里当 iOS 防缩放对策，于是「改字号」
+     要改两处，漏一处就出现「打字面 16px、但 controlH 按 14px 算」的错位。 */
   .chat-composer-float :deep(.nm-textarea__field) {
-    font-size: 16px;
+    font-size: var(--chat-field-font);
     /* 纵向 padding 取「让 1 行文字恰好填满 --chat-control-h」的对称值：
          padding-y = (controlH − 1.6em) / 2
        - controlH = 45.6（R=55 等小角机型）→ 10px，与库的默认值一致（零回归）；
@@ -2974,18 +2982,66 @@ function mediaSrc(img: string): string {
     margin: 12px 0;
     text-align: center;
     color: var(--nm-text-secondary);
-    font-size: 13px;
+    font-size: 12px;
+  }
+
+  /* ── 移动端 UI 字号整体降一档（2026-10-29，与输入框同一批反馈）────────
+     只降「界面 chrome」：输入区状态行、入口行按钮、卡片区提示。消息正文
+     已在 MessageItem.vue 单独降档（纯文本 12px / Markdown 13px），此处不碰。
+
+     为什么优先改 token 而不是逐个选择器打补丁：入口行 7 颗按钮全部复用
+     库的 `--nm-button-font-sm`，在 `.chat-view` 作用域内重定义一次就全覆盖，
+     以后新加入口按钮也自动继承，不会漏。
+     触摸目标不受影响：库的 `.nm-button--small` 带 `@include nm-touch-min`
+     （pointer: coarse 下强制 44×44），字号与内边距都不参与该下限。 */
+  .chat-view {
+    --nm-button-font-sm: 12px;
+  }
+  /* 状态行（provider/model + 相位文案）。高度不缩（--chat-status-h 仍 17px）
+     —— 它是「常驻行与忙碌行同高」的单一事实来源，也是 API 徽标的 line-height；
+     只缩字号，三处等距的几何保持不变。 */
+  .chat-status {
+    font-size: 11px;
+  }
+  .chat-status__api {
+    font-size: 10px;
   }
 }
 
-/* iOS 真机（含 iPad 宽屏，不受 768px 断点约束）：ui-frame 在 iOS + 粗指针
-   环境把原生输入控件字号钉到 16px（聚焦防缩放）。输入行控件高度必须同步，
-   否则 iPad 上发送/附件按钮会比输入框矮 3.6px（底对齐后顶部露一截）。 */
-@supports (-webkit-touch-callout: none) {
-  @media (pointer: coarse) {
-    .chat-composer-float {
-      --chat-field-font: 16px;
-    }
+/* ── 触屏：控件高度必须 ≥ 44px（2026-10-29 随字号下调一并修正）─────────
+   ui-frame 的 `base.scss` 在 `pointer: coarse` 下给所有 `:where(button)`
+   加了 `min-height: 44px` —— `.chat-view__attach-btn` 是原生 <button>，
+   吃这条。字号 16px 时派生高度 45.6 > 44，min-height 不生效，一切正常；
+   降到 14px 后派生高度 42.4 < 44，**min-height 反超**：附件按钮 44、
+   输入框 42.4，两者差 1.6px，输入行被最高的子元素撑高，textarea 底对齐
+   → 输入框上方的间隙比外壳 padding 多 1.6px（layout:mobile 实测
+   g1=11.61 vs P=10，5 个机型全挂）。
+   给派生量补**同一个 44 下限**，两者重新等高，同时正好对上 iOS 触控标准
+   （44×44）。用 `pointer: coarse` 而非宽度断点：iPad 宽屏不受 768 约束，
+   但一样是粗指针、一样吃 `:where(button)` 那条规则。
+   桌面（细指针）不加下限 —— 那边没有 min-height: 44，派生值 42.4 自洽。 */
+@media (pointer: coarse) {
+  .chat-composer-float {
+    --chat-control-h: max(
+      44px,
+      calc(var(--nm-field-padding-y-md, 10px) * 2 + var(--chat-field-font) * 1.6)
+    );
   }
 }
+
+/* iOS 备注（2026-10-29）：这里原本无条件把输入字号钉回 16px 以规避
+   「Safari 聚焦 <16px 输入控件时自动放大页面」。用户要求移动端整体字号
+   变小后，**该覆盖已移除** —— 全平台统一 14px（iPad 等宽屏也是 14px）。
+   副作用：iPhone/iPad 上点输入框，Safari 会把页面放大一档（右上角可点
+   「AA」缩回）。若这个行为比字号更让人在意，把下面四行取消注释即可只
+   在 iOS 恢复 16px；其余平台不受影响：
+
+   @supports (-webkit-touch-callout: none) {
+     @media (pointer: coarse) {
+       .chat-composer-float { --chat-field-font: 16px; }
+     }
+   }
+
+   注意：无论走哪条路，`.nm-textarea__field` 的字号都取 var(--chat-field-font)，
+   控件高度也随之派生，不会出现「按钮比输入框矮一截」的老问题。 */
 </style>

@@ -155,7 +155,11 @@ describe('ChatView 竖屏移动端', () => {
     expect(composerRules).toMatch(
       /bottom: calc\(var\(--composer-inset\) \+ v-bind\(keyboardInsetPx\)\)/,
     );
-    expect(styleBlock).toMatch(/font-size:\s*16px/);
+    // 打字面字号 = 单一事实来源变量（2026-10-29 起不再硬编码 16px，
+    // 否则改字号要改两处，漏一处就出现「打字面 16 / controlH 按 14 算」的错位）
+    expect(styleBlock, '打字面字号取 --chat-field-font').toMatch(
+      /font-size:\s*var\(--chat-field-font\)/,
+    );
     // 圆角同心（移动口径，2026-10 二次修订）：同心关系只有一条——
     //   内层圆角 = 外框圆角 − padding − border
     // 由根变量 --composer-inner-radius 派生，内外各自不再写死数值。
@@ -286,8 +290,10 @@ describe('ChatView 竖屏移动端', () => {
     expect(styleBlock).toMatch(/--composer-radius: 24px/);
     expect(styleBlock).toMatch(/--composer-padding: 12px/);
     expect(styleBlock).toMatch(/--composer-border: 0px/);
-    // 输入行控件高度跟随字号：字号一变，取消/附件/发送同步重算（不写死 42px）
-    expect(mobileStyle).toMatch(/--chat-field-font: 16px/);
+    // 输入行控件高度跟随字号：字号一变，取消/附件/发送同步重算（不写死 42px）。
+    // 2026-10-29：移动端字号 16px → 14px（用户要求「手机上输入框字小一点」）。
+    // 这个断言守着「控件高度是派生量」这条契约，具体的值会随设计调整。
+    expect(mobileStyle).toMatch(/--chat-field-font: 14px/);
   });
 
   it('软键盘适配：visualViewport 监听在源码中挂载/清理', () => {
