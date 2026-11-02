@@ -283,25 +283,10 @@ export interface TeamInfo {
   api_profile?: string | null;
   /** 该 agent 系统提示词由哪些 skill 组成（空 = 用 system_prompt 字段） */
   system_skills?: string[];
-  /**
-   * 循环模式（互斥循环插件推导）：single = 单会话（会话内 turn 串行排队、
-   * 无会话管理 UI、回执分支不可见）；parallel = 并行多会话（会话卡/全局分组/
-   * 可见分支）。缺省视为 single（默认模式）。
-   */
-  loop_mode?: LoopMode;
 }
 
-export type LoopMode = 'single' | 'parallel';
-
-/** 循环模式读取：`loop_mode` 缺省 single（默认）。 */
-export function loopModeOf(team?: TeamInfo | null): LoopMode {
-  if (!team) return 'single';
-  return team.loop_mode ?? 'single';
-}
-
-/** 循环模式插件 id（编辑器写入 enabled_plugins 白名单用，二选一） */
+/** 循环插件 id（唯一模式：每会话 turn 串行排队）。 */
 export const LOOP_SINGLE_PLUGIN_ID = 'echo-agent.loop.single';
-export const LOOP_PARALLEL_PLUGIN_ID = 'echo-agent.loop.parallel';
 
 /** 后台 shell 会话摘要（Shell 面板终端可视化） */
 export interface ShellSessionInfo {
@@ -807,27 +792,6 @@ export type BackendEvent =
   | { AgentContentDelta: { session_id: string; branch_id: string; delta: string; team_id?: string | null } }
   | { SubagentStarted: { session_id: string; task: string } }
   | { SubagentCompleted: { session_id: string; success: boolean } }
-  | {
-      ReplyBranchStarted: {
-        session_id: string;
-        branch_id: string;
-        message_sequence: number;
-        task: string;
-        target: string;
-        started_at_ms: number;
-      };
-    }
-  | { ReplyBranchContent: { session_id: string; branch_id: string; content: string } }
-  | {
-      ReplyBranchCompleted: {
-        session_id: string;
-        branch_id: string;
-        message_sequence: number;
-        success: boolean;
-        cancelled: boolean;
-        completed_at_ms: number;
-      };
-    }
   | { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }
   | { ToolResult: { session_id: string; tool_name: string; result: string; tool_call_id?: string; timed_out?: boolean; branch_id?: string; team_id?: string | null; elapsed_ms?: number } }
   | { ChecklistUpdated: { session_id: string; state: ChecklistState; team_id?: string | null } }

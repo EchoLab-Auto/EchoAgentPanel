@@ -139,7 +139,6 @@ export function startConnection(): void {
       resetEventSeq();
       // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
       // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。
-      state.branchTabs = {};
       state.tasks = [];
       state.activities = {};
       // 时间线**不再清空**（2026-09 刷新加速）：内存里的 teamTimelines 与

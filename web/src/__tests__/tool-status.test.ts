@@ -71,7 +71,6 @@ beforeEach(() => {
   state.teams = [team('Alice'), team('EchoCode')];
   state.activeTeamId = 'Alice';
   state.activeRegion = null;
-  state.branchTabs = {};
   state.tasks = [];
   state.activities = {};
 });

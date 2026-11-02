@@ -53,9 +53,7 @@ import {
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
-import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
-import { loopModeOf } from '../protocol';
-import { applyMode, deriveMode } from '../loop-mode';
+import type { PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { MarkdownRenderer, DocFlowCanvas } from '@echolab-auto/ui-frame/doc';
 import { buildPluginDependencyGraph } from '../plugin-deps';
 // 子设置页按需加载（2026-10 审计修复）：五个子页约 2300 行（含 LogView
@@ -1407,11 +1405,9 @@ const teamSections = [
 // 默认展开前两个分区；能力分区从摘要行按需展开（避免超长滚动）。
 const teamSectionOpen = ref<string[]>(['basic', 'prompt']);
 
-/** 分区摘要：基础（启用态 + 循环模式 + 运行区域） */
+/** 分区摘要：基础（启用态 + 运行区域） */
 const teamBasicSummary = computed(() => {
-  const base = `${teamFormEnabled.value ? '启用' : '禁用'} · ${
-    teamLoopMode.value === 'parallel' ? '并行多会话' : '单会话'
-  }`;
+  const base = teamFormEnabled.value ? '启用' : '禁用';
   // 多区域部署下把区域并进摘要：「这个 agent 在哪台机器上」是一等信息，
   // 不该只藏在折叠分区里的选择器里（列表行同样带徽标，见 teamList 渲染）。
   return multiRegion.value ? `${base} · ${coreDisplay(state, teamFormCore.value).name}` : base;
@@ -1443,20 +1439,6 @@ const teamFormRules = {
   ],
   name: [{ required: true, message: '请输入名称' }],
 };
-
-// ── 循环模式分段单选（互斥循环插件，写入 enabled_plugins 白名单） ──
-const MODE_OPTIONS = [
-  { label: '单会话（默认）', value: 'single' },
-  { label: '并行多会话', value: 'parallel' },
-];
-const teamLoopMode = computed(() => deriveMode(teamFormEnabledPlugins.value));
-function setTeamLoopMode(value: string | number) {
-  teamFormEnabledPlugins.value = applyMode(
-    teamFormEnabledPlugins.value,
-    String(value ?? 'single') as LoopMode,
-    state.plugins.map((p) => p.id),
-  );
-}
 
 async function startTeamCreate() {
   // 编辑中再点「新建智能体」→ 先确认（否则表单被静默清空）。
@@ -2811,7 +2793,7 @@ watch(
             <div class="detail-meta">
               <NeumorphismTag variant="info" size="small">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
               <NeumorphismTag size="small">
-                {{ loopModeOf(selectedTeam) === 'parallel' ? '并行多会话' : '单会话' }}
+                单会话
               </NeumorphismTag>
             </div>
             <div class="detail-field">
@@ -2948,17 +2930,6 @@ watch(
                   </NeumorphismFormItem>
                   <NeumorphismFormItem label="启用" name="enabled">
                     <NeumorphismSwitch v-model="teamFormEnabled" size="small" />
-                  </NeumorphismFormItem>
-                  <NeumorphismFormItem label="循环模式">
-                    <p class="muted caps-hint">
-                      单会话 = 同一会话的 turn 串行排队、无会话管理 UI（默认）；并行多会话 = 同一会话可并发分支、显示会话列表 / 全局会话 / 可见回执分支。
-                    </p>
-                    <NeumorphismSegmented
-                      :model-value="teamLoopMode"
-                      :options="MODE_OPTIONS"
-                      size="small"
-                      @update:model-value="setTeamLoopMode"
-                    />
                   </NeumorphismFormItem>
                 </template>
 

@@ -88,7 +88,6 @@ beforeEach(() => {
   state.teams = [team('Alice'), team('EchoCode')];
   state.activeTeamId = 'Alice';
   state.activeRegion = null;
-  state.branchTabs = {};
 });
 
 describe('流式正文（AgentContentDelta → AgentOutput 对账）', () => {

@@ -13,7 +13,6 @@ import NeumorphismCollapse from '@echolab-auto/ui-frame/components/NeumorphismCo
 import NeumorphismDivider from '@echolab-auto/ui-frame/components/NeumorphismDivider';
 import { NeumorphismFormItem } from '@echolab-auto/ui-frame/components/NeumorphismForm';
 import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
-import NeumorphismSegmented from '@echolab-auto/ui-frame/components/NeumorphismSegmented';
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
 import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwitch';
 import NeumorphismTable from '@echolab-auto/ui-frame/components/NeumorphismTable';
@@ -30,8 +29,7 @@ import {
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
-import type { LoopMode, TeamInfo } from '../protocol';
-import { applyMode, deriveMode } from '../loop-mode';
+import type { TeamInfo } from '../protocol';
 
 // ⚠️ Boolean prop 未传时 Vue 会铸成 false（resolvePropValue 的布尔铸型）——
 // 「缺省 = 打开」必须走 withDefaults 显式声明，否则外壳永远不渲染。
@@ -267,13 +265,6 @@ const CAP_SECTIONS = [
 const openSections = ref<string[]>(CAP_SECTIONS.map((s) => s.key));
 
 
-// ── 循环模式分段单选（互斥循环插件，写入 enabled_plugins 白名单） ──
-const MODE_OPTIONS = [
-  { label: '单会话（默认）', value: 'single' },
-  { label: '并行多会话', value: 'parallel' },
-];
-const loopMode = computed(() => deriveMode(enabledPlugins.value));
-
 /** API 供应商选项（全局供应商池 + 跟随全局默认） */
 const apiProviderOptions = computed(() => {
   const profiles = state.api?.profiles ?? [];
@@ -288,13 +279,6 @@ const apiProviderOptions = computed(() => {
   }
   return opts;
 });
-function setLoopMode(value: string | number | (string | number)[] | undefined) {
-  enabledPlugins.value = applyMode(
-    enabledPlugins.value,
-    String(value ?? 'single') as LoopMode,
-    state.plugins.map((p) => p.id),
-  );
-}
 
 function save() {
   if (!name.value.trim()) return;
@@ -387,19 +371,6 @@ function save() {
             :options="apiProviderOptions"
             size="small"
             @update:model-value="apiProfile = String($event ?? '')"
-          />
-        </div>
-
-        <div class="agent-config__group">
-          <div class="agent-config__group-title">循环模式</div>
-          <p class="muted agent-config__hint">
-            单会话 = 同一会话的 turn 串行排队、无会话管理 UI（默认）；并行多会话 = 同一会话可并发分支、显示会话列表 / 全局会话 / 可见回执分支。另启一个会话即另一条并行通道。
-          </p>
-          <NeumorphismSegmented
-            :model-value="loopMode"
-            :options="MODE_OPTIONS"
-            size="small"
-            @update:model-value="setLoopMode"
           />
         </div>
 

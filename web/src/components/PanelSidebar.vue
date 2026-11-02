@@ -1,6 +1,6 @@
 <script setup lang="ts">
 //! 边栏卡片栈（chat-rail 内容；左右两列共用同一组件，`side` 区分）：
-//! 连接状态 / 文件浏览器 / Git 状态 / Shell / 临时分支，上下排列
+//! 连接状态 / 文件浏览器 / Git 状态 / Shell，上下排列
 //! （RailStack：折叠为横条、分隔条拖动调整上下空间、卡片可拖到另一列，均持久化）。
 //!
 //! 卡片门控（与所在列无关）：
@@ -8,7 +8,6 @@
 //! - 文件浏览器：workspace 插件可用且有激活会话（内容跟随激活会话）
 //! - Git 状态：同上（同一工作区会话；2026-10 从「工作区会话管理」面板提出）
 //! - Shell：常驻（与 LLM 工具共用同一会话体系）
-//! - 临时分支：仅并行多会话模式（单会话模式 Core 不发 ReplyBranch*）
 //!
 //! 布局（哪张卡在哪一列、列内顺序）由 `rail-layout.ts` 持有并持久化——
 //! 门控只决定「是否渲染」，不决定「放哪里」（用户拖动过的位置不因门控
@@ -16,7 +15,6 @@
 
 import { computed } from 'vue';
 import { lazy } from '../lazy';
-import { state } from '../store';
 import { railCardsFor, workspaceCardFor } from '../rail-cards';
 import type { RailSide } from '../rail-layout';
 import RailStack, { type RailCardDef } from './RailStack.vue';
@@ -30,7 +28,6 @@ const ShellList = lazy(() => import('./ShellList.vue'), 'ShellList');
 
 const props = withDefaults(
   defineProps<{
-    activeBranchId: string | null;
     teamId: string | null;
     /** 本列所在侧（决定渲染哪些卡片、以及「移到另一侧」的方向）。 */
     side: RailSide;
@@ -59,10 +56,7 @@ const cards = computed<RailCardDef[]>(() => railCardsFor(props.side, props.teamI
 /** 文件浏览器卡当前绑定的工作区会话（模板里传给 WorkspaceFileBrowser）。 */
 const workspaceCard = computed(() => workspaceCardFor(props.teamId));
 
-function truncateTask(task: string): string {
-  const oneLine = task.replace(/\s+/g, ' ').trim();
-  return oneLine.length > 24 ? oneLine.slice(0, 24) + '…' : oneLine;
-}
+
 </script>
 
 <template>
@@ -93,24 +87,6 @@ function truncateTask(task: string): string {
     </template>
     <template #shell>
       <ShellList :team-id="teamId" @open-detail="(id, core) => emit('openShellDetail', id, core)" />
-    </template>
-    <template #branches>
-      <div v-if="Object.keys(state.branchTabs).length === 0" class="muted">
-        （无运行中的分支）
-      </div>
-      <div
-        v-for="branchId in Object.keys(state.branchTabs)"
-        :key="branchId"
-        class="branch-tab"
-        :class="{ active: activeBranchId === branchId }"
-        title="点击查看分支执行过程"
-        @click="emit('selectBranch', branchId)"
-      >
-        <span class="branch-tab-spinner" />
-        <span class="branch-tab-task">
-          {{ truncateTask(state.branchTabs[branchId].task) }}
-        </span>
-      </div>
     </template>
   </RailStack>
 </template>

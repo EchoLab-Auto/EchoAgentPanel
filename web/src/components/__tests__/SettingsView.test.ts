@@ -27,7 +27,6 @@ function seed() {
       enabled_plugins: ['echo-agent.tools.builtin'],
       enabled_tools: [],
       enabled_skills: ['coding'],
-      loop_mode: 'single',
     },
     {
       id: 'base',

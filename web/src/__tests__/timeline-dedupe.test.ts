@@ -49,7 +49,6 @@ beforeEach(() => {
   state.teams = [team(TEAM)];
   state.activeTeamId = TEAM;
   state.activeRegion = null;
-  state.branchTabs = {};
   state.sessionHistory = {};
   state.teamTimelines = {};
   state.trunkTeamId = null;

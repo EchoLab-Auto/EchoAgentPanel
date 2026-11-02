@@ -1,7 +1,7 @@
 //! 边栏卡片栈契约（RailStack，2026-09-19；2026-09-24 起左右两列 + 拖动换列）。
 //!
 //! 卡片：连接状态（常驻，紧凑卡）/ 文件浏览器（workspace 插件 + 激活会话时）/
-//! Shell（常驻）/ 临时分支（并行模式）。卡片可折叠为横条；分隔条拖动调整
+//! Shell（常驻）。卡片可折叠为横条；分隔条拖动调整
 //! 上下空间；卡片可在两列之间拖动（`side` + rail-layout）。
 //! 本测试锁定：卡片门控、列归属与换列、折叠行为、分隔条结构、会话切换卡不回流。
 
@@ -72,10 +72,9 @@ describe('PanelSidebar（边栏卡片栈）', () => {
   beforeEach(() => {
     localStorage.clear();
     resetRailLayout();
-    state.teams = [team({ loop_mode: 'single' })];
+    state.teams = [team({})];
     state.activeTeamId = 'alix';
     state.sessions = [session({})];
-    state.branchTabs = {};
     state.shellSessions = [];
     state.connected = true;
     state.workspaceSessions = [];
@@ -84,12 +83,11 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.workspaceGitBySession = {};
   });
 
-  it('卡片顺序与门控：连接状态置顶常驻、Shell 常驻（在文件浏览器下方）、临时分支仅并行模式、无激活工作区时无文件浏览器卡', async () => {
+  it('卡片顺序与门控：连接状态置顶常驻、Shell 常驻（在文件浏览器下方）、无激活工作区时无文件浏览器卡', async () => {
     const wrapper = await mountSidebar();
     const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
     expect(titles[0]).toContain('连接状态');
     expect(titles.some((t) => t.startsWith('Shell'))).toBe(true);
-    expect(titles.some((t) => t.includes('临时分支'))).toBe(false);
     expect(titles.some((t) => t.includes('文件浏览器'))).toBe(false);
   });
 
@@ -185,13 +183,6 @@ describe('PanelSidebar（边栏卡片栈）', () => {
       .find((t) => t.text().includes('Git'))!;
     expect(gitTitle.text()).toContain('10');
     state.workspaceGitBySession = {};
-  });
-
-  it('并行多会话模式：临时分支卡出现在栈尾', async () => {
-    state.teams = [team({ loop_mode: 'parallel' })];
-    const wrapper = await mountSidebar();
-    const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
-    expect(titles[titles.length - 1]).toContain('临时分支');
   });
 
   it('卡片可折叠为横条：点卡头收起内容（折叠态持久化）', async () => {

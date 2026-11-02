@@ -91,7 +91,6 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
       '.nm-textarea', // 系统提示词
       '.nm-switch', // 启用
       '.nm-select', // API 供应商
-      '.nm-segmented', // 循环模式
       '.nm-divider', // 分组分隔
     ]) {
       expect(wrapper.find(`.agent-config ${cls}`).exists(), `缺少 ${cls}`).toBe(true);

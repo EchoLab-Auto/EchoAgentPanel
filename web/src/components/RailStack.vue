@@ -466,7 +466,7 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
     </div>
     <!-- 空列且未拖动：空态占位（2026-10）。列的存在性由「登记卡片」决定
          （见 ChatView 的 leftRailVisible / rail-cards 的 railRegistered），
-         卡片门控因异步状态（workspace / loopMode / teams）暂时藏起全部卡片
+         卡片门控因异步状态（workspace / teams）暂时藏起全部卡片
          时**列仍在**——这里给出可见空态，避免一片空白让人以为边栏坏了。 -->
     <div v-else-if="isEmpty" class="rail-stack__empty-hint">
       <span class="rail-stack__empty-hint-title">当前无可用卡片</span>

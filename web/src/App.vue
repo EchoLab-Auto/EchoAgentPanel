@@ -14,7 +14,6 @@ import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';
 import { requestActiveRegionManagement, requestTimeline, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
-import { loopModeOf } from './protocol';
 import { currentTeam, teamPluginEnabled } from './capabilities';
 import {
   LOCAL_DEFAULT_SESSION,
@@ -27,11 +26,10 @@ import {
 import ChatView from './components/ChatView.vue';
 import CompactionIndicator from './components/CompactionIndicator.vue';
 // 首屏瘦身（2026-10 审计修复）：设置视图（3400+ 行，含 5 个子设置页）、
-// Shell 详情与分支弹窗改为按需加载——不进聊天首屏的代码不进首包，
+// Shell 详情改为按需加载——不进聊天首屏的代码不进首包，
 // vite 自动按 import() 边界分包。
 const SettingsView = lazy(() => import('./components/SettingsView.vue'), 'SettingsView');
 const ShellPanel = lazy(() => import('./components/ShellPanel.vue'), 'ShellPanel');
-const BranchModal = lazy(() => import('./components/BranchModal.vue'), 'BranchModal');
 import FullscreenToggleButton from './components/FullscreenToggleButton.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
@@ -186,7 +184,6 @@ function onTeamSelect(next: string | null, core?: string | null) {
   applyActiveTeam(next, resolved);
   // 分支 tab 属于上一个 agent 的运行期状态：切换后清空，避免在
   // 未启用回执分支的 agent（侧边栏无分支卡）下残留/串显。
-  state.branchTabs = {};
   // 切换 Team = 切换记忆（会话隔离）。
   // 1) 有缓存：立刻用缓存渲染（消除白屏/网络等待），再后台增量拉取；
   // 2) 无缓存：全量拉取（先清空避免串显上一 agent 内容）。
@@ -217,11 +214,11 @@ function setView(next: View) {
   }
 }
 
-// 当前对话目标会话；'global' = 全局上下文（显示全部消息）。默认 local user 会话。
-const activeSessionId = ref(readTabOnly(SESSION_KEY) ?? 'local:tui::local_user');
+// 当前对话目标会话。旧版聚合视图（global）已随并行模式移除，旧偏好统一回落默认会话。
+const savedSession = readTabOnly(SESSION_KEY);
+const activeSessionId = ref(savedSession && savedSession !== 'global' ? savedSession : 'local:tui::local_user');
 /** 侧栏卡片读它来决定"文件浏览器绑哪个工作区"（per-window，非全局 active）。 */
 railSessionId.value = activeSessionId.value;
-const activeBranchId = ref<string | null>(null);
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
 // 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
 const activeTeamId = ref<string | null>(loadActiveTeam());
@@ -502,22 +499,6 @@ watch(
   { immediate: true },
 );
 
-// ── 全局会话被禁用兜底：当前 agent 非并行多会话模式时若停留在 global 则回退 local ──
-watch(
-  [() => state.teams, () => activeTeamId.value],
-  () => {
-    const team = currentTeam(state);
-    if (activeSessionId.value === 'global' && team && loopModeOf(team) !== 'parallel') {
-      // 落点必须是**中立的默认本地会话**（2026-10 多窗口三次修复）：
-      // `localLanding()` 读的是 per-persona 全局 `workspaceActive`——另一个
-      // 窗口（或模型 use 工具）刚激活哪个工作区，这里就会把本窗口带过去。
-      // 本 watcher 由 `state.teams` 的任何变动触发（TeamsList 广播 = 全窗口
-      // 都会收到），所以它是一条真实的跨窗口串台路径。
-      selectSession(LOCAL_DEFAULT_SESSION, 'global-fallback');
-    }
-  },
-);
-
 // ── Team 兜底：无选中或选中项已删除时，选列表首个并持久化 ──
 // 去主智能体（2026-09）：没有"默认/主 agent"；`activeTeamId` 始终指向一个
 // 具体智能体（首次连接取列表首个，纯客户端初始选择）。
@@ -726,12 +707,10 @@ watch(
             v-if="view === 'chat'"
             :session-id="activeSessionId"
             :active-team-id="activeTeamId"
-            :active-branch-id="activeBranchId"
             @send="send"
             @cancel="cancelWork"
             @select-team="onTeamSelect"
             @select-session="onSessionPick"
-            @select-branch="(id) => (activeBranchId = id)"
             @open-shell-detail="openShellDetail"
           />
         </KeepAlive>
@@ -762,11 +741,6 @@ watch(
       </div>
     </NeumorphismLayout>
 
-    <BranchModal
-      v-if="activeBranchId"
-      :branch-id="activeBranchId"
-      @close="activeBranchId = null"
-    />
     <!-- 移动端 toast 位置：窄屏改 top-center（右上角贴近拇指操作区易误触遮挡），
          桌面维持 top-right。position 是库的响应式 prop，旋转/拉伸实时跟随。 -->
     <NeumorphismToastProvider
