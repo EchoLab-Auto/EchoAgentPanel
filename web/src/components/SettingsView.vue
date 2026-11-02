@@ -56,7 +56,8 @@ import LoadHint from './LoadHint.vue';
 import type { LoopMode, PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { loopModeOf } from '../protocol';
 import { applyMode, deriveMode } from '../loop-mode';
-import { MarkdownRenderer } from '@echolab-auto/ui-frame/doc';
+import { MarkdownRenderer, DocFlowCanvas } from '@echolab-auto/ui-frame/doc';
+import { buildPluginDependencyGraph } from '../plugin-deps';
 // 子设置页按需加载（2026-10 审计修复）：五个子页约 2300 行（含 LogView
 // 挂载即开始的 5s 轮询），此前全随设置视图进首包；改为首次切入对应
 // 分类时才加载（vite 对每个 import() 自动分包）。
@@ -765,6 +766,12 @@ const pluginCatalog = computed(() => {
   // 多来源且该节点还没推数据 → 空列表（绝不回退，否则串显别个节点）。
   return [];
 });
+
+/** 插件工作区的展示形态：列表（默认）/ 依赖树。 */
+const pluginViewMode = ref<'list' | 'deps'>('list');
+
+/** 当前节点的插件依赖图（宿主服务表 → 插件 → 插件）。 */
+const pluginDepGraph = computed(() => buildPluginDependencyGraph(pluginCatalog.value));
 
 const PLUGIN_FILTERS: { key: PluginFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -2144,6 +2151,12 @@ watch(
           size="small"
           aria-label="分组维度"
         />
+        <NeumorphismSegmented
+          v-model="pluginViewMode"
+          :options="[{ label: '列表', value: 'list' }, { label: '依赖树', value: 'deps' }]"
+          size="small"
+          aria-label="展示形态"
+        />
       </div>
 
       <!-- API 工作区：整页表单（无条目列表） -->
@@ -2343,7 +2356,7 @@ watch(
           </template>
 
           <!-- 插件：工作台分组（门控语义 / kind / 平铺）+ 双行行卡 -->
-          <template v-else-if="activeCategory === 'plugin'">
+          <template v-else-if="activeCategory === 'plugin' && pluginViewMode === 'list'">
             <LoadHint :phase="pluginPhase" label="插件清单" @retry="refreshPlugins" />
             <div v-for="g in pluginWorkbenchGroups" :key="g.key" class="caps-list-group">
               <div class="caps-list-group__head" @click="toggleGroup('plugin:' + g.key)">
@@ -2465,6 +2478,17 @@ watch(
               >
                 清除筛选
               </NeumorphismButton>
+            </div>
+          </template>
+
+          <!-- 插件：依赖树（宿主服务表 → 插件 → 插件），与列表互斥 -->
+          <template v-else-if="activeCategory === 'plugin' && pluginViewMode === 'deps'">
+            <div class="plugin-deps-view">
+              <div class="plugin-deps-view__hint">
+                从左到右 = 从被依赖到依赖方。菱形 = 已禁用/装配失败。
+                边上的文字是被消费的服务键（`echo-agent.` 前缀省略）。
+              </div>
+              <DocFlowCanvas :graph="pluginDepGraph" height="520px" />
             </div>
           </template>
 
@@ -4333,6 +4357,22 @@ watch(
   font-size: 12px;
   line-height: 1.4;
   white-space: normal;
+}
+
+/* 插件依赖树视图：占满列表区，顶部一行读图说明 */
+.plugin-deps-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  min-height: 0;
+  height: 100%;
+}
+.plugin-deps-view__hint {
+  font-size: 11.5px;
+  color: var(--nm-text-secondary);
+  line-height: 1.5;
+  flex-shrink: 0;
 }
 
 /* 插件详情：成员 chips（点击跳转到工具/技能分类并选中） */

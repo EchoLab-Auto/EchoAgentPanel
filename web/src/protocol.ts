@@ -407,6 +407,14 @@ export interface PluginInfo {
    * 不发该字段，故为可选。
    */
   required_services?: string[];
+  /**
+   * 本插件**提供**的服务键（`Ctx::provide` 注册进服务表的键）。
+   *
+   * 依赖树的另一半：`required_services` 是"我需要谁"，`provides_services`
+   * 是"我贡献了什么"。大多数插件不提供任何服务（只消费宿主接缝），
+   * 字段为空。旧 Core 不发该字段 = 空数组。
+   */
+  provides_services?: string[];
   /** 本插件的**软依赖**（`Inject::optional`；缺失不阻止挂载）。 */
   optional_services?: string[];
   /**
