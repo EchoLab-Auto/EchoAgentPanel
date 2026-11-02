@@ -205,6 +205,19 @@ const timeLabel = computed(() => {
   font-size: inherit;
 }
 
+/* ── 移动端（<768px）：气泡正文字号降一档（2026-10-29 用户反馈「手机上字太大」）
+   桌面正文 13px（`--nm-font-md`）。注意 agent 消息走 Markdown 渲染器，其
+   `.neumorphism-markdown-content` **自带** 15px（`--nm-font-lg`），不继承外层
+   `.msg-item__content` —— 只压外层的话手机上 agent 气泡仍是 15px，故必须
+   `:deep` 单独压一档。移动端口径：纯文本 12px、Markdown 13px，与桌面同档差。 */
+@media (max-width: 767.98px) {
+  .msg-item__content {
+    font-size: var(--nm-font-sm);
+  }
+  .msg-item__content :deep(.neumorphism-markdown-content) {
+    font-size: var(--nm-font-md);
+  }
+}
 /* Markdown 标题锚点（doc 模块的 `#` 链接）在聊天气泡里没有目录导航语义，
    且其绝对定位（标题右缘 -22px）会撑出气泡的横向 scrollWidth（实测 22px，
    气泡贴边时视觉上探出边缘）；气泡内直接隐藏。 */
