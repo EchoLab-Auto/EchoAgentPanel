@@ -164,6 +164,15 @@ export const PLUGIN_KIND_LABELS: Record<string, string> = {
   session: '会话',
   management: '管理面',
   interaction: '交互',
+  /** Core↔Core 对等链路（2026-11 之前就漏了这个标签——`plugins.md` 早就
+   *  提醒过「新增 kind 时要记得同步它」，实测漏了两轮）。 */
+  federation: '联邦',
+  /** 安全能力（脱敏）：人格关不掉的进程级不变量。 */
+  security: '安全',
+  /** 运行地基（2026-11 取消「中间层 / 插件」二分）：词汇 / 线契约 /
+   *  注册表 / 事件日志 / 配置存储 / 循环驱动。**不可禁用**——Core 侧写
+   *  `enabled = false` 会让启动失败并点名。 */
+  kernel: '运行地基',
 };
 /** 工具是否被包级插件禁用（内置工具集关闭时全部工具不可用） */
 function toolPackageDisabled(team: TeamInfo | null | undefined): boolean {

@@ -147,7 +147,7 @@ describe('包维度门控插件清单（单一来源）', () => {
 
   it('插件 kind 中文显示名覆盖 Core PluginKind 全部 wire 名（含 interaction=交互）', () => {
     // Core 端 echo-plugin::PluginKind 的 as_str 全集（新增 kind 必须同步标签）。
-    const kinds = ['skill', 'tool', 'provider', 'loop', 'instance', 'orchestration', 'management', 'interaction'];
+    const kinds = ['skill', 'tool', 'provider', 'loop', 'instance', 'orchestration', 'management', 'interaction', 'session', 'federation', 'security', 'kernel'];
     for (const kind of kinds) {
       expect(PLUGIN_KIND_LABELS[kind], `缺少 kind 显示名: ${kind}`).toBeTruthy();
     }
