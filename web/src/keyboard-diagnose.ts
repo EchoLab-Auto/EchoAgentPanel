@@ -49,6 +49,82 @@ function num(n: number | undefined | null, digits = 1): string {
   return n.toFixed(digits)
 }
 
+/** 完整快照（发给后端 /api/diag 用，字段比浮层多得多）。 */
+function snapshot(): Record<string, unknown> {
+  const vv = window.visualViewport
+  const root = document.querySelector<HTMLElement>('.chat-view')
+  const composer = document.querySelector<HTMLElement>('.chat-composer-float')
+  const field = document.querySelector<HTMLElement>('.nm-textarea__field')
+  const rootRect = root?.getBoundingClientRect()
+  const composerRect = composer?.getBoundingClientRect()
+  const cs = composer ? getComputedStyle(composer) : null
+  const rootCs = root ? getComputedStyle(root) : null
+
+  return {
+    // 视口三件套（判「键盘有没有被检测到」）
+    innerHeight: window.innerHeight,
+    vvHeight: vv?.height ?? null,
+    vvOffsetTop: vv?.offsetTop ?? null,
+    vvPageTop: vv?.pageTop ?? null,
+    vvScale: vv?.scale ?? null,
+    // 事件计数（判「事件路径是不是死的」）
+    vvEvents: { ...vvEvents },
+    // 容器：rect + 关键 computed（判「包含块是不是它」）
+    rootRect: rootRect
+      ? { top: rootRect.top, bottom: rootRect.bottom, height: rootRect.height }
+      : null,
+    rootPosition: rootCs?.position ?? null,
+    rootPaddingBottom: rootCs?.paddingBottom ?? null,
+    rootTransform: rootCs?.transform ?? null,
+    rootOverflowY: rootCs?.overflowY ?? null,
+    // 卡片：rect + **computed bottom**（这是判定「变量有没有生效」的铁证）
+    composerRect: composerRect
+      ? { top: composerRect.top, bottom: composerRect.bottom, height: composerRect.height }
+      : null,
+    composerBottom: cs?.bottom ?? null, // used value：468px 表示变量生效，11.7px 表示没生效
+    composerPosition: cs?.position ?? null,
+    composerInsetBlockEnd: cs?.getPropertyValue('inset-block-end')?.trim() ?? null,
+    // 内联变量（JS 写入的绝对值）
+    inlineBottomPx: composer?.style.getPropertyValue('--composer-bottom-px') ?? null,
+    inlineClip: (composer?.style.getPropertyValue('--composer-clip') ?? '').slice(0, 24),
+    // 作用域变量
+    varBottomGap: cs?.getPropertyValue('--composer-bottom-gap')?.trim() ?? null,
+    varControlH: cs?.getPropertyValue('--chat-control-h')?.trim() ?? null,
+    varKeyboardClass: composer?.className.includes('--keyboard') ?? false,
+    // 页级
+    appH: getComputedStyle(document.documentElement).getPropertyValue('--app-h').trim(),
+    scrollY: window.scrollY,
+    docScrollTop: document.documentElement.scrollTop,
+    bodyScrollTop: document.body.scrollTop,
+    activeIsField: !!field && document.activeElement === field,
+    dpr: window.devicePixelRatio,
+    ua: navigator.userAgent,
+  }
+}
+
+/**
+ * 把快照 POST 给 Panel（`/api/diag`，豁免认证）。仅在 ?diag 模式下调用。
+ *
+ * 为什么需要：真机上没法开 DevTools，而这类问题至少要 20 个字段才能定位。
+ * 让用户口述两三个数字，每缺一个就多跑一轮，代价太高。直接打上来，
+ * 排查者在本机 tail 文件即可。失败静默（诊断不该影响主流程）。
+ */
+let postBudget = 60
+function postSnapshot(): void {
+  if (postBudget <= 0) return
+  postBudget -= 1
+  try {
+    void fetch('/api/diag', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(snapshot()),
+      keepalive: true,
+    }).catch(() => {})
+  } catch {
+    /* 忽略 */
+  }
+}
+
 function collect(): Sample[] {
   const vv = window.visualViewport
   const root = document.querySelector<HTMLElement>('.chat-view')
@@ -83,9 +159,16 @@ function collect(): Sample[] {
     { label: 'view 高', value: num(containerH, 0), warn: containerShrunk },
     { label: '卡片 bottom', value: num(composerRect?.bottom, 0) },
     {
-      // JS 写入的绝对值 bottom（键盘态的单一事实来源）；空 = 走 CSS 公式
+      // JS 写入的绝对值；空 = 没写
       label: 'bottom-px',
       value: composer?.style.getPropertyValue('--composer-bottom-px').trim() || '（未写）',
+    },
+    {
+      // **实际生效的** bottom（used value）。与上一行不等 = 变量被覆盖/未解析；
+      // 等于 11.7px(3vw) = 完全没走键盘口径。
+      label: 'bottom(生效)',
+      value: composer ? getComputedStyle(composer).bottom : '—',
+      warn: !!composer && getComputedStyle(composer).bottom === 'auto',
     },
     { label: '目标 bottom', value: num(target, 0) },
     {
@@ -142,6 +225,11 @@ function mount(): void {
   render()
   // 键盘动画几百毫秒，单次采样会漏中间态；固定节拍连采
   setInterval(render, 400)
+  // 同时把完整快照打回后端（节流 500ms，总共 60 条上限）。
+  // 排查者本机 `tail -f /tmp/panel-keyboard-diag.jsonl` 就能看到全过程，
+  // 不需要用户口述任何数字。
+  postSnapshot()
+  setInterval(postSnapshot, 500)
   window.addEventListener('resize', render)
   window.addEventListener('orientationchange', render)
   window.visualViewport?.addEventListener('resize', render)

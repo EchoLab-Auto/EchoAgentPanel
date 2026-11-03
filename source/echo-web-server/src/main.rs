@@ -177,6 +177,15 @@ async fn main() -> Result<()> {
         // 无 /api/qq/* 路由。
         .route("/api/logs/panel", get(log::panel_logs))
         .route("/api/logs/core", get(log::core_logs))
+        // 前端诊断回传（2026-11，仅 ?diag 模式调用）：真机键盘问题只能靠
+        // 把完整快照打上来排查，口述两三个数字效率太低。挂在这里而非
+        // route_layer 之后 —— 要豁免 Bearer 认证，手机才能直接打上来。
+        .route(
+            "/api/diag",
+            get(echo_web_server::diag::get_diag)
+                .post(echo_web_server::diag::post_diag)
+                .delete(echo_web_server::diag::clear_diag),
+        )
         .merge(echo_web_server::upstreams_api::routes())
         // Bearer 认证（token 非空时；静态前端豁免以加载登录页）。
         .route_layer(axum::middleware::from_fn_with_state(

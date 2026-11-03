@@ -3166,6 +3166,14 @@ function mediaSrc(img: string): string {
      左右留白保持不变（卡片宽度不跳变），只是底部不再等间隙。 */
   .chat-composer-float--keyboard {
     --composer-bottom-gap: 0px;
+    /* 兜底：无论 JS 算成什么，卡片都不得越过容器顶部（2026-11）。
+       `bottom > 100% − 卡片高` 意味着卡片要跑出容器上沿；这里用保守的
+       91px（静止卡片高）封顶。正常值远小于它，不受影响；只有算错时才生效，
+       效果是「卡片贴住容器顶」，不会整块飞走。 */
+    bottom: min(
+      var(--composer-bottom-px, calc(var(--composer-bottom-gap, 0px) + v-bind(keyboardInsetPx))),
+      calc(100% - 91px)
+    );
   }
   /* 打字面字号 = `--chat-field-font`（单一事实来源，别再抄一个 16px）。
      历史教训：上一版把 16px 硬编码在这里当 iOS 防缩放对策，于是「改字号」
