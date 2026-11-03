@@ -247,6 +247,9 @@ watch(
 const composerFloatRef = ref<HTMLElement | null>(null);
 const entryBottom = ref('170px');
 let ctxObserver: ResizeObserver | null = null;
+/** 观察 `.chat-view` 自身高度：容器一变矮（--app-h 被改写 / 浏览器压缩布局
+ *  视口），键盘抬升量必须重算，否则旧的 inset 会叠加在矮容器里把输入区顶飞。 */
+let rootObserver: ResizeObserver | null = null;
 
 /**
  * 输入区轮廓（clip-path）—— 移动端贴合设备屏幕角用。
@@ -325,7 +328,7 @@ function updateComposerClip() {
   // 键盘上沿，那对大圆角失去了贴合对象，反而在两侧各切出一块三角缺口，
   // 露出底色 —— 观感比不做贴角更差。键盘态下没有任何屏幕角可贴，
   // 交给库的 squircle 常规圆角（`--composer-radius` 24px）。
-  if (keyboardInset.value > 0) {
+  if (keyboardVisible.value) {
     composerClip.value = 'none';
     composerCornerR.value = '';
     return;
@@ -375,14 +378,60 @@ const composerStyle = computed(() => ({
  */
 const keyboardInset = ref(0);
 const keyboardInsetPx = computed(() => `${keyboardInset.value}px`);
+/**
+ * 「键盘占用着屏幕底部吗」——与 `keyboardInset` **分开**的两件事。
+ *
+ * keyboardInset 是「我们要主动抬多少」，它会被容器已压缩的情况压成 0；
+ * keyboardVisible 是「屏幕下角还在不在」的事实判断。底部留白归零与
+ * 贴角轮廓退回常规圆角都该看后者 —— 否则一旦容器被浏览器压矮
+ * （inset 归 0），卡片又会退回「等间隙 + 贴屏幕圆角」，于是
+ * 键盘上沿之上重新出现那条 3vw 的灰带、两侧还各多一个三角缺口。
+ */
+const keyboardVisible = ref(false);
 let visualViewport: VisualViewport | null = null;
 function updateKeyboardInset() {
   if (!visualViewport) return;
-  const inset = Math.round(
+
+  // 「可视视口被压掉多少」——布局视口坐标。这是**抬升的原始需求**。
+  const hidden = Math.round(
     window.innerHeight - visualViewport.height - visualViewport.offsetTop,
   );
-  const next = inset > 80 ? inset : 0;
-  if (next === keyboardInset.value) return;
+
+  // 但「需要抬多少」还取决于**容器自己有没有已经被压矮**。
+  //
+  // 两种浏览器行为：
+  //   A. resizes-visual（iOS Safari / Android Chrome 默认）：布局视口
+  //      innerHeight **不变**，键盘只压视觉视口 → 必须自己抬 hidden。
+  //   B. resizes-content（部分 WebView / 非默认配置）：布局视口本身被压矮，
+  //      `--app-h` 跟着变小、`#app` 真的矮了 → 此时 hidden 也≈0，不该再抬。
+  //
+  // A、B 用同一个公式 hidden 就能各自得到正确值 —— **前提是 `--app-h`
+  // 与 innerHeight 始终同步**。而它们会不同步：index.html 的 setAppHeight
+  // 挂在裸 `window.resize` 上，键盘弹出瞬间 innerHeight 可能先变小一次，
+  // 把它写成 508 后就不再复原（没有后续 resize 事件）。此时
+  //   容器只有 508 高，hidden 仍按 innerHeight=844 算出 336，
+  //   两者相加把卡片顶到距屏幕顶 81px 的位置 —— 用户报的
+  //   「整个输入区都在屏幕最上方」。
+  //
+  // 所以先问一句：**容器已经比布局视口矮一截了吗？**
+  //   是 → 键盘已经被布局吃掉，不要再抬（这一条也让 --app-h 写坏时自愈）；
+  //   否 → 按 hidden 抬，并用容器高封顶，保证任何情况下卡片都不会越过顶部。
+  // 事实：键盘在不在（与「要不要抬」解耦，见 keyboardVisible 注释）
+  const visibleChanged = keyboardVisible.value !== hidden > 80;
+  keyboardVisible.value = hidden > 80;
+
+  const root = viewRootRef.value;
+  const containerH = root?.getBoundingClientRect().height ?? window.innerHeight;
+  const containerShrunk = containerH < window.innerHeight - 80;
+
+  // 静止卡片高 ~91px；留 48px 顶部呼吸 → 最多抬到「卡片上沿离顶 48px」。
+  const maxLift = Math.max(0, Math.round(containerH - 91 - 48));
+  const next = containerShrunk || hidden <= 80 ? 0 : Math.min(hidden, maxLift);
+
+  // early return 必须把 visibleChanged 也算进来：容器被压缩时 next 会从
+  // 336 掉回 0，键盘收起时 next 仍是 0 —— 只看 next 会漏掉「贴角轮廓该恢复」
+  // 这一次重算，卡片就会一直停在常规圆角上。
+  if (next === keyboardInset.value && !visibleChanged) return;
   keyboardInset.value = next;
   // 键盘开合改变「要不要贴屏角」：屏幕下角已经不在可视区，轮廓必须重算
   // （updateComposerClip 内部会据 keyboardInset 退回常规圆角）。
@@ -420,9 +469,23 @@ onMounted(() => {
     updateComposerClip();
   });
   ctxObserver.observe(target);
+
+  // 容器高度变化 → 重算键盘抬升（2026-11 用户报「输入区跑到屏幕最上方」）。
+  //
+  // 事故链：`--app-h` 被写成键盘态高度（508）→ `.chat-view` 只剩 452 高，
+  // 但 keyboardInset 仍停在上一轮算出的 336（那是按 844 高容器算的），
+  // 两者叠加 → 卡片 top 落到距屏幕顶 81px。只靠 visualViewport 的
+  // resize/scroll 事件救不回来：`--app-h` 的变化不产生这两个事件。
+  // 容器高度变化是「--app-h 被改」最直接的信号，观察它最可靠。
+  if (viewRootRef.value) {
+    rootObserver = new ResizeObserver(() => updateKeyboardInset());
+    rootObserver.observe(viewRootRef.value);
+  }
 });
 onBeforeUnmount(() => {
   ctxObserver?.disconnect();
+  rootObserver?.disconnect();
+  rootObserver = null;
   document.removeEventListener('selectionchange', onSelectionChange);
   if (visualViewport) {
     visualViewport.removeEventListener('resize', updateKeyboardInset);
@@ -1825,7 +1888,7 @@ function mediaSrc(img: string): string {
         'chat-composer-float--busy': composerBusy,
         'chat-composer-float--clipped': composerClip !== 'none',
         // 键盘抬起 = 屏幕下角让位给键盘，底部留白随之归零（见 --composer-bottom-gap）
-        'chat-composer-float--keyboard': keyboardInset > 0,
+        'chat-composer-float--keyboard': keyboardVisible,
       }"
       :style="composerStyle"
       @focusin="onComposerFocus"
@@ -2937,7 +3000,10 @@ function mediaSrc(img: string): string {
        键盘抬起时归零（见下一条规则）—— 否则卡片下沿停在键盘上沿之上
        3vw（390 宽 = 11.7px）处，中间那条露底的灰带就是用户看到的「输入区
        下方一片灰色」。键盘上没有屏幕角要贴，等间隙在这里没有意义。 */
-    bottom: calc(var(--composer-bottom-gap) + v-bind(keyboardInsetPx));
+    /* fallback 0px 不是装饰：自定义属性缺失时整条 calc 会判为非法值
+       （IACVT），`bottom` 退回 `auto` —— 绝对定位元素于是按 static position
+       落到容器顶部，正是「输入区跑到屏幕最上方」的另一种成因。 */
+    bottom: calc(var(--composer-bottom-gap, 0px) + v-bind(keyboardInsetPx));
   }
 
   /* 键盘抬起：底部留白归零，卡片直接坐在键盘上沿。

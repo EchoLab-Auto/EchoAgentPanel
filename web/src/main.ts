@@ -43,3 +43,14 @@ const globalConfig = {
 app.provide(ConfigKey, computed(() => globalConfig as NeumorphismGlobalConfig));
 
 app.mount('#app');
+
+// 软键盘/视口诊断浮层（2026-11）：仅在 URL 带 `?diag` / `#diag` 时按需加载。
+// 判据**内联**在这里（而不是 import 进来的函数），否则那个 143 行的模块会被
+// 静态依赖拖进主 chunk —— 诊断代码永远不该占用首屏体积。
+// 手机上排查「键盘弹起后界面错位」用它取真实数值，比远程推测各家浏览器的
+// 键盘处理方式可靠。见 keyboard-diagnose.ts。
+const diagWanted =
+  /[?&]diag\b/.test(window.location.search) || /(^|[#&])diag\b/.test(window.location.hash);
+if (diagWanted) {
+  void import('./keyboard-diagnose').then((m) => m.initKeyboardDiagnose());
+}

@@ -79,7 +79,24 @@
         var doc = document.documentElement;
         function setAppHeight() {
           var h = window.innerHeight;
-          if (h > 0) doc.style.setProperty('--app-h', h + 'px');
+          if (h > 0) {
+            // 键盘打开时**不更新**基准（2026-11 修复，用户报「输入区跑到
+            // 屏幕最上方」）。iOS / 部分 Android WebView 在键盘弹出瞬间会让
+            // innerHeight 短暂变小一次，而这个函数是裸挂在 window.resize 上
+            // 的；一旦把 508 写进 --app-h，键盘收起后不会再有 resize 事件把它
+            // 改回 844 —— 界面永久矮一截。与此同时 ChatView 的键盘抬升仍按
+            // 真实 innerHeight（844）算出 336px，两者叠加就把输入区顶到顶部。
+            // 判据：可视视口明显小于布局视口 = 键盘在我们下面。
+            // 对 resizes-content 的浏览器（innerHeight 与 vv 同步变矮）差值≈0，
+            // 仍会正常更新 —— 那条路径本来就该缩。
+            if (
+              window.visualViewport &&
+              window.innerHeight - window.visualViewport.height > 80
+            ) {
+              return;
+            }
+            doc.style.setProperty('--app-h', h + 'px');
+          }
         }
         setAppHeight();
         window.addEventListener('resize', setAppHeight);

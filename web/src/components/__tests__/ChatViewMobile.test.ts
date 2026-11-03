@@ -155,8 +155,10 @@ describe('ChatView 竖屏移动端', () => {
     // 底部间隙单独一个变量（2026-10-29）：默认 = --composer-inset（等间隙），
     // 键盘抬起时 `.chat-composer-float--keyboard` 把它归零 —— 否则卡片下沿停在
     // 键盘上沿之上 3vw，中间那条露底色带就是用户报的「输入区下方一片灰色」。
-    expect(composerRules, '底部间隙走独立变量').toMatch(
-      /bottom: calc\(var\(--composer-bottom-gap\) \+ v-bind\(keyboardInsetPx\)\)/,
+    // 必须有 0px fallback：变量缺失时整条 calc 会被判非法（IACVT），
+    // bottom 退回 auto，绝对定位的输入区会落到容器顶部。
+    expect(composerRules, '底部间隙走独立变量（带 fallback）').toMatch(
+      /bottom: calc\(var\(--composer-bottom-gap,\s*0px\) \+ v-bind\(keyboardInsetPx\)\)/,
     );
     expect(composerRules, '底部间隙默认等于左右留白').toMatch(
       /--composer-bottom-gap:\s*var\(--composer-inset\)/,
