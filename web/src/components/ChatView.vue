@@ -458,65 +458,69 @@ function updateKeyboardInset() {
 }
 
 /**
- * 闭环同步：把输入区底边钉到「可视区底边 = 键盘上沿」。
+ * 把输入区底边**直接摆到**可视区下沿（2026-11 第三版）。
  *
- * 为什么不用纯公式（2026-11，用户报 Safari 上「整个输入区跑到屏幕最上方」）：
+ * 前两版都栽在同一件事上：用一个**累加量**（keyboardInset）去逼近目标。
+ * 累加量有两个致命属性 ——
+ *   ① 没有天然上限：闭环里 `inset + delta` 一旦被错值推动一次就会单调跑飞；
+ *      `maxLift` 只约束公式那条路径，管不住闭环。
+ *   ② 依赖参考系：inset 是「距容器底部多远」，容器本身一变形（--app-h
+ *      被改、Safari 连布局视口一起滚），同一个数值落在完全不同的地方。
  *
- * iOS Safari 在键盘弹出时会**自己滚动 visual viewport**（`offsetTop` 变正）
- * 来保证聚焦元素可见。理想情况下 `hidden = innerHeight − vv.height − vv.offsetTop`
- * 能把这份滚动抵掉；但实测里 Safari 的 `height` 与 `offsetTop` 在键盘动画
- * 期间的报告顺序不确定 —— 先报新 height、offsetTop 还是 0，于是算出 336
- * 抬了一次；随后 Safari 滚动 336，页面又上移一次。**两套机制叠加 = 双倍位移**，
- * 卡片顶到屏幕最上方（实测卡片 top 落到 81px）。而且错误值会被
- * `next === keyboardInset` 的 early-return 固化，之后不再自我修正。
+ * 真机数据（Safari，`vv.height=376`、事件 1/1、**偏差 −688**）：键盘明明
+ * 被检测到、事件也来了，但卡片跑到了可视区**上方之外** —— 累加量跑飞
+ * 叠加参考系漂移，越修越远。
  *
- * 所以改成测量闭环，三个好处：
- *   ① 不依赖 offsetTop/height 的报告时序 —— 只比「我要它去哪」和「它现在在哪」；
- *   ② 自动吸收任何未知机制（Safari 滚布局视口、内部容器滚动、第三方样式改动）；
- *   ③ 收敛后可证明正确：|delta| ≤ 1px。
+ * 所以改成**不累加、不推算**，只做一件事：
  *
- * 坐标系：`getBoundingClientRect()` 与 `vv.offsetTop + vv.height` 都是**布局
- * 视口**坐标，同源可比。目标位置就是可视区下沿。
+ *   CSS `bottom` 的 used value 定义就是「元素底边距包含块底边的距离」，
+ *   于是 `wantBottom = 容器底边 − 目标底边` 就是唯一正确的值 ——
+ *   一次算准，与容器多高、inset 是多少、有没有 clamp 全都无关。
  *
- * 迭代上限 4 轮：每轮改一次 CSS 变量、等一帧、再量。正常情况下 1 轮就收敛。
+ * 允许负数：`bottom: -312px` 会把元素往下推出容器，正是容器已经矮到装不下
+ * 卡片时该做的事（视觉上卡片浮在容器下方、仍在屏幕内）。
+ *
+ * 结果写进内联 `--composer-bottom-px`；CSS 侧 `bottom` 优先用它，否则退回
+ * 原公式（`--composer-bottom-gap + keyboardInset`）。键盘收起时删掉这个变量，
+ * 一切回到原来的等间隙布局。
  */
 function syncComposerToViewport(): void {
   const el = composerFloatRef.value;
+  const root = viewRootRef.value;
   const vv = window.visualViewport;
-  if (!el || !vv) {
+  if (!el || !root) return;
+
+  // 键盘不在：撤掉内联覆盖，回到 CSS 的等间隙口径
+  if (!vv || !keyboardVisible.value) {
     syncRounds = 0;
-    return;
-  }
-  if (!keyboardVisible.value) {
-    // 键盘不在：抬升量必须是 0，否则下次弹出会带着上次的残留
-    syncRounds = 0;
-    if (keyboardInset.value !== 0) keyboardInset.value = 0;
+    if (el.style.getPropertyValue('--composer-bottom-px')) {
+      el.style.removeProperty('--composer-bottom-px');
+    }
     return;
   }
 
-  // iOS Safari 的补充动作：它会连**布局视口**一起滚（哪怕 overflow:hidden）。
-  // 那份滚动已经由闭环吸收，但页面上移本身还带着顶栏一起跑 —— 复位它。
-  // 只在键盘态执行，不影响正常浏览滚动。
-  if (window.scrollY !== 0) {
-    window.scrollTo(0, 0);
-  }
+  // iOS Safari 会连布局视口一起滚（哪怕 overflow:hidden）。那份滚动会让容器
+  // 整体上移、顶栏跑出屏幕；复位它。只在键盘态执行，不影响正常浏览滚动。
+  if (window.scrollY !== 0) window.scrollTo(0, 0);
 
   const targetBottom = vv.offsetTop + vv.height;
-  const rect = el.getBoundingClientRect();
-  const delta = rect.bottom - targetBottom; // >0：卡片还在目标下方，需要继续抬
+  const rootRect = root.getBoundingClientRect();
+  const cardRect = el.getBoundingClientRect();
+  const curBottom = rootRect.bottom - cardRect.bottom; // 当前 CSS bottom 的 used value
+  const wantBottom = rootRect.bottom - targetBottom; // 让卡片底边落在可视区下沿
 
-  if (Math.abs(delta) <= 1 || syncRounds >= 4) {
+  if (Math.abs(curBottom - wantBottom) <= 0.5) {
+    syncRounds = 0;
+    return;
+  }
+  // 兜底：最多连续纠 6 次，防某种反馈环把 rAF 拖成死循环
+  if (syncRounds >= 6) {
     syncRounds = 0;
     return;
   }
   syncRounds += 1;
-
-  const next = Math.max(0, Math.round(keyboardInset.value + delta));
-  if (next === keyboardInset.value) {
-    syncRounds = 0;
-    return;
-  }
-  keyboardInset.value = next;
+  el.style.setProperty('--composer-bottom-px', `${wantBottom.toFixed(2)}px`);
+  // 等一帧再复核：Safari 可能在我们写完后又滚了一下
   requestAnimationFrame(syncComposerToViewport);
 }
 
@@ -3146,10 +3150,16 @@ function mediaSrc(img: string): string {
        键盘抬起时归零（见下一条规则）—— 否则卡片下沿停在键盘上沿之上
        3vw（390 宽 = 11.7px）处，中间那条露底的灰带就是用户看到的「输入区
        下方一片灰色」。键盘上没有屏幕角要贴，等间隙在这里没有意义。 */
-    /* fallback 0px 不是装饰：自定义属性缺失时整条 calc 会判为非法值
+    /* 键盘态由 JS 写入 `--composer-bottom-px`（绝对值，见 syncComposerToViewport），
+       一次算准、与容器高度无关，可为负数；非键盘态没有这个变量，退回
+       「等间隙 + 键盘偏移」的原口径。
+       内层 fallback `0px` 不是装饰：自定义属性缺失时整条 calc 会判为非法值
        （IACVT），`bottom` 退回 `auto` —— 绝对定位元素于是按 static position
-       落到容器顶部，正是「输入区跑到屏幕最上方」的另一种成因。 */
-    bottom: calc(var(--composer-bottom-gap, 0px) + v-bind(keyboardInsetPx));
+       落到容器顶部，这是「输入区跑到屏幕最上方」的另一种成因。 */
+    bottom: var(
+      --composer-bottom-px,
+      calc(var(--composer-bottom-gap, 0px) + v-bind(keyboardInsetPx))
+    );
   }
 
   /* 键盘抬起：底部留白归零，卡片直接坐在键盘上沿。

@@ -82,6 +82,11 @@ function collect(): Sample[] {
     },
     { label: 'view 高', value: num(containerH, 0), warn: containerShrunk },
     { label: '卡片 bottom', value: num(composerRect?.bottom, 0) },
+    {
+      // JS 写入的绝对值 bottom（键盘态的单一事实来源）；空 = 走 CSS 公式
+      label: 'bottom-px',
+      value: composer?.style.getPropertyValue('--composer-bottom-px').trim() || '（未写）',
+    },
     { label: '目标 bottom', value: num(target, 0) },
     {
       // 只在键盘态才要求贴可视区下沿；无键盘时卡片本来就该离底 3vw，
