@@ -184,10 +184,13 @@ function restoreComposerBlurSoon() {
 
 function onComposerFocus() {
   suspendComposerBlur();
+  // 键盘可能弹出：启动轮询测量（不依赖 vv 事件，见 startKeyboardTracking）
+  startKeyboardTracking();
 }
 
 function onComposerBlur() {
   restoreComposerBlurSoon();
+  stopKeyboardTracking();
 }
 
 onBeforeUnmount(() => {
@@ -517,6 +520,67 @@ function syncComposerToViewport(): void {
   requestAnimationFrame(syncComposerToViewport);
 }
 
+/**
+ * 键盘跟踪轮询：不依赖**任何** visualViewport 事件。
+ *
+ * 为什么需要（2026-11 实测推演）：上面的监听全部建立在「键盘弹出会派发
+ * vv.resize / vv.scroll」这个假设上。而 Safari 在本应用这种
+ * `html,body{overflow:hidden}` 的固定视口 SPA 里，有相当大概率
+ * **既不更新 `vv.height`、也不派发事件** —— 因为它认定页面无法滚动，
+ * 把「保证聚焦元素可见」的责任推给页面自己。此时监听器永远收不到通知，
+ * 输入区一动不动被键盘盖住（这正是「这版不行」最可能的形态：
+ * 从「跑到顶部」变成「根本没抬」）。
+ *
+ * 对策：输入框聚焦/触摸时，直接用固定节拍采样 1.6 秒（覆盖 iOS 键盘
+ * 约 250ms 的动画 + Safari 自己滚动的延迟），每拍都跑一次闭环测量。
+ * 有事件也跑（幂等）、没事件也跑 —— 结果不依赖任何时序假设。
+ *
+ * 停止条件：跑满 1.6s 自然停；期间若用户失焦则立刻停。
+ */
+let focusPollId: number | null = null;
+let focusPollStart = 0;
+
+/**
+ * 采样节拍（2026-11 第二轮）：**整个聚焦期都采样**，不是只跑一阵。
+ *
+ * 第一版只跑 1.6s，实测暴露两个缺口（后者更严重）：
+ *   ① Safari 在键盘动画**之后**才滚 offsetTop（>1.6s）→ 错过；
+ *   ② 键盘收起时若焦点仍在（点键盘上的「完成」而不是点页面），
+ *      没有事件、也没有采样 → 输入区**永远停在抬起的位置**。
+ * 所以：前 1.6s 用 60ms 高频覆盖键盘动画，之后降到 250ms 长期守着，
+ * 直到输入框失焦。250ms 一次 `updateKeyboardInset + 闭环`，每次只做
+ * 一次 getBoundingClientRect 且收敛后不写任何状态，开销可忽略。
+ */
+function startKeyboardTracking(): void {
+  if (focusPollId !== null) window.clearTimeout(focusPollId);
+  focusPollStart = performance.now();
+  const tick = () => {
+    focusPollId = null;
+    if (!document.activeElement?.closest('.chat-composer-float')) {
+      // 失焦：把状态清干净，别把抬起量留给下一次
+      stopKeyboardTracking();
+      if (keyboardInset.value !== 0) keyboardInset.value = 0;
+      if (keyboardVisible.value) {
+        keyboardVisible.value = false;
+        updateComposerClip();
+      }
+      return;
+    }
+    updateKeyboardInset();
+    syncComposerToViewport();
+    const fast = performance.now() - focusPollStart < 1600;
+    focusPollId = window.setTimeout(tick, fast ? 60 : 250);
+  };
+  focusPollId = window.setTimeout(tick, 0);
+}
+
+function stopKeyboardTracking(): void {
+  if (focusPollId !== null) {
+    window.clearTimeout(focusPollId);
+    focusPollId = null;
+  }
+}
+
 onMounted(() => {
   // 拖选监听：选区出现即临时关 blur（输入框未聚焦时也可能拖选已输入文本）。
   document.addEventListener('selectionchange', onSelectionChange);
@@ -562,6 +626,7 @@ onMounted(() => {
   }
 });
 onBeforeUnmount(() => {
+  stopKeyboardTracking();
   ctxObserver?.disconnect();
   rootObserver?.disconnect();
   rootObserver = null;
@@ -1972,6 +2037,8 @@ function mediaSrc(img: string): string {
       :style="composerStyle"
       @focusin="onComposerFocus"
       @focusout="onComposerBlur"
+      @touchstart.passive="startKeyboardTracking"
+      @pointerdown.passive="startKeyboardTracking"
     >
       <!-- 投影补层（只在移动端 clip 生效时显示）：见下方 __halo 的样式注释 ——
            `clip-path` 会把卡片**自身**的外阴影一起裁掉，手机上的悬浮观感只能

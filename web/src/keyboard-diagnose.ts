@@ -2,34 +2,51 @@
 //!
 //! 用途：手机上「键盘弹起后界面错位」类问题，靠猜浏览器行为是没用的 ——
 //! iOS Safari、Android Chrome、各家 WebView 对键盘的处理互不相同
-//! （有的压缩布局视口，有的只压视觉视口，有的顺手滚一下页面）。
+//! （有的压缩布局视口，有的只压视觉视口，有的顺手滚一下页面，还有的
+//! 干脆不更新 `visualViewport` 也不派发事件）。
 //!
-//! 这个模块只在 URL 带 `?diag`（或 `#diag`）时激活，右下角固定一块浮层，
-//! 每 400ms 刷新真实数值。出问题时让用户带着参数刷新一次、弹出键盘、
-//! 截图，就能直接定位是哪一层算错。
+//! 只在 URL 带 `?diag`（或 `#diag`）时激活：右下角固定一块深色浮层，
+//! 每 400ms 刷新真实数值，异常项带 ⚠。出问题时带着参数刷新一次、弹出键盘、
+//! 截图即可定位到具体是哪一层算错。
 //!
-//! 刻意做成「零依赖 + 独立文件」：
-//!   - 不 import 任何 Vue / 组件，避免把调试代码拖进主 chunk 的逻辑；
-//!   - 由 main.ts 动态 import（`if (needDiag()) import(...)`），
-//!     生产包里它是个独立小 chunk，只有带参数时才会下载。
+//! 字段含义（判案顺序）：
+//!   innerHeight / vv.height / vv.offsetTop
+//!     —— 三个原始输入。键盘弹出后若 vv.height 完全没变，说明浏览器
+//!        根本没告诉我们键盘存在，只能靠轮询或让浏览器自己滚。
+//!   vv事件 r/s
+//!     —— 事件计数。聚焦后仍是 0/0 → 事件路径整条是死的（轮询才是出路）。
+//!   --app-h / view 高
+//!     —— 容器实际高度。与 innerHeight 差很多 = 基准被写坏过。
+//!   卡片 bottom / 目标 bottom / 偏差
+//!     —— 闭环的唯一判据。目标 = vv.offsetTop + vv.height（可视区下沿，
+//!        布局视口坐标），卡片 bottom 应与之相等，偏差 > 2 就是没对齐。
 //!
-//! 浮层本身：`pointer-events: none`（不挡输入）、`position: fixed`、
-//! 半透明黑底白字、等宽字体、字号 10px —— 手机上要能一屏看全。
+//! 刻意做成「零依赖 + 独立文件」：不 import 任何 Vue / 组件，由 main.ts
+//! 动态 import，生产包里是独立小 chunk，不带 `?diag` 就不下载。
 
 interface Sample {
   label: string
   value: string
-  /** 异常时高亮（红底），正常不上色 */
+  /** 异常时高亮，正常不上色 */
   warn?: boolean
+}
+
+/** visualViewport 事件计数：区分「我们算错」与「我们压根没被通知」。 */
+const vvEvents = { resize: 0, scroll: 0 }
+function hookViewportEvents(): void {
+  const vv = window.visualViewport
+  if (!vv) return
+  vv.addEventListener('resize', () => {
+    vvEvents.resize += 1
+  })
+  vv.addEventListener('scroll', () => {
+    vvEvents.scroll += 1
+  })
 }
 
 function num(n: number | undefined | null, digits = 1): string {
   if (n === undefined || n === null || Number.isNaN(n)) return '—'
   return n.toFixed(digits)
-}
-
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '—'
 }
 
 function collect(): Sample[] {
@@ -39,123 +56,91 @@ function collect(): Sample[] {
   const rootRect = root?.getBoundingClientRect()
   const composerRect = composer?.getBoundingClientRect()
 
-  // 「键盘把我们压掉了多少」——两套口径都列出来，看它们是否一致。
-  // 不一致正是错位的来源（一个按布局视口算、一个按容器实高算）。
-  const hiddenByViewport = vv ? window.innerHeight - vv.height - vv.offsetTop : 0
+  const appH = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--app-h'),
+  )
   const containerH = rootRect?.height ?? 0
-  const containerShrunk = containerH < window.innerHeight - 80
+  const containerShrunk = containerH > 0 && containerH < window.innerHeight - 80
+  const target = vv ? vv.offsetTop + vv.height : Number.NaN
+  const delta = composerRect ? composerRect.bottom - target : Number.NaN
+  const kbOn = vv ? vv.height < window.innerHeight - 80 : false
 
-  // 卡片距容器底部的实际距离 = CSS bottom 的 used value
-  const bottomUsed =
-    rootRect && composerRect ? rootRect.bottom - composerRect.bottom : Number.NaN
-
-  const appH = Number.parseFloat(cssVar('--app-h'))
-
-  const rows: Sample[] = [
+  return [
     { label: 'innerHeight', value: num(window.innerHeight, 0) },
     { label: 'vv.height', value: num(vv?.height, 0) },
     { label: 'vv.offsetTop', value: num(vv?.offsetTop, 0) },
-    { label: '压掉(布局口径)', value: num(hiddenByViewport, 0), warn: hiddenByViewport > 80 },
-    { label: '--app-h', value: Number.isNaN(appH) ? '—' : num(appH, 0) },
     {
-      label: 'app-h 与 innerHeight 差',
-      value: Number.isNaN(appH) ? '—' : num(appH - window.innerHeight, 0),
+      label: 'vv事件 r/s',
+      value: `${vvEvents.resize}/${vvEvents.scroll}`,
+      // 键盘没检测到、事件也是 0 → 事件路径整条是死的
+      warn: !kbOn && vvEvents.resize === 0 && vvEvents.scroll === 0,
+    },
+    {
+      label: '--app-h',
+      value: Number.isNaN(appH) ? '—' : num(appH, 0),
       warn: !Number.isNaN(appH) && Math.abs(appH - window.innerHeight) > 80,
     },
-    { label: '.chat-view 高', value: num(containerH, 0) },
-    {
-      label: '容器已压缩?',
-      value: containerShrunk ? '是' : '否',
-      warn: containerShrunk,
-    },
-    { label: '卡片 top', value: num(composerRect?.top, 0) },
+    { label: 'view 高', value: num(containerH, 0), warn: containerShrunk },
     { label: '卡片 bottom', value: num(composerRect?.bottom, 0) },
+    { label: '目标 bottom', value: num(target, 0) },
     {
-      // 闭环目标 = 可视区下沿（布局视口坐标）。卡片 bottom 应该等于它。
-      label: '目标 bottom',
-      value: vv ? num(vv.offsetTop + vv.height, 0) : '—',
+      // 只在键盘态才要求贴可视区下沿；无键盘时卡片本来就该离底 3vw，
+      // 那 11.7px 是设计值，不该报警。
+      label: '偏差(应0)',
+      value: num(delta, 1),
+      warn: kbOn && Math.abs(delta) > 2,
     },
+    { label: '键盘态', value: kbOn ? '是' : '否' },
     {
-      label: '偏差(应为 0)',
-      value:
-        vv && composerRect
-          ? num(composerRect.bottom - (vv.offsetTop + vv.height), 1)
-          : '—',
-      warn: !!(vv && composerRect) && Math.abs(composerRect.bottom - (vv.offsetTop + vv.height)) > 2,
-    },
-    { label: '卡片距容器底', value: num(bottomUsed, 0) },
-    {
-      label: '--composer-bottom-gap',
+      label: 'gap',
       value: composer
         ? getComputedStyle(composer).getPropertyValue('--composer-bottom-gap').trim() || '—'
         : '—',
     },
-    {
-      label: '--chat-field-font',
-      value: composer
-        ? getComputedStyle(composer).getPropertyValue('--chat-field-font').trim() || '—'
-        : '—',
-    },
-    {
-      label: '贴角轮廓',
-      value: composer?.style.getPropertyValue('--composer-corner-r') || 'none',
-    },
     { label: 'scrollY', value: num(window.scrollY, 0), warn: window.scrollY > 0 },
-    { label: 'vv.pageTop', value: num(vv?.pageTop, 0) },
-    { label: 'pointer:coarse', value: String(matchMedia('(pointer: coarse)').matches) },
   ]
-  return rows
 }
 
 function mount(): void {
+  hookViewportEvents()
   const box = document.createElement('div')
   box.id = 'kb-diagnose'
   box.setAttribute(
     'style',
     [
       'position:fixed',
-      'right:6px',
+      'left:6px',
       'bottom:6px',
       'z-index:2147483647',
-      'max-width:min(92vw,340px)',
-      'padding:6px 8px',
+      'max-width:min(94vw,360px)',
+      'padding:7px 9px',
       'border-radius:8px',
-      'background:rgba(0,0,0,.82)',
-      'color:#e8e8e8',
-      'font:10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace',
+      'background:rgba(0,0,0,.88)',
+      'color:#f0f0f0',
+      'font:600 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace',
       'white-space:pre',
+      // 不吃事件（不能挡住输入框与键盘），纯展示
       'pointer-events:none',
       'user-select:none',
+      'letter-spacing:.01em',
     ].join(';'),
   )
   document.body.appendChild(box)
 
   const render = () => {
-    const rows = collect()
     box.textContent =
       'KEYBOARD DIAG\n' +
-      rows
-        .map((r) => `${r.warn ? '⚠ ' : '  '}${r.label.padEnd(20, ' ')} ${r.value}`)
+      collect()
+        .map((r) => `${r.warn ? '⚠ ' : '  '}${r.label.padEnd(13, ' ')} ${r.value}`)
         .join('\n')
   }
   render()
-  // 键盘动画有几百毫秒，单次采样会漏掉中间态；用固定节拍连采
+  // 键盘动画几百毫秒，单次采样会漏中间态；固定节拍连采
   setInterval(render, 400)
   window.addEventListener('resize', render)
   window.addEventListener('orientationchange', render)
   window.visualViewport?.addEventListener('resize', render)
   window.visualViewport?.addEventListener('scroll', render)
-}
-
-/** 是否需要诊断：`?diag`、`?diag=1`、`#diag` 都算。 */
-export function needDiag(): boolean {
-  try {
-    const search = window.location.search
-    const hash = window.location.hash
-    return /[?&]diag\b/.test(search) || /(^|[#&])diag\b/.test(hash)
-  } catch {
-    return false
-  }
 }
 
 export function initKeyboardDiagnose(): void {
