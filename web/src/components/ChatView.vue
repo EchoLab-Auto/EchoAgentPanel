@@ -395,9 +395,38 @@ const keyboardVisible = ref(false);
  *  `updateKeyboardInset` 引用它时不存在 TDZ 区的可读性歧义。 */
 let syncRounds = 0;
 let visualViewport: VisualViewport | null = null;
-/** 页面加载时的视口高度（= 无键盘基准）。判「键盘在不在」用它做分母，
- *  而不是与**当前** innerHeight 比 —— 见 updateKeyboardInset 里的实测数据。 */
-let baseViewportH = typeof window !== 'undefined' ? window.innerHeight : 0;
+/**
+ * 无键盘基准，**按屏幕方向分别记录「见过的最大内部高度」**。
+ *
+ * 为什么不只存一个数（第一版写法，实测被自己的 resize 监听打回）：
+ * 键盘弹出本身就会触发 `window.resize`，若在那时无条件把基准改成新的
+ * `innerHeight`（376），缩小量立刻变成 0，键盘再次检测不到 —— 自我覆盖。
+ *
+ * 为什么按方向分组：横竖屏切换会大幅改变 innerHeight（714 ↔ 390），
+ * 单一基准必然把「旋转」误判成「键盘弹出」。
+ *
+ * 判据「见过就取最大」同时解决两件事：
+ *   · 键盘只会让 innerHeight 变小 → 基准不动；
+ *   · 浏览器工具条收展带来小幅波动（几十 px）→ 由 80px 阈值吸收。
+ *
+ * 方向用 `screen.orientation.angle`（0/180 竖屏、90/270 横屏）而不是
+ * 比较 innerWidth/innerHeight —— 键盘会把高度压到比宽度还小，
+ * 那时 `w > h` 会把竖屏误判成横屏。
+ */
+const baseByOrientation: Record<string, number> = {};
+function orientationKey(): string {
+  const raw = screen.orientation?.angle ?? (window as unknown as { orientation?: number }).orientation ?? 0;
+  const angle = ((raw % 360) + 360) % 360;
+  return angle === 90 || angle === 270 ? 'landscape' : 'portrait';
+}
+/** 取当前方向的基准（首次见到即记录；变大才更新）。 */
+function viewportBaseline(): number {
+  const key = orientationKey();
+  const h = window.innerHeight;
+  const known = baseByOrientation[key];
+  if (!known || h > known) baseByOrientation[key] = h;
+  return baseByOrientation[key];
+}
 function updateKeyboardInset() {
   if (!visualViewport) return;
 
@@ -439,11 +468,12 @@ function updateKeyboardInset() {
   // 卡片停在 3vw 留白处，而容器已被滚到 top=−282 —— 于是卡片 bottom=26，
   // 整个输入区吊在屏幕最上方。这正是用户报的现象。
   //
-  // 改法：拿页面加载时记下的 baseViewportH 当基准，两个口径任一大幅缩小
-  // 即判定键盘在。三帧分别得到 714−714=0 / 714−376=338 / 714−714=0，
-  // 完美区分。
-  const shrunkByInner = baseViewportH - window.innerHeight;
-  const shrunkByVisual = baseViewportH - visualViewport.height;
+  // 改法：拿无键盘基准（viewportBaseline，按屏幕方向记录的「见过的最大值」）
+  // 比，两个口径任一大幅缩小即判定键盘在。三帧分别得到
+  // 714−714=0 / 714−376=338 / 714−714=0，完美区分。
+  const base = viewportBaseline();
+  const shrunkByInner = base - window.innerHeight;
+  const shrunkByVisual = base - visualViewport.height;
   const keyboardOn = shrunkByInner > 80 || shrunkByVisual > 80;
   const visibleChanged = keyboardVisible.value !== keyboardOn;
   keyboardVisible.value = keyboardOn;
@@ -643,14 +673,45 @@ function startKeyboardTracking(): void {
   focusPollId = window.setTimeout(tick, 0);
 }
 
+/** 屏幕旋转：延后一拍让布局稳定，再校正 `--app-h` 并重算一次键盘态。 */
+function onOrientationChange(): void {
+  window.setTimeout(() => {
+    healAppHeight();
+    updateKeyboardInset();
+  }, 300);
+}
+
 function stopKeyboardTracking(): void {
   if (focusPollId !== null) {
     window.clearTimeout(focusPollId);
     focusPollId = null;
   }
+  // 收尾一次（2026-11）：轮询停掉之后就没人再修 `--app-h` 了，而真机数据
+  // 证明「键盘收起 → --app-h 卡在键螐值」是常态（Safari 未必派发
+  // window.resize）。失焦往往就是收键盘的时刻，必须在这里补最后一刀，
+  // 否则整个应用会永久矮一截（实测卡在 376px / 真实 714px）。
+  healAppHeight();
+}
+
+/**
+ * 把 `--app-h` 拉回真实 innerHeight。
+ *
+ * 只在无键盘时执行：按键态下 innerHeight 本身就已经是压缩后的值，
+ * 此时写进去没错（等于布局视口模型），但没必要 —— 交给键盘态的逻辑。
+ */
+function healAppHeight(): void {
+  if (keyboardVisible.value) return;
+  const root = document.documentElement;
+  const cur = Number.parseFloat(root.style.getPropertyValue('--app-h'));
+  if (Number.isNaN(cur)) return; // 内联没写过就别管（dvh/100% 兜底）
+  if (Math.abs(cur - window.innerHeight) <= 2) return; // 已经对了，不碰样式
+  root.style.setProperty('--app-h', `${window.innerHeight}px`);
 }
 
 onMounted(() => {
+  // 旋转后确认一次 --app-h（基准本身由 viewportBaseline() 惰性维护，
+  // 见其注释：不能挂在 resize 上无条件更新，那会被键盘自身的 resize 覆盖）。
+  window.addEventListener('orientationchange', onOrientationChange);
   // 拖选监听：选区出现即临时关 blur（输入框未聚焦时也可能拖选已输入文本）。
   document.addEventListener('selectionchange', onSelectionChange);
   // 软键盘：**不判断 isMobile**（2026-10-29 修复）。
@@ -696,6 +757,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   stopKeyboardTracking();
+  window.removeEventListener('orientationchange', onOrientationChange);
   ctxObserver?.disconnect();
   rootObserver?.disconnect();
   rootObserver = null;

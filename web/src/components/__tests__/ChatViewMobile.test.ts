@@ -325,14 +325,15 @@ describe('ChatView 竖屏移动端', () => {
       require('path').resolve(__dirname, '../ChatView.vue'),
       'utf-8',
     );
-    // 必须存在基准变量（初值取 window.innerHeight）
-    expect(raw, '记录了页面加载基准').toMatch(
-      /baseViewportH\s*=\s*[^;]*window\.innerHeight/,
+    // 必须有「按屏幕方向分组、取见过的最大高度」的基准
+    expect(raw, '按方向分组记录基准').toMatch(/baseByOrientation\s*:\s*Record<string, number>/);
+    expect(raw, '基准取见过的最大 innerHeight').toMatch(
+      /if\s*\(\s*!known\s*\|\|\s*h\s*>\s*known\s*\)\s*baseByOrientation\[key\]\s*=\s*h/,
     );
-    // 判据必须引用基准
-    expect(raw, '用基准算缩小量').toMatch(/baseViewportH\s*-\s*window\.innerHeight/);
+    // 判据必须引用基准，且同时覆盖两个口径
+    expect(raw, '用基准算缩小量（innerHeight 口径）').toMatch(/base\s*-\s*window\.innerHeight/);
     expect(raw, '同时覆盖 visualViewport 口径').toMatch(
-      /baseViewportH\s*-\s*visualViewport\.height/,
+      /base\s*-\s*visualViewport\.height/,
     );
     // 禁止退回到「与当前 innerHeight 直接比」的写法
     expect(
