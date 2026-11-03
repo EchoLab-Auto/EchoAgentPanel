@@ -326,16 +326,17 @@ function updateComposerClip() {
   // rect.left 就是「输入区左边缘到屏幕左边」的真实距离，与 rect.width 同源；
   // 它含 env(safe-area-inset-left)（横屏刘海时 > 变量值），此时按真实位置
   // 画轮廓才是对的。变量是否**存在**仍作为「是否启用贴合模式」的开关。
-  // 键盘弹出时退回常规圆角卡片（2026-10-29）：贴角轮廓的下角是按
-  // 「屏幕物理圆角」画的（半径 43px @390 宽）。键盘一抬，卡片下沿悬在
-  // 键盘上沿，那对大圆角失去了贴合对象，反而在两侧各切出一块三角缺口，
-  // 露出底色 —— 观感比不做贴角更差。键盘态下没有任何屏幕角可贴，
-  // 交给库的 squircle 常规圆角（`--composer-radius` 24px）。
-  if (keyboardVisible.value) {
-    composerClip.value = 'none';
-    composerCornerR.value = '';
-    return;
-  }
+  // 键盘态**保持同一套轮廓**（2026-11 用户反馈「形状和原来不一样」）。
+  // 见下方说明；这里先不做任何特判。
+  //
+  // 这里曾有一句「键盘态退回常规圆角（clip-path → none）」，理由是「下角
+  // 那对 43px 大圆角失去了贴合对象」。实测证明那是错的：clip-path 是卡片
+  // **自身的形状**，它不会露出缺口，只是下角圆角较大而已 —— 与无键盘时
+  // 完全相同。摘掉它反而把轮廓从「贴屏角的超椭圆」降级成「24px 常规圆角」，
+  // 用户一眼就看出输入框换了模样。
+  //
+  // 键盘态下左右留白（3vw）、屏角半径（--panel-display-radius）都没变，
+  // 所以算出来的轮廓与无键盘时逐点相同 —— 形状严格一致，只有位置变。
   const insetDeclared = style.getPropertyValue('--composer-inset').trim();
   const inset = insetDeclared ? rect.left : 0;
   if (rect.width < 2 || rect.height < 2 || inset <= 0) {
@@ -533,6 +534,30 @@ function syncComposerToViewport(): void {
   const vv = window.visualViewport;
   if (!el || !root) return;
 
+  // 键盘在 → 把 #app 钉住，**从根上阻止 Safari 滚页面**（2026-11）。
+  //
+  // iOS 为了保证聚焦元素可见，会在键盘弹出时把页面滚上去（真机实测
+  // scrollY 0 → 338，容器 top 56 → −282）。只靠 `scrollTo(0,0)` 复位是
+  // 拉锯：我们拉回、它再滚，用户看到的是输入框在键盘上沿附近抖、间歇
+  // 露出一条缝。
+  //
+  // `#app` 是整套布局的根（高度 100%）。键盘态给它 `position: fixed;
+  // inset: 0`：它脱离子文档流 → 文档高度变 0 → 没有可滚动的距离，
+  // Safari 想滚也滚不动。键盘收起立刻清空，恢复正常流。
+  // 用 inset 而不是 top/height：一次给全四边，不必关心原高度链。
+  const appEl = document.getElementById('app');
+  if (appEl) {
+    if (keyboardVisible.value) {
+      if (appEl.style.position !== 'fixed') {
+        appEl.style.position = 'fixed';
+        appEl.style.inset = '0';
+      }
+    } else if (appEl.style.position === 'fixed') {
+      appEl.style.position = '';
+      appEl.style.inset = '';
+    }
+  }
+
   // 键盘不在：撤掉内联覆盖，回到 CSS 的等间隙口径
   if (!vv || !keyboardVisible.value) {
     syncRounds = 0;
@@ -667,8 +692,13 @@ function startKeyboardTracking(): void {
     }
     updateKeyboardInset();
     syncComposerToViewport();
+    // 节拍（2026-11 二次调整）：键盘动画期间 60ms；之后键盘仍在用 100ms
+    // —— 250ms 在真机上会被读成「跟不紧、时不时露一条缝」。100ms 仍是
+    // 「每秒 10 次 getBoundingClientRect + 一次比较」，收敛后不写任何状态，
+    // 开销可以忽略。
     const fast = performance.now() - focusPollStart < 1600;
-    focusPollId = window.setTimeout(tick, fast ? 60 : 250);
+    const gap = fast ? 60 : keyboardVisible.value ? 100 : 250;
+    focusPollId = window.setTimeout(tick, gap);
   };
   focusPollId = window.setTimeout(tick, 0);
 }
