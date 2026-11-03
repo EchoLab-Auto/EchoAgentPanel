@@ -312,6 +312,51 @@ describe('ChatView 竖屏移动端', () => {
     expect(mobileStyle).toMatch(/--chat-field-font: 14px/);
   });
 
+  /**
+   * 键盘判据的回归防线（2026-11，真机 iPhone / iOS 18.7 / Safari 26.6.2）。
+   *
+   * 曾经写成 `vv.height < innerHeight − 80`，而 iOS Safari 键盘弹出时
+   * **两个值一起变小**（714→376 / 714→376），于是 376 < 296 恒假，
+   * 键盘永远检测不到。这组断言把「必须与页面加载基准比」钉死，
+   * 顺带把真机三帧数据留在注释里，避免以后又被"看起来更直接"的写法改回去。
+   */
+  it('键盘判据必须用页面加载基准，不能与当前 innerHeight 比', () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../ChatView.vue'),
+      'utf-8',
+    );
+    // 必须存在基准变量（初值取 window.innerHeight）
+    expect(raw, '记录了页面加载基准').toMatch(
+      /baseViewportH\s*=\s*[^;]*window\.innerHeight/,
+    );
+    // 判据必须引用基准
+    expect(raw, '用基准算缩小量').toMatch(/baseViewportH\s*-\s*window\.innerHeight/);
+    expect(raw, '同时覆盖 visualViewport 口径').toMatch(
+      /baseViewportH\s*-\s*visualViewport\.height/,
+    );
+    // 禁止退回到「与当前 innerHeight 直接比」的写法
+    expect(
+      raw,
+      '不得用 vv.height < innerHeight − 80（iOS Safari 两个值同步缩小，恒为假）',
+    ).not.toMatch(/visualViewport\.height\s*<\s*window\.innerHeight\s*-/);
+  });
+
+  /**
+   * 可视区下沿的坐标口径：布局视口被压缩时不加 offsetTop。
+   * 真机键盘态：innerHeight=376、vv.height=376、vv.offsetTop=338，
+   * 此时可视区下沿 = 376；加成 714 会落到键盘背后。
+   */
+  it('布局视口已压缩时，可视区下沿取 vv.height（不加 offsetTop）', () => {
+    const raw = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../ChatView.vue'),
+      'utf-8',
+    );
+    expect(raw, '按 innerHeight 与 vv.height 的关系区分模型').toMatch(
+      /layoutShrunk\s*=\s*window\.innerHeight\s*<=\s*vv\.height\s*\+\s*1/,
+    );
+    expect(raw, '压缩时不加 offsetTop').toMatch(/layoutShrunk\s*\?\s*vv\.height/);
+  });
+
   it('软键盘适配：visualViewport 监听在源码中挂载/清理', () => {
     const raw = require('fs').readFileSync(
       require('path').resolve(__dirname, '../ChatView.vue'),

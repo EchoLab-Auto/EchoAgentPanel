@@ -395,6 +395,9 @@ const keyboardVisible = ref(false);
  *  `updateKeyboardInset` 引用它时不存在 TDZ 区的可读性歧义。 */
 let syncRounds = 0;
 let visualViewport: VisualViewport | null = null;
+/** 页面加载时的视口高度（= 无键盘基准）。判「键盘在不在」用它做分母，
+ *  而不是与**当前** innerHeight 比 —— 见 updateKeyboardInset 里的实测数据。 */
+let baseViewportH = typeof window !== 'undefined' ? window.innerHeight : 0;
 function updateKeyboardInset() {
   if (!visualViewport) return;
 
@@ -422,16 +425,26 @@ function updateKeyboardInset() {
   // 所以先问一句：**容器已经比布局视口矮一截了吗？**
   //   是 → 键盘已经被布局吃掉，不要再抬（这一条也让 --app-h 写坏时自愈）；
   //   否 → 按 hidden 抬，并用容器高封顶，保证任何情况下卡片都不会越过顶部。
-  // 事实：键盘在不在 —— **只看可视区高度**，不能减 offsetTop。
+  // 键盘在不在：**与页面加载时的基准比**，不能与当前 innerHeight 比。
   //
-  // `hidden = innerHeight − vv.height − vv.offsetTop` 含 Safari 自己滚的那部分；
-  // Safari 滚满 336 后 hidden 会变成 0，但键盘**仍在**。用 hidden 判断会让
-  // `--keyboard` 类被摘掉 → 底部留白退回 3vw → 卡片底边比键盘上沿高 11.7px
-  // （用户最初报的那条灰带以另一种形式复现），而且闭环修不回来：那 11.7px
-  // 不是抬升量不够，是留白又冒出来了，`keyboardInset` 已经 clamp 到 0。
+  // 真机数据（iPhone / iOS 18.7 / Safari 26.6.2，实测三帧）：
+  //   ① 无键盘  innerHeight=714  vv.height=714  vv.offsetTop=0    scrollY=0
+  //   ② 键盘弹  innerHeight=376  vv.height=376  vv.offsetTop=338  scrollY=338
+  //   ③ 收起后  innerHeight=714  vv.height=714  vv.offsetTop=0    scrollY=0
   //
-  // `vv.height` 才是「可视区还剩多高」，与滚动无关。矮了 80px 以上 = 键盘在。
-  const keyboardOn = visualViewport.height < window.innerHeight - 80;
+  // 关键：② 里 innerHeight **和** vv.height 一起变成 376 —— iOS Safari 在
+  // 键盘弹出时压缩的是**布局视口本身**（等同 resizes-content）。所以
+  // `vv.height < innerHeight − 80` 恒为假（376 < 296 不成立），键盘永远
+  // 检测不到：`--keyboard` 类从没挂上、`--composer-bottom-px` 从没写入，
+  // 卡片停在 3vw 留白处，而容器已被滚到 top=−282 —— 于是卡片 bottom=26，
+  // 整个输入区吊在屏幕最上方。这正是用户报的现象。
+  //
+  // 改法：拿页面加载时记下的 baseViewportH 当基准，两个口径任一大幅缩小
+  // 即判定键盘在。三帧分别得到 714−714=0 / 714−376=338 / 714−714=0，
+  // 完美区分。
+  const shrunkByInner = baseViewportH - window.innerHeight;
+  const shrunkByVisual = baseViewportH - visualViewport.height;
+  const keyboardOn = shrunkByInner > 80 || shrunkByVisual > 80;
   const visibleChanged = keyboardVisible.value !== keyboardOn;
   keyboardVisible.value = keyboardOn;
 
@@ -496,18 +509,70 @@ function syncComposerToViewport(): void {
     if (el.style.getPropertyValue('--composer-bottom-px')) {
       el.style.removeProperty('--composer-bottom-px');
     }
+    // 顺手把 `--app-h` 复位（实测缺这一步的后果）：真机数据里键盘收起后
+    //   innerHeight=714、vv.height=714（都恢复了）
+    //   但 --app-h 仍是 376px → .chat-view 只有 320 高、卡片停在 y=239
+    // 键盘收起时 Safari 未必派发 window.resize，index.html 的 setAppHeight
+    // 因此没被调用。这里由轮询兜住：只要无键盘且两者不一致就改回去。
+    // 只在「差值明显」时写，避免每拍都碰内联样式（那会拖累样式重算）。
+    const cur = Number.parseFloat(
+      document.documentElement.style.getPropertyValue('--app-h'),
+    );
+    if (!Number.isNaN(cur) && Math.abs(cur - window.innerHeight) > 2) {
+      document.documentElement.style.setProperty('--app-h', `${window.innerHeight}px`);
+    }
     return;
   }
 
-  // iOS Safari 会连布局视口一起滚（哪怕 overflow:hidden）。那份滚动会让容器
-  // 整体上移、顶栏跑出屏幕；复位它。只在键盘态执行，不影响正常浏览滚动。
-  if (window.scrollY !== 0) window.scrollTo(0, 0);
+  // ① iOS Safari 会把页面滚上去（实测 scrollY=0 → 338），容器跟着从 top=56
+  // 跑到 top=−282，顶栏整块移出屏幕。复位它。
+  //
+  // **复位当帧不能测量**：`window.scrollTo` 是异步生效的，本帧的
+  // getBoundingClientRect 还停在滚动后的坐标。实测踩过：某次在滚动中途
+  // 量到 rootRect.bottom = −1043，算出 wantBottom = −1419，写进 CSS 后
+  // 卡片被推到容器下方 1419px；下一拍又基于这个错位继续放大 —— 正反馈。
+  // 所以：只复位、跳下一帧、不计算。
+  const scrolled = window.scrollY || document.documentElement.scrollTop || 0;
+  if (scrolled !== 0) {
+    window.scrollTo(0, 0);
+    if (syncRounds < 8) {
+      syncRounds += 1;
+      requestAnimationFrame(syncComposerToViewport);
+    } else {
+      syncRounds = 0;
+    }
+    return;
+  }
 
-  const targetBottom = vv.offsetTop + vv.height;
   const rootRect = root.getBoundingClientRect();
   const cardRect = el.getBoundingClientRect();
+
+  // ② 「可视区下沿」在布局视口坐标里的位置。
+  //
+  // 实测：键盘态下 iOS Safari 把 innerHeight **和** vv.height 一起压到 376，
+  // 此时 getBoundingClientRect 的坐标系已经是压缩后的 —— 可视区下沿就是
+  // vv.height(376)，**不能**再加 offsetTop(338)：那会得到 714，落到键盘背后。
+  // 而 resizes-visual 的浏览器（如旧版 Chrome）innerHeight 不变、只有
+  // vv.height 缩小，此时才需要加 offsetTop。
+  // 用「innerHeight 是否已经跟 vv.height 一样矮」区分这两种模型：
+  //   ② 376 <= 377 → 已压缩 → target = 376          ✅
+  //   ① 714 <= 715 → target = 714（无键盘，不写）     ✅
+  const layoutShrunk = window.innerHeight <= vv.height + 1;
+  const targetBottom = layoutShrunk ? vv.height : vv.offsetTop + vv.height;
   const curBottom = rootRect.bottom - cardRect.bottom; // 当前 CSS bottom 的 used value
   const wantBottom = rootRect.bottom - targetBottom; // 让卡片底边落在可视区下沿
+
+  // ③ 合理性闸门（2026-11，实测必需）：卡片底边只可能落在「容器底边附近」
+  // —— 最坏情况是容器矮到装不下卡片，此时 wantBottom ≈ −(卡片高)。
+  // 一旦 |wantBottom| 超过容器高 + 400，只可能是测量本身不可信（布局震荡、
+  // 滚动锚定、Safari 的动画中间态）。这种值**绝不能写进 CSS**：它会把卡片
+  // 推走，下一拍基于错位继续放大，形成正反馈（实测 −1419 就是这么来的）。
+  // 宁可保持上一帧的位置等下一拍。
+  const rootH = root.clientHeight || rootRect.height;
+  if (!Number.isFinite(wantBottom) || Math.abs(wantBottom) > rootH + 400) {
+    syncRounds = 0;
+    return;
+  }
 
   if (Math.abs(curBottom - wantBottom) <= 0.5) {
     syncRounds = 0;
