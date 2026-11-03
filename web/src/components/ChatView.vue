@@ -388,6 +388,9 @@ const keyboardInsetPx = computed(() => `${keyboardInset.value}px`);
  * 键盘上沿之上重新出现那条 3vw 的灰带、两侧还各多一个三角缺口。
  */
 const keyboardVisible = ref(false);
+/** 闭环校正的轮次计数（见 syncComposerToViewport）。声明在此处是为了让
+ *  `updateKeyboardInset` 引用它时不存在 TDZ 区的可读性歧义。 */
+let syncRounds = 0;
 let visualViewport: VisualViewport | null = null;
 function updateKeyboardInset() {
   if (!visualViewport) return;
@@ -416,9 +419,18 @@ function updateKeyboardInset() {
   // 所以先问一句：**容器已经比布局视口矮一截了吗？**
   //   是 → 键盘已经被布局吃掉，不要再抬（这一条也让 --app-h 写坏时自愈）；
   //   否 → 按 hidden 抬，并用容器高封顶，保证任何情况下卡片都不会越过顶部。
-  // 事实：键盘在不在（与「要不要抬」解耦，见 keyboardVisible 注释）
-  const visibleChanged = keyboardVisible.value !== hidden > 80;
-  keyboardVisible.value = hidden > 80;
+  // 事实：键盘在不在 —— **只看可视区高度**，不能减 offsetTop。
+  //
+  // `hidden = innerHeight − vv.height − vv.offsetTop` 含 Safari 自己滚的那部分；
+  // Safari 滚满 336 后 hidden 会变成 0，但键盘**仍在**。用 hidden 判断会让
+  // `--keyboard` 类被摘掉 → 底部留白退回 3vw → 卡片底边比键盘上沿高 11.7px
+  // （用户最初报的那条灰带以另一种形式复现），而且闭环修不回来：那 11.7px
+  // 不是抬升量不够，是留白又冒出来了，`keyboardInset` 已经 clamp 到 0。
+  //
+  // `vv.height` 才是「可视区还剩多高」，与滚动无关。矮了 80px 以上 = 键盘在。
+  const keyboardOn = visualViewport.height < window.innerHeight - 80;
+  const visibleChanged = keyboardVisible.value !== keyboardOn;
+  keyboardVisible.value = keyboardOn;
 
   const root = viewRootRef.value;
   const containerH = root?.getBoundingClientRect().height ?? window.innerHeight;
@@ -436,6 +448,73 @@ function updateKeyboardInset() {
   // 键盘开合改变「要不要贴屏角」：屏幕下角已经不在可视区，轮廓必须重算
   // （updateComposerClip 内部会据 keyboardInset 退回常规圆角）。
   updateComposerClip();
+  // 公式给的是**起点**；等一帧（CSS 变量落到布局上）后交闭环校正，
+  // 见 syncComposerToViewport 的注释。
+  syncRounds = 0;
+  requestAnimationFrame(syncComposerToViewport);
+}
+
+/**
+ * 闭环同步：把输入区底边钉到「可视区底边 = 键盘上沿」。
+ *
+ * 为什么不用纯公式（2026-11，用户报 Safari 上「整个输入区跑到屏幕最上方」）：
+ *
+ * iOS Safari 在键盘弹出时会**自己滚动 visual viewport**（`offsetTop` 变正）
+ * 来保证聚焦元素可见。理想情况下 `hidden = innerHeight − vv.height − vv.offsetTop`
+ * 能把这份滚动抵掉；但实测里 Safari 的 `height` 与 `offsetTop` 在键盘动画
+ * 期间的报告顺序不确定 —— 先报新 height、offsetTop 还是 0，于是算出 336
+ * 抬了一次；随后 Safari 滚动 336，页面又上移一次。**两套机制叠加 = 双倍位移**，
+ * 卡片顶到屏幕最上方（实测卡片 top 落到 81px）。而且错误值会被
+ * `next === keyboardInset` 的 early-return 固化，之后不再自我修正。
+ *
+ * 所以改成测量闭环，三个好处：
+ *   ① 不依赖 offsetTop/height 的报告时序 —— 只比「我要它去哪」和「它现在在哪」；
+ *   ② 自动吸收任何未知机制（Safari 滚布局视口、内部容器滚动、第三方样式改动）；
+ *   ③ 收敛后可证明正确：|delta| ≤ 1px。
+ *
+ * 坐标系：`getBoundingClientRect()` 与 `vv.offsetTop + vv.height` 都是**布局
+ * 视口**坐标，同源可比。目标位置就是可视区下沿。
+ *
+ * 迭代上限 4 轮：每轮改一次 CSS 变量、等一帧、再量。正常情况下 1 轮就收敛。
+ */
+function syncComposerToViewport(): void {
+  const el = composerFloatRef.value;
+  const vv = window.visualViewport;
+  if (!el || !vv) {
+    syncRounds = 0;
+    return;
+  }
+  if (!keyboardVisible.value) {
+    // 键盘不在：抬升量必须是 0，否则下次弹出会带着上次的残留
+    syncRounds = 0;
+    if (keyboardInset.value !== 0) keyboardInset.value = 0;
+    return;
+  }
+
+  // iOS Safari 的补充动作：它会连**布局视口**一起滚（哪怕 overflow:hidden）。
+  // 那份滚动已经由闭环吸收，但页面上移本身还带着顶栏一起跑 —— 复位它。
+  // 只在键盘态执行，不影响正常浏览滚动。
+  if (window.scrollY !== 0) {
+    window.scrollTo(0, 0);
+  }
+
+  const targetBottom = vv.offsetTop + vv.height;
+  const rect = el.getBoundingClientRect();
+  const delta = rect.bottom - targetBottom; // >0：卡片还在目标下方，需要继续抬
+
+  if (Math.abs(delta) <= 1 || syncRounds >= 4) {
+    syncRounds = 0;
+    return;
+  }
+  syncRounds += 1;
+
+  const next = Math.max(0, Math.round(keyboardInset.value + delta));
+  if (next === keyboardInset.value) {
+    syncRounds = 0;
+    return;
+  }
+  keyboardInset.value = next;
+  requestAnimationFrame(syncComposerToViewport);
 }
 
 onMounted(() => {

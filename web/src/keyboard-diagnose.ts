@@ -70,6 +70,19 @@ function collect(): Sample[] {
     },
     { label: '卡片 top', value: num(composerRect?.top, 0) },
     { label: '卡片 bottom', value: num(composerRect?.bottom, 0) },
+    {
+      // 闭环目标 = 可视区下沿（布局视口坐标）。卡片 bottom 应该等于它。
+      label: '目标 bottom',
+      value: vv ? num(vv.offsetTop + vv.height, 0) : '—',
+    },
+    {
+      label: '偏差(应为 0)',
+      value:
+        vv && composerRect
+          ? num(composerRect.bottom - (vv.offsetTop + vv.height), 1)
+          : '—',
+      warn: !!(vv && composerRect) && Math.abs(composerRect.bottom - (vv.offsetTop + vv.height)) > 2,
+    },
     { label: '卡片距容器底', value: num(bottomUsed, 0) },
     {
       label: '--composer-bottom-gap',
