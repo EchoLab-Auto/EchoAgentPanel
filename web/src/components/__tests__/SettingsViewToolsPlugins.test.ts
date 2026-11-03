@@ -83,8 +83,7 @@ function seed() {
       description: '内置工具',
       entry: '',
       author: '',
-      enabled: true,
-      builtin: true,
+            builtin: true,
       package: 'echo-agent.tools.builtin',
       gating: 'persona',
     },
@@ -96,8 +95,7 @@ function seed() {
       description: 'QQ 平台',
       entry: '',
       author: '',
-      enabled: true,
-      builtin: true,
+            builtin: true,
       package: 'echo-agent.adapter.qq',
       gating: 'persona',
     },
@@ -109,8 +107,7 @@ function seed() {
       description: 'Panel 通道',
       entry: '',
       author: '',
-      enabled: true,
-      builtin: true,
+            builtin: true,
       package: 'echo-agent.management.panel',
       gating: 'process',
     },
@@ -122,8 +119,7 @@ function seed() {
       description: '单会话',
       entry: '',
       author: '',
-      enabled: true,
-      builtin: true,
+            builtin: true,
       package: 'echo-agent.loop.single',
       gating: 'process',
     },
@@ -135,8 +131,7 @@ function seed() {
       description: 'provider',
       entry: '',
       author: '',
-      enabled: true,
-      builtin: true,
+            builtin: true,
       package: 'echo-agent.provider.llm',
       gating: 'process',
     },
@@ -223,7 +218,7 @@ describe('SettingsView 工具工作台', () => {
 
   it('工具详情：包被禁用时显示警示横幅', async () => {
     // QQ 包插件改为禁用
-    (state.plugins as typeof state.plugins)[1].enabled = false;
+    (state.plugins as typeof state.plugins)[1].state = 'failed';
     const wrapper = await openCategory('工具');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('send_group_msg'))!;
     await row.trigger('click');
@@ -264,8 +259,7 @@ describe('SettingsView 插件工作台', () => {
         description: '运行期挂载',
         entry: '',
         author: '',
-        enabled: true,
-        builtin: false,
+                builtin: false,
         package: 'example.external',
         gating: 'process',
       },
@@ -398,8 +392,7 @@ describe('SettingsView 插件工作台', () => {
         category: '',
         package: '',
         content: '',
-        enabled: true,
-        source: { url: 'git@github.com:EchoLab-Auto/skill-echo-prodoc.git', rev: 'f727ad5' },
+                source: { url: 'git@github.com:EchoLab-Auto/skill-echo-prodoc.git', rev: 'f727ad5' },
       } as never,
     ];
     await wrapper.vm.$nextTick();
@@ -421,22 +414,20 @@ describe('SettingsView 插件工作台', () => {
     expect(subtitle).toContain('1 模式插件');
   });
 
-  it('行内：包规模徽标 / 受保护锁 / 模式标记；受保护项无开关', async () => {
+  it('行内：包规模徽标 / 受保护锁 / 模式标记；**没有启停开关**', async () => {
     const wrapper = await openCategory('插件');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     // 包规模：1 工具 · 1 技能
     expect(qqRow.text()).toContain('1 工具 · 1 技能');
     const mgmtRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('管理面'))!;
     expect(mgmtRow.text()).toContain('受保护');
-    expect(mgmtRow.find('.caps-skill-item__quick input').exists()).toBe(false);
     const loopRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
     expect(loopRow.text()).toContain('模式');
-    // 普通插件有开关 → TogglePlugin
-    const input = qqRow.find('.caps-skill-item__quick input');
-    await input.setValue(false);
-    expect(vi.mocked(sendCommand).mock.calls.map((c) => c[0])).toContainEqual({
-      TogglePlugin: { id: 'echo-agent.adapter.qq', enabled: false },
-    });
+
+    // 禁用动作已删除：任何插件行都没有启停开关，只有（受保护插件除外的）重启按钮。
+    expect(wrapper.findAll('.caps-skill-item__quick input')).toHaveLength(0);
+    expect(mgmtRow.find('.plugin-restart-btn').exists()).toBe(false);
+    expect(qqRow.find('.plugin-restart-btn').exists()).toBe(true);
   });
 
   it('行内「重启」：已启用且不受保护的插件可发 RestartPlugin，不改启用状态', async () => {
@@ -448,20 +439,14 @@ describe('SettingsView 插件工作台', () => {
     expect(vi.mocked(sendCommand).mock.calls.map((c) => c[0])).toContainEqual({
       RestartPlugin: { id: 'echo-agent.adapter.qq' },
     });
-    // 重启 ≠ 启停：不得顺带发 TogglePlugin（否则会在配置里留下禁用记录）。
-    expect(
-      vi.mocked(sendCommand).mock.calls.map((c) => c[0]).some(
-        (cmd) => typeof cmd === 'object' && cmd !== null && 'TogglePlugin' in cmd,
-      ),
-    ).toBe(false);
     // 受保护（管理面）不给重启按钮。
     const mgmtRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('管理面'))!;
     expect(mgmtRow.find('.plugin-restart-btn').exists()).toBe(false);
   });
 
-  it('未启用的插件不给行内重启按钮（没有可重载的实例）', async () => {
+  it('装配失败的插件不给行内重启按钮（没有可重载的实例）', async () => {
     state.plugins = state.plugins.map((p) =>
-      p.id === 'echo-agent.adapter.qq' ? { ...p, enabled: false } : p,
+      p.id === 'echo-agent.adapter.qq' ? { ...p, state: 'failed' } : p,
     );
     const wrapper = await openCategory('插件');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
@@ -471,7 +456,7 @@ describe('SettingsView 插件工作台', () => {
   it('装配失败：行内出「失败」徽标，详情出失败原因块（与主动禁用区分）', async () => {
     const reason = 'plugin echo-agent.adapter.qq mount failed: command not found';
     state.plugins = state.plugins.map((p) =>
-      p.id === 'echo-agent.adapter.qq' ? { ...p, enabled: false, error: reason } : p,
+      p.id === 'echo-agent.adapter.qq' ? { ...p, state: 'failed', error: reason } : p,
     );
     const wrapper = await openCategory('插件');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
@@ -515,8 +500,7 @@ describe('SettingsView 插件工作台', () => {
         description: '从 plugin.toml 发现',
         entry: '',
         author: '',
-        enabled: true,
-        builtin: false,
+                builtin: false,
         runtime: 'in_process',
         package: 'data.plugin',
         gating: 'process',
@@ -588,7 +572,7 @@ describe('SettingsView 插件工作台', () => {
     expect(row.text()).not.toContain('运行中');
   });
 
-  it('外部条目：启停影响文案说「立即生效」（真的起停子进程）', async () => {
+  it('外部条目：影响文案说明它由 plugins.toml 定义、只能重启不能卸载', async () => {
     state.plugins = [
       ...state.plugins,
       {
@@ -599,8 +583,7 @@ describe('SettingsView 插件工作台', () => {
         description: 'plugins.toml 的 stdio 条目',
         entry: 'example-ext',
         author: '',
-        enabled: true,
-        builtin: false,
+                builtin: false,
         runtime: 'subprocess',
         package: 'example-ext',
         gating: 'process',
@@ -611,8 +594,8 @@ describe('SettingsView 插件工作台', () => {
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('示例外部插件'))!;
     await row.trigger('click');
     const impact = wrapper.find('.plugin-impact').text();
-    expect(impact).toContain('立即生效');
-    expect(impact).not.toContain('重启 Core 后生效');
+    expect(impact).toContain('plugins.toml');
+    expect(impact).toContain('只能重启');
   });
 
   it('技术信息：定义文件 / 启动命令 / 环境变量键名（排查「为什么不起来」）', async () => {
@@ -626,8 +609,7 @@ describe('SettingsView 插件工作台', () => {
         description: 'plugins.toml 的 stdio 条目',
         entry: 'example-ext',
         author: '',
-        enabled: true,
-        builtin: false,
+                builtin: false,
         runtime: 'subprocess',
         package: 'example-ext',
         gating: 'process',
@@ -753,8 +735,7 @@ describe('多 Core 插件归档（pluginsByCore）', () => {
           description: '',
           entry: '',
           author: '',
-          enabled: true,
-          builtin: true,
+                    builtin: true,
           package: 'node-b.plugin',
           core: 'node-b',
         },

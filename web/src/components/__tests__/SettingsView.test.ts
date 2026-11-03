@@ -46,11 +46,11 @@ function seed() {
     { name: 'workspace', description: 'd', parameters: null, category: 'builtin', enabled: true, package: 'echo-agent.workspace' },
   ] as typeof state.tools;
   state.plugins = [
-    { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.tools.builtin', gating: 'persona' },
-    { id: 'echo-agent.adapter.qq', name: 'QQ 实例', version: '1', kind: 'instance', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.adapter.qq' },
-    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.workspace', gating: 'persona' },
-    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.future-interaction', gating: 'process' },
-    { id: 'echo-agent.management.panel', name: '管理面', version: '1', kind: 'management', description: '', entry: '', author: '', enabled: true, builtin: true, package: 'echo-agent.management.panel', gating: 'process' },
+    { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.tools.builtin', gating: 'persona' },
+    { id: 'echo-agent.adapter.qq', name: 'QQ 实例', version: '1', kind: 'instance', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.adapter.qq' },
+    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.workspace', gating: 'persona' },
+    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.future-interaction', gating: 'process' },
+    { id: 'echo-agent.management.panel', name: '管理面', version: '1', kind: 'management', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.management.panel', gating: 'process' },
   ] as typeof state.plugins;
 }
 

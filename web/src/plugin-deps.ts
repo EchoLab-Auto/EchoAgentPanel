@@ -64,9 +64,7 @@ export function buildPluginDependencyGraph(plugins: PluginInfo[]): ProDocFlowGra
 
   for (const p of plugins) {
     const nodeId = nodeIdOf(p.id);
-    // 禁用/装配失败的插件用菱形标出（与"启用"矩形区分），但不影响拓扑。
-    const shape = p.enabled ? 'rect' : 'diamond';
-    nodes.push({ id: nodeId, label: p.name || p.id, shape });
+    nodes.push({ id: nodeId, label: p.name || p.id, shape: 'rect' });
 
     for (const key of p.required_services ?? []) {
       const providerId = providerByKey.get(key);

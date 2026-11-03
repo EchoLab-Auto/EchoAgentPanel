@@ -319,7 +319,6 @@ export interface PluginInfo {
   description: string;
   entry: string;
   author: string;
-  enabled: boolean;
   /** true = Core 编译内置；false = 外部插件。旧 Core 缺失时按 true 兼容。 */
   builtin?: boolean;
   /**
@@ -593,7 +592,6 @@ export type BackendCommand =
     }
   | { DeleteSkill: { name: string } }
   | 'RequestPluginsList'
-  | { TogglePlugin: { id: string; enabled: boolean } }
   | { RestartPlugin: { id: string } }
   | 'RequestTeamsList'
   | { ToggleTeam: { id: string; enabled: boolean } }

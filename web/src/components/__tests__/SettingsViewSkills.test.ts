@@ -88,7 +88,7 @@ function seed() {
       description: '',
       entry: '',
       author: '',
-      enabled: false,
+      state: 'failed',
       builtin: true,
       package: 'echo-agent.adapter.qq',
     },

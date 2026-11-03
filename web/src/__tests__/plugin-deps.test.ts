@@ -11,7 +11,6 @@ function plugin(partial: Partial<PluginInfo>): PluginInfo {
     description: '',
     entry: '',
     author: '',
-    enabled: true,
     ...partial,
   };
 }
@@ -52,11 +51,9 @@ describe('buildPluginDependencyGraph', () => {
     expect(edge!.to).toBe('echo-agent_shell');
   });
 
-  it('禁用插件用菱形标记', () => {
-    const graph = buildPluginDependencyGraph([
-      plugin({ id: 'a', name: 'A', enabled: false }),
-    ]);
-    expect(graph.nodes.find((n) => n.id === 'a')!.shape).toBe('diamond');
+  it('清单中的插件都以矩形节点展示', () => {
+    const graph = buildPluginDependencyGraph([plugin({ id: 'a', name: 'A' })]);
+    expect(graph.nodes.find((n) => n.id === 'a')!.shape).toBe('rect');
   });
 
   it('无依赖边的孤立插件也出现在图里', () => {

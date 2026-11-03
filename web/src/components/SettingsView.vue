@@ -7,7 +7,7 @@
 //! - API：快速模板 / 表单 / 测试连接 / Profiles（UpdateApiConfig / RenameApi / TestApi / SwitchApi / DeleteApi）
 //! - 技能：启停、编辑（SaveSkill）、新建、删除（DeleteSkill）、Git 安装/更新/移除来源
 //! - 工具：启停（ToggleTool）、参数 Schema 浏览
-//! - 插件：启停（TogglePlugin）
+//! - 插件：清单（当前挂载集）+ 重启，没有启停开关（禁用动作已删除）
 //! - 智能体：选中即进编辑态（SaveTeam）、启停（ToggleTeam）、删除（DeleteTeam）
 //! - 日志：Core/Panel 分段、5s 自动刷新（HTTP /api/logs/{core,panel}）
 //! 数据来自后端 SkillsList / ToolsList / PluginsList / TeamsList 事件，打开时主动拉取；
@@ -123,7 +123,7 @@ const disabledCount = computed(() => {
     case 'tool':
       return state.tools.filter((t) => !t.enabled).length;
     case 'plugin':
-      return state.plugins.filter((p) => !p.enabled).length;
+      return 0;
     case 'team':
       return state.teams.filter((t) => !t.enabled).length;
   }
@@ -321,9 +321,9 @@ function skillPackageLabel(pkg: string | undefined, standalone = '独立技能')
   return PACKAGE_DISPLAY_NAMES[pkg] ?? pkg;
 }
 
-/** 所属包的插件是否被禁用（禁用后包内技能对模型不可见）。 */
+/** 清单只含当前挂载插件；已卸载的插件不在清单里，不会产生包禁用标记。 */
 const disabledPluginIds = computed(
-  () => new Set(state.plugins.filter((p) => !p.enabled).map((p) => p.id)),
+  () => new Set(state.plugins.filter((p) => p.state === 'failed').map((p) => p.id)),
 );
 function skillPackageDisabled(s: SkillInfo): boolean {
   return !!s.package && disabledPluginIds.value.has(s.package);
@@ -850,9 +850,9 @@ function pluginMatchesFilter(p: PluginInfo, filter: PluginFilter): boolean {
     case 'all':
       return true;
     case 'enabled':
-      return p.enabled;
+      return p.state !== 'failed';
     case 'disabled':
-      return !p.enabled;
+      return p.state === 'failed';
   }
 }
 
@@ -863,8 +863,8 @@ const pluginFilterCounts = computed(() => {
     disabled: 0,
   };
   for (const p of pluginCatalog.value) {
-    if (p.enabled) counts.enabled += 1;
-    else counts.disabled += 1;
+    if (p.state === 'failed') counts.disabled += 1;
+    else counts.enabled += 1;
   }
   return counts;
 });
@@ -937,12 +937,6 @@ function pluginProtected(p: PluginInfo): boolean {
   return p.id === MANAGEMENT_PANEL_PLUGIN_ID;
 }
 
-/** 插件行内快速开关（受保护的不给开关）。 */
-function quickTogglePlugin(p: PluginInfo, enabled: boolean) {
-  if (pluginProtected(p)) return;
-  togglePlugin(p, enabled, pluginCoreEffective.value ?? undefined);
-}
-
 /** 插件「带来什么」：包内工具/技能（供列表徽标与详情 chip 展示）。 */
 const pluginMembersById = computed(() => {
   const map = new Map<string, { tools: string[]; skills: string[] }>();
@@ -973,32 +967,35 @@ const pluginUsageRows = computed(() => {
   return rows;
 });
 
-/** 启停影响文案（按门控语义分派）。 */
+/**
+ * 卸载影响文案（按门控语义分派）。
+ *
+ * 没有"禁用"这个动作了，所以文案回答的是「**卸载**它会让什么消失」——
+ * 那是用户真正要知道的后果（改 `plugins.toml` 或删配置后重启 Core 才发生）。
+ */
 const pluginImpactText = computed(() => {
   const p = selectedPlugin.value;
   if (!p) return '';
   if (pluginProtected(p)) {
-    return '「管理面」插件承载 Panel ↔ Core 的 management 通道：禁用即断连自锁（无法经界面恢复），Core 侧拒绝经 TogglePlugin 禁用。确需禁用请编辑 core.toml 的 disabled_plugins 后重启 Core。';
+    return '「管理面」插件承载 Panel ↔ Core 的 management 通道：卸载即断连自锁（无法经界面恢复），所以它只能随 Core 一起启停。';
   }
-  // 外部条目（`plugins.toml` 的 stdio 插件）优先判：它的启停语义是
-  // 「真的起停子进程」，与门控/通道/名义挂载三类都不同。
   if (pluginIsExternalEntry(p)) {
     const members = pluginMembers(p);
     const tools = members.tools.length;
-    return `外部插件（独立进程）：启停**立即生效**——禁用会排空并退出该插件进程${tools > 0 ? `，其 ${tools} 个工具随即不可用` : ''}；启用会重新拉起并握手。同时写入 disabled_plugins，重启 Core 后保持当前状态。`;
+    return `外部插件（独立进程）：由 \`plugins.toml\` 的 \`[[plugin]]\` 条目定义，随 Core 启动拉起、随 Core 退出停止${tools > 0 ? `，带来 ${tools} 个工具` : ''}。运行期只能重启（重新握手），不能就地卸载。`;
   }
   const sem = pluginSemantic(p);
   if (sem === 'gated') {
     const members = pluginMembers(p);
-    return `整包门控：禁用后其包内 ${members.tools.length} 个工具、${members.skills.length} 个技能对所有智能体不可见（含白名单内的智能体）。`;
+    return `整包门控：它带来 ${members.tools.length} 个工具、${members.skills.length} 个技能；卸载后这些能力对所有智能体都不可见（含白名单内的智能体）。`;
   }
   if (sem === 'channel') {
-    return '平台通道：禁用即卸载该实例/管理通道注册，对应平台会话与连接停止；对其他插件无影响。';
+    return '平台通道：卸载即撤销该实例 / 管理通道注册，对应平台会话与连接停止。';
   }
   if (sem === 'mode') {
-    return '模式插件：全局停用 = 卸载 echo-loop 驱动（单会话与并行多会话都停用则回退内置循环实现）。某智能体的「单会话 / 并行多会话」在「智能体」配置的循环模式里选择，与这里的全局开关是两层。';
+    return '循环插件：提供 echo-loop 驱动与 `loop` 服务，卸载后 Agent 没有 turn 驱动（启动期就会明确失败）。';
   }
-  return '名义挂载插件：启停写入 disabled_plugins，重启 Core 后生效。';
+  return '进程内插件：随 Core 启动挂载，改动需要重启 Core 生效。';
 });
 
 // 详情「技术信息」折叠态 + 参数复制反馈文本（选中切换时重置，见上方 watch）
@@ -1582,30 +1579,17 @@ function toggleSkill(skill: SkillInfo, enabled: boolean) {
   sendCommand({ ToggleSkill: { name: skill.name, enabled } });
 }
 
-// ── 插件启停 ──
-// 管理面插件承载 Panel ↔ Core 的 management 通道：core 拒绝经 TogglePlugin
-// 禁用它（防自锁），这里在 UI 侧提前明示，避免误以为操作生效。
+// ── 插件重启 ──
+// 插件没有启停开关：清单 = 当前挂载集，卸载即从清单消失。唯一可做的运行期
+// 操作是「重启」（卸下 → 重新挂载），让插件按最新配置重新初始化。
 const MANAGEMENT_PANEL_PLUGIN_ID = 'echo-agent.management.panel';
 
-function togglePlugin(plugin: PluginInfo, enabled: boolean, targetCore?: string) {
-  if (!enabled && plugin.id === MANAGEMENT_PANEL_PLUGIN_ID) {
-    addToast({
-      message:
-        '「管理面」插件承载 Panel 与 Core 的通信通道，禁用即断连自锁（无法经界面恢复），已被保护。如需禁用请编辑 core.toml 的 disabled_plugins 后重启 Core。',
-      type: 'warning',
-      duration: 6000,
-    });
-    return;
-  }
-  sendCommand({ TogglePlugin: { id: plugin.id, enabled } }, targetCore);
-}
-
 /**
- * 插件「重启」= 卸下 + 重新挂载（Core 的 `RestartPlugin`），**不改**启用状态。
+ * 插件「重启」= 卸下 + 重新挂载（Core 的 `RestartPlugin`）。
  *
- * 与「关再开」的差别：不写 `disabled_plugins`、不触发配置持久化——纯粹让
- * 插件按最新配置/外部状态重新初始化（子进程插件重连、实例插件重启进程）。
- * 管理面插件同样受保护：重启 = 先断 management WS，Panel 立即失联。
+ * 纯粹让插件按最新配置 / 外部状态重新初始化（子进程插件重连、实例插件重启
+ * 进程），不触碰任何持久化状态。管理面插件受保护：重启 = 先断 management WS，
+ * Panel 立即失联。
  */
 function restartPlugin(plugin: PluginInfo, targetCore?: string) {
   if (plugin.id === MANAGEMENT_PANEL_PLUGIN_ID) {
@@ -1614,14 +1598,6 @@ function restartPlugin(plugin: PluginInfo, targetCore?: string) {
         '「管理面」插件承载 Panel 与 Core 的通信通道，重启会先断开这条通道（Panel 无法经界面恢复）。如需重载请重启 Core 服务。',
       type: 'warning',
       duration: 6000,
-    });
-    return;
-  }
-  if (!plugin.enabled) {
-    addToast({
-      message: '插件当前未启用——先启用再重启（未挂载的插件没有可重载的实例）。',
-      type: 'warning',
-      duration: 5000,
     });
     return;
   }
@@ -2356,15 +2332,15 @@ watch(
                   class="caps-list-item caps-skill-item"
                   :class="{
                     'caps-list-item--active': selectedPlugin?.id === p.id,
-                    'caps-skill-item--off': !p.enabled,
+                    'caps-skill-item--off': false,
                   }"
                   @click="selectPluginItem(p)"
                 >
                   <div class="caps-skill-item__main">
                     <span
                       class="caps-skill-item__dot"
-                      :class="{ 'caps-skill-item__dot--on': p.enabled }"
-                      :title="p.enabled ? '已启用' : '已禁用'"
+                      :class="{ 'caps-skill-item__dot--on': true }"
+                      title="已挂载"
                     />
                     <span class="caps-list-item__name">{{ p.name }}</span>
                     <span class="caps-skill-item__marks">
@@ -2418,30 +2394,16 @@ watch(
                       </span>
                     </span>
                     <span class="caps-skill-item__quick" @click.stop>
-                      <span
-                        v-if="pluginProtected(p)"
-                        class="caps-lock"
-                        title="禁用即断连自锁（受保护）"
+                      <button
+                        v-if="!pluginProtected(p) && p.state !== 'failed'"
+                        type="button"
+                        class="plugin-restart-btn"
+                        title="重启（卸下后重新挂载）"
+                        aria-label="重启插件"
+                        @click="quickRestartPlugin(p)"
                       >
-                        <PanelIcon name="lock" size="sm" tone="warn" aria-label="受保护" />
-                      </span>
-                      <template v-else>
-                        <button
-                          v-if="p.enabled"
-                          type="button"
-                          class="plugin-restart-btn"
-                          title="重启（卸下后重新挂载，不改启用状态）"
-                          aria-label="重启插件"
-                          @click="quickRestartPlugin(p)"
-                        >
-                          <PanelIcon name="refresh" size="xs" />
-                        </button>
-                        <NeumorphismSwitch
-                          :model-value="p.enabled"
-                          size="small"
-                          @change="quickTogglePlugin(p, $event)"
-                        />
-                      </template>
+                        <PanelIcon name="refresh" size="xs" />
+                      </button>
                     </span>
                   </div>
                   <div class="caps-skill-item__sub">
@@ -2467,8 +2429,7 @@ watch(
           <template v-else-if="activeCategory === 'plugin' && pluginViewMode === 'deps'">
             <div class="plugin-deps-view">
               <div class="plugin-deps-view__hint">
-                从左到右 = 从被依赖到依赖方。菱形 = 已禁用/装配失败。
-                边上的文字是被消费的服务键（`echo-agent.` 前缀省略）。
+                从左到右 = 从被依赖到依赖方。                边上的文字是被消费的服务键（`echo-agent.` 前缀省略）。
               </div>
               <DocFlowCanvas :graph="pluginDepGraph" height="520px" />
             </div>
@@ -3104,7 +3065,7 @@ watch(
                   受保护
                 </span>
                 <NeumorphismButton
-                  v-if="!pluginProtected(selectedPlugin) && selectedPlugin.enabled"
+                  v-if="!pluginProtected(selectedPlugin)"
                   size="small"
                   variant="glass"
                   title="卸下后重新挂载（不改启用状态、不写配置）"
@@ -3113,14 +3074,6 @@ watch(
                   <PanelIcon name="refresh" size="xs" />
                   重启
                 </NeumorphismButton>
-                <NeumorphismSwitch
-                  v-if="!pluginProtected(selectedPlugin)"
-                  :model-value="selectedPlugin.enabled"
-                  size="small"
-                  active-text="启用"
-                  inactive-text="禁用"
-                  @change="togglePlugin(selectedPlugin!, $event)"
-                />
               </div>
             </div>
 
