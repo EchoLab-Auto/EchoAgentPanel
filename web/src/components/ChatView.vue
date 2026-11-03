@@ -184,13 +184,14 @@ function restoreComposerBlurSoon() {
 
 function onComposerFocus() {
   suspendComposerBlur();
-  // 键盘可能弹出：启动轮询测量（不依赖 vv 事件，见 startKeyboardTracking）
-  startKeyboardTracking();
+  // 监控是常驻的（见 startKeyboardMonitor），这里不需要启动。
+  // 保留 focus 钩子只为 suspendComposerBlur() 的既有用途。
 }
 
 function onComposerBlur() {
   restoreComposerBlurSoon();
-  stopKeyboardTracking();
+  // **不要停监控**：iOS 键盘态里 focus/blur 会抖动（点候选栏、切输入法都会），
+  // 一旦在这里停掉就再也没有人纠偏了 —— 正是上一版「有时贴、有时不贴」的根因。
 }
 
 onBeforeUnmount(() => {
@@ -394,7 +395,12 @@ const keyboardInsetPx = computed(() => `${keyboardInset.value}px`);
 const keyboardVisible = ref(false);
 /** 闭环校正的轮次计数（见 syncComposerToViewport）。声明在此处是为了让
  *  `updateKeyboardInset` 引用它时不存在 TDZ 区的可读性歧义。 */
-let syncRounds = 0;
+/** 连续「测出来不齐」的拍数（键盘态 100ms/拍）。第 12 拍触发自动上报。 */
+let misalignedTicks = 0;
+/** 自动上报每次会话只发一条，避免刷屏。 */
+let anomalyReported = false;
+/** visualViewport 事件计数（诊断用：区分「算错」与「没被通知」）。 */
+const vvEvents = { resize: 0, scroll: 0 };
 let visualViewport: VisualViewport | null = null;
 /**
  * 无键盘基准，**按屏幕方向分别记录「见过的最大内部高度」**。
@@ -428,6 +434,11 @@ function viewportBaseline(): number {
   if (!known || h > known) baseByOrientation[key] = h;
   return baseByOrientation[key];
 }
+function countVvEvent(e: Event): void {
+  if (e.type === 'resize') vvEvents.resize += 1;
+  else vvEvents.scroll += 1;
+}
+
 function updateKeyboardInset() {
   if (!visualViewport) return;
 
@@ -495,38 +506,34 @@ function updateKeyboardInset() {
   // 键盘开合改变「要不要贴屏角」：屏幕下角已经不在可视区，轮廓必须重算
   // （updateComposerClip 内部会据 keyboardInset 退回常规圆角）。
   updateComposerClip();
-  // 公式给的是**起点**；等一帧（CSS 变量落到布局上）后交闭环校正，
-  // 见 syncComposerToViewport 的注释。
-  syncRounds = 0;
-  requestAnimationFrame(syncComposerToViewport);
+  // 之后由常驻监控的下一拍（100ms）调 syncComposerToViewport 完成测量校正。
+  // 这里不做 rAF 递归 —— 递归 + 迭代计数会耗尽后静默放弃，正是上一版
+  // 「有时贴、有时不贴」的根因。
 }
 
 /**
- * 把输入区底边**直接摆到**可视区下沿（2026-11 第三版）。
+ * 把输入区底边摆到「可视区下沿」（2026-11 第四版：单次纠偏，无递归）。
  *
- * 前两版都栽在同一件事上：用一个**累加量**（keyboardInset）去逼近目标。
- * 累加量有两个致命属性 ——
- *   ① 没有天然上限：闭环里 `inset + delta` 一旦被错值推动一次就会单调跑飞；
- *      `maxLift` 只约束公式那条路径，管不住闭环。
- *   ② 依赖参考系：inset 是「距容器底部多远」，容器本身一变形（--app-h
- *      被改、Safari 连布局视口一起滚），同一个数值落在完全不同的地方。
+ * 历史（每一版都是被真机数据打回来的）：
+ *   ① 纯公式 inset = innerHeight − vv.height − vv.offsetTop
+ *      → iOS Safari 的 height/offsetTop 报告顺序不定，双倍位移，卡片飞到顶部。
+ *   ② 累加闭环 inset += delta
+ *      → 累加量无天然上限，一次错值就单调跑飞（实测偏差 −688）；
+ *        且参考系会随容器变形漂移。
+ *   ③ 绝对值 wantBottom = 容器底边 − 目标底边 + rAF 递归 & 迭代计数
+ *      → 方向正确，但**计数会耗尽后静默放弃**：`syncRounds` 是共享的，
+ *        滚动复位分支也累加；一旦 ≥6 就 return，而键盘高度还在变。
+ *        表现就是「有时贴住、有时不贴」。
  *
- * 真机数据（Safari，`vv.height=376`、事件 1/1、**偏差 −688**）：键盘明明
- * 被检测到、事件也来了，但卡片跑到了可视区**上方之外** —— 累加量跑飞
- * 叠加参考系漂移，越修越远。
+ * 本版：单次纠偏。每次调用只测量一次、写一次值，**不做递归**。
+ * 节拍由常驻监控（startKeyboardMonitor）提供 —— 它每 100ms 调一次，
+ * 足够覆盖 iOS 键盘动画、输入法切换、表情键盘等所有高度变化，
+ * 也不存在「计数耗尽」这种失败模式。
  *
- * 所以改成**不累加、不推算**，只做一件事：
- *
- *   CSS `bottom` 的 used value 定义就是「元素底边距包含块底边的距离」，
+ * 核心一步不变（这是唯一算得准的量）：
+ *   CSS `bottom` 的 used value 定义 = 元素底边距包含块底边的距离，
  *   于是 `wantBottom = 容器底边 − 目标底边` 就是唯一正确的值 ——
- *   一次算准，与容器多高、inset 是多少、有没有 clamp 全都无关。
- *
- * 允许负数：`bottom: -312px` 会把元素往下推出容器，正是容器已经矮到装不下
- * 卡片时该做的事（视觉上卡片浮在容器下方、仍在屏幕内）。
- *
- * 结果写进内联 `--composer-bottom-px`；CSS 侧 `bottom` 优先用它，否则退回
- * 原公式（`--composer-bottom-gap + keyboardInset`）。键盘收起时删掉这个变量，
- * 一切回到原来的等间隙布局。
+ *   与容器多高、inset 多少、有没有 clamp 全都无关，且可为负。
  */
 function syncComposerToViewport(): void {
   const el = composerFloatRef.value;
@@ -534,173 +541,168 @@ function syncComposerToViewport(): void {
   const vv = window.visualViewport;
   if (!el || !root) return;
 
-  // 键盘在 → 把 #app 钉住，**从根上阻止 Safari 滚页面**（2026-11）。
-  //
-  // iOS 为了保证聚焦元素可见，会在键盘弹出时把页面滚上去（真机实测
-  // scrollY 0 → 338，容器 top 56 → −282）。只靠 `scrollTo(0,0)` 复位是
-  // 拉锯：我们拉回、它再滚，用户看到的是输入框在键盘上沿附近抖、间歇
-  // 露出一条缝。
-  //
-  // `#app` 是整套布局的根（高度 100%）。键盘态给它 `position: fixed;
-  // inset: 0`：它脱离子文档流 → 文档高度变 0 → 没有可滚动的距离，
-  // Safari 想滚也滚不动。键盘收起立刻清空，恢复正常流。
-  // 用 inset 而不是 top/height：一次给全四边，不必关心原高度链。
-  const appEl = document.getElementById('app');
-  if (appEl) {
-    if (keyboardVisible.value) {
-      if (appEl.style.position !== 'fixed') {
-        appEl.style.position = 'fixed';
-        appEl.style.inset = '0';
-      }
-    } else if (appEl.style.position === 'fixed') {
-      appEl.style.position = '';
-      appEl.style.inset = '';
-    }
-  }
+  // ── 键盘态：钉住 #app，从根上禁止 Safari 滚页面 ──────────────────────
+  // iOS 为保证聚焦元素可见会滚页面（真机 scrollY 0 → 338，容器 top 56 → −282）。
+  // 只靠 scrollTo(0,0) 复位是拉锯。`#app` 改 position:fixed 后脱离子文档流，
+  // 文档没有可滚动高度，Safari 想滚也滚不动。收起键盘立刻还原。
+  setAppPinned(keyboardVisible.value);
 
-  // 键盘不在：撤掉内联覆盖，回到 CSS 的等间隙口径
+  // ── 无键盘：撤掉内联覆盖，顺手校正 --app-h ────────────────────────────
   if (!vv || !keyboardVisible.value) {
-    syncRounds = 0;
     if (el.style.getPropertyValue('--composer-bottom-px')) {
       el.style.removeProperty('--composer-bottom-px');
     }
-    // 顺手把 `--app-h` 复位（实测缺这一步的后果）：真机数据里键盘收起后
-    //   innerHeight=714、vv.height=714（都恢复了）
-    //   但 --app-h 仍是 376px → .chat-view 只有 320 高、卡片停在 y=239
-    // 键盘收起时 Safari 未必派发 window.resize，index.html 的 setAppHeight
-    // 因此没被调用。这里由轮询兜住：只要无键盘且两者不一致就改回去。
-    // 只在「差值明显」时写，避免每拍都碰内联样式（那会拖累样式重算）。
-    const cur = Number.parseFloat(
-      document.documentElement.style.getPropertyValue('--app-h'),
-    );
-    if (!Number.isNaN(cur) && Math.abs(cur - window.innerHeight) > 2) {
-      document.documentElement.style.setProperty('--app-h', `${window.innerHeight}px`);
-    }
+    healAppHeight();
     return;
   }
 
-  // ① iOS Safari 会把页面滚上去（实测 scrollY=0 → 338），容器跟着从 top=56
-  // 跑到 top=−282，顶栏整块移出屏幕。复位它。
-  //
-  // **复位当帧不能测量**：`window.scrollTo` 是异步生效的，本帧的
-  // getBoundingClientRect 还停在滚动后的坐标。实测踩过：某次在滚动中途
-  // 量到 rootRect.bottom = −1043，算出 wantBottom = −1419，写进 CSS 后
-  // 卡片被推到容器下方 1419px；下一拍又基于这个错位继续放大 —— 正反馈。
-  // 所以：只复位、跳下一帧、不计算。
+  // ── 键盘态：测量一次、纠偏一次 ──────────────────────────────────────
+  // 0) 页面被滚动了（#app 尚未 fixed 的短暂窗口 / 其他原因）：先复位，
+  //    本拍不测量 —— scrollTo 异步生效，此刻 rect 还是滚动后的坐标。
   const scrolled = window.scrollY || document.documentElement.scrollTop || 0;
   if (scrolled !== 0) {
     window.scrollTo(0, 0);
-    if (syncRounds < 8) {
-      syncRounds += 1;
-      requestAnimationFrame(syncComposerToViewport);
-    } else {
-      syncRounds = 0;
-    }
     return;
   }
 
   const rootRect = root.getBoundingClientRect();
   const cardRect = el.getBoundingClientRect();
 
-  // ② 「可视区下沿」在布局视口坐标里的位置。
-  //
-  // 实测：键盘态下 iOS Safari 把 innerHeight **和** vv.height 一起压到 376，
-  // 此时 getBoundingClientRect 的坐标系已经是压缩后的 —— 可视区下沿就是
-  // vv.height(376)，**不能**再加 offsetTop(338)：那会得到 714，落到键盘背后。
-  // 而 resizes-visual 的浏览器（如旧版 Chrome）innerHeight 不变、只有
-  // vv.height 缩小，此时才需要加 offsetTop。
-  // 用「innerHeight 是否已经跟 vv.height 一样矮」区分这两种模型：
-  //   ② 376 <= 377 → 已压缩 → target = 376          ✅
-  //   ① 714 <= 715 → target = 714（无键盘，不写）     ✅
+  // 1) 可视区下沿（布局视口坐标）：
+  //   · iOS Safari 键盘态把 innerHeight 与 vv.height 一起压小 → 下沿 = vv.height
+  //   · resizes-visual 的浏览器（innerHeight 不变）→ 下沿 = vv.offsetTop + vv.height
   const layoutShrunk = window.innerHeight <= vv.height + 1;
   const targetBottom = layoutShrunk ? vv.height : vv.offsetTop + vv.height;
-  const curBottom = rootRect.bottom - cardRect.bottom; // 当前 CSS bottom 的 used value
-  const wantBottom = rootRect.bottom - targetBottom; // 让卡片底边落在可视区下沿
 
-  // ③ 合理性闸门（2026-11，实测必需）：卡片底边只可能落在「容器底边附近」
-  // —— 最坏情况是容器矮到装不下卡片，此时 wantBottom ≈ −(卡片高)。
-  // 一旦 |wantBottom| 超过容器高 + 400，只可能是测量本身不可信（布局震荡、
-  // 滚动锚定、Safari 的动画中间态）。这种值**绝不能写进 CSS**：它会把卡片
-  // 推走，下一拍基于错位继续放大，形成正反馈（实测 −1419 就是这么来的）。
-  // 宁可保持上一帧的位置等下一拍。
+  // 2) 唯一正确的值（见函数头注释）
+  const curBottom = rootRect.bottom - cardRect.bottom;
+  const wantBottom = rootRect.bottom - targetBottom;
+
+  // 3) 合理性闸门：卡片底边只可能落在容器底边附近（最坏情况容器装不下
+  //    卡片 → wantBottom ≈ −卡片高）。超过 容器高+400 只可能是测量不可信
+  //    （布局震荡 / 滚动锚定 / 动画中间态），绝不写入 —— 否则会把卡片推走，
+  //    下一拍基于错位继续放大，形成正反馈（实测 −1419 就是这么来的）。
   const rootH = root.clientHeight || rootRect.height;
   if (!Number.isFinite(wantBottom) || Math.abs(wantBottom) > rootH + 400) {
-    syncRounds = 0;
     return;
   }
 
   if (Math.abs(curBottom - wantBottom) <= 0.5) {
-    syncRounds = 0;
+    // 已对齐：记录一次「健康」，供自动上报判断是否只是动画中间态
+    if (misalignedTicks > 0) misalignedTicks = 0;
     return;
   }
-  // 兜底：最多连续纠 6 次，防某种反馈环把 rAF 拖成死循环
-  if (syncRounds >= 6) {
-    syncRounds = 0;
-    return;
-  }
-  syncRounds += 1;
+
   el.style.setProperty('--composer-bottom-px', `${wantBottom.toFixed(2)}px`);
-  // 等一帧再复核：Safari 可能在我们写完后又滚了一下
-  requestAnimationFrame(syncComposerToViewport);
+
+  // 4) 偏差持续 → 自动上报（无需 ?diag）。
+  //    单拍偏差可能只是键盘动画中间态，连续多拍还在偏就说明真有 bug。
+  //    这是本轮新增的「自证通道」：用户遇到问题时数据会自己上传，
+  //    不必再让他带参数刷新、口述数字。
+  if (Math.abs(curBottom - wantBottom) > 2) {
+    misalignedTicks += 1;
+    if (misalignedTicks === 12) {
+      reportAnomaly('composer misaligned', {
+        wantBottom,
+        curBottom,
+        targetBottom,
+        rootH,
+        rootRect: { top: rootRect.top, bottom: rootRect.bottom },
+        cardRect: { top: cardRect.top, bottom: cardRect.bottom },
+        layoutShrunk,
+        innerHeight: window.innerHeight,
+        vvHeight: vv.height,
+        vvOffsetTop: vv.offsetTop,
+        appH: getComputedStyle(document.documentElement)
+          .getPropertyValue('--app-h')
+          .trim(),
+      });
+    }
+  } else {
+    misalignedTicks = 0;
+  }
+}
+
+/** 键盘态把 #app 钉成 fixed（阻止页面滚动）；其余时候还原。 */
+function setAppPinned(pinned: boolean): void {
+  const appEl = document.getElementById('app');
+  if (!appEl) return;
+  if (pinned) {
+    if (appEl.style.position !== 'fixed') {
+      appEl.style.position = 'fixed';
+      appEl.style.inset = '0';
+    }
+  } else if (appEl.style.position === 'fixed') {
+    appEl.style.position = '';
+    appEl.style.inset = '';
+  }
 }
 
 /**
- * 键盘跟踪轮询：不依赖**任何** visualViewport 事件。
+ * 自动异常上报（2026-11）：遇到「怎么调都不齐」时把现场数据打给 Panel，
+ * 落到 `/tmp/panel-keyboard-diag.jsonl`，排查者本机 tail 即可。
  *
- * 为什么需要（2026-11 实测推演）：上面的监听全部建立在「键盘弹出会派发
- * vv.resize / vv.scroll」这个假设上。而 Safari 在本应用这种
- * `html,body{overflow:hidden}` 的固定视口 SPA 里，有相当大概率
- * **既不更新 `vv.height`、也不派发事件** —— 因为它认定页面无法滚动，
- * 把「保证聚焦元素可见」的责任推给页面自己。此时监听器永远收不到通知，
- * 输入区一动不动被键盘盖住（这正是「这版不行」最可能的形态：
- * 从「跑到顶部」变成「根本没抬」）。
- *
- * 对策：输入框聚焦/触摸时，直接用固定节拍采样 1.6 秒（覆盖 iOS 键盘
- * 约 250ms 的动画 + Safari 自己滚动的延迟），每拍都跑一次闭环测量。
- * 有事件也跑（幂等）、没事件也跑 —— 结果不依赖任何时序假设。
- *
- * 停止条件：跑满 1.6s 自然停；期间若用户失焦则立刻停。
+ * 为什么要自动：前几轮全靠用户口述两三个数字，每缺一个字段就多跑一轮。
+ * 这里只在**连续 12 拍（≈1.2s）仍有 >2px 偏差**时上报一次，正常使用
+ * 不产生任何流量。失败静默 —— 诊断不能影响主流程。
  */
-let focusPollId: number | null = null;
-let focusPollStart = 0;
+function reportAnomaly(reason: string, detail: Record<string, unknown>): void {
+  if (anomalyReported) return;
+  anomalyReported = true;
+  try {
+    void fetch('/api/diag', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        source: 'ChatView',
+        reason,
+        detail,
+        ua: navigator.userAgent,
+        vvEvents,
+        ts: Date.now(),
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* 忽略 */
+  }
+}
 
 /**
- * 采样节拍（2026-11 第二轮）：**整个聚焦期都采样**，不是只跑一阵。
+ * 常驻监控（2026-11 第五版）：**组件挂载即启动，卸载才停**。
  *
- * 第一版只跑 1.6s，实测暴露两个缺口（后者更严重）：
- *   ① Safari 在键盘动画**之后**才滚 offsetTop（>1.6s）→ 错过；
- *   ② 键盘收起时若焦点仍在（点键盘上的「完成」而不是点页面），
- *      没有事件、也没有采样 → 输入区**永远停在抬起的位置**。
- * 所以：前 1.6s 用 60ms 高频覆盖键盘动画，之后降到 250ms 长期守着，
- * 直到输入框失焦。250ms 一次 `updateKeyboardInset + 闭环`，每次只做
- * 一次 getBoundingClientRect 且收敛后不写任何状态，开销可忽略。
+ * 为什么不再「聚焦时启动、失焦时停止」（上一版的做法，被真机打回）：
+ * 那条链有三个可断的点，每个都会让输入区永久不贴：
+ *
+ *   ① **失焦即停轮询**。iOS Safari 在键盘态里 `document.activeElement`
+ *      并非始终指向输入框 —— 点键盘候选栏、切换输入法、点「听写」，
+ *      甚至键盘自己的 accessory bar 都可能触发 blur。一旦 `closest()` 判假，
+ *      轮询被 `stopKeyboardTracking()` 干掉，之后键盘高度再怎么变都没人管。
+ *   ② **启动入口只有 touchstart / pointerdown / focusin**。若页面加载时
+ *      输入框已有焦点、或用外接键盘 Tab 聚焦，这三个事件都不发生，
+ *      监控从未启动过。
+ *   ③ 上一版还有共享的 `syncRounds` 迭代计数，耗尽后静默放弃。
+ *
+ * 常驻后这些问题一起消失：不看焦点、不看事件，只按节拍照常测量。
+ * 代价是每秒 10 次 `getBoundingClientRect` + 一次比较（键盘态），
+ * 收敛后不写任何状态 —— 可忽略。
+ *
+ * 节拍：键盘态 100ms（覆盖键盘动画、高度切换）；有焦点 100ms
+ * （尽早发现键盘弹出）；其余 500ms（只为兜住意外，比如 `--app-h` 被写坏）。
  */
-function startKeyboardTracking(): void {
-  if (focusPollId !== null) window.clearTimeout(focusPollId);
-  focusPollStart = performance.now();
+let monitorId: number | null = null;
+
+function startKeyboardMonitor(): void {
+  if (monitorId !== null) return;
   const tick = () => {
-    focusPollId = null;
-    if (!document.activeElement?.closest('.chat-composer-float')) {
-      // 失焦：把状态清干净，别把抬起量留给下一次
-      stopKeyboardTracking();
-      if (keyboardInset.value !== 0) keyboardInset.value = 0;
-      if (keyboardVisible.value) {
-        keyboardVisible.value = false;
-        updateComposerClip();
-      }
-      return;
-    }
+    monitorId = null;
     updateKeyboardInset();
     syncComposerToViewport();
-    // 节拍（2026-11 二次调整）：键盘动画期间 60ms；之后键盘仍在用 100ms
-    // —— 250ms 在真机上会被读成「跟不紧、时不时露一条缝」。100ms 仍是
-    // 「每秒 10 次 getBoundingClientRect + 一次比较」，收敛后不写任何状态，
-    // 开销可以忽略。
-    const fast = performance.now() - focusPollStart < 1600;
-    const gap = fast ? 60 : keyboardVisible.value ? 100 : 250;
-    focusPollId = window.setTimeout(tick, gap);
+    const focused = !!document.activeElement?.closest('.chat-composer-float');
+    const gap = keyboardVisible.value || focused ? 100 : 500;
+    monitorId = window.setTimeout(tick, gap);
   };
-  focusPollId = window.setTimeout(tick, 0);
+  monitorId = window.setTimeout(tick, 0);
 }
 
 /** 屏幕旋转：延后一拍让布局稳定，再校正 `--app-h` 并重算一次键盘态。 */
@@ -708,18 +710,15 @@ function onOrientationChange(): void {
   window.setTimeout(() => {
     healAppHeight();
     updateKeyboardInset();
+    syncComposerToViewport();
   }, 300);
 }
 
-function stopKeyboardTracking(): void {
-  if (focusPollId !== null) {
-    window.clearTimeout(focusPollId);
-    focusPollId = null;
+function stopKeyboardMonitor(): void {
+  if (monitorId !== null) {
+    window.clearTimeout(monitorId);
+    monitorId = null;
   }
-  // 收尾一次（2026-11）：轮询停掉之后就没人再修 `--app-h` 了，而真机数据
-  // 证明「键盘收起 → --app-h 卡在键螐值」是常态（Safari 未必派发
-  // window.resize）。失焦往往就是收键盘的时刻，必须在这里补最后一刀，
-  // 否则整个应用会永久矮一截（实测卡在 376px / 真实 714px）。
   healAppHeight();
 }
 
@@ -739,6 +738,8 @@ function healAppHeight(): void {
 }
 
 onMounted(() => {
+  // 常驻监控（不看焦点、不看事件，见 startKeyboardMonitor 的注释）
+  startKeyboardMonitor();
   // 旋转后确认一次 --app-h（基准本身由 viewportBaseline() 惰性维护，
   // 见其注释：不能挂在 resize 上无条件更新，那会被键盘自身的 resize 覆盖）。
   window.addEventListener('orientationchange', onOrientationChange);
@@ -761,6 +762,8 @@ onMounted(() => {
   // 时序」，比在这里赌 isMobile 的初值可靠。
   if (window.visualViewport) {
     visualViewport = window.visualViewport;
+    visualViewport.addEventListener('resize', countVvEvent);
+    visualViewport.addEventListener('scroll', countVvEvent);
     visualViewport.addEventListener('resize', updateKeyboardInset);
     visualViewport.addEventListener('scroll', updateKeyboardInset);
   }
@@ -786,13 +789,15 @@ onMounted(() => {
   }
 });
 onBeforeUnmount(() => {
-  stopKeyboardTracking();
+  stopKeyboardMonitor();
   window.removeEventListener('orientationchange', onOrientationChange);
   ctxObserver?.disconnect();
   rootObserver?.disconnect();
   rootObserver = null;
   document.removeEventListener('selectionchange', onSelectionChange);
   if (visualViewport) {
+    visualViewport.removeEventListener('resize', countVvEvent);
+    visualViewport.removeEventListener('scroll', countVvEvent);
     visualViewport.removeEventListener('resize', updateKeyboardInset);
     visualViewport.removeEventListener('scroll', updateKeyboardInset);
     visualViewport = null;
@@ -2198,8 +2203,6 @@ function mediaSrc(img: string): string {
       :style="composerStyle"
       @focusin="onComposerFocus"
       @focusout="onComposerBlur"
-      @touchstart.passive="startKeyboardTracking"
-      @pointerdown.passive="startKeyboardTracking"
     >
       <!-- 投影补层（只在移动端 clip 生效时显示）：见下方 __halo 的样式注释 ——
            `clip-path` 会把卡片**自身**的外阴影一起裁掉，手机上的悬浮观感只能
