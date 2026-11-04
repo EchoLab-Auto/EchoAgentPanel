@@ -4,7 +4,7 @@
 //! 只有等用户在生产上跑才发现。这里用 `bash -n` 做语法门禁，并对"文档承诺
 //! 的开关"做存在性守护——重命名 / 删码后帮助文本与 README 不会脱节。
 //!
-//! 同类门禁见 EchoAgentCore 的 `source/core/tests/install_script_flag.rs`。
+//! 同类门禁见 EchoAgentCore 的 `source/plugin/core/tests/install_script_flag.rs`。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
