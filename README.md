@@ -217,3 +217,28 @@ Panel 在 WebSocket 建立、重连、切换 Agent/Core 时主动重新请求列
 清理历史”的多步操作应由 UI 防重复提交（操作期间按钮去重并保留表单）、先串行清理对应
 通道历史再提交更新，超时/错误需可见并可重试；未来协议中增加 request id / version，
 以便 Core 原子化确认和乱序恢复。
+
+## 作为 Core 的可选进程内插件
+
+**插件实现完全在本仓**：`source/echo-plugin-panel/`。它与独立
+`echo-agent-panel` 外壳共享 `echo-web-server::runtime`，Core 不持有 Panel
+路由、配置或生命周期实现。
+
+在 Core 的 `plugins.toml` 显式启用后才会监听端口：
+
+```toml
+[[plugin]]
+id = "echo-agent.panel.web"
+kind = "builtin"
+name = "Web Panel"
+enabled = true
+
+[plugin.config]
+bind = "127.0.0.1:8080"
+static_dir = "/home/me/.local/libexec/echo-agent-panel/web"
+config_file = "/home/me/.config/echo-agent-panel/panel.toml"
+```
+
+默认不挂载、不监听。`config_file` 可复用现有多上游、SSH 与联邦发现配置；
+对外监听必须 `allow_remote = true` 且配置 `access_token_secret_file`，令牌
+不写进插件诊断配置。独立部署与内嵌部署都受支持，不能在同一端口同时运行。
