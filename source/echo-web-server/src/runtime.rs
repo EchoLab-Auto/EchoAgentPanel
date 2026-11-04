@@ -52,6 +52,7 @@ pub struct RunningPanel {
     task: Option<tokio::task::JoinHandle<()>>,
     probe: Option<tokio::task::JoinHandle<()>>,
     local_addr: std::net::SocketAddr,
+    tunnels: Arc<crate::ssh::SshTunnels>,
 }
 
 impl RunningPanel {
@@ -89,6 +90,7 @@ impl Drop for RunningPanel {
         if let Some(probe) = &self.probe {
             probe.abort();
         }
+        self.tunnels.shutdown();
     }
 }
 
@@ -205,7 +207,7 @@ impl PanelRuntime {
                 crate::upstreams_api::require_auth,
             ))
             .fallback(crate::static_files::static_handler)
-            .with_state(state);
+            .with_state(state.clone());
         let listener = tokio::net::TcpListener::bind(&config.bind)
             .await
             .map_err(|e| anyhow::anyhow!("cannot bind {}: {e}", config.bind))?;
@@ -230,6 +232,7 @@ impl PanelRuntime {
             task: Some(task),
             probe: Some(probe),
             local_addr,
+            tunnels: state.tunnels.clone(),
         })
     }
 }
