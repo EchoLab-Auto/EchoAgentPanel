@@ -929,7 +929,7 @@ export type BackendEvent =
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
   | { PluginsList: { plugins: PluginInfo[] } }
-  // **插件事件**（plugin-framework v0.7 的事件通道）：插件运行期 `emit` 的
+  // **插件事件**（echo-fabric-arch v0.7 的事件通道）：插件运行期 `emit` 的
   // 东西 + 注册表自己的 `plugin.mounted` / `plugin.unmounted`。`name` /
   // `payload` 是插件与 Core 自行约定的词汇，前端**不解释**、只当活动日志
   // 展示（新增插件事件不必改前端）。注释放在联合分支**之外**：本文件的
