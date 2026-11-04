@@ -97,11 +97,34 @@ impl Drop for RunningPanel {
 pub struct PanelRuntime;
 
 impl PanelRuntime {
-    /// 在既有 Tokio runtime 中启动；调用方负责 Tokio 生命周期。
+    /// 在既有 Tokio runtime 的任意 worker 线程中启动。
+    ///
+    /// 插件 mount 是同步接口，但宿主可能在多线程 runtime 的 worker 上调用；
+    /// 直接 `Handle::block_on` 会 panic。将 listener 建立交给一个短生命周期的
+    /// 独立 Tokio worker，启动完成后只把已 bind 的服务任务交给宿主 runtime。
     pub fn start(config: PanelRuntimeConfig) -> Result<RunningPanel> {
         let handle = tokio::runtime::Handle::try_current()
             .map_err(|e| anyhow::anyhow!("PanelRuntime::start must run inside Tokio: {e}"))?;
-        handle.block_on(Self::start_async(config))
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let local = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("temporary Panel startup runtime");
+                    local.block_on(Self::start_async_in(handle, config))
+                })
+                .join()
+                .map_err(|_| anyhow::anyhow!("Panel startup worker panicked"))?
+        })
+    }
+
+    async fn start_async_in(
+        handle: tokio::runtime::Handle,
+        config: PanelRuntimeConfig,
+    ) -> Result<RunningPanel> {
+        let _guard = handle.enter();
+        Self::start_async(config).await
     }
 
     pub async fn start_async(config: PanelRuntimeConfig) -> Result<RunningPanel> {
