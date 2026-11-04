@@ -190,6 +190,15 @@ impl SshTunnels {
     }
 
     /// 摘除隧道（上游删除/改为直连时）。
+    /// 停止所有隧道。Drop 不能等待异步锁，只取消任务并让 listener 随任务释放。
+    pub fn shutdown(&self) {
+        if let Ok(mut inner) = self.inner.try_lock() {
+            for (_, tunnel) in inner.drain() {
+                tunnel.shutdown();
+            }
+        }
+    }
+
     pub async fn remove(&self, name: &str) {
         let removed = self.inner.lock().await.remove(name);
         if let Some(tunnel) = removed {

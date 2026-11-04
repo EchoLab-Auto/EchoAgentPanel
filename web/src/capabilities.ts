@@ -75,6 +75,7 @@ export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
   'echo-agent.session': '会话',
   'echo-agent.transcript': '显示层',
   'echo-agent.shell': 'Shell 会话',
+  'echo-agent.panel.web': '内嵌 Web Panel',
 };
 
 /**
@@ -109,7 +110,7 @@ export type PluginCheckboxState = 'enabled' | 'readonly' | 'hidden';
  * 判据是**能力类别**（用户心智里"这个人格有没有管理/交互能力"），不是
  * "能不能关"——它们关不掉，但看得见。
  */
-const READONLY_PLUGIN_KINDS = ['management', 'interaction'] as const;
+const READONLY_PLUGIN_KINDS = ['management', 'panel', 'interaction'] as const;
 
 /**
  * 插件在勾选区里的三态。**只读 Core 的判定**（`PluginInfo.gating`）。
@@ -135,7 +136,8 @@ export function pluginCheckboxState(plugin: {
   if (
     isInstancePluginKind(plugin.kind) ||
     plugin.kind === 'management' ||
-    plugin.kind === 'interaction'
+    plugin.kind === 'interaction' ||
+    plugin.kind === 'panel'
   ) {
     return 'enabled';
   }
@@ -163,6 +165,7 @@ export const PLUGIN_KIND_LABELS: Record<string, string> = {
   orchestration: '编排',
   session: '会话',
   management: '管理面',
+  panel: '内嵌 Panel',
   interaction: '交互',
   /** Core↔Core 对等链路（2026-11 之前就漏了这个标签——`plugins.md` 早就
    *  提醒过「新增 kind 时要记得同步它」，实测漏了两轮）。 */
