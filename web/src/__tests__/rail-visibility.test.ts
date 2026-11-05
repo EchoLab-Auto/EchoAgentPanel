@@ -19,6 +19,17 @@ import ChatView from '../components/ChatView.vue';
 import { state } from '../store';
 import { placeCard, resetRailLayout } from '../rail-layout';
 import { railHasVisibleCards, railRegistered } from '../rail-cards';
+import { registerPanelExtension } from '../extensions/registry';
+
+registerPanelExtension({
+  id: 'test',
+  railCardSlots: ['files'],
+  railCards() {
+    const session = state.workspaceSessions.find((item) => item.id === state.workspaceActive);
+    const card = defineComponent({ setup: () => () => h('div') });
+    return session ? [{ id: 'files', title: `文件浏览器 · ${session.name}`, component: card }] : [];
+  },
+});
 
 // ── 库组件 stub（与 ChatViewMobile.test.ts 同法：不渲染真实 ui-frame/chat） ──
 const MessageItemStub = defineComponent({
@@ -94,7 +105,7 @@ describe('侧栏列显隐：登记（结构）与门控（内容）解耦', () =
     expect(railRegistered('left')).toBe(false);
 
     // 把条件性卡片（文件浏览器）放到左列，但门控不满足
-    placeCard('files', 'left', 0);
+    placeCard('extension:test:files', 'left', 0);
     deactivateWorkspace();
     expect(railRegistered('left')).toBe(true); // 登记在 → 列该保活
     expect(railHasVisibleCards('left', 'alix')).toBe(false); // 但当前没有可见卡片
@@ -106,7 +117,7 @@ describe('侧栏列显隐：登记（结构）与门控（内容）解耦', () =
   });
 
   it('门控失效时左列仍在（保留占位与 324px 留白），并显示空态提示', async () => {
-    placeCard('files', 'left', 0);
+    placeCard('extension:test:files', 'left', 0);
     deactivateWorkspace();
     const wrapper = mountChatView();
     await nextTick();
@@ -121,7 +132,7 @@ describe('侧栏列显隐：登记（结构）与门控（内容）解耦', () =
   });
 
   it('门控恢复后同一列内部长出卡片（列本身从未卸载）', async () => {
-    placeCard('files', 'left', 0);
+    placeCard('extension:test:files', 'left', 0);
     deactivateWorkspace();
     const wrapper = mountChatView();
     await nextTick();
@@ -137,14 +148,14 @@ describe('侧栏列显隐：登记（结构）与门控（内容）解耦', () =
   });
 
   it('登记为空（用户把最后一张卡拖走）时左列照常消失', async () => {
-    placeCard('files', 'left', 0);
+    placeCard('extension:test:files', 'left', 0);
     deactivateWorkspace();
     const wrapper = mountChatView();
     await nextTick();
     expect(wrapper.find('.chat-rail--left').exists()).toBe(true);
 
     // 用户把卡片拖回右列：登记变空 → 列该消失（显式意图，非闪烁）
-    placeCard('files', 'right', 0);
+    placeCard('extension:test:files', 'right', 0);
     await nextTick();
     expect(wrapper.find('.chat-rail--left').exists()).toBe(false);
     wrapper.unmount();

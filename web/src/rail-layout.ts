@@ -12,6 +12,7 @@
 //! 那份状态**按卡片 id** 存，与所在列无关——卡片换列后折叠态与高度比例保留。
 
 import { reactive, watch } from 'vue';
+import { panelRailCardIds } from './extensions/registry';
 
 export type RailSide = 'left' | 'right';
 
@@ -19,7 +20,7 @@ export type RailSide = 'left' | 'right';
  * 卡片 id 的规范顺序（新增卡片时在此登记；用于未归属卡片的补位与默认布局）。
  * 与 `PanelSidebar` 里的卡片注册表一致。
  */
-export const RAIL_CARD_ORDER = ['status', 'files', 'git', 'shell', 'branches'] as const;
+export const RAIL_CARD_ORDER = ['status', 'shell', 'branches'] as const;
 
 export interface RailLayout {
   left: string[];
@@ -79,7 +80,9 @@ function load(): RailLayout {
 }
 
 function isKnownCard(id: unknown): id is string {
-  return typeof id === 'string' && (RAIL_CARD_ORDER as readonly string[]).includes(id);
+  return typeof id === 'string' && (
+    (RAIL_CARD_ORDER as readonly string[]).includes(id) || id.startsWith('extension:')
+  );
 }
 
 /**
@@ -87,13 +90,10 @@ function isKnownCard(id: unknown): id is string {
  * 第一个「规范序号更大」的右侧卡片之前，保持既定视觉顺序。
  */
 function fillUnplaced(layout: RailLayout, seen: Set<string>): void {
-  for (const id of RAIL_CARD_ORDER) {
+  const order = [RAIL_CARD_ORDER[0], ...panelRailCardIds(), ...RAIL_CARD_ORDER.slice(1)];
+  for (const id of order) {
     if (seen.has(id)) continue;
-    const index = layout.right.findIndex(
-      (existing) =>
-        RAIL_CARD_ORDER.indexOf(existing as (typeof RAIL_CARD_ORDER)[number]) >
-        RAIL_CARD_ORDER.indexOf(id),
-    );
+    const index = layout.right.findIndex((existing) => order.indexOf(existing) > order.indexOf(id));
     if (index === -1) layout.right.push(id);
     else layout.right.splice(index, 0, id);
     seen.add(id);
@@ -178,4 +178,5 @@ export function resetRailLayout(): void {
   const defaults = defaultLayout();
   railLayout.left = defaults.left;
   railLayout.right = defaults.right;
+  fillUnplaced(railLayout, new Set([...railLayout.left, ...railLayout.right]));
 }

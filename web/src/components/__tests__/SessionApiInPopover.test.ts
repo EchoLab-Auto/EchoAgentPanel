@@ -15,6 +15,21 @@ import { defineComponent, h, nextTick, ref } from 'vue';
 import { state } from '../../store';
 import type { SessionInfo } from '../../protocol';
 
+import { registerPanelExtension } from '../../extensions/registry';
+
+registerPanelExtension({
+  id: 'test.workspace-channel',
+  hooks: {
+    sessionPresentation(session) {
+      return session.scope === 'workspace' ? { tag: '工作区', tagTone: 'accent' } : null;
+    },
+    canConfigureSessionApi(session) {
+      return session.scope === 'workspace';
+    },
+  },
+});
+
+
 const sendCommand = vi.fn();
 vi.mock('../../connection', () => ({
   sendCommand: (...args: unknown[]) => sendCommand(...args),

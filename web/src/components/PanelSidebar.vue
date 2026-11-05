@@ -1,12 +1,11 @@
 <script setup lang="ts">
 //! 边栏卡片栈（chat-rail 内容；左右两列共用同一组件，`side` 区分）：
-//! 连接状态 / 文件浏览器 / Git 状态 / Shell，上下排列
+//! 内置状态/Shell 与扩展卡片统一排列
 //! （RailStack：折叠为横条、分隔条拖动调整上下空间、卡片可拖到另一列，均持久化）。
 //!
 //! 卡片门控（与所在列无关）：
 //! - 连接状态：常驻（Core 管理通道 + 各 QQ 实例；紧凑卡，固定高度）
-//! - 文件浏览器：workspace 插件可用且有激活会话（内容跟随激活会话）
-//! - Git 状态：同上（同一工作区会话；2026-10 从「工作区会话管理」面板提出）
+//! - 扩展卡片：由扩展按自身能力和数据门控
 //! - Shell：常驻（与 LLM 工具共用同一会话体系）
 //!
 //! 布局（哪张卡在哪一列、列内顺序）由 `rail-layout.ts` 持有并持久化——
@@ -15,15 +14,13 @@
 
 import { computed } from 'vue';
 import { lazy } from '../lazy';
-import { railCardsFor, workspaceCardFor } from '../rail-cards';
+import { railCardsFor } from '../rail-cards';
 import type { RailSide } from '../rail-layout';
 import RailStack, { type RailCardDef } from './RailStack.vue';
 // 右栏卡片按需加载（2026-10 审计）：连接状态卡 / 文件浏览器 / Shell 列表
 // 合计约 1100 行 + 依赖，不在首帧关键路径上（右栏在挂载后渲染）——转为
 // 异步 chunk，首屏 JS 不再被它们拖累。
 const ConnectionStatusCard = lazy(() => import('./ConnectionStatusCard.vue'), 'ConnectionStatusCard');
-const WorkspaceFileBrowser = lazy(() => import('./WorkspaceFileBrowser.vue'), 'WorkspaceFileBrowser');
-const WorkspaceGitCard = lazy(() => import('./WorkspaceGitCard.vue'), 'WorkspaceGitCard');
 const ShellList = lazy(() => import('./ShellList.vue'), 'ShellList');
 
 const props = withDefaults(
@@ -44,7 +41,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   selectBranch: [id: string];
-  manageWorkspace: [];
   openShellDetail: [sessionId: string, core: string | null];
   /** 卡片换列（拖动或头部按钮）——由视图层做提示/持久化外的后续动作。 */
   relocate: [id: string, side: RailSide];
@@ -52,9 +48,6 @@ const emit = defineEmits<{
 
 /** 本列渲染的卡片：门控 × 用户排序（共享注册表 `rail-cards.ts`）。 */
 const cards = computed<RailCardDef[]>(() => railCardsFor(props.side, props.teamId));
-
-/** 文件浏览器卡当前绑定的工作区会话（模板里传给 WorkspaceFileBrowser）。 */
-const workspaceCard = computed(() => workspaceCardFor(props.teamId));
 
 
 </script>
@@ -68,22 +61,6 @@ const workspaceCard = computed(() => workspaceCardFor(props.teamId));
   >
     <template #status>
       <ConnectionStatusCard />
-    </template>
-    <template #files>
-      <div class="rail-files">
-        <button
-          type="button"
-          class="rail-files__manage"
-          title="工作区会话管理（新建 / 编辑 / 激活、多对话）"
-          @click="emit('manageWorkspace')"
-        >
-          工作区会话管理 →
-        </button>
-        <WorkspaceFileBrowser :team-id="teamId" :session="workspaceCard" />
-      </div>
-    </template>
-    <template #git>
-      <WorkspaceGitCard :team-id="teamId" :session="workspaceCard" />
     </template>
     <template #shell>
       <ShellList :team-id="teamId" @open-detail="(id, core) => emit('openShellDetail', id, core)" />

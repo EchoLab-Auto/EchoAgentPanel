@@ -14,15 +14,13 @@ import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';
 import { requestActiveRegionManagement, requestTimeline, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
-import { currentTeam, teamPluginEnabled } from './capabilities';
+import { currentTeam } from './capabilities';
 import {
-  LOCAL_DEFAULT_SESSION,
-  decideOnWorkspaceBroadcast,
-  localSessionProjection,
-  noteLocalActivateIntent,
-  takeLocalActivateIntent,
-  workspacePickIntent,
-} from './workspace';
+  beforeSessionPick,
+  setupPanelExtensions,
+  teamLanding,
+} from './extensions/registry';
+import 'virtual:panel-extensions';
 import ChatView from './components/ChatView.vue';
 import CompactionIndicator from './components/CompactionIndicator.vue';
 // 首屏瘦身（2026-10 审计修复）：设置视图（3400+ 行，含 5 个子设置页）、
@@ -39,7 +37,6 @@ import PanelIcon from './components/PanelIcon.vue';
 import { railSessionId } from './rail-cards';
 import { readPref, readTabOnly, writePref, writeTabOnly } from './tab-prefs';
 
-startConnection();
 
 // 竖屏移动端（2026-10）：断点与库同源（innerWidth < 768）。移动端隐藏
 // 全屏按钮（CSS），顶栏出现「卡片」入口（打开 ChatView 内的卡片抽屉）。
@@ -217,7 +214,7 @@ function setView(next: View) {
 // 当前对话目标会话。旧版聚合视图（global）已随并行模式移除，旧偏好统一回落默认会话。
 const savedSession = readTabOnly(SESSION_KEY);
 const activeSessionId = ref(savedSession && savedSession !== 'global' ? savedSession : 'local:tui::local_user');
-/** 侧栏卡片读它来决定"文件浏览器绑哪个工作区"（per-window，非全局 active）。 */
+/** 扩展卡片可通过 windowSessionId 绑定本窗口正在查看的会话。 */
 railSessionId.value = activeSessionId.value;
 // 当前 Team 成员（空 = 默认/default）。切换后发送自动带上 team_id（会话隔离）。
 // 初始值从 localStorage 恢复：刷新/重连后停留在上次使用的 Agent。
@@ -231,6 +228,17 @@ state.activeRegion = activeRegion.value;
 // 本窗口正在看的会话：Core 的会话级操作回执（`Notice`）据此只在发起窗口展示
 // （否则 A 窗口压缩会话 A 时，B 窗口也会弹「已压缩…」——2026-10 用户报告）。
 state.windowSessionId = activeSessionId.value;
+
+// 扩展只拿应用上下文与公开槽位；Panel 壳不加载任何业务插件 UI。
+setupPanelExtensions({
+  teamId: activeTeamId,
+  sessionId: activeSessionId,
+  core: activeRegion,
+  selectSession,
+  setSession: setActiveSession,
+  syncTeamCore: applyActiveTeam,
+});
+startConnection();
 
 
 
@@ -291,29 +299,10 @@ function selectSession(id: string, reason = 'select') {
 // 面板侧只在本地视图上跟随。
 /** 切换团队后的本地落点：已知该团队 active → 通道投影；否则默认本地会话。 */
 function localLanding(teamId: string | null): string {
-  const synced = state.workspaceTeamId === teamId;
-  return synced
-    ? localSessionProjection(
-        state.workspaceActive,
-        state.workspaceActiveConversation,
-        state.workspaceSessions,
-      )
-    : LOCAL_DEFAULT_SESSION;
+  return teamLanding(teamId) ?? 'local:tui::local_user';
 }
 
-function sendWorkspaceActivate(id: string | null, conversation: string | null = null) {
-  // 先登记本窗口意图再发命令：回推到达时据此判断「这次是自己在切」，
-  // 而不是另一窗口/模型工具改的（见 workspace.ts 的多窗口一节）。
-  noteLocalActivateIntent(id, conversation);
-  sendCommand({
-    ActivateWorkspaceSession: {
-      team_id: activeTeamId.value ?? undefined,
-      id,
-      // 取消激活（id = null）时 Core 忽略 conversation；激活时缺省 = 进 last_conversation。
-      conversation: id ? conversation : undefined,
-    },
-  });
-}
+
 /** 用户在「会话」切换器点选（用户意图；程序化切换走 selectSession）。 */
 function onSessionPick(id: string) {
   // 会话归属 core 即当前 agent 的归属 core：同名 team 跨 core 时，选中
@@ -330,16 +319,7 @@ function onSessionPick(id: string) {
       applyActiveTeam(activeTeamId.value, picked.core);
     }
   }
-  const synced = state.workspaceTeamId === activeTeamId.value;
-  const intent = workspacePickIntent(
-    id,
-    state.workspaceActive,
-    state.workspaceActiveConversation,
-    synced,
-    state.workspaceSessions,
-  );
-  if (intent.kind === 'activate') sendWorkspaceActivate(intent.workspaceId, intent.conversation);
-  else if (intent.kind === 'deactivate') sendWorkspaceActivate(null);
+  beforeSessionPick(id);
   selectSession(id);
 }
 
@@ -398,107 +378,6 @@ function setActiveSession(next: string, reason: string): void {
   writeTabOnly(SESSION_KEY, next);
 }
 
-/**
- * 排障用：把最近 20 次 workspace 广播决策留在 `window.__echoPanelWorkspaceLog`。
- *
- * 多窗口串台类问题无法靠现象区分「他端广播 / 本能意图残留 / 通道失效回退」，
- * 只有把每次决策的输入与结论记下来才能定位。纯内存环形缓冲，无 IO、无副作用，
- * 用户复现后一条命令即可导出：
- *
- * ```js
- * copy(JSON.stringify(window.__echoPanelWorkspaceLog, null, 2))
- * ```
- */
-function recordWorkspaceDecision(entry: {
-  active: string | null;
-  activeConversation: string | null;
-  current: string;
-  mine: boolean;
-  decision: { kind: string; next?: string };
-}): void {
-  const w = window as unknown as { __echoPanelWorkspaceLog?: unknown[] };
-  const log = (w.__echoPanelWorkspaceLog ??= []);
-  log.push({
-    t: new Date().toISOString(),
-    active: entry.active,
-    activeConversation: entry.activeConversation,
-    current: entry.current,
-    mine: entry.mine,
-    decision: entry.decision.kind,
-    next: entry.decision.next ?? null,
-  });
-  if (log.length > 20) log.shift();
-}
-
-// active 回推 → 本窗口视图是否跟随（多窗口互不干扰，2026-10）。
-//
-// Core 的 workspace `active` 是全局单例，`WorkspaceSessions` 会广播给所有
-// Panel 连接。此前这里**无条件**跟随投影：A 窗口点选工作区会话（或选默认
-// 会话取消激活）会把其他所有窗口一起跳走——两个浏览器窗口无法各看各的。
-//
-// 现在只跟随「本窗口自己发起的激活」（`takeLocalActivateIntent` 消费意图），
-// 他端广播只同步 workspace 状态（面板高亮 / 切换器激活标记照常更新）；另加
-// 安全网：本地停留的通道被删时回退（`decideOnWorkspaceBroadcast`）。
-// 详细规则见 `workspace.ts` 的「多窗口互不干扰」一节。
-watch(
-  [
-    () => state.workspaceTeamId,
-    () => state.workspaceActive,
-    () => state.workspaceActiveConversation,
-  ],
-  () => {
-    if (state.workspaceTeamId !== activeTeamId.value) return;
-    const mine = takeLocalActivateIntent(
-      state.workspaceActive,
-      state.workspaceActiveConversation,
-    );
-    const decision = decideOnWorkspaceBroadcast({
-      currentSessionId: activeSessionId.value,
-      active: state.workspaceActive,
-      activeConversation: state.workspaceActiveConversation,
-      sessions: state.workspaceSessions,
-      hasLocalIntent: mine,
-    });
-    recordWorkspaceDecision({
-      active: state.workspaceActive,
-      activeConversation: state.workspaceActiveConversation,
-      current: activeSessionId.value,
-      mine,
-      decision,
-    });
-    if (decision.kind !== 'keep' && activeSessionId.value !== decision.next) {
-      setActiveSession(decision.next, `workspace-${decision.kind}`);
-    }
-  },
-);
-// 连接/切换 Team 后拉取工作区会话快照（投影与切换器双击绑定依赖它）。
-// 仅对启用 workspace 插件的人格发（未挂载存储的人格会回明确错误提示）。
-let workspaceFetchKey = '';
-// 每次重连都重新拉管理快照；不能只依赖 WorkspacePanel 是否挂载。
-let workspaceConnectionEpoch = 0;
-let workspaceWasConnected = false;
-watch(
-  [() => state.connected, () => state.teams, () => activeTeamId.value],
-  () => {
-    if (!state.connected) {
-      workspaceFetchKey = '';
-      workspaceWasConnected = false;
-      return;
-    }
-    if (!workspaceWasConnected) {
-      workspaceConnectionEpoch += 1;
-      workspaceWasConnected = true;
-    }
-    const team = currentTeam(state);
-    if (!team || !teamPluginEnabled(team, 'echo-agent.workspace')) return;
-    const teamKey = `${team.core ?? ''}:${team.id}`;
-    if (workspaceFetchKey === `${workspaceConnectionEpoch}:${teamKey}`) return;
-    workspaceFetchKey = `${workspaceConnectionEpoch}:${teamKey}`;
-    sendCommand({ RequestWorkspaceSessions: { team_id: team.id } });
-  },
-  { immediate: true },
-);
-
 // ── Team 兜底：无选中或选中项已删除时，选列表首个并持久化 ──
 // 去主智能体（2026-09）：没有"默认/主 agent"；`activeTeamId` 始终指向一个
 // 具体智能体（首次连接取列表首个，纯客户端初始选择）。
@@ -534,7 +413,7 @@ function resetToFirstTeam() {
   }
   // 自动兜底（当前 agent 从列表消失 / 未选中）：**不能用 localLanding**——
   // 同 global 兜底的理由，它会把本窗口带到他人刚激活的工作区。回中立默认会话。
-  selectSession(LOCAL_DEFAULT_SESSION, 'team-reset');
+  selectSession('local:tui::local_user', 'team-reset');
 }
 
 watch(

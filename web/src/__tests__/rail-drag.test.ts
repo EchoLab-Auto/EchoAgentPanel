@@ -28,6 +28,9 @@ import {
 } from '../rail-drag';
 import { placeCardAfter, railLayout, resetRailLayout } from '../rail-layout';
 
+import { registerPanelExtension } from '../extensions/registry';
+registerPanelExtension({ id: 'test', railCardSlots: ['files', 'git'] });
+
 /** 给元素装一个固定的矩形（jsdom 无布局）。 */
 function stubRect(el: Element, rect: { x: number; y: number; w: number; h: number }): void {
   (el as HTMLElement).getBoundingClientRect = () =>
@@ -114,7 +117,7 @@ describe('rail-drag 状态机', () => {
 
   it('落点：命中列 + 插入序号 + 锚点卡片（序号按可见卡片算）', async () => {
     makeRail(['status', 'shell'], RIGHT_ORIGIN);
-    makeRail(['files'], LEFT_ORIGIN);
+    makeRail(['extension:test:files'], LEFT_ORIGIN);
     const unregisterRight = registerRail('right', document.querySelectorAll('.rail-stack')[0] as HTMLElement);
     const unregisterLeft = registerRail('left', document.querySelectorAll('.rail-stack')[1] as HTMLElement);
     expect(__registeredSides().sort()).toEqual(['left', 'right']);
@@ -131,7 +134,7 @@ describe('rail-drag 状态机', () => {
     updateCardDrag({ x: LEFT_ORIGIN.x + 100, y: LEFT_ORIGIN.y + 12 + 40 + 6 });
     expect(railDrag.dropSide).toBe('left');
     expect(railDrag.dropIndex).toBe(1);
-    expect(railDrag.dropAfter).toBe('files');
+    expect(railDrag.dropAfter).toBe('extension:test:files');
 
     unregisterRight();
     unregisterLeft();
@@ -139,7 +142,7 @@ describe('rail-drag 状态机', () => {
 
   it('落位：布局变更 + 飞行终点 = 落点位置 + arriving 标记 + 收尾复位', async () => {
     const { rail: rightRail } = makeRail(['status', 'shell'], RIGHT_ORIGIN);
-    const { rail: leftRail } = makeRail(['files'], LEFT_ORIGIN);
+    const { rail: leftRail } = makeRail(['extension:test:files'], LEFT_ORIGIN);
     registerRail('right', rightRail);
     registerRail('left', leftRail);
 
@@ -226,7 +229,7 @@ describe('rail-drag 状态机', () => {
 
     // 可见顺序：shell 在 status 之前；不可见卡仍在列表里
     expect(railLayout.right[0]).toBe('shell');
-    expect(railLayout.right).toContain('files');
+    expect(railLayout.right).toContain('extension:test:files');
     expect(railLayout.right).toContain('branches');
   });
 });

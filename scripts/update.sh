@@ -365,6 +365,10 @@ fi
 PHASE=building
 write_status running "building revision $TARGET" "$TARGET"
 cargo build --release --locked -p echo-web-server --manifest-path "$SOURCE_DIR/Cargo.toml"
+if [[ ! -v PANEL_UI_EXTENSIONS && -f "$STATE_DIR/ui-extensions" ]]; then
+    export PANEL_UI_EXTENSIONS
+    PANEL_UI_EXTENSIONS=$(cat "$STATE_DIR/ui-extensions")
+fi
 (
     cd "$SOURCE_DIR/web"
     if [[ -f package-lock.json ]]; then

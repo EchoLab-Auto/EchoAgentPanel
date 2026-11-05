@@ -8,18 +8,10 @@
 //! `rail-layout.ts`（用户拖动结果，持久化）。
 
 import { state } from './store';
-import { teamPluginEnabled, teamToolAvailable } from './capabilities';
 import { railLayout, type RailSide } from './rail-layout';
 import { ref } from 'vue';
-import { parseWorkspaceChannelId } from './workspace';
-import { sessionKey } from './keys';
+import { panelRailCards } from './extensions/registry';
 import type { RailCardDef } from './components/RailStack.vue';
-
-/** 当前激活人格（用于卡片门控与计数）。 */
-function currentTeam(teamId: string | null) {
-  const id = teamId ?? state.teams[0]?.id ?? null;
-  return state.teams.find((t) => t.id === id) ?? null;
-}
 
 /**
  * 本窗口正在查看的会话 id（App.vue 在 activeSessionId 变化时写入）。
@@ -30,44 +22,6 @@ function currentTeam(teamId: string | null) {
  * 串台）。按本窗口会话解析后，卡片只反映"我这一格在看哪个工作区"。
  */
 export const railSessionId = ref<string | null>(null);
-
-/**
- * 文件浏览器卡绑定的工作区会话。
- *
- * 解析顺序（2026-10 多窗口修复）：
- * 1. **本窗口会话是工作区通道** → 用该通道的工作区（与全局 active 无关）；
- * 2. 本窗口停在别处（默认本地会话 / QQ / global）→ 退回全局 `workspaceActive`
- *    （保持旧行为：用户没在看通道时，卡片跟随 Core 的激活态仍是有用信息）。
- *
- * 门控不变：workspace 插件与工具均可用、且列表归属当前 agent。
- */
-export function workspaceCardFor(teamId: string | null) {
-  const team = currentTeam(teamId);
-  const ok = teamPluginEnabled(team, 'echo-agent.workspace') && teamToolAvailable(team, 'workspace');
-  const synced = state.workspaceTeamId === (teamId ?? state.teams[0]?.id ?? null);
-  if (!ok || !synced) return null;
-  const own = parseWorkspaceChannelId(railSessionId.value ?? '')?.workspaceId ?? null;
-  const target = own ?? state.workspaceActive;
-  if (!target) return null;
-  return state.workspaceSessions.find((s) => s.id === target) ?? null;
-}
-
-/**
- * 工作区 git 状态卡的会话绑定（与文件浏览器卡同源：`workspaceCardFor`）。
- *
- * 只把「工作区会话」传出去，git 快照由卡片自己按 session id 取
- * （`state.workspaceGitBySession`）——注册表只算**计数**（徽标），不持有数据。
- */
-function workspaceGitCard(teamId: string | null) {
-  const session = workspaceCardFor(teamId);
-  if (!session) return null;
-  const dirs = state.workspaceGitBySession[sessionKey(state.activeRegion, session.id)] ?? [];
-  const changed = dirs.reduce(
-    (sum, d) => sum + (d.staged ?? 0) + (d.modified ?? 0) + (d.untracked ?? 0),
-    0,
-  );
-  return { session, changed };
-}
 
 /** 当前 agent 的 Shell 会话数（与 Shell 视图的口径一致）。 */
 export function shellSessionCount(teamId: string | null): number {
@@ -84,21 +38,8 @@ export function shellSessionCount(teamId: string | null): number {
  * 因此这里以参数传入而不是模块级缓存——同一视图内左右两列使用同一 teamId。
  */
 export function railCardsFor(side: RailSide, teamId: string | null): RailCardDef[] {
-  const workspace = workspaceCardFor(teamId);
-  const gits = workspaceGitCard(teamId);
   const defs: Record<string, RailCardDef | null> = {
     status: { id: 'status', title: '连接状态', compact: true },
-    files: workspace
-      ? { id: 'files', title: `文件浏览器 · ${workspace.name}` }
-      : null,
-    git: gits
-      ? {
-          id: 'git',
-          title: `Git · ${gits.session.name}`,
-          count: gits.changed,
-          countTitle: '未提交的变更文件数（已暂存 + 已修改 + 未跟踪）',
-        }
-      : null,
     shell: {
       id: 'shell',
       title: 'Shell',
@@ -106,6 +47,8 @@ export function railCardsFor(side: RailSide, teamId: string | null): RailCardDef
       countTitle: '当前 agent 的会话数',
     },
   };
+  // 扩展卡片与内置卡片走同一布局、折叠、拖动和持久化机制。
+  for (const card of panelRailCards(teamId)) defs[card.id] = card;
   return railLayout[side]
     .map((id) => defs[id])
     .filter((card): card is RailCardDef => !!card);

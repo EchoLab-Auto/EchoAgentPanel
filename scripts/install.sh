@@ -148,6 +148,10 @@ Options:
   --no-deps             Skip automatic installation of missing prerequisites
   --dry-run             Print resolved paths without changing the system
   --scope <user|system> Which systemd scope to install into (default: user).
+  --ui-extension <dir>  Include a Panel UI extension package (repeatable).
+                        The directory must contain panel-extension.json.
+                        May also use PANEL_UI_EXTENSIONS (colon-separated).
+  --no-ui-extensions    Build the plain Panel shell and clear saved UI extensions.
 
                         `user` writes ~/.config/systemd/user units and drives them
                         with `systemctl --user`; it enables linger so the service
@@ -167,6 +171,10 @@ One-liner (no clone needed):
 EOF
 }
 
+UI_EXTENSIONS=${PANEL_UI_EXTENSIONS:-}
+UI_EXTENSIONS_SET=0
+[[ -v PANEL_UI_EXTENSIONS ]] && UI_EXTENSIONS_SET=1
+
 while (($#)); do
     case "$1" in
         --repository)
@@ -176,6 +184,35 @@ while (($#)); do
             fi
             REPOSITORY_URL=$2
             shift 2
+            ;;
+        --ui-extension)
+            if (($# < 2)) || [[ -z "$2" ]]; then
+                echo "error: --ui-extension requires a directory" >&2
+                exit 2
+            fi
+            extension_dir=$(CDPATH= cd -- "$2" 2>/dev/null && pwd -P) || {
+                echo "error: UI extension directory not found: $2" >&2
+                exit 2
+            }
+            [[ -f "$extension_dir/panel-extension.json" ]] || {
+                echo "error: missing $extension_dir/panel-extension.json" >&2
+                exit 2
+            }
+            UI_EXTENSIONS="${UI_EXTENSIONS:+$UI_EXTENSIONS:}$extension_dir"
+            UI_EXTENSIONS_SET=1
+            shift 2
+            ;;
+        --ui-extension=*)
+            [[ -n "${1#--ui-extension=}" ]] || {
+                echo "error: --ui-extension requires a directory" >&2
+                exit 2
+            }
+            set -- --ui-extension "${1#--ui-extension=}" "${@:2}"
+            ;;
+        --no-ui-extensions)
+            UI_EXTENSIONS=""
+            UI_EXTENSIONS_SET=1
+            shift
             ;;
         --no-start)
             START_SERVICE=0
@@ -459,6 +496,18 @@ fi
 
 echo "==> Building Rust backend"
 cargo build --release --locked -p echo-web-server --manifest-path "$SOURCE_DIR/Cargo.toml"
+
+# UI 扩展是显式部署组成，不属于 Panel 默认源码。写入状态文件，后续
+# scripts/update.sh 自动保留；--no-ui-extensions 可清空。
+if ((UI_EXTENSIONS_SET)); then
+    printf '%s\n' "$UI_EXTENSIONS" > "$STATE_DIR/ui-extensions"
+elif [[ -z "$UI_EXTENSIONS" && -f "$STATE_DIR/ui-extensions" ]]; then
+    UI_EXTENSIONS=$(cat "$STATE_DIR/ui-extensions")
+fi
+export PANEL_UI_EXTENSIONS="$UI_EXTENSIONS"
+if [[ -n "$PANEL_UI_EXTENSIONS" ]]; then
+    echo "==> Panel UI extensions: $PANEL_UI_EXTENSIONS"
+fi
 
 echo "==> Building web frontend"
 (

@@ -106,7 +106,7 @@ describe('移动端布局 v2：入口行横滚提示', () => {
     expect(tag![0]).toContain('@focusin="warmFromEvent"');
     expect(chatVue).toContain('preloadLazy');
     // 每个覆盖面板按钮都带 data-overlay，预热才能识别目标
-    for (const id of ['config', 'context', 'workspace', 'sessions', 'instance', 'tasks']) {
+    for (const id of ['config', 'context', 'sessions', 'instance', 'tasks']) {
       expect(chatVue, `${id} 按钮缺 data-overlay`).toContain(`data-overlay="${id}"`);
     }
   });
@@ -119,7 +119,7 @@ describe('移动端布局 v2：入口行横滚提示', () => {
   });
 
   it('可滚性在能力开关变化时重算（按钮 v-if 会增减）', () => {
-    const idx = chatVue.indexOf('watch(\n  [sessionSwitcherAvailable, workspaceAvailable, tasksAvailable, instanceAvailable]');
+    const idx = chatVue.indexOf('watch(\n  [sessionSwitcherAvailable, tasksAvailable, instanceAvailable]');
     expect(idx, '缺能力开关变化的 watch').toBeGreaterThan(0);
   });
 

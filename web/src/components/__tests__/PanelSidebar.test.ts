@@ -6,7 +6,7 @@
 //! 本测试锁定：卡片门控、列归属与换列、折叠行为、分隔条结构、会话切换卡不回流。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { nextTick } from 'vue';
+import { defineComponent, h, nextTick } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 
 vi.mock('../../connection', () => {
@@ -24,6 +24,23 @@ import { state } from '../../store';
 import { moveToOtherSide, resetRailLayout, sideOf } from '../../rail-layout';
 import { sessionKey } from '../../keys';
 import type { SessionInfo, TeamInfo } from '../../protocol';
+import { registerPanelExtension } from '../../extensions/registry';
+
+const ExtensionCardStub = defineComponent({ setup: () => () => h('div', 'extension card') });
+registerPanelExtension({
+  id: 'test.cards',
+  railCardSlots: ['files', 'git'],
+  railCards() {
+    const session = state.workspaceSessions.find((item) => item.id === state.workspaceActive);
+    if (!session) return [];
+    const changed = (state.workspaceGitBySession[sessionKey(null, session.id)] ?? [])
+      .reduce((sum, dir) => sum + (dir.staged ?? 0) + (dir.modified ?? 0) + (dir.untracked ?? 0), 0);
+    return [
+      { id: 'files', title: `文件浏览器 · ${session.name}`, component: ExtensionCardStub },
+      { id: 'git', title: `Git · ${session.name}`, count: changed, component: ExtensionCardStub },
+    ];
+  },
+});
 
 function team(over: Partial<TeamInfo>): TeamInfo {
   return { id: 'alix', name: 'Alix', enabled: true, sessions: 0, ...over } as TeamInfo;

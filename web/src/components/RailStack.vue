@@ -22,7 +22,7 @@
 //!   ——两列合并为一条纵向列表，不提供跨列拖动（卡头恢复 `pan-y`，
 //!   拖动列表不从卡头「死区」开始）。
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import {
   armCardDrag,
@@ -50,6 +50,9 @@ export interface RailCardDef {
    * 拖动比例——否则小卡片会被撑成大块、把下方卡片挤扁。
    */
   compact?: boolean;
+  /** 扩展卡片组件；内置卡片继续使用同名具名插槽。 */
+  component?: Component;
+  componentProps?: Record<string, unknown>;
 }
 
 const props = withDefaults(
@@ -448,7 +451,12 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
             </header>
           </template>
           <div v-if="isOpen(card.id)" class="rail-stack__body">
-            <slot :name="card.id" />
+            <component
+              :is="card.component"
+              v-if="card.component"
+              v-bind="card.componentProps"
+            />
+            <slot v-else :name="card.id" />
           </div>
         </NeumorphismCard>
       </div>

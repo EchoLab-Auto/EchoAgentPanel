@@ -11,7 +11,6 @@
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { lazy, preloadLazy } from '../lazy';
-import { ensureWorkspaceSessions } from '../workspace-prefetch';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
@@ -33,11 +32,12 @@ import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squirc
 import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
+import PanelExtensionEntries from './PanelExtensionEntries.vue';
 import SessionOverlay, { type OverlayInset } from './SessionOverlay.vue';
 import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
-import { entryOverlay, type EntryOverlayId } from '../overlays';
+import { entryOverlay, type BuiltinOverlayId } from '../overlays';
 import { railDragEngaged } from '../rail-drag';
 import { claimReasoningAnimation } from '../reasoning-anim';
 import {
@@ -59,7 +59,6 @@ const loaders = {
   agentConfig: () => import('./AgentConfigModal.vue'),
   context: () => import('./ContextView.vue'),
   instance: () => import('./InstancePanel.vue'),
-  workspace: () => import('./WorkspacePanel.vue'),
   sessions: () => import('./SessionSwitcher.vue'),
   tasks: () => import('./TasksPanel.vue'),
 } as const;
@@ -67,17 +66,15 @@ const loaders = {
 const AgentConfigModal = lazy(loaders.agentConfig, 'AgentConfigModal');
 const ContextView = lazy(loaders.context, 'ContextView');
 const InstancePanel = lazy(loaders.instance, 'InstancePanel');
-const WorkspacePanel = lazy(loaders.workspace, 'WorkspacePanel');
 const SessionSwitcher = lazy(loaders.sessions, 'SessionSwitcher');
 const TasksPanel = lazy(loaders.tasks, 'TasksPanel');
 
 /** 入口行按钮 → 对应的 chunk 键（按 `toggleOverlay` 的 id 一一对应）。 */
-const WARM_BY_OVERLAY: Record<EntryOverlayId, keyof typeof loaders> = {
+const WARM_BY_OVERLAY: Record<BuiltinOverlayId, keyof typeof loaders> = {
   config: 'agentConfig',
   context: 'context',
   checklist: 'context', // 清单与上下文同属 ContextView 侧栏，共用一份 chunk
   sessions: 'sessions',
-  workspace: 'workspace',
   instance: 'instance',
   tasks: 'tasks',
 };
@@ -95,13 +92,10 @@ const WARM_BY_OVERLAY: Record<EntryOverlayId, keyof typeof loaders> = {
 function warmFromEvent(event: Event): void {
   const target = event.target as HTMLElement | null;
   const host = target?.closest('[data-overlay]') as HTMLElement | null;
-  const id = host?.dataset.overlay as EntryOverlayId | undefined;
+  const id = host?.dataset.overlay as BuiltinOverlayId | undefined;
   if (!id) return;
   const scope = WARM_BY_OVERLAY[id];
   if (scope) warmOverlayChunks(scope);
-  // 数据也一起提前（chunk 与数据并行）：指针停在按钮上的那几百毫秒足够
-  // 把一个 WS 往返跑完，真正点下去时卡片已经能直接画出来。
-  prefetchOverlayData(id);
 }
 
 /**
@@ -220,14 +214,8 @@ const connected = computed(() => state.connected);
  * 面板里按实例/会话按需拉）。要加新的一项时：这里加一行 + 面板侧的补拉也走
  * 同一个 `ensure*` 函数（它自带"已有数据/已在飞就不发"的去重）。
  */
-function prefetchOverlayData(id: EntryOverlayId): void {
-  if (id === 'workspace') {
-    ensureWorkspaceSessions(props.activeTeamId ?? null, state.activeRegion ?? null);
-  }
-}
-
 /** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。 */
-function toggleOverlay(id: EntryOverlayId) {
+function toggleOverlay(id: BuiltinOverlayId) {
   entryOverlay.value = entryOverlay.value === id ? null : id;
 }
 
@@ -236,16 +224,6 @@ function closeOverlay() {
   entryOverlay.value = null;
 }
 
-// 数据预热改挂在状态变化上（而不是 `toggleOverlay` 里）：`entryOverlay` 现在
-// 是模块级状态，顶栏的进度指示器也能打开「上下文」面板——预热若仍写在本组件
-// 的点击回调里，那条路径就会漏掉（面板打开后才开始拉数据）。
-watch(
-  entryOverlay,
-  (id) => {
-    if (id) prefetchOverlayData(id);
-  },
-  { flush: 'sync' },
-);
 // 入口按钮固定与输入框间距 12px：观察输入框高度变化（auto-resize），
 // bottom = composerHeight + 12(margin) + 12(gap)。
 const composerFloatRef = ref<HTMLElement | null>(null);
@@ -936,14 +914,9 @@ function pickSession(id: string) {
   emit('selectSession', id);
 }
 
-/** 工作区按钮显隐：workspace 插件 + workspace 工具都可见才显示。 */
-const workspaceAvailable = computed(() =>
-  teamPluginEnabled(currentTeam.value, 'echo-agent.workspace') &&
-  teamToolAvailable(currentTeam.value, 'workspace'),
-);
 // 入口行按钮随工具可用性增减（会话/工作区/任务/实例各有 v-if），任一变化都要重算。
 watch(
-  [sessionSwitcherAvailable, workspaceAvailable, tasksAvailable, instanceAvailable],
+  [sessionSwitcherAvailable, tasksAvailable, instanceAvailable],
   () => void nextTick(syncEntryScroll),
 );
 onMounted(() => {
@@ -953,20 +926,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => window.removeEventListener('resize', syncEntryScroll));
 
-/**
- * 打开工作区会话管理（入口按钮与文件浏览器卡的「工作区会话管理 →」共用）。
- * 走单一状态：从侧栏按钮打开时同样会关掉其它覆盖面板。
- */
-function toggleWorkspace() {
-  toggleOverlay('workspace');
-}
-
-// 插件/Team 更新回推后，若 workspace 插件变为不可用，关闭残留弹层。
-watch(workspaceAvailable, (available) => {
-  if (!available && entryOverlay.value === 'workspace') closeOverlay();
-});
-
-// 切换 Agent 时若实例/工作区/会话/任务面板打开则关闭，避免残留禁用 agent 的面板
+// 切换 Agent 时关闭内置面板；扩展面板由通用槽位处理，避免残留禁用 agent 的面板
 watch(
   () => props.activeTeamId,
   () => closeOverlay(),
@@ -1865,21 +1825,14 @@ function mediaSrc(img: string): string {
         </svg>
         会话
       </NeumorphismButton>
-      <NeumorphismButton
-        v-if="workspaceAvailable"
-        class="ctx-entry"
-        variant="glass"
-        shape="pill"
-        size="small"
-        title="工作区会话（多会话 / 多目录 / git 状态；文件浏览器常驻右侧边栏）"
-        data-overlay="workspace"
-        @click="toggleWorkspace"
-      >
-        <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-        </svg>
-        工作区
-      </NeumorphismButton>
+      <PanelExtensionEntries
+        :team-id="props.activeTeamId ?? null"
+        :session-id="props.sessionId"
+        :inset="overlayInset"
+        :ignore="entryRowRef"
+        @select-session="pickSession"
+        @changed="syncEntryScroll"
+      />
       <NeumorphismButton
         v-if="instanceAvailable"
         class="ctx-entry"
@@ -1944,15 +1897,6 @@ function mediaSrc(img: string): string {
         :active-session-id="props.sessionId"
         @select="pickSession"
       />
-    </SessionOverlay>
-    <SessionOverlay
-      :open="entryOverlay === 'workspace'"
-      :inset="overlayInset"
-      :ignore="entryRowRef"
-      label="工作区会话"
-      @close="closeOverlay()"
-    >
-      <WorkspacePanel :team-id="props.activeTeamId ?? null" />
     </SessionOverlay>
     <SessionOverlay
       :open="entryOverlay === 'instance'"
@@ -2134,7 +2078,6 @@ function mediaSrc(img: string): string {
         <PanelSidebar
           side="left"
           :team-id="props.activeTeamId ?? null"
-          @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
       </aside>
@@ -2148,7 +2091,6 @@ function mediaSrc(img: string): string {
         <PanelSidebar
           side="right"
           :team-id="props.activeTeamId ?? null"
-          @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
       </aside>
@@ -2173,7 +2115,6 @@ function mediaSrc(img: string): string {
           side="left"
           :drag-enabled="false"
           :team-id="props.activeTeamId ?? null"
-          @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
         <PanelSidebar
@@ -2181,7 +2122,6 @@ function mediaSrc(img: string): string {
           side="right"
           :drag-enabled="false"
           :team-id="props.activeTeamId ?? null"
-          @manage-workspace="toggleWorkspace"
           @open-shell-detail="(id, core) => emit('openShellDetail', id, core)"
         />
         <p v-if="!railHasCards('left') && !railHasCards('right')" class="mobile-cards__empty">

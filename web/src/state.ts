@@ -36,7 +36,7 @@ import type {
 } from './protocol';
 
 import { checklistKey, scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
-import { hasRecentLocalActivateIntent } from './workspace';
+import { acceptPanelEvent } from './extensions/registry';
 
 export const TRUNK_SESSION_ID = 'trunk';
 
@@ -1236,6 +1236,7 @@ export function initialState(): AppState {
 }
 
 export function reduce(state: AppState, event: BackendEvent, entry?: string): AppState {
+  if (!acceptPanelEvent(event)) return state;
   switch (Object.keys(event)[0]) {
     case 'InstanceStateChanged': {
       if (!managementCoreCurrent(state, payloadCore(event))) return state;
@@ -2220,14 +2221,6 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         // 错误同样中断本轮：残留 running 工具行一并收尾（否则永久读秒）。
         settleRunningTools(state, e.session_id);
       }
-      // 工作区激活/取消的成功提示：Core 用 `Error{session_id:null}` 广播给
-      // **所有**连接（`workspace/commands.rs`）。不过滤的话，A 窗口点一下
-      // 工作区通道，B 窗口也弹出「已激活工作区会话：X」——多窗口串台
-      // （2026-10）。只在本窗口刚发起激活时显示（提示对本窗口有意义，
-      // 对其他窗口是噪音且会被误读成"我也被切过去了"）。
-      if (!e.session_id && isWorkspaceActivationNotice(e.message) && !hasRecentLocalActivateIntent()) {
-        return state;
-      }
       pushToast(state, e.message, 'error');
       return state;
     }
@@ -2375,9 +2368,7 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
  *
  * 用前缀匹配而非精确串：文案带工作区名/对话名（`已激活工作区会话：{id}（对话 {conv}）`）。
  */
-function isWorkspaceActivationNotice(message: string): boolean {
-  return message.startsWith('已激活工作区会话') || message.startsWith('已取消工作区会话激活');
-}
+
 
 export function pushToast(state: AppState, text: string, kind: Toast['kind']) {
   state.toasts.push({ id: Date.now() + Math.random(), text: truncate(text, 512), kind });

@@ -14,6 +14,21 @@ import SessionSwitcher from '../SessionSwitcher.vue';
 import { state } from '../../store';
 import type { InstanceStatus, SessionInfo } from '../../protocol';
 
+import { registerPanelExtension } from '../../extensions/registry';
+
+registerPanelExtension({
+  id: 'test.workspace-channel',
+  hooks: {
+    sessionPresentation(session) {
+      return session.scope === 'workspace' ? { tag: '工作区', tagTone: 'accent' } : null;
+    },
+    canConfigureSessionApi(session) {
+      return session.scope === 'workspace';
+    },
+  },
+});
+
+
 function session(over: Partial<SessionInfo>): SessionInfo {
   return {
     id: 'local:tui::local_user',
@@ -127,7 +142,7 @@ describe('SessionSwitcher 会话切换', () => {
     // 标签「工作区」带独立配色类（tag-workspace）
     const tag = wrapper.findAll('.sw-tag').find((t) => t.text() === '工作区');
     expect(tag).toBeTruthy();
-    expect(tag!.classes()).toContain('tag-workspace');
+    expect(tag!.classes()).toContain('tag-accent');
   });
 
   it('会话级 API 下拉：仅工作区通道行渲染（profile 列表为空也显示）', () => {

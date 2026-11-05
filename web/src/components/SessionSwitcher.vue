@@ -5,10 +5,7 @@
 //! 点击切换；当前会话高亮，运行中会话带忙碌点。每个会话拥有独立的
 //! 模型上下文（Core 侧按会话投影，见 TrunkStore::snapshot_for）。
 //!
-//! Local 分组含**工作区通道**（legacy：`local:workspace:<id>:local_user`，
-//! 多对话（2026-10）：`local:workspace:<ws>/<conv>:local_user`——scope_id
-//! 内嵌 `<ws>/<conv>`，`/` 不与 `:` 段分隔冲突，同一工作区的多条对话
-//! 自然展开为多行）：legacy 昵称 = 工作区名，非 legacy 昵称 =
+//! 业务通道的展示与绑定由 Panel 扩展钩子提供。
 //! 「工作区名 · 对话名」（Core 下发），标签均为「工作区」。点选语义由
 //! App 侧双向绑定——选通道 = 激活对应 (工作区, 对话)、选默认会话 =
 //! 取消激活（2026-09-14 / 2026-10 多对话扩展）。
@@ -22,6 +19,7 @@
 import { computed } from 'vue';
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
 import { state } from '../store';
+import { panelCanConfigureSessionApi, panelSessionPresentation } from '../extensions/registry';
 import { sessionScopedKey } from '../keys';
 import { sendCommand } from '../connection';
 import { sessionLabelsFor } from '../session-labels';
@@ -52,11 +50,9 @@ function sessionTag(session: SessionInfo): SessionTag {
   const platform = parts[0] ?? '';
   const scope = parts[1] ?? '';
   if (platform === 'local') {
-    // 工作区通道（激活 = 进入项目对话）：昵称 = 工作区名 / 「工作区 · 对话」，
-    // 独立标签。多对话通道 scope_id 含 `/`（`<ws>/<conv>`）但不含 `:`，
-    // 按 `:` 分段即可正确识别 scope。
-    if (scope === 'workspace') {
-      return { group: 'local', label: session.nickname || session.id, tag: '工作区', tagKey: 'workspace', platform: null, kind: null };
+    const presentation = panelSessionPresentation(session);
+    if (presentation) {
+      return { group: 'local', label: session.nickname || session.id, tag: presentation.tag, tagKey: presentation.tagTone ?? 'local', platform: null, kind: null };
     }
     return { group: 'local', label: session.nickname || session.id, tag: 'Local', tagKey: 'local', platform: null, kind: null };
   }
@@ -159,9 +155,9 @@ function coreBadge(session: SessionInfo & { core?: string | null }): string | nu
   return state.knownCores.size > 0 && session.core ? session.core : null;
 }
 
-/** 是否工作区通道（会话级 API 仅对其开放：覆盖写入工作区对话持久化）。 */
-function isWorkspace(session: SessionInfo): boolean {
-  return sessionTag(session).tagKey === 'workspace';
+/** 是否允许按会话覆盖 API：由通道所属扩展声明。 */
+function canConfigureApi(session: SessionInfo): boolean {
+  return panelCanConfigureSessionApi(session);
 }
 
 /** 下拉选项：首项空值 = 跟随 persona；其余为全局供应商池。列表为空也至少有首项。 */
@@ -221,7 +217,7 @@ function onApiChange(session: SessionInfo & { core?: string | null }, value: unk
         <span v-if="isBusy(session)" class="sw-busy">●</span>
         <!-- 会话级 API 下拉（2026-10）：仅工作区通道（有持久化载体）；点击不触发行选 -->
         <div
-          v-if="isWorkspace(session)"
+          v-if="canConfigureApi(session)"
           class="sw-api"
           :title="`会话级 API：${apiValue(session) || '跟随 persona'}`"
           @click.stop
@@ -297,7 +293,7 @@ function onApiChange(session: SessionInfo & { core?: string | null }, value: unk
   color: var(--nm-text-secondary);
 }
 .sw-tag.tag-local { color: #0ea5e9; }
-.sw-tag.tag-workspace { color: #14b8a6; }
+.sw-tag.tag-accent { color: #14b8a6; }
 .sw-tag.tag-dm { color: #2ea46e; }
 .sw-tag.tag-group { color: #f59e0b; }
 .sw-label {

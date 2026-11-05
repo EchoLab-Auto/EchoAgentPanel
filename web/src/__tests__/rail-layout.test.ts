@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+
   RAIL_CARD_ORDER,
   __normalizeForTest,
   cardsFor,
@@ -19,6 +20,8 @@ import {
   resetRailLayout,
   sideOf,
 } from '../rail-layout';
+import { registerPanelExtension } from '../extensions/registry';
+registerPanelExtension({ id: 'test', railCardSlots: ['files', 'git'] });
 
 describe('rail-layout 默认与归一化', () => {
   beforeEach(() => {
@@ -28,7 +31,7 @@ describe('rail-layout 默认与归一化', () => {
 
   it('默认布局：全部卡片在右侧、按规范顺序', () => {
     expect(railLayout.left).toEqual([]);
-    expect(railLayout.right).toEqual([...RAIL_CARD_ORDER]);
+    expect(railLayout.right).toEqual([RAIL_CARD_ORDER[0], 'extension:test:files', 'extension:test:git', ...RAIL_CARD_ORDER.slice(1)]);
     expect(sideOf('shell')).toBe('right');
     expect(indexOf('status', 'right')).toBe(0);
   });
@@ -42,9 +45,9 @@ describe('rail-layout 默认与归一化', () => {
     // 右侧原样保留 status（shell 已去重），并把未登记的 files/git/branches 按规范顺序补进去
     expect(normalized.right).toContain('status');
     expect(normalized.right).not.toContain('shell');
-    expect(new Set(normalized.right)).toEqual(new Set(['status', 'files', 'git', 'branches']));
+    expect(new Set(normalized.right)).toEqual(new Set(['status', 'extension:test:files', 'extension:test:git', 'branches']));
     // 补齐后的顺序仍按规范顺序（files 在 branches 之前）
-    expect(normalized.right.indexOf('files')).toBeLessThan(normalized.right.indexOf('branches'));
+    expect(normalized.right.indexOf('extension:test:files')).toBeLessThan(normalized.right.indexOf('branches'));
   });
 
   it('归一化：损坏的存储退默认布局（不抛错）', () => {
@@ -64,9 +67,9 @@ describe('rail-layout 落位语义', () => {
     placeCardAfter('branches', 'right', null);
     expect(railLayout.right[0]).toBe('branches');
 
-    placeCardAfter('branches', 'right', 'files');
+    placeCardAfter('branches', 'right', 'extension:test:files');
     // 摘出 branches 后插到 files 之后：[status, files, branches, git, shell]
-    expect(railLayout.right).toEqual(['status', 'files', 'branches', 'git', 'shell']);
+    expect(railLayout.right).toEqual(['status', 'extension:test:files', 'branches', 'extension:test:git', 'shell']);
 
     placeCardAfter('branches', 'right', 'does-not-exist');
     expect(railLayout.right[railLayout.right.length - 1]).toBe('branches');
@@ -95,11 +98,11 @@ describe('rail-layout 落位语义', () => {
   it('placeCard（按序号）：仅用于可见列表与存储列表一致时', () => {
     resetRailLayout();
     placeCard('branches', 'right', 0);
-    expect(railLayout.right).toEqual(['branches', 'status', 'files', 'git', 'shell']);
+    expect(railLayout.right).toEqual(['branches', 'status', 'extension:test:files', 'extension:test:git', 'shell']);
   });
 
   it('cardsFor：按列内顺序 × 可见性过滤（不可见卡片不占位）', () => {
-    expect(cardsFor('right', (id) => id !== 'files')).toEqual(['status', 'git', 'shell', 'branches']);
+    expect(cardsFor('right', (id) => id !== 'extension:test:files')).toEqual(['status', 'extension:test:git', 'shell', 'branches']);
     placeCardAfter('shell', 'left', null);
     expect(cardsFor('left', () => true)).toEqual(['shell']);
   });
@@ -109,6 +112,6 @@ describe('rail-layout 落位语义', () => {
     placeCardAfter('status', 'left', null);
     resetRailLayout();
     expect(railLayout.left).toEqual([]);
-    expect(railLayout.right).toEqual([...RAIL_CARD_ORDER]);
+    expect(railLayout.right).toEqual([RAIL_CARD_ORDER[0], 'extension:test:files', 'extension:test:git', ...RAIL_CARD_ORDER.slice(1)]);
   });
 });

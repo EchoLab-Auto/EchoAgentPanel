@@ -15,12 +15,19 @@ import { defineComponent, h, nextTick } from 'vue';
 import ChatView from '../ChatView.vue';
 import { state } from '../../store';
 import { entryOverlay } from '../../overlays';
+import { registerPanelExtension } from '../../extensions/registry';
 
 const WorkspacePanelStub = defineComponent({
   name: 'WorkspacePanel',
   setup() {
     return () => h('div', { class: 'stub-workspace-panel' }, 'workspace');
   },
+});
+
+registerPanelExtension({
+  id: 'test.workspace',
+  entries: [{ id: 'sessions', label: '工作区', icon: 'folder', when: () => true }],
+  overlays: [{ id: 'sessions', label: '工作区会话', component: WorkspacePanelStub }],
 });
 
 const ChatComposerStub = defineComponent({
