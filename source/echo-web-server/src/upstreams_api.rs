@@ -332,14 +332,8 @@ pub fn routes() -> axum::Router<AppState> {
             "/api/upstreams/{name}",
             axum::routing::delete(delete_upstream),
         )
-        .route(
-            "/api/panel-identity",
-            axum::routing::get(panel_identity),
-        )
-        .route(
-            "/api/upstreams/prune",
-            axum::routing::post(prune_upstreams),
-        )
+        .route("/api/panel-identity", axum::routing::get(panel_identity))
+        .route("/api/upstreams/prune", axum::routing::post(prune_upstreams))
 }
 
 /// Bearer 认证中间件（2026-10 安全收紧）：token 非空时校验

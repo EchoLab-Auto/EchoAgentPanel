@@ -1,6 +1,6 @@
 # Panel UI 扩展
 
-Panel 壳不内置业务插件 UI。扩展在**构建期显式**组合，没有远程脚本下载或运行时
+Panel 壳不内置业务模块 UI。扩展在**构建期显式**组合，没有远程脚本下载或运行时
 执行未知代码的隐式入口。未配置扩展时，构建产物只包含 Panel 壳与内置管理界面。
 
 ## 扩展包
@@ -15,7 +15,7 @@ my-extension/
 `panel-extension.json`：
 
 ```json
-{ "id": "example.plugin", "entry": "index.ts" }
+{ "id": "example.module", "entry": "index.ts" }
 ```
 
 `index.ts` 使用公开 SDK（禁止穿透引用 Panel 私有路径）：
@@ -25,7 +25,7 @@ import { definePanelExtension, registerPanelExtension } from '@echo-agent/panel'
 import ExamplePanel from './components/ExamplePanel.vue';
 
 registerPanelExtension(definePanelExtension({
-  id: 'example.plugin',
+  id: 'example.module',
   railCardSlots: ['summary'],
   entries: [{
     id: 'manage', label: '示例', icon: 'folder',
@@ -45,7 +45,7 @@ registerPanelExtension(definePanelExtension({
 }));
 ```
 
-扩展 id 会成为 UI 命名空间，例如 `extension:example.plugin:manage`。扩展复用 Panel
+扩展 id 会成为 UI 命名空间，例如 `extension:example.module:manage`。扩展复用 Panel
 的 Vue、ui-frame、弹层互斥、卡片拖动/折叠和布局持久化；数据请求与业务能力门控由
 扩展自己负责。
 

@@ -16,7 +16,7 @@ const agent: TeamInfo & { core?: string | null } = {
   sessions: 0,
   core: 'core-a',
   system_prompt: '你是 Alix',
-  enabled_plugins: ['echo-agent.tools.builtin'],
+  enabled_modules: ['echo-agent.tools.builtin'],
 };
 
 describe('agent 运行区域迁移', () => {

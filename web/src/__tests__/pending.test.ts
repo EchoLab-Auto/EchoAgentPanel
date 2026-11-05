@@ -85,7 +85,7 @@ describe('pending：阶段推进', () => {
   });
 
   it('无关事件不销账', () => {
-    trackRequest('t', 'RequestPluginsList');
+    trackRequest('t', 'RequestModulesList');
     const { phase } = usePending('t');
     resolvePendingEvent({ Error: { session_id: null, message: 'x' } });
     vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);

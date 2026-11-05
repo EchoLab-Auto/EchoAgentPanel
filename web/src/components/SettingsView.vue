@@ -1,5 +1,5 @@
 <script setup lang="ts">
-//! 设置视图：API 配置 + 资源管理（技能/工具/插件/智能体）+ 运行日志的统一面板。
+//! 设置视图：API 配置 + 资源管理（技能/工具/模块/智能体）+ 运行日志的统一面板。
 //!
 //! 布局：左侧一级菜单（API 设置 + 四类资源 + 日志，带计数徽标），右侧为当前分类的工作区——
 //! API 为整页表单（ApiSettings）；日志为整页查看器（LogView）；
@@ -7,10 +7,10 @@
 //! - API：快速模板 / 表单 / 测试连接 / Profiles（UpdateApiConfig / RenameApi / TestApi / SwitchApi / DeleteApi）
 //! - 技能：启停、编辑（SaveSkill）、新建、删除（DeleteSkill）、Git 安装/更新/移除来源
 //! - 工具：启停（ToggleTool）、参数 Schema 浏览
-//! - 插件：清单（当前挂载集）+ 重启，没有启停开关（禁用动作已删除）
+//! - 模块：清单（当前挂载集）+ 重启，没有启停开关（禁用动作已删除）
 //! - 智能体：选中即进编辑态（SaveTeam）、启停（ToggleTeam）、删除（DeleteTeam）
 //! - 日志：Core/Panel 分段、5s 自动刷新（HTTP /api/logs/{core,panel}）
-//! 数据来自后端 SkillsList / ToolsList / PluginsList / TeamsList 事件，打开时主动拉取；
+//! 数据来自后端 SkillsList / ToolsList / ModulesList / TeamsList 事件，打开时主动拉取；
 //! API 配置随 state.api 事件更新。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -41,21 +41,21 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import PanelIcon from './PanelIcon.vue';
 import { confirmDialog } from '../confirm';
 import { state } from '../store';
-import { coreDisplay, type PluginEventEntry } from '../state';
+import { coreDisplay, type ModuleEventEntry } from '../state';
 import { moveAgentToRegion } from '../agent-placement';
 import {
   PACKAGE_DISPLAY_NAMES,
-  PLUGIN_KIND_LABELS,
-  isPluginCheckboxVisible,
-  isInstancePluginKind,
-  pluginCheckboxState,
+  MODULE_KIND_LABELS,
+  isModuleCheckboxVisible,
+  isInstanceModuleKind,
+  moduleCheckboxState,
 } from '../capabilities';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
-import type { PluginInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
+import type { ModuleInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { MarkdownRenderer, DocFlowCanvas } from '@echolab-auto/ui-frame/doc';
-import { buildPluginDependencyGraph } from '../plugin-deps';
+import { buildModuleDependencyGraph } from '../module-deps';
 // 子设置页按需加载（2026-10 审计修复）：五个子页约 2300 行（含 LogView
 // 挂载即开始的 5s 轮询），此前全随设置视图进首包；改为首次切入对应
 // 分类时才加载（vite 对每个 import() 自动分包）。
@@ -70,12 +70,12 @@ const TOOL_BUILTIN = '内置工具';
 const TOOL_OTHER = '扩展工具';
 
 // ── 一级菜单：当前分类 ──
-type CategoryKey = 'api' | 'skill' | 'tool' | 'plugin' | 'team' | 'cores' | 'system' | 'logs';
+type CategoryKey = 'api' | 'skill' | 'tool' | 'module' | 'team' | 'cores' | 'system' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
 
 // ── 列表加载跟踪（pending.ts）：四类清单各自的加载/慢/超时三态 ──
 // 竖屏移动端（2026-10）：断点与库内 useTouchDevice 同源（innerWidth < 768）。
-// 一级菜单变横滑 tab 条；工作台（技能/工具/插件/智能体）从「列表+详情并排」
+// 一级菜单变横滑 tab 条；工作台（技能/工具/模块/智能体）从「列表+详情并排」
 // 退化为 Master-Detail 二级导航（详情态隐藏列表、头部出现返回按钮）。
 const { isMobile } = useTouchDevice();
 
@@ -83,16 +83,16 @@ const { isMobile } = useTouchDevice();
 const { addToast } = useToast();
 const { phase: skillPhase, loading: skillLoading } = usePending('settings:skills');
 const { phase: toolPhase, loading: toolLoading } = usePending('settings:tools');
-const { phase: pluginPhase, loading: pluginLoading } = usePending('settings:plugins');
+const { phase: modulePhase, loading: moduleLoading } = usePending('settings:modules');
 const { phase: teamPhase, loading: teamLoading } = usePending('settings:teams');
 const settingsLoading = computed(
   () =>
-    skillLoading.value || toolLoading.value || pluginLoading.value || teamLoading.value,
+    skillLoading.value || toolLoading.value || moduleLoading.value || teamLoading.value,
 );
 onUnmounted(() => {
   releasePending('settings:skills');
   releasePending('settings:tools');
-  releasePending('settings:plugins');
+  releasePending('settings:modules');
   releasePending('settings:teams');
 });
 
@@ -102,7 +102,7 @@ const categories = computed(() => [
   // 清单加载中（loading）暂隐计数徽标——显示旧计数/0 都会被误读。
   { key: 'skill' as const, label: '技能', count: (skillLoading.value ? null : state.skills.length) as number | null },
   { key: 'tool' as const, label: '工具', count: (toolLoading.value ? null : state.tools.length) as number | null },
-  { key: 'plugin' as const, label: '插件', count: (pluginLoading.value ? null : state.plugins.length) as number | null },
+  { key: 'module' as const, label: '模块', count: (moduleLoading.value ? null : state.modules.length) as number | null },
   { key: 'team' as const, label: '智能体', count: (teamLoading.value ? null : state.teams.length) as number | null },
   { key: 'cores' as const, label: 'Core 连接', count: null as number | null },
   // 连接管理合并页（2026-10：联邦并入）：上游 Core + 联邦节点。
@@ -122,7 +122,7 @@ const disabledCount = computed(() => {
       return state.skills.filter((s) => !s.enabled).length;
     case 'tool':
       return state.tools.filter((t) => !t.enabled).length;
-    case 'plugin':
+    case 'module':
       return 0;
     case 'team':
       return state.teams.filter((t) => !t.enabled).length;
@@ -169,23 +169,23 @@ const toolbarSubtitle = computed(() => {
     if (c.disabled) parts.push(`${c.disabled} 已禁用`);
     return parts.join(' · ');
   }
-  if (activeCategory.value === 'plugin') {
-    const c = pluginFilterCounts.value;
-    // 统计必须与**列表同源**（pluginCatalog = 当前选定节点的插件）：
-    // 用 state.plugins 时选了一个非 activeRegion 的节点会出现"共 5 项"
-    // 但列表只显示 2 行（2026-10 多 Core 插件管理）。
-    const catalog = pluginCatalog.value;
-    const gated = catalog.filter((p) => pluginSemantic(p) === 'gated').length;
-    const modes = catalog.filter((p) => pluginSemantic(p) === 'mode').length;
-    const external = catalog.filter((p) => pluginSource(p) === 'external').length;
+  if (activeCategory.value === 'module') {
+    const c = moduleFilterCounts.value;
+    // 统计必须与**列表同源**（moduleCatalog = 当前选定节点的模块）：
+    // 用 state.modules 时选了一个非 activeRegion 的节点会出现"共 5 项"
+    // 但列表只显示 2 行（2026-10 多 Core 模块管理）。
+    const catalog = moduleCatalog.value;
+    const gated = catalog.filter((p) => moduleSemantic(p) === 'gated').length;
+    const modes = catalog.filter((p) => moduleSemantic(p) === 'mode').length;
+    const external = catalog.filter((p) => moduleSource(p) === 'external').length;
     const parts = [`共 ${c.all} 项`];
     // 当前分组维度决定哪个维度更值得说：按来源分组时先说内部/外部。
-    if (pluginGroupBy.value === 'source') {
-      if (external) parts.push(`${external} 外部插件`);
-      if (c.all - external) parts.push(`${c.all - external} 内部插件`);
+    if (moduleGroupBy.value === 'source') {
+      if (external) parts.push(`${external} 外部模块`);
+      if (c.all - external) parts.push(`${c.all - external} 内部模块`);
     } else {
       if (gated) parts.push(`${gated} 包维度门控`);
-      if (modes) parts.push(`${modes} 模式插件`);
+      if (modes) parts.push(`${modes} 模式模块`);
     }
     if (c.disabled) parts.push(`${c.disabled} 已禁用`);
     return parts.join(' · ');
@@ -196,7 +196,7 @@ const toolbarSubtitle = computed(() => {
 // ── 选中状态（各分类独立保持，切回时恢复）──
 const selectedSkill = ref<SkillInfo | null>(null);
 const selectedTool = ref<ToolInfo | null>(null);
-const selectedPlugin = ref<PluginInfo | null>(null);
+const selectedModule = ref<ModuleInfo | null>(null);
 const selectedTeam = ref<TeamInfo | null>(null);
 const editing = ref(false);
 const creating = ref(false);
@@ -321,12 +321,12 @@ function skillPackageLabel(pkg: string | undefined, standalone = '独立技能')
   return PACKAGE_DISPLAY_NAMES[pkg] ?? pkg;
 }
 
-/** 清单只含当前挂载插件；已卸载的插件不在清单里，不会产生包禁用标记。 */
-const disabledPluginIds = computed(
-  () => new Set(state.plugins.filter((p) => p.state === 'failed').map((p) => p.id)),
+/** 清单只含当前挂载模块；已卸载的模块不在清单里，不会产生包禁用标记。 */
+const disabledModuleIds = computed(
+  () => new Set(state.modules.filter((p) => p.state === 'failed').map((p) => p.id)),
 );
 function skillPackageDisabled(s: SkillInfo): boolean {
-  return !!s.package && disabledPluginIds.value.has(s.package);
+  return !!s.package && disabledModuleIds.value.has(s.package);
 }
 
 /** 工作台分组：按包 / 按分类 / 平铺（平铺 = 单组）。 */
@@ -345,7 +345,7 @@ const skillWorkbenchGroups = computed(() => {
       push(
         key,
         skillPackageLabel(pkg),
-        pkg && disabledPluginIds.value.has(pkg) ? '所属包已禁用，包内技能当前不可用' : undefined,
+        pkg && disabledModuleIds.value.has(pkg) ? '所属包已禁用，包内技能当前不可用' : undefined,
         s,
       );
     } else {
@@ -590,7 +590,7 @@ const toolWorkbenchGroups = computed(() => {
       push(
         key,
         skillPackageLabel(pkg, '独立工具'),
-        pkg && disabledPluginIds.value.has(pkg) ? '所属包已禁用，包内工具当前不可用' : undefined,
+        pkg && disabledModuleIds.value.has(pkg) ? '所属包已禁用，包内工具当前不可用' : undefined,
         t,
       );
     } else {
@@ -616,9 +616,9 @@ const toolWorkbenchGroups = computed(() => {
   });
 });
 
-/** 工具所属包是否被插件全局禁用（禁用后包内工具对模型不可见）。 */
+/** 工具所属包是否被模块全局禁用（禁用后包内工具对模型不可见）。 */
 function toolPackageDisabled(t: ToolInfo): boolean {
-  return !!t.package && disabledPluginIds.value.has(t.package);
+  return !!t.package && disabledModuleIds.value.has(t.package);
 }
 
 /** 工具行内快速开关（不改变选中）。 */
@@ -644,7 +644,7 @@ const toolUsageRows = computed(() => {
   return rows;
 });
 
-/** 包内成员（工具 / 技能名列表）；插件详情与工具详情的「所属包」共用。 */
+/** 包内成员（工具 / 技能名列表）；模块详情与工具详情的「所属包」共用。 */
 function packageMembers(pkgId: string | undefined): { tools: string[]; skills: string[] } {
   if (!pkgId) return { tools: [], skills: [] };
   return {
@@ -677,7 +677,7 @@ watch(
   () => {
     toolParamMode.value = 'table';
     toolParamText.value = '';
-    pluginInfoOpen.value = false;
+    moduleInfoOpen.value = false;
   },
 );
 const toolParamText = ref('');
@@ -692,35 +692,35 @@ async function copyToolParams() {
   }
 }
 
-// ── 插件工作台（2026-09-23 重排版）──
+// ── 模块工作台（2026-09-23 重排版）──
 //
-// 背景（实测）：9 个插件按 kind 分成 6 组，`Turn Runner`（英文）与
-// 「工具」「技能」两组名误导；三类语义完全不同的插件（整包门控 / 平台通道 /
+// 背景（实测）：9 个模块按 kind 分成 6 组，`Turn Runner`（英文）与
+// 「工具」「技能」两组名误导；三类语义完全不同的模块（整包门控 / 平台通道 /
 // 循环模式）平铺混排；详情一行塞满 ID/Package/Entry/Author。
-// 门控语义分组把「影响面最大的整包门控」提到最上，模式插件单独成组并注明
+// 门控语义分组把「影响面最大的整包门控」提到最上，模式模块单独成组并注明
 // 「互斥；全局停用 ≠ 切换某智能体模式」。
 
-type PluginFilter = 'all' | 'enabled' | 'disabled';
-const pluginSearch = ref('');
-const pluginFilter = ref<PluginFilter>('all');
-const pluginGroupBy = ref<'source' | 'semantic' | 'kind' | 'flat'>('source');
-const pluginCore = ref<string | null>(state.activeRegion);
+type ModuleFilter = 'all' | 'enabled' | 'disabled';
+const moduleSearch = ref('');
+const moduleFilter = ref<ModuleFilter>('all');
+const moduleGroupBy = ref<'source' | 'semantic' | 'kind' | 'flat'>('source');
+const moduleCore = ref<string | null>(state.activeRegion);
 // 跟随运行区域（2026-10 多 Core）：选择器初值在挂载时快照，设置页开着期间
-// activeRegion 被 TeamsList 校正 / 上游增删改变时不跟随 → 插件面板停在旧 core，
+// activeRegion 被 TeamsList 校正 / 上游增删改变时不跟随 → 模块面板停在旧 core，
 // 与同页其他分类指向不同机器（用户以为改的是"当前这台"）。
 watch(
   () => state.activeRegion,
   (next) => {
-    pluginCore.value = next;
-    selectedPlugin.value = null;
+    moduleCore.value = next;
+    selectedModule.value = null;
   },
 );
-/** 可选的管理节点：上游名 ∪ 人格归属 core ∪ 已知的 pluginsByCore 键。 */
-const pluginCoreOptions = computed(() => {
+/** 可选的管理节点：上游名 ∪ 人格归属 core ∪ 已知的 modulesByCore 键。 */
+const moduleCoreOptions = computed(() => {
   const ids = new Set<string>();
   for (const u of state.upstreams) ids.add(u.name);
   for (const t of state.teams) if (t.core) ids.add(t.core);
-  for (const k of Object.keys(state.pluginsByCore)) if (k) ids.add(k);
+  for (const k of Object.keys(state.modulesByCore)) if (k) ids.add(k);
   if (state.activeRegion) ids.add(state.activeRegion);
   return [...ids].sort((a, b) => a.localeCompare(b, 'en'));
 });
@@ -728,56 +728,56 @@ const pluginCoreOptions = computed(() => {
  * 实际生效的管理节点（选择器显示值）。
  *
  * 未显式选择时回退 activeRegion；再回退"唯一来源"——单上游配置下中继不加
- * 信封，事件里没有 core 名（`pluginsByCore` 的键是空串），而选择器的选项
+ * 信封，事件里没有 core 名（`modulesByCore` 的键是空串），而选择器的选项
  * 来自上游名，两者永远对不上。此时显示唯一来源，才不会出现"选了个节点却
  * 一片空白"。
  */
-const pluginCoreEffective = computed<string | null>(() => {
-  if (pluginCore.value) return pluginCore.value;
+const moduleCoreEffective = computed<string | null>(() => {
+  if (moduleCore.value) return moduleCore.value;
   if (state.activeRegion) return state.activeRegion;
-  const known = Object.keys(state.pluginsByCore);
+  const known = Object.keys(state.modulesByCore);
   return known.length === 1 ? known[0] : null;
 });
 /**
- * 当前节点的插件列表。
+ * 当前节点的模块列表。
  *
  * 取数顺位：显式选定 / activeRegion 的归档 → **唯一来源**（单上游无壳场景，
- * 键为空串）→ `state.plugins`（Core 只在"本节点是管理目标"时才更新它，
+ * 键为空串）→ `state.modules`（Core 只在"本节点是管理目标"时才更新它，
  * 等价于当前节点的兼容视图）。
  *
- * ⚠️ 不要用 `state.plugins` 直接当列表：多 Core 下它是"最后推送的那份"，
+ * ⚠️ 不要用 `state.modules` 直接当列表：多 Core 下它是"最后推送的那份"，
  * 选了别的节点会串显。
  */
-const pluginCatalog = computed(() => {
-  const known = Object.keys(state.pluginsByCore);
-  const key = pluginCoreEffective.value;
+const moduleCatalog = computed(() => {
+  const known = Object.keys(state.modulesByCore);
+  const key = moduleCoreEffective.value;
   if (key == null) {
     // 尚未选定节点：只有一个来源就用它，否则用 Core 维护的兼容视图
-    // （`state.plugins` 只在"本节点是管理目标"时被更新）。
-    return known.length === 1 ? (state.pluginsByCore[known[0]] ?? []) : state.plugins;
+    // （`state.modules` 只在"本节点是管理目标"时被更新）。
+    return known.length === 1 ? (state.modulesByCore[known[0]] ?? []) : state.modules;
   }
-  const exact = state.pluginsByCore[key];
+  const exact = state.modulesByCore[key];
   if (exact) return exact;
   // 单来源但键对不上（单上游无信封时键是空串，或选择器里是上游名）：
   // 只有一份数据就直接用它，避免"选了个节点却一片空白"。
-  if (known.length === 1) return state.pluginsByCore[known[0]] ?? [];
+  if (known.length === 1) return state.modulesByCore[known[0]] ?? [];
   // 多来源且该节点还没推数据 → 空列表（绝不回退，否则串显别个节点）。
   return [];
 });
 
-/** 插件工作区的展示形态：列表（默认）/ 依赖树。 */
-const pluginViewMode = ref<'list' | 'deps'>('list');
+/** 模块工作区的展示形态：列表（默认）/ 依赖树。 */
+const moduleViewMode = ref<'list' | 'deps'>('list');
 
-/** 当前节点的插件依赖图（宿主服务表 → 插件 → 插件）。 */
-const pluginDepGraph = computed(() => buildPluginDependencyGraph(pluginCatalog.value));
+/** 当前节点的模块依赖图（宿主服务表 → 模块 → 模块）。 */
+const moduleDepGraph = computed(() => buildModuleDependencyGraph(moduleCatalog.value));
 
-const PLUGIN_FILTERS: { key: PluginFilter; label: string }[] = [
+const MODULE_FILTERS: { key: ModuleFilter; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'enabled', label: '已启用' },
   { key: 'disabled', label: '已禁用' },
 ];
 
-const PLUGIN_GROUP_OPTIONS = [
+const MODULE_GROUP_OPTIONS = [
   { label: '内部 / 外部', value: 'source' },
   { label: '按门控语义', value: 'semantic' },
   { label: '按 kind', value: 'kind' },
@@ -785,16 +785,16 @@ const PLUGIN_GROUP_OPTIONS = [
 ];
 
 /** 门控语义分类（单一来源：分组、行内徽标、详情文案共用）。 */
-const PLUGIN_SEMANTIC_LABELS: Record<string, string> = {
+const MODULE_SEMANTIC_LABELS: Record<string, string> = {
   gated: '包维度门控',
   channel: '平台通道',
-  mode: '模式插件（互斥）',
+  mode: '模式模块（互斥）',
   other: '其它',
 };
 
-function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
+function moduleSemantic(p: ModuleInfo): 'gated' | 'channel' | 'mode' | 'other' {
   if (p.kind === 'loop') return 'mode';
-  if (isInstancePluginKind(p.kind) || p.kind === 'management') return 'channel';
+  if (isInstanceModuleKind(p.kind) || p.kind === 'management') return 'channel';
   // 「包维度门控」= Core 判定的 persona 作用域（旧 Core 无该字段时退回 false，
   // 与删除清单前的行为一致：那时也不在清单里就不会是 gated）。
   if (p.gating === 'persona') return 'gated';
@@ -802,50 +802,50 @@ function pluginSemantic(p: PluginInfo): 'gated' | 'channel' | 'mode' | 'other' {
 }
 
 /**
- * 插件的**来源分组**：内部 / 外部。
+ * 模块的**来源分组**：内部 / 外部。
  *
  * 判定按**实现跑在哪**，不按「manifest 是否编译进 Core」（2026-10-18 二次
- * 修正）——用户对「外部插件」的语义预期就是「不在 Core 进程内」：独立 PID、
+ * 修正）——用户对「外部模块」的语义预期就是「不在 Core 进程内」：独立 PID、
  * 独立生命周期、崩了不带走 Core。
  *
  * - `runtime === 'subprocess'` → 外部。QQ 实例即此类：门控 manifest 编译
  *   在 Core 里（`builtin = true`），但实例实现由独立进程
- *   `echo-instance-qq` 提供。早期按 `builtin` 判定会把它归到「内部插件」，
+ *   `echo-instance-qq` 提供。早期按 `builtin` 判定会把它归到「内部模块」，
  *   而它自己的描述写着「独立进程」——分组与文案互相矛盾。
  * - 旧 Core 无 `runtime` 字段 → 回退按 `builtin` 推断（外部 manifest 一律是
  *   stdio 子进程）。
  */
-function pluginSource(p: PluginInfo): 'builtin' | 'external' {
+function moduleSource(p: ModuleInfo): 'builtin' | 'external' {
   if (p.runtime) return p.runtime === 'subprocess' ? 'external' : 'builtin';
   return p.builtin === false ? 'external' : 'builtin';
 }
-const PLUGIN_SOURCE_LABELS = { builtin: '内部插件', external: '外部插件' } as const;
+const MODULE_SOURCE_LABELS = { builtin: '内部模块', external: '外部模块' } as const;
 
 /**
- * 插件的**来源**（manifest 从哪来），与 [`pluginSource`]（实现在哪跑）正交。
+ * 模块的**来源**（manifest 从哪来），与 [`moduleSource`]（实现在哪跑）正交。
  *
- * 分组仍按运行位置（用户对「外部插件」的预期是「不在 Core 进程内」），
- * 但来源也要能看到——否则 `builtin = false` + `in_process` 的**数据插件**
- * （插件目录发现的 `plugin.toml`）会被分组吞掉，看不出它其实不随二进制发布。
+ * 分组仍按运行位置（用户对「外部模块」的预期是「不在 Core 进程内」），
+ * 但来源也要能看到——否则 `builtin = false` + `in_process` 的**数据模块**
+ * （模块目录发现的 `module.toml`）会被分组吞掉，看不出它其实不随二进制发布。
  */
-function pluginOrigin(p: PluginInfo): 'shipped' | 'configured' {
+function moduleOrigin(p: ModuleInfo): 'shipped' | 'configured' {
   return p.builtin === false ? 'configured' : 'shipped';
 }
-const PLUGIN_ORIGIN_LABELS = { shipped: '随二进制发布', configured: '外部来源' } as const;
+const MODULE_ORIGIN_LABELS = { shipped: '随二进制发布', configured: '外部来源' } as const;
 /** 来源徽标（只在「外部来源」时显示——默认情况不必占视觉）。 */
-function pluginOriginBadge(p: PluginInfo): string {
-  return pluginOrigin(p) === 'configured' ? PLUGIN_ORIGIN_LABELS.configured : '';
+function moduleOriginBadge(p: ModuleInfo): string {
+  return moduleOrigin(p) === 'configured' ? MODULE_ORIGIN_LABELS.configured : '';
 }
 
-/** 实现是否跑在独立子进程（=`外部插件`；判定见 [`pluginSource`]）。 */
-function pluginIsSubprocess(p: PluginInfo): boolean { return pluginSource(p) === 'external'; }
-const PLUGIN_RUNTIME_LABELS = { subprocess: '独立进程', in_process: '进程内' } as const;
+/** 实现是否跑在独立子进程（=`外部模块`；判定见 [`moduleSource`]）。 */
+function moduleIsSubprocess(p: ModuleInfo): boolean { return moduleSource(p) === 'external'; }
+const MODULE_RUNTIME_LABELS = { subprocess: '独立进程', in_process: '进程内' } as const;
 /** 运行形态的人读标签（旧 Core 缺字段 → 进程内）。 */
-function pluginRuntimeLabel(p: PluginInfo): string {
-  return PLUGIN_RUNTIME_LABELS[p.runtime === 'subprocess' ? 'subprocess' : 'in_process'];
+function moduleRuntimeLabel(p: ModuleInfo): string {
+  return MODULE_RUNTIME_LABELS[p.runtime === 'subprocess' ? 'subprocess' : 'in_process'];
 }
 
-function pluginMatchesFilter(p: PluginInfo, filter: PluginFilter): boolean {
+function moduleMatchesFilter(p: ModuleInfo, filter: ModuleFilter): boolean {
   switch (filter) {
     case 'all':
       return true;
@@ -856,23 +856,23 @@ function pluginMatchesFilter(p: PluginInfo, filter: PluginFilter): boolean {
   }
 }
 
-const pluginFilterCounts = computed(() => {
-  const counts: Record<PluginFilter, number> = {
-    all: pluginCatalog.value.length,
+const moduleFilterCounts = computed(() => {
+  const counts: Record<ModuleFilter, number> = {
+    all: moduleCatalog.value.length,
     enabled: 0,
     disabled: 0,
   };
-  for (const p of pluginCatalog.value) {
+  for (const p of moduleCatalog.value) {
     if (p.state === 'failed') counts.disabled += 1;
     else counts.enabled += 1;
   }
   return counts;
 });
 
-const filteredPlugins = computed(() => {
-  const needle = pluginSearch.value.trim().toLowerCase();
-  return pluginCatalog.value.filter((p) => {
-    if (!pluginMatchesFilter(p, pluginFilter.value)) return false;
+const filteredModules = computed(() => {
+  const needle = moduleSearch.value.trim().toLowerCase();
+  return moduleCatalog.value.filter((p) => {
+    if (!moduleMatchesFilter(p, moduleFilter.value)) return false;
     if (!needle) return true;
     return (
       p.name.toLowerCase().includes(needle) ||
@@ -882,10 +882,10 @@ const filteredPlugins = computed(() => {
   });
 });
 
-/** 插件分组：门控语义 / kind / 平铺。 */
-const pluginWorkbenchGroups = computed(() => {
-  const groups = new Map<string, { title: string; hint?: string; items: PluginInfo[] }>();
-  const push = (key: string, title: string, hint: string | undefined, p: PluginInfo) => {
+/** 模块分组：门控语义 / kind / 平铺。 */
+const moduleWorkbenchGroups = computed(() => {
+  const groups = new Map<string, { title: string; hint?: string; items: ModuleInfo[] }>();
+  const push = (key: string, title: string, hint: string | undefined, p: ModuleInfo) => {
     if (!groups.has(key)) groups.set(key, { title, hint, items: [] });
     groups.get(key)!.items.push(p);
   };
@@ -896,26 +896,26 @@ const pluginWorkbenchGroups = computed(() => {
     other: undefined,
   };
   const ORDER: Record<string, number> = { gated: 0, channel: 1, mode: 2, other: 3 };
-  for (const p of filteredPlugins.value) {
-    if (pluginGroupBy.value === 'flat') {
-      push('__all__', '全部插件', undefined, p);
-    } else if (pluginGroupBy.value === 'source') {
-      const source = pluginSource(p);
+  for (const p of filteredModules.value) {
+    if (moduleGroupBy.value === 'flat') {
+      push('__all__', '全部模块', undefined, p);
+    } else if (moduleGroupBy.value === 'source') {
+      const source = moduleSource(p);
       // 外部组的 hint 要讲清「独立进程」而非「第三方」：QQ 实例随 Core
       // 发布，但实现在独立进程里（2026-10-18 报障的正是这一点）。
       push(
         `source:${source}`,
-        PLUGIN_SOURCE_LABELS[source],
+        MODULE_SOURCE_LABELS[source],
         source === 'external'
-          ? '实现在独立进程（独立 PID / 生命周期）；随 Core 发布或来自插件目录'
+          ? '实现在独立进程（独立 PID / 生命周期）；随 Core 发布或来自模块目录'
           : '实现编译在 Core 进程内；随 Core 发布',
         p,
       );
-    } else if (pluginGroupBy.value === 'semantic') {
-      const sem = pluginSemantic(p);
-      push(`sem:${sem}`, PLUGIN_SEMANTIC_LABELS[sem], SEMANTIC_HINT[sem], p);
+    } else if (moduleGroupBy.value === 'semantic') {
+      const sem = moduleSemantic(p);
+      push(`sem:${sem}`, MODULE_SEMANTIC_LABELS[sem], SEMANTIC_HINT[sem], p);
     } else {
-      const cat = PLUGIN_KIND_LABELS[p.kind] ?? p.kind;
+      const cat = MODULE_KIND_LABELS[p.kind] ?? p.kind;
       push(`kind:${cat}`, cat, undefined, p);
     }
   }
@@ -925,40 +925,40 @@ const pluginWorkbenchGroups = computed(() => {
     hint: v.hint,
     items: v.items.sort((a, b) => a.id.localeCompare(b.id, 'en')),
   }));
-  if (pluginGroupBy.value !== 'semantic') return entries;
+  if (moduleGroupBy.value !== 'semantic') return entries;
   return entries.sort(
     (a, b) =>
       (ORDER[a.key.replace('sem:', '')] ?? 9) - (ORDER[b.key.replace('sem:', '')] ?? 9),
   );
 });
 
-/** 管理面插件受保护（禁用即断连自锁；kind 判定与 core 的拒绝对齐）。 */
-function pluginProtected(p: PluginInfo): boolean {
-  return p.id === MANAGEMENT_PANEL_PLUGIN_ID;
+/** 管理面模块受保护（禁用即断连自锁；kind 判定与 core 的拒绝对齐）。 */
+function moduleProtected(p: ModuleInfo): boolean {
+  return p.id === MANAGEMENT_PANEL_MODULE_ID;
 }
 
-/** 插件「带来什么」：包内工具/技能（供列表徽标与详情 chip 展示）。 */
-const pluginMembersById = computed(() => {
+/** 模块「带来什么」：包内工具/技能（供列表徽标与详情 chip 展示）。 */
+const moduleMembersById = computed(() => {
   const map = new Map<string, { tools: string[]; skills: string[] }>();
-  for (const p of state.plugins) {
+  for (const p of state.modules) {
     map.set(p.id, packageMembers(p.package || p.id));
   }
   return map;
 });
 
-function pluginMembers(p: PluginInfo): { tools: string[]; skills: string[] } {
-  return pluginMembersById.value.get(p.id) ?? { tools: [], skills: [] };
+function moduleMembers(p: ModuleInfo): { tools: string[]; skills: string[] } {
+  return moduleMembersById.value.get(p.id) ?? { tools: [], skills: [] };
 }
 
-/** 插件使用面（被谁使用）：enabled_plugins 白名单反查。 */
-const pluginUsageRows = computed(() => {
-  const plugin = selectedPlugin.value;
-  if (!plugin) return [] as { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[];
+/** 模块使用面（被谁使用）：enabled_modules 白名单反查。 */
+const moduleUsageRows = computed(() => {
+  const module = selectedModule.value;
+  if (!module) return [] as { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[];
   const rows: { team: string; label: string; variant: 'primary' | 'error' | 'info' | 'success' }[] = [];
   for (const t of state.teams) {
     const name = t.name || t.id;
-    const list = t.enabled_plugins ?? [];
-    if (list.length === 0 || list.includes(plugin.id)) {
+    const list = t.enabled_modules ?? [];
+    if (list.length === 0 || list.includes(module.id)) {
       rows.push({ team: name, label: '已启用', variant: 'success' });
     } else {
       rows.push({ team: name, label: '未列入白名单', variant: 'info' });
@@ -971,37 +971,37 @@ const pluginUsageRows = computed(() => {
  * 卸载影响文案（按门控语义分派）。
  *
  * 没有"禁用"这个动作了，所以文案回答的是「**卸载**它会让什么消失」——
- * 那是用户真正要知道的后果（改 `plugins.toml` 或删配置后重启 Core 才发生）。
+ * 那是用户真正要知道的后果（改 `modules.toml` 或删配置后重启 Core 才发生）。
  */
-const pluginImpactText = computed(() => {
-  const p = selectedPlugin.value;
+const moduleImpactText = computed(() => {
+  const p = selectedModule.value;
   if (!p) return '';
-  if (pluginProtected(p)) {
-    return '「管理面」插件承载 Panel ↔ Core 的 management 通道：卸载即断连自锁（无法经界面恢复），所以它只能随 Core 一起启停。';
+  if (moduleProtected(p)) {
+    return '「管理面」模块承载 Panel ↔ Core 的 management 通道：卸载即断连自锁（无法经界面恢复），所以它只能随 Core 一起启停。';
   }
-  if (pluginIsExternalEntry(p)) {
-    const members = pluginMembers(p);
+  if (moduleIsExternalEntry(p)) {
+    const members = moduleMembers(p);
     const tools = members.tools.length;
-    return `外部插件（独立进程）：由 \`plugins.toml\` 的 \`[[plugin]]\` 条目定义，随 Core 启动拉起、随 Core 退出停止${tools > 0 ? `，带来 ${tools} 个工具` : ''}。运行期只能重启（重新握手），不能就地卸载。`;
+    return `外部模块（独立进程）：由 \`modules.toml\` 的 \`[[module]]\` 条目定义，随 Core 启动拉起、随 Core 退出停止${tools > 0 ? `，带来 ${tools} 个工具` : ''}。运行期只能重启（重新握手），不能就地卸载。`;
   }
-  const sem = pluginSemantic(p);
+  const sem = moduleSemantic(p);
   if (sem === 'gated') {
-    const members = pluginMembers(p);
+    const members = moduleMembers(p);
     return `整包门控：它带来 ${members.tools.length} 个工具、${members.skills.length} 个技能；卸载后这些能力对所有智能体都不可见（含白名单内的智能体）。`;
   }
   if (sem === 'channel') {
     return '平台通道：卸载即撤销该实例 / 管理通道注册，对应平台会话与连接停止。';
   }
   if (sem === 'mode') {
-    return '循环插件：提供 echo-loop 驱动与 `loop` 服务，卸载后 Agent 没有 turn 驱动（启动期就会明确失败）。';
+    return '循环模块：提供 echo-loop 驱动与 `loop` 服务，卸载后 Agent 没有 turn 驱动（启动期就会明确失败）。';
   }
-  return '进程内插件：随 Core 启动挂载，改动需要重启 Core 生效。';
+  return '进程内模块：随 Core 启动挂载，改动需要重启 Core 生效。';
 });
 
 // 详情「技术信息」折叠态 + 参数复制反馈文本（选中切换时重置，见上方 watch）
-const pluginInfoOpen = ref(false);
+const moduleInfoOpen = ref(false);
 
-/** 跳到指定分类并选中条目（交叉跳转：插件 ⇄ 包内工具/技能）。 */
+/** 跳到指定分类并选中条目（交叉跳转：模块 ⇄ 包内工具/技能）。 */
 function jumpToCategory(cat: CategoryKey, name: string) {
   activeCategory.value = cat;
   resetTransient();
@@ -1009,22 +1009,22 @@ function jumpToCategory(cat: CategoryKey, name: string) {
     selectedTool.value = state.tools.find((t) => t.name === name) ?? null;
   } else if (cat === 'skill') {
     selectedSkill.value = state.skills.find((s) => s.name === name) ?? null;
-  } else if (cat === 'plugin') {
-    selectedPlugin.value = state.plugins.find((p) => p.id === name) ?? null;
+  } else if (cat === 'module') {
+    selectedModule.value = state.modules.find((p) => p.id === name) ?? null;
   }
 }
 
-/** 当前分类是否存在「工作台」（筛选栏 + 可拖宽列表）：技能/工具/插件。 */
+/** 当前分类是否存在「工作台」（筛选栏 + 可拖宽列表）：技能/工具/模块。 */
 const hasWorkbench = computed(
   () =>
     activeCategory.value === 'skill' ||
     activeCategory.value === 'tool' ||
-    activeCategory.value === 'plugin',
+    activeCategory.value === 'module',
 );
 // ── 运行区域（多 Core）：「每个区域至少保留一个」判据 ──
 /**
  * 可选运行区域 = 已配置上游 ∪ 当前运行区域 ∪ 已有 agent 的归属（同一口径
- * pluginCoreOptions）：上游列表尚未轮询到时也不至于给出空选项。
+ * moduleCoreOptions）：上游列表尚未轮询到时也不至于给出空选项。
  */
 const regionOptions = computed(() => {
   const ids = new Set(state.upstreams.map((u) => u.name));
@@ -1077,9 +1077,9 @@ function selectToolItem(t: ToolInfo) {
   resetTransient();
   selectedTool.value = t;
 }
-function selectPluginItem(p: PluginInfo) {
+function selectModuleItem(p: ModuleInfo) {
   resetTransient();
-  selectedPlugin.value = p;
+  selectedModule.value = p;
 }
 async function selectTeamItem(t: TeamInfo) {
   // 编辑中切条目（含点回自己——会重填表单）先走脏确认，防静默丢改动。
@@ -1096,7 +1096,7 @@ const EMPTY_HINT: Record<CategoryKey, string> = {
   api: '',
   skill: '在左侧列表选择技能查看详情；或点右上角「新建技能」',
   tool: '在左侧列表选择工具，查看参数 Schema 与启停',
-  plugin: '在左侧列表选择插件查看详情与启停',
+  module: '在左侧列表选择模块查看详情与启停',
   team: '在左侧列表选择智能体进行配置；或点右上角「新建智能体」',
   cores: '',
   system: '',
@@ -1111,8 +1111,8 @@ const showEmpty = computed(() => {
       return !selectedSkill.value && !editing.value && !creating.value;
     case 'tool':
       return !selectedTool.value;
-    case 'plugin':
-      return !selectedPlugin.value;
+    case 'module':
+      return !selectedModule.value;
     case 'team':
       return !selectedTeam.value && !teamEditing.value;
   }
@@ -1121,7 +1121,7 @@ const showEmpty = computed(() => {
 /**
  * 移动端「详情态」：当前分类已选中条目（或处于编辑态）——此时隐藏条目列表、
  * 详情全宽显示（Master-Detail 二级导航；返回按钮见 closeMobileDetail）。
- * 仅工作台类（技能/工具/插件）与智能体有该形态；其余分类是整页表单，恒 false。
+ * 仅工作台类（技能/工具/模块）与智能体有该形态；其余分类是整页表单，恒 false。
  */
 const mobileDetailOpen = computed(() => {
   if (!isMobile.value) return false;
@@ -1130,8 +1130,8 @@ const mobileDetailOpen = computed(() => {
       return !!(selectedSkill.value || editing.value || creating.value);
     case 'tool':
       return !!selectedTool.value;
-    case 'plugin':
-      return !!selectedPlugin.value;
+    case 'module':
+      return !!selectedModule.value;
     case 'team':
       return !!(selectedTeam.value || teamEditing.value);
     default:
@@ -1156,7 +1156,7 @@ async function closeMobileDetail() {
   resetTransient();
   selectedSkill.value = null;
   selectedTool.value = null;
-  selectedPlugin.value = null;
+  selectedModule.value = null;
   selectedTeam.value = null;
 }
 
@@ -1208,7 +1208,7 @@ async function doMoveRegion() {
 }
 const teamFormDisabledTools = ref<string[]>([]);
 const teamFormDisabledSkills = ref<string[]>([]);
-const teamFormEnabledPlugins = ref<string[]>([]);
+const teamFormEnabledModules = ref<string[]>([]);
 const teamFormEnabledTools = ref<string[]>([]);
 const teamFormEnabledSkills = ref<string[]>([]);
 const teamFormSystemSkills = ref<string[]>([]);
@@ -1240,7 +1240,7 @@ function teamSnapshotOf(): string {
     teamFormEnabled.value ? '1' : '0',
     JSON.stringify(teamFormDisabledTools.value),
     JSON.stringify(teamFormDisabledSkills.value),
-    JSON.stringify(teamFormEnabledPlugins.value),
+    JSON.stringify(teamFormEnabledModules.value),
     JSON.stringify(teamFormEnabledTools.value),
     JSON.stringify(teamFormEnabledSkills.value),
     JSON.stringify(teamFormSystemSkills.value),
@@ -1270,32 +1270,32 @@ const teamFormModel = computed(() => ({
   enabled: teamFormEnabled.value,
   disabled_tools: teamFormDisabledTools.value,
   disabled_skills: teamFormDisabledSkills.value,
-  enabled_plugins: teamFormEnabledPlugins.value,
+  enabled_modules: teamFormEnabledModules.value,
   enabled_tools: teamFormEnabledTools.value,
   enabled_skills: teamFormEnabledSkills.value,
   system_skills: teamFormSystemSkills.value,
 }));
 
-// 能力列表（复选框）：插件 / 工具 / 技能
-// 插件级勾选只保留"整类能力"：kind ∈ {instance, management} ∪ 包维度门控
-// 插件（判定单一来源 = capabilities.ts::isPluginCheckboxVisible；
-// 编排互斥子插件由「编排模式」分段控件管理）。
-const capabilityPluginOptions = computed(() =>
-  state.plugins
-    .filter((p) => isPluginCheckboxVisible(p))
+// 能力列表（复选框）：模块 / 工具 / 技能
+// 模块级勾选只保留"整类能力"：kind ∈ {instance, management} ∪ 包维度门控
+// 模块（判定单一来源 = capabilities.ts::isModuleCheckboxVisible；
+// 编排互斥子模块由「编排模式」分段控件管理）。
+const capabilityModuleOptions = computed(() =>
+  state.modules
+    .filter((p) => isModuleCheckboxVisible(p))
     .map((p) => {
-      const readonly = pluginCheckboxState(p) === 'readonly';
+      const readonly = moduleCheckboxState(p) === 'readonly';
       return {
         key: p.id,
         readonly,
         // 只读项在标签上直接说明"为什么勾不动"，省掉一次点击才发现。
-        label: `${p.name}（${PLUGIN_KIND_LABELS[p.kind] ?? p.kind}${readonly ? ' · 进程级' : ''}）`,
+        label: `${p.name}（${MODULE_KIND_LABELS[p.kind] ?? p.kind}${readonly ? ' · 进程级' : ''}）`,
       };
     }),
 );
 /** 可写的键（只读项不进白名单——它们从来不受人格控制）。 */
-const capabilityPluginWritableKeys = computed(() =>
-  capabilityPluginOptions.value.filter((o) => !o.readonly).map((o) => o.key),
+const capabilityModuleWritableKeys = computed(() =>
+  capabilityModuleOptions.value.filter((o) => !o.readonly).map((o) => o.key),
 );
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
 // 包显示名单一来源 = capabilities.ts::PACKAGE_DISPLAY_NAMES。
@@ -1418,7 +1418,7 @@ const teamPromptSummary = computed(() => {
 /** 分区摘要：能力白名单（空表 = 不限制） */
 const teamCapsSummary = computed(() => {
   const parts: string[] = [];
-  if (teamFormEnabledPlugins.value.length > 0) parts.push(`${teamFormEnabledPlugins.value.length} 插件`);
+  if (teamFormEnabledModules.value.length > 0) parts.push(`${teamFormEnabledModules.value.length} 模块`);
   if (teamFormEnabledTools.value.length > 0) parts.push(`${teamFormEnabledTools.value.length} 工具`);
   if (teamFormEnabledSkills.value.length > 0) parts.push(`${teamFormEnabledSkills.value.length} 技能`);
   return parts.length > 0 ? parts.join(' · ') : '不限制（全部可用）';
@@ -1453,7 +1453,7 @@ async function startTeamCreate() {
   teamFormEnabled.value = true;
   teamFormDisabledTools.value = [];
   teamFormDisabledSkills.value = [];
-  teamFormEnabledPlugins.value = [];
+  teamFormEnabledModules.value = [];
   teamFormEnabledTools.value = [];
   teamFormEnabledSkills.value = [];
   teamFormSystemSkills.value = [];
@@ -1477,7 +1477,7 @@ function startTeamEdit(agent: TeamInfo) {
   teamFormEnabled.value = agent.enabled;
   teamFormDisabledTools.value = agent.disabled_tools ?? [];
   teamFormDisabledSkills.value = agent.disabled_skills ?? [];
-  teamFormEnabledPlugins.value = agent.enabled_plugins ?? [];
+  teamFormEnabledModules.value = agent.enabled_modules ?? [];
   teamFormEnabledTools.value = agent.enabled_tools ?? [];
   teamFormEnabledSkills.value = agent.enabled_skills ?? [];
   teamFormSystemSkills.value = agent.system_skills ?? [];
@@ -1508,7 +1508,7 @@ function teamSaveCommand(id: string) {
       enabled: teamFormEnabled.value,
       disabled_tools: teamFormDisabledTools.value,
       disabled_skills: teamFormDisabledSkills.value,
-      enabled_plugins: teamFormEnabledPlugins.value,
+      enabled_modules: teamFormEnabledModules.value,
       enabled_tools: teamFormEnabledTools.value,
       enabled_skills: teamFormEnabledSkills.value,
       system_skills: teamFormSystemSkills.value,
@@ -1579,136 +1579,136 @@ function toggleSkill(skill: SkillInfo, enabled: boolean) {
   sendCommand({ ToggleSkill: { name: skill.name, enabled } });
 }
 
-// ── 插件重启 ──
-// 插件没有启停开关：清单 = 当前挂载集，卸载即从清单消失。唯一可做的运行期
-// 操作是「重启」（卸下 → 重新挂载），让插件按最新配置重新初始化。
-const MANAGEMENT_PANEL_PLUGIN_ID = 'echo-agent.management.panel';
+// ── 模块重启 ──
+// 模块没有启停开关：清单 = 当前挂载集，卸载即从清单消失。唯一可做的运行期
+// 操作是「重启」（卸下 → 重新挂载），让模块按最新配置重新初始化。
+const MANAGEMENT_PANEL_MODULE_ID = 'echo-agent.management.panel';
 
 /**
- * 插件「重启」= 卸下 + 重新挂载（Core 的 `RestartPlugin`）。
+ * 模块「重启」= 卸下 + 重新挂载（Core 的 `RestartModule`）。
  *
- * 纯粹让插件按最新配置 / 外部状态重新初始化（子进程插件重连、实例插件重启
- * 进程），不触碰任何持久化状态。管理面插件受保护：重启 = 先断 management WS，
+ * 纯粹让模块按最新配置 / 外部状态重新初始化（子进程模块重连、实例模块重启
+ * 进程），不触碰任何持久化状态。管理面模块受保护：重启 = 先断 management WS，
  * Panel 立即失联。
  */
-function restartPlugin(plugin: PluginInfo, targetCore?: string) {
-  if (plugin.id === MANAGEMENT_PANEL_PLUGIN_ID) {
+function restartModule(module: ModuleInfo, targetCore?: string) {
+  if (module.id === MANAGEMENT_PANEL_MODULE_ID) {
     addToast({
       message:
-        '「管理面」插件承载 Panel 与 Core 的通信通道，重启会先断开这条通道（Panel 无法经界面恢复）。如需重载请重启 Core 服务。',
+        '「管理面」模块承载 Panel 与 Core 的通信通道，重启会先断开这条通道（Panel 无法经界面恢复）。如需重载请重启 Core 服务。',
       type: 'warning',
       duration: 6000,
     });
     return;
   }
-  sendCommand({ RestartPlugin: { id: plugin.id } }, targetCore);
+  sendCommand({ RestartModule: { id: module.id } }, targetCore);
 }
 
 /** 行内「重启」入口（列表行与管理面用同一套保护判定）。 */
-function quickRestartPlugin(p: PluginInfo) {
-  restartPlugin(p, pluginCoreEffective.value ?? undefined);
+function quickRestartModule(p: ModuleInfo) {
+  restartModule(p, moduleCoreEffective.value ?? undefined);
 }
 
 /**
- * 插件的**配置来源层**（`plugins.toml` / `base.toml · layer 0`）。
+ * 模块的**配置来源层**（`modules.toml` / `base.toml · layer 0`）。
  *
  * 空串 = 配置未提及（编译内置的缺省行为）。这条信息来自 Core 的分层合成，
  * 与 `echo-agent-core dump-config` 同源——面板只做展示，不解释合成规则。
  */
-function pluginConfigOrigin(p: PluginInfo): string {
+function moduleConfigOrigin(p: ModuleInfo): string {
   return (p.config_origin ?? '').trim();
 }
 
 /** 挂载失败原因（与「用户主动禁用」区分开：两者 enabled 都是 false）。 */
-function pluginMountError(p: PluginInfo): string {
+function moduleMountError(p: ModuleInfo): string {
   return (p.error ?? '').trim();
 }
 
 /**
- * 本插件要求的 **服务键**（`Ctx` 命名空间）；空串 = 无要求（旧 Core 也不发）。
+ * 本模块要求的 **服务键**（`Ctx` 命名空间）；空串 = 无要求（旧 Core 也不发）。
  *
  * 用途不是装饰：挂载前 Core 会逐个校验这些键是否已注册，缺失即拒绝挂载
  * 并落进 `error`。所以这一行是 `error` 的**前置解释**——看到
  * 「缺 loop 服务」时，这里能看出它本来就要求 `loop`。
  */
-function pluginRequiredServices(p: PluginInfo): string {
+function moduleRequiredServices(p: ModuleInfo): string {
   return (p.required_services ?? []).filter(Boolean).join('、');
 }
 
-/** 软依赖（`Inject::optional`）：缺失不阻止挂载，只影响插件能做到什么。 */
-function pluginOptionalServices(p: PluginInfo): string {
+/** 软依赖（`Inject::optional`）：缺失不阻止挂载，只影响模块能做到什么。 */
+function moduleOptionalServices(p: ModuleInfo): string {
   return (p.optional_services ?? []).filter(Boolean).join('、');
 }
 
 /**
- * 此刻**还缺**的硬依赖；非空 = 这个插件在等（Core 会自动追平）。
+ * 此刻**还缺**的硬依赖；非空 = 这个模块在等（Core 会自动追平）。
  *
  * 与 `error` 分开显示：`error` 是挂载失败的原因，这里是"还没轮到的原因"。
  */
-function pluginPendingServices(p: PluginInfo): string {
+function modulePendingServices(p: ModuleInfo): string {
   return (p.pending_services ?? []).filter(Boolean).join('、');
 }
 
 /**
- * 插件订阅的事件名（`Contribution::Events` 的进程内等价物）。
+ * 模块订阅的事件名（`Contribution::Events` 的进程内等价物）。
  *
- * 空 = 不订阅。想确认"这个插件到底会对什么有反应"时看这一行；实际收到的
- * 事件见 [`pluginRecentEvents`]。
+ * 空 = 不订阅。想确认"这个模块到底会对什么有反应"时看这一行；实际收到的
+ * 事件见 [`moduleRecentEvents`]。
  */
-function pluginSubscribedEvents(p: PluginInfo): string {
+function moduleSubscribedEvents(p: ModuleInfo): string {
   return (p.subscribed_events ?? []).filter(Boolean).join('、');
 }
 
 /**
- * 该插件最近发出的**插件事件**（来自 `state.pluginEvents`，最多 5 条）。
+ * 该模块最近发出的**模块事件**（来自 `state.moduleEvents`，最多 5 条）。
  *
- * 只按 `plugin` 过滤——Core 自己的 lifecycle 事件（`plugin.mounted`）的
- * `plugin` 字段是空串，归到"宿主"名下，不混进某个插件的记录里。
+ * 只按 `module` 过滤——Core 自己的 lifecycle 事件（`module.mounted`）的
+ * `module` 字段是空串，归到"宿主"名下，不混进某个模块的记录里。
  */
-function pluginRecentEvents(p: PluginInfo): PluginEventEntry[] {
-  return state.pluginEvents.filter((e) => e.plugin === p.id).slice(0, 5);
+function moduleRecentEvents(p: ModuleInfo): ModuleEventEntry[] {
+  return state.moduleEvents.filter((e) => e.module === p.id).slice(0, 5);
 }
 
 /**
  * 子进程运行态（`state`）的人读标签与色调。
  *
- * 空 = 进程内实现（没有独立生命周期）；只有 `plugins.toml` 的外部条目与
+ * 空 = 进程内实现（没有独立生命周期）；只有 `modules.toml` 的外部条目与
  * 实例门控壳才有这个字段。它描述的是**进程**，与 `enabled`（用户开关）
  * 正交——`ready` + `enabled=false` 是「开着但被停」，`failed` 是「起不来」。
  */
-const PLUGIN_RUNTIME_STATE_LABELS: Record<string, string> = {
+const MODULE_RUNTIME_STATE_LABELS: Record<string, string> = {
   pending: '启动中',
   ready: '运行中',
   draining: '停止中',
   stopped: '已停止',
   failed: '失败',
 };
-function pluginStateLabel(p: PluginInfo): string {
+function moduleStateLabel(p: ModuleInfo): string {
   const state = (p.state ?? '').trim();
-  return PLUGIN_RUNTIME_STATE_LABELS[state] ?? '';
+  return MODULE_RUNTIME_STATE_LABELS[state] ?? '';
 }
 /**
- * 是不是 `plugins.toml` 的**外部条目**（stdio 子进程插件）。
+ * 是不是 `modules.toml` 的**外部条目**（stdio 子进程模块）。
  *
- * 判据与 Core 的 `PluginHost::is_external_entry` 一致：`subprocess` 且
+ * 判据与 Core 的 `ModuleHost::is_external_entry` 一致：`subprocess` 且
  * `builtin = false`。实例门控壳是 `subprocess + builtin`（manifest 编译在
  * Core 里），不算——它有自己的启停通道。
  */
-function pluginIsExternalEntry(p: PluginInfo): boolean {
+function moduleIsExternalEntry(p: ModuleInfo): boolean {
   return p.runtime === 'subprocess' && p.builtin === false;
 }
 
 /** 运行态是否处于故障（决定徽标用红还是中性色）。 */
-function pluginStateIsError(p: PluginInfo): boolean {
+function moduleStateIsError(p: ModuleInfo): boolean {
   return (p.state ?? '').trim() === 'failed';
 }
 /**
  * 启动命令的展示文本：`命令 + 参数`（参数为空时只有命令）。
  *
  * 用途是排查「命令拼错 / 路径不存在 / 参数漏了」——与 `error` 一起看。
- * 命令来自 `plugins.toml`，Panel 只展示不执行。
+ * 命令来自 `modules.toml`，Panel 只展示不执行。
  */
-function pluginLaunchCommand(p: PluginInfo): string {
+function moduleLaunchCommand(p: ModuleInfo): string {
   const command = (p.command ?? '').trim();
   if (!command) return '';
   const args = p.args ?? [];
@@ -1716,7 +1716,7 @@ function pluginLaunchCommand(p: PluginInfo): string {
 }
 
 /** 是否刚从崩溃里恢复过（有重启次数才显示，常态不占视觉）。 */
-function pluginRestartNote(p: PluginInfo): string {
+function moduleRestartNote(p: ModuleInfo): string {
   const restarts = p.restarts ?? 0;
   if (restarts <= 0) return '';
   return `已自动重启 ${restarts} 次`;
@@ -1916,8 +1916,8 @@ function refreshSkills() {
 function refreshTools() {
   sendPending('RequestToolsList', 'settings:tools');
 }
-function refreshPlugins() {
-  sendPending('RequestPluginsList', 'settings:plugins');
+function refreshModules() {
+  sendPending('RequestModulesList', 'settings:modules');
 }
 function refreshTeams() {
   sendPending('RequestTeamsList', 'settings:teams');
@@ -1925,7 +1925,7 @@ function refreshTeams() {
 function refresh() {
   refreshSkills();
   refreshTools();
-  refreshPlugins();
+  refreshModules();
   refreshTeams();
 }
 
@@ -2025,7 +2025,7 @@ watch(
         </div>
       </div>
 
-      <!-- 工作台筛选栏（技能 / 工具 / 插件）：搜索 + 状态筛选 + 分组维度 -->
+      <!-- 工作台筛选栏（技能 / 工具 / 模块）：搜索 + 状态筛选 + 分组维度 -->
       <div v-if="activeCategory === 'skill'" class="caps-filters">
         <NeumorphismInput
           v-model="skillSearch"
@@ -2082,35 +2082,35 @@ watch(
         />
       </div>
 
-      <div v-else-if="activeCategory === 'plugin'" class="caps-filters">
-        <NeumorphismSelect :model-value="pluginCoreEffective ?? ''" :options="pluginCoreOptions.map(core => ({ label: coreDisplay(state, core).title, value: core }))" size="small" aria-label="管理节点" @update:model-value="pluginCore = String($event ?? '') || null; selectedPlugin = null; sendPending('RequestPluginsList', 'settings:plugins', pluginCoreEffective ?? undefined)" />
+      <div v-else-if="activeCategory === 'module'" class="caps-filters">
+        <NeumorphismSelect :model-value="moduleCoreEffective ?? ''" :options="moduleCoreOptions.map(core => ({ label: coreDisplay(state, core).title, value: core }))" size="small" aria-label="管理节点" @update:model-value="moduleCore = String($event ?? '') || null; selectedModule = null; sendPending('RequestModulesList', 'settings:modules', moduleCoreEffective ?? undefined)" />
         <NeumorphismInput
-          v-model="pluginSearch"
+          v-model="moduleSearch"
           placeholder="搜索名称 / ID / 描述"
           size="small"
           class="caps-filters__search"
         />
         <div class="caps-filters__chips">
           <button
-            v-for="f in PLUGIN_FILTERS"
+            v-for="f in MODULE_FILTERS"
             :key="f.key"
             type="button"
             class="caps-chip"
-            :class="{ 'caps-chip--active': pluginFilter === f.key }"
-            @click="pluginFilter = f.key"
+            :class="{ 'caps-chip--active': moduleFilter === f.key }"
+            @click="moduleFilter = f.key"
           >
             {{ f.label }}
-            <span class="caps-chip__count">{{ pluginFilterCounts[f.key] }}</span>
+            <span class="caps-chip__count">{{ moduleFilterCounts[f.key] }}</span>
           </button>
         </div>
         <NeumorphismSegmented
-          v-model="pluginGroupBy"
-          :options="PLUGIN_GROUP_OPTIONS"
+          v-model="moduleGroupBy"
+          :options="MODULE_GROUP_OPTIONS"
           size="small"
           aria-label="分组维度"
         />
         <NeumorphismSegmented
-          v-model="pluginViewMode"
+          v-model="moduleViewMode"
           :options="[{ label: '列表', value: 'list' }, { label: '依赖树', value: 'deps' }]"
           size="small"
           aria-label="展示形态"
@@ -2167,7 +2167,7 @@ watch(
       <!-- 资源工作区：条目列表 + 详情/编辑（移动端 Master-Detail，见 mobileWorkspaceClass） -->
       <div v-else class="caps-workspace" :class="mobileWorkspaceClass">
         <!-- 条目列表 -->
-        <!-- 列表宽度：工作台（技能/工具/插件）可拖拽（其余分类沿用默认 250px）；
+        <!-- 列表宽度：工作台（技能/工具/模块）可拖拽（其余分类沿用默认 250px）；
              移动端不绑定（列表全宽、详情态隐藏） -->
         <div
           class="caps-list"
@@ -2313,28 +2313,28 @@ watch(
             </div>
           </template>
 
-          <!-- 插件：工作台分组（门控语义 / kind / 平铺）+ 双行行卡 -->
-          <template v-else-if="activeCategory === 'plugin' && pluginViewMode === 'list'">
-            <LoadHint :phase="pluginPhase" label="插件清单" @retry="refreshPlugins" />
-            <div v-for="g in pluginWorkbenchGroups" :key="g.key" class="caps-list-group">
-              <div class="caps-list-group__head" @click="toggleGroup('plugin:' + g.key)">
-                <span class="caret">{{ isCollapsed('plugin:' + g.key) ? '▸' : '▾' }}</span>
+          <!-- 模块：工作台分组（门控语义 / kind / 平铺）+ 双行行卡 -->
+          <template v-else-if="activeCategory === 'module' && moduleViewMode === 'list'">
+            <LoadHint :phase="modulePhase" label="模块清单" @retry="refreshModules" />
+            <div v-for="g in moduleWorkbenchGroups" :key="g.key" class="caps-list-group">
+              <div class="caps-list-group__head" @click="toggleGroup('module:' + g.key)">
+                <span class="caret">{{ isCollapsed('module:' + g.key) ? '▸' : '▾' }}</span>
                 <span class="caps-list-group__name">{{ g.title }}</span>
                 <span class="caps-count caps-count--soft">{{ g.items.length }}</span>
               </div>
               <template v-if="g.hint">
                 <div class="caps-list-group__hint caps-list-group__hint--neutral">{{ g.hint }}</div>
               </template>
-              <template v-if="!isCollapsed('plugin:' + g.key)">
+              <template v-if="!isCollapsed('module:' + g.key)">
                 <div
                   v-for="p in g.items"
                   :key="p.id"
                   class="caps-list-item caps-skill-item"
                   :class="{
-                    'caps-list-item--active': selectedPlugin?.id === p.id,
+                    'caps-list-item--active': selectedModule?.id === p.id,
                     'caps-skill-item--off': false,
                   }"
-                  @click="selectPluginItem(p)"
+                  @click="selectModuleItem(p)"
                 >
                   <div class="caps-skill-item__main">
                     <span
@@ -2345,49 +2345,49 @@ watch(
                     <span class="caps-list-item__name">{{ p.name }}</span>
                     <span class="caps-skill-item__marks">
                       <span
-                        v-if="pluginMembers(p).tools.length || pluginMembers(p).skills.length"
+                        v-if="moduleMembers(p).tools.length || moduleMembers(p).skills.length"
                         class="caps-mark"
-                        :title="`包内 ${pluginMembers(p).tools.length} 工具 · ${pluginMembers(p).skills.length} 技能`"
+                        :title="`包内 ${moduleMembers(p).tools.length} 工具 · ${moduleMembers(p).skills.length} 技能`"
                       >
-                        {{ pluginMembers(p).tools.length }} 工具 · {{ pluginMembers(p).skills.length }} 技能
+                        {{ moduleMembers(p).tools.length }} 工具 · {{ moduleMembers(p).skills.length }} 技能
                       </span>
                       <span
-                        v-if="pluginIsSubprocess(p)"
+                        v-if="moduleIsSubprocess(p)"
                         class="caps-mark caps-mark--system"
                         :title="`实现在独立子进程（Core 侧只有启停门控）：${p.name}`"
                       >
                         独立进程
                       </span>
                       <span
-                        v-if="pluginProtected(p)"
+                        v-if="moduleProtected(p)"
                         class="caps-mark caps-mark--warn caps-mark--icon"
                         title="禁用即断连自锁，Core 拒绝"
                       >
                         <PanelIcon name="lock" size="xs" tone="warn" />
                         受保护
                       </span>
-                      <span v-else-if="pluginSemantic(p) === 'mode'" class="caps-mark caps-mark--system" title="互斥模式插件">
+                      <span v-else-if="moduleSemantic(p) === 'mode'" class="caps-mark caps-mark--system" title="互斥模式模块">
                         模式
                       </span>
                       <span
-                        v-if="pluginStateLabel(p) && p.state !== 'ready'"
+                        v-if="moduleStateLabel(p) && p.state !== 'ready'"
                         class="caps-mark caps-mark--icon"
-                        :class="pluginStateIsError(p) ? 'caps-mark--err' : 'caps-mark--system'"
-                        :title="`子进程运行态：${pluginStateLabel(p)}${pluginRestartNote(p) ? ' · ' + pluginRestartNote(p) : ''}`"
+                        :class="moduleStateIsError(p) ? 'caps-mark--err' : 'caps-mark--system'"
+                        :title="`子进程运行态：${moduleStateLabel(p)}${moduleRestartNote(p) ? ' · ' + moduleRestartNote(p) : ''}`"
                       >
-                        {{ pluginStateLabel(p) }}
+                        {{ moduleStateLabel(p) }}
                       </span>
                       <span
-                        v-if="pluginOriginBadge(p)"
+                        v-if="moduleOriginBadge(p)"
                         class="caps-mark caps-mark--git"
-                        title="来源：不是编译进本二进制的插件（plugins.toml 条目或插件目录发现）"
+                        title="来源：不是编译进本二进制的模块（modules.toml 条目或模块目录发现）"
                       >
-                        {{ pluginOriginBadge(p) }}
+                        {{ moduleOriginBadge(p) }}
                       </span>
                       <span
-                        v-if="pluginMountError(p)"
+                        v-if="moduleMountError(p)"
                         class="caps-mark caps-mark--err caps-mark--icon"
-                        :title="`装配失败：${pluginMountError(p)}`"
+                        :title="`装配失败：${moduleMountError(p)}`"
                       >
                         <PanelIcon name="warning" size="xs" tone="err" />
                         失败
@@ -2395,12 +2395,12 @@ watch(
                     </span>
                     <span class="caps-skill-item__quick" @click.stop>
                       <button
-                        v-if="!pluginProtected(p) && p.state !== 'failed'"
+                        v-if="!moduleProtected(p) && p.state !== 'failed'"
                         type="button"
-                        class="plugin-restart-btn"
+                        class="module-restart-btn"
                         title="重启（卸下后重新挂载）"
-                        aria-label="重启插件"
-                        @click="quickRestartPlugin(p)"
+                        aria-label="重启模块"
+                        @click="quickRestartModule(p)"
                       >
                         <PanelIcon name="refresh" size="xs" />
                       </button>
@@ -2412,26 +2412,26 @@ watch(
                 </div>
               </template>
             </div>
-            <div v-if="pluginWorkbenchGroups.length === 0 && pluginPhase === 'idle'" class="caps-list-empty">
-              <span class="muted">无匹配插件</span>
+            <div v-if="moduleWorkbenchGroups.length === 0 && modulePhase === 'idle'" class="caps-list-empty">
+              <span class="muted">无匹配模块</span>
               <NeumorphismButton
-                v-if="pluginSearch || pluginFilter !== 'all'"
+                v-if="moduleSearch || moduleFilter !== 'all'"
                 size="small"
                 variant="glass"
-                @click="pluginSearch = ''; pluginFilter = 'all'"
+                @click="moduleSearch = ''; moduleFilter = 'all'"
               >
                 清除筛选
               </NeumorphismButton>
             </div>
           </template>
 
-          <!-- 插件：依赖树（宿主服务表 → 插件 → 插件），与列表互斥 -->
-          <template v-else-if="activeCategory === 'plugin' && pluginViewMode === 'deps'">
-            <div class="plugin-deps-view">
-              <div class="plugin-deps-view__hint">
+          <!-- 模块：依赖树（宿主服务表 → 模块 → 模块），与列表互斥 -->
+          <template v-else-if="activeCategory === 'module' && moduleViewMode === 'deps'">
+            <div class="module-deps-view">
+              <div class="module-deps-view__hint">
                 从左到右 = 从被依赖到依赖方。                边上的文字是被消费的服务键（`echo-agent.` 前缀省略）。
               </div>
-              <DocFlowCanvas :graph="pluginDepGraph" height="520px" />
+              <DocFlowCanvas :graph="moduleDepGraph" height="520px" />
             </div>
           </template>
 
@@ -2463,7 +2463,7 @@ watch(
           </template>
         </div>
 
-        <!-- 分栏拖拽分隔条（列表宽度可调；技能/工具/插件工作台用） -->
+        <!-- 分栏拖拽分隔条（列表宽度可调；技能/工具/模块工作台用） -->
         <div
           v-if="hasWorkbench"
           class="caps-resizer"
@@ -2539,8 +2539,8 @@ watch(
 
             <!-- 组合并提示：所属包被禁用时技能对所有智能体不可见 -->
             <div v-if="skillPackageDisabled(selectedSkill)" class="skill-banner skill-banner--warn">
-              「{{ skillPackageLabel(selectedSkill.package) }}」插件当前已禁用，包内技能对所有智能体不可见；
-              在「插件」分类重新启用该包后本技能才会生效。
+              「{{ skillPackageLabel(selectedSkill.package) }}」模块当前已禁用，包内技能对所有智能体不可见；
+              在「模块」分类重新启用该包后本技能才会生效。
             </div>
             <div v-if="!selectedSkill.enabled" class="skill-banner">
               该技能已禁用：不参与触发，也不会注入提示词（列表/详情开关可直接启用）。
@@ -2796,8 +2796,8 @@ watch(
             </div>
             <div class="detail-keywords">
               <span class="muted">启用白名单：</span>
-              <template v-if="(selectedTeam.enabled_plugins?.length ?? 0) + (selectedTeam.enabled_tools?.length ?? 0) + (selectedTeam.enabled_skills?.length ?? 0) > 0">
-                <NeumorphismTag v-for="e in selectedTeam.enabled_plugins ?? []" :key="e" size="small" variant="primary">
+              <template v-if="(selectedTeam.enabled_modules?.length ?? 0) + (selectedTeam.enabled_tools?.length ?? 0) + (selectedTeam.enabled_skills?.length ?? 0) > 0">
+                <NeumorphismTag v-for="e in selectedTeam.enabled_modules ?? []" :key="e" size="small" variant="primary">
                   {{ e }}
                 </NeumorphismTag>
                 <NeumorphismTag v-for="e in selectedTeam.enabled_tools ?? []" :key="e" size="small" variant="primary">
@@ -2928,38 +2928,38 @@ watch(
                   </NeumorphismFormItem>
                 </template>
 
-                <!-- 分区 3：启用的能力（插件 / 包 / 工具 / 技能） -->
+                <!-- 分区 3：启用的能力（模块 / 包 / 工具 / 技能） -->
                 <template #header-caps>
                   <span class="sec-title">启用的能力</span>
                   <span class="sec-summary">{{ teamCapsSummary }}</span>
                 </template>
                 <template #caps>
-                  <div class="sec-sub">插件</div>
+                  <div class="sec-sub">模块</div>
                   <p class="muted caps-hint">
-                    勾选该智能体可用的能力块（平台实例 + 能力型插件）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
+                    勾选该智能体可用的能力块（平台实例 + 能力型模块）；全选 = 不限制（默认）。内置工具集不在此列，请在下方按工具勾选。
                   </p>
                   <div class="caps-checkbox-grid caps-checkbox-grid--grid">
                     <NeumorphismCheckbox
-                      v-for="opt in capabilityPluginOptions"
+                      v-for="opt in capabilityModuleOptions"
                       :key="opt.key"
                       size="small"
                       :disabled="opt.readonly"
                       :model-value="
-                        opt.readonly || isWhitelisted(teamFormEnabledPlugins, opt.key)
+                        opt.readonly || isWhitelisted(teamFormEnabledModules, opt.key)
                       "
                       :label="opt.label"
                       @update:model-value="
-                        teamFormEnabledPlugins = toggleAllowlist(
-                          teamFormEnabledPlugins,
-                          capabilityPluginWritableKeys,
+                        teamFormEnabledModules = toggleAllowlist(
+                          teamFormEnabledModules,
+                          capabilityModuleWritableKeys,
                           opt.key,
                         )
                       "
                     />
-                    <span v-if="capabilityPluginOptions.length === 0" class="muted">（无）</span>
+                    <span v-if="capabilityModuleOptions.length === 0" class="muted">（无）</span>
                   </div>
-                  <p v-if="capabilityPluginOptions.some((o) => o.readonly)" class="muted caps-hint">
-                    标「进程级」的能力对所有人格始终生效——它不受本白名单控制，要停用请到「插件」页禁用该插件。
+                  <p v-if="capabilityModuleOptions.some((o) => o.readonly)" class="muted caps-hint">
+                    标「进程级」的能力对所有人格始终生效——它不受本白名单控制，要停用请到「模块」页禁用该模块。
                   </p>
 
                   <NeumorphismDivider dashed inset />
@@ -3046,30 +3046,30 @@ watch(
             </NeumorphismForm>
           </div>
 
-          <!-- 插件详情（分区检查器：带来什么 / 被谁使用 / 启停影响 / 技术信息） -->
-          <div v-else-if="activeCategory === 'plugin' && selectedPlugin" class="caps-detail skill-detail">
+          <!-- 模块详情（分区检查器：带来什么 / 被谁使用 / 启停影响 / 技术信息） -->
+          <div v-else-if="activeCategory === 'module' && selectedModule" class="caps-detail skill-detail">
             <div class="detail-head">
               <div class="skill-detail__title">
-                <h3>{{ selectedPlugin.name }}</h3>
-                <span class="skill-detail__pkg">{{ PLUGIN_SEMANTIC_LABELS[pluginSemantic(selectedPlugin)] }}</span>
+                <h3>{{ selectedModule.name }}</h3>
+                <span class="skill-detail__pkg">{{ MODULE_SEMANTIC_LABELS[moduleSemantic(selectedModule)] }}</span>
               </div>
               <div class="detail-actions">
-                <NeumorphismTag v-if="pluginIsSubprocess(selectedPlugin)" variant="info" size="small">
-                  外部插件 · 独立进程
+                <NeumorphismTag v-if="moduleIsSubprocess(selectedModule)" variant="info" size="small">
+                  外部模块 · 独立进程
                 </NeumorphismTag>
                 <span
-                  v-if="pluginProtected(selectedPlugin)"
+                  v-if="moduleProtected(selectedModule)"
                   class="caps-mark caps-mark--warn caps-mark--icon"
                 >
                   <PanelIcon name="lock" size="xs" tone="warn" />
                   受保护
                 </span>
                 <NeumorphismButton
-                  v-if="!pluginProtected(selectedPlugin)"
+                  v-if="!moduleProtected(selectedModule)"
                   size="small"
                   variant="glass"
                   title="卸下后重新挂载（不改启用状态、不写配置）"
-                  @click="restartPlugin(selectedPlugin!, pluginCoreEffective ?? undefined)"
+                  @click="restartModule(selectedModule!, moduleCoreEffective ?? undefined)"
                 >
                   <PanelIcon name="refresh" size="xs" />
                   重启
@@ -3077,16 +3077,16 @@ watch(
               </div>
             </div>
 
-            <p class="skill-detail__desc">{{ selectedPlugin.description || '（无描述）' }}</p>
+            <p class="skill-detail__desc">{{ selectedModule.description || '（无描述）' }}</p>
 
             <!-- 装配失败：与「用户主动禁用」区分开（两者 enabled 都是 false） -->
-            <div v-if="pluginMountError(selectedPlugin)" class="plugin-mount-error">
+            <div v-if="moduleMountError(selectedModule)" class="module-mount-error">
               <PanelIcon name="warning" size="sm" tone="err" />
               <div>
                 <strong>装配失败（已跳过挂载）</strong>
-                <p>{{ pluginMountError(selectedPlugin) }}</p>
+                <p>{{ moduleMountError(selectedModule) }}</p>
                 <p class="muted">
-                  常见原因：`plugins.toml` 里的 `command` 路径不存在/不可执行、插件进程启动后握手失败。
+                  常见原因：`modules.toml` 里的 `command` 路径不存在/不可执行、模块进程启动后握手失败。
                   修好后点「重启」即可重试，无需重启 Core。
                 </p>
               </div>
@@ -3094,40 +3094,40 @@ watch(
 
             <!-- 带来什么：包内工具/技能（可点击跳转） -->
             <div class="detail-section">
-              <div class="detail-section__title">这个插件带来什么</div>
-              <template v-if="pluginMembers(selectedPlugin).tools.length || pluginMembers(selectedPlugin).skills.length">
-                <div v-if="pluginMembers(selectedPlugin).tools.length" class="plugin-members">
-                  <span class="muted plugin-members__label">工具</span>
+              <div class="detail-section__title">这个模块带来什么</div>
+              <template v-if="moduleMembers(selectedModule).tools.length || moduleMembers(selectedModule).skills.length">
+                <div v-if="moduleMembers(selectedModule).tools.length" class="module-members">
+                  <span class="muted module-members__label">工具</span>
                   <button
-                    v-for="name in pluginMembers(selectedPlugin).tools"
+                    v-for="name in moduleMembers(selectedModule).tools"
                     :key="name"
                     type="button"
-                    class="plugin-member-chip"
+                    class="module-member-chip"
                     @click="jumpToCategory('tool', name)"
                   >
                     {{ name }}
                   </button>
                 </div>
-                <div v-if="pluginMembers(selectedPlugin).skills.length" class="plugin-members">
-                  <span class="muted plugin-members__label">技能</span>
+                <div v-if="moduleMembers(selectedModule).skills.length" class="module-members">
+                  <span class="muted module-members__label">技能</span>
                   <button
-                    v-for="name in pluginMembers(selectedPlugin).skills"
+                    v-for="name in moduleMembers(selectedModule).skills"
                     :key="name"
                     type="button"
-                    class="plugin-member-chip"
+                    class="module-member-chip"
                     @click="jumpToCategory('skill', name)"
                   >
                     {{ name }}
                   </button>
                 </div>
               </template>
-              <span v-else class="muted">该插件未注册工具或技能</span>
+              <span v-else class="muted">该模块未注册工具或技能</span>
             </div>
 
             <div class="detail-section">
               <div class="detail-section__title">被谁使用</div>
-              <div v-if="pluginUsageRows.length" class="skill-usage">
-                <div v-for="row in pluginUsageRows" :key="row.team" class="skill-usage__row">
+              <div v-if="moduleUsageRows.length" class="skill-usage">
+                <div v-for="row in moduleUsageRows" :key="row.team" class="skill-usage__row">
                   <span class="skill-usage__team">{{ row.team }}</span>
                   <NeumorphismTag :variant="row.variant" size="small">{{ row.label }}</NeumorphismTag>
                 </div>
@@ -3137,99 +3137,99 @@ watch(
 
             <div class="detail-section">
               <div class="detail-section__title">启停影响</div>
-              <div class="plugin-impact" :class="{ 'plugin-impact--warn': pluginProtected(selectedPlugin) }">
-                {{ pluginImpactText }}
+              <div class="module-impact" :class="{ 'module-impact--warn': moduleProtected(selectedModule) }">
+                {{ moduleImpactText }}
               </div>
             </div>
 
             <!-- 技术信息（折叠：低频信息不占视野） -->
             <div class="detail-section">
               <div
-                class="detail-section__title detail-section__title--row plugin-info__head"
-                @click="pluginInfoOpen = !pluginInfoOpen"
+                class="detail-section__title detail-section__title--row module-info__head"
+                @click="moduleInfoOpen = !moduleInfoOpen"
               >
                 <span>技术信息</span>
-                <span class="muted">{{ pluginInfoOpen ? '▾' : '▸' }}</span>
+                <span class="muted">{{ moduleInfoOpen ? '▾' : '▸' }}</span>
               </div>
-              <div v-if="pluginInfoOpen" class="skill-source">
+              <div v-if="moduleInfoOpen" class="skill-source">
                 <div class="skill-source__row">
                   <span class="muted">ID</span>
-                  <code>{{ selectedPlugin.id }}</code>
+                  <code>{{ selectedModule.id }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">包（Package）</span>
-                  <code>{{ selectedPlugin.package || selectedPlugin.id }}</code>
+                  <code>{{ selectedModule.package || selectedModule.id }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">kind / 版本</span>
-                  <code>{{ selectedPlugin.kind }} · v{{ selectedPlugin.version || '—' }}</code>
+                  <code>{{ selectedModule.kind }} · v{{ selectedModule.version || '—' }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">Entry</span>
-                  <code>{{ selectedPlugin.entry || '—' }}</code>
+                  <code>{{ selectedModule.entry || '—' }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">运行形态</span>
-                  <code>{{ pluginRuntimeLabel(selectedPlugin) }}</code>
+                  <code>{{ moduleRuntimeLabel(selectedModule) }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">来源</span>
-                  <code>{{ PLUGIN_ORIGIN_LABELS[pluginOrigin(selectedPlugin)] }}</code>
+                  <code>{{ MODULE_ORIGIN_LABELS[moduleOrigin(selectedModule)] }}</code>
                 </div>
-                <div v-if="pluginStateLabel(selectedPlugin)" class="skill-source__row">
+                <div v-if="moduleStateLabel(selectedModule)" class="skill-source__row">
                   <span class="muted">运行态</span>
                   <code>
-                    {{ pluginStateLabel(selectedPlugin) }}
-                    <template v-if="pluginRestartNote(selectedPlugin)">
-                      · {{ pluginRestartNote(selectedPlugin) }}
+                    {{ moduleStateLabel(selectedModule) }}
+                    <template v-if="moduleRestartNote(selectedModule)">
+                      · {{ moduleRestartNote(selectedModule) }}
                     </template>
-                    <template v-if="selectedPlugin.generation">
-                      · 代际 {{ selectedPlugin.generation }}
+                    <template v-if="selectedModule.generation">
+                      · 代际 {{ selectedModule.generation }}
                     </template>
                   </code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">Author</span>
-                  <code>{{ selectedPlugin.author || '—' }}</code>
+                  <code>{{ selectedModule.author || '—' }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">配置来源</span>
-                  <code v-if="pluginConfigOrigin(selectedPlugin)">{{ pluginConfigOrigin(selectedPlugin) }}</code>
+                  <code v-if="moduleConfigOrigin(selectedModule)">{{ moduleConfigOrigin(selectedModule) }}</code>
                   <code v-else class="muted">未在配置中声明（缺省内置行为）</code>
                 </div>
-                <div v-if="selectedPlugin.source_path" class="skill-source__row">
+                <div v-if="selectedModule.source_path" class="skill-source__row">
                   <span class="muted">定义文件</span>
-                  <code class="plugin-def-path">{{ selectedPlugin.source_path }}</code>
+                  <code class="module-def-path">{{ selectedModule.source_path }}</code>
                 </div>
-                <div v-if="pluginLaunchCommand(selectedPlugin)" class="skill-source__row">
+                <div v-if="moduleLaunchCommand(selectedModule)" class="skill-source__row">
                   <span class="muted">启动命令</span>
-                  <code class="plugin-def-path">{{ pluginLaunchCommand(selectedPlugin) }}</code>
+                  <code class="module-def-path">{{ moduleLaunchCommand(selectedModule) }}</code>
                 </div>
-                <div v-if="(selectedPlugin.env_keys ?? []).length" class="skill-source__row">
+                <div v-if="(selectedModule.env_keys ?? []).length" class="skill-source__row">
                   <span class="muted">环境变量</span>
-                  <code class="plugin-def-path">{{ (selectedPlugin.env_keys ?? []).join('、') }}</code>
+                  <code class="module-def-path">{{ (selectedModule.env_keys ?? []).join('、') }}</code>
                 </div>
-                <div v-if="pluginRequiredServices(selectedPlugin)" class="skill-source__row">
+                <div v-if="moduleRequiredServices(selectedModule)" class="skill-source__row">
                   <span class="muted">依赖服务</span>
-                  <code class="plugin-def-path">{{ pluginRequiredServices(selectedPlugin) }}</code>
+                  <code class="module-def-path">{{ moduleRequiredServices(selectedModule) }}</code>
                 </div>
-                <div v-if="pluginOptionalServices(selectedPlugin)" class="skill-source__row">
+                <div v-if="moduleOptionalServices(selectedModule)" class="skill-source__row">
                   <span class="muted">可选依赖</span>
-                  <code class="plugin-def-path">{{ pluginOptionalServices(selectedPlugin) }}</code>
+                  <code class="module-def-path">{{ moduleOptionalServices(selectedModule) }}</code>
                 </div>
-                <div v-if="pluginPendingServices(selectedPlugin)" class="skill-source__row">
+                <div v-if="modulePendingServices(selectedModule)" class="skill-source__row">
                   <span class="muted">等待依赖</span>
-                  <code class="plugin-def-path">{{ pluginPendingServices(selectedPlugin) }}</code>
+                  <code class="module-def-path">{{ modulePendingServices(selectedModule) }}</code>
                   <span class="muted">（依赖到位后自动挂载）</span>
                 </div>
-                <div v-if="pluginSubscribedEvents(selectedPlugin)" class="skill-source__row">
+                <div v-if="moduleSubscribedEvents(selectedModule)" class="skill-source__row">
                   <span class="muted">订阅事件</span>
-                  <code class="plugin-def-path">{{ pluginSubscribedEvents(selectedPlugin) }}</code>
+                  <code class="module-def-path">{{ moduleSubscribedEvents(selectedModule) }}</code>
                 </div>
-                <div v-if="pluginRecentEvents(selectedPlugin).length" class="skill-source__row">
+                <div v-if="moduleRecentEvents(selectedModule).length" class="skill-source__row">
                   <span class="muted">最近事件</span>
-                  <code class="plugin-def-path">
-                    {{ pluginRecentEvents(selectedPlugin).map((e) => e.name).join('、') }}
+                  <code class="module-def-path">
+                    {{ moduleRecentEvents(selectedModule).map((e) => e.name).join('、') }}
                   </code>
                 </div>
               </div>
@@ -3255,8 +3255,8 @@ watch(
             </div>
 
             <div v-if="toolPackageDisabled(selectedTool)" class="skill-banner skill-banner--warn">
-              「{{ skillPackageLabel(selectedTool.package, '独立工具') }}」插件当前已禁用，包内工具对所有智能体不可见；
-              在「插件」分类重新启用该包后本工具才会生效。
+              「{{ skillPackageLabel(selectedTool.package, '独立工具') }}」模块当前已禁用，包内工具对所有智能体不可见；
+              在「模块」分类重新启用该包后本工具才会生效。
             </div>
             <div v-if="!selectedTool.enabled" class="skill-banner">
               该工具已禁用：模型不可见、调用会失败（列表/详情开关可直接启用）。
@@ -3294,9 +3294,9 @@ watch(
                   <NeumorphismButton
                     size="small"
                     variant="glass"
-                    @click="jumpToCategory('plugin', selectedTool!.package!)"
+                    @click="jumpToCategory('module', selectedTool!.package!)"
                   >
-                    在「插件」中查看 →
+                    在「模块」中查看 →
                   </NeumorphismButton>
                 </div>
               </div>
@@ -3728,7 +3728,7 @@ watch(
   font-weight: 400;
   color: var(--nm-text-secondary);
 }
-/* 分区内子块标题（插件 / 包 / 工具 / 技能） */
+/* 分区内子块标题（模块 / 包 / 工具 / 技能） */
 .sec-sub {
   margin: 8px 0 4px;
   font-size: 12px;
@@ -3957,7 +3957,7 @@ watch(
   background: color-mix(in srgb, var(--panel-err) 12%, transparent);
 }
 /* 行内「重启」按钮：hover 才出现（与开关同排，视觉重量低于开关） */
-.plugin-restart-btn {
+.module-restart-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3972,12 +3972,12 @@ watch(
   cursor: pointer;
   vertical-align: middle;
 }
-.plugin-restart-btn:hover {
+.module-restart-btn:hover {
   color: var(--panel-accent);
   background: color-mix(in srgb, var(--panel-accent) 12%, transparent);
 }
 /* 详情：装配失败提示块 */
-.plugin-mount-error {
+.module-mount-error {
   display: flex;
   gap: 8px;
   align-items: flex-start;
@@ -3988,15 +3988,15 @@ watch(
   border: 1px solid color-mix(in srgb, var(--panel-err) 28%, transparent);
 }
 /* 定义文件 / 启动命令：长路径允许折行（不撑破详情栏） */
-.plugin-def-path {
+.module-def-path {
   word-break: break-all;
 }
-.plugin-mount-error strong {
+.module-mount-error strong {
   display: block;
   font-size: 12px;
   color: var(--panel-err);
 }
-.plugin-mount-error p {
+.module-mount-error p {
   margin: 4px 0 0;
   font-size: 11px;
   line-height: 1.5;
@@ -4283,8 +4283,8 @@ watch(
   white-space: normal;
 }
 
-/* 插件依赖树视图：占满列表区，顶部一行读图说明 */
-.plugin-deps-view {
+/* 模块依赖树视图：占满列表区，顶部一行读图说明 */
+.module-deps-view {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -4292,26 +4292,26 @@ watch(
   min-height: 0;
   height: 100%;
 }
-.plugin-deps-view__hint {
+.module-deps-view__hint {
   font-size: 11.5px;
   color: var(--nm-text-secondary);
   line-height: 1.5;
   flex-shrink: 0;
 }
 
-/* 插件详情：成员 chips（点击跳转到工具/技能分类并选中） */
-.plugin-members {
+/* 模块详情：成员 chips（点击跳转到工具/技能分类并选中） */
+.module-members {
   display: flex;
   align-items: flex-start;
   gap: 6px;
   flex-wrap: wrap;
 }
-.plugin-members__label {
+.module-members__label {
   font-size: 11.5px;
   min-width: 30px;
   padding-top: 3px;
 }
-.plugin-member-chip {
+.module-member-chip {
   border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.1));
   background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
   color: var(--nm-text-primary);
@@ -4322,23 +4322,23 @@ watch(
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
-.plugin-member-chip:hover {
+.module-member-chip:hover {
   background: var(--panel-accent-soft);
   border-color: var(--panel-accent);
 }
 
-/* 插件详情：启停影响文案块 */
-.plugin-impact {
+/* 模块详情：启停影响文案块 */
+.module-impact {
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--nm-text-secondary);
 }
-.plugin-impact--warn {
+.module-impact--warn {
   color: var(--panel-warn);
 }
 
 /* 技术信息折叠头可点 */
-.plugin-info__head {
+.module-info__head {
   cursor: pointer;
   user-select: none;
 }

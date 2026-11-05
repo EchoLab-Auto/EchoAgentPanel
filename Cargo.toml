@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["source/echo-web-server", "source/echo-plugin-panel"]
+members = ["source/echo-web-server", "source/echo-module-panel"]
 
 [workspace.package]
 version = "0.1.0"

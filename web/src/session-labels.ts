@@ -1,6 +1,6 @@
 //! 会话平台标签（03b §1.3 / §4.3 S2）：SessionSwitcher 分组标题的文案来源。
 //!
-//! 数据来源：`state.instances` 中 `platform` 匹配的条目——插件描述符的
+//! 数据来源：`state.instances` 中 `platform` 匹配的条目——模块描述符的
 //! `session_labels`（如 `{ dm: "QQ 私聊", group: "QQ 群" }`）经线协议
 //! `InstanceStatus` 到达 Panel（载体由 01 决定，本模块屏蔽差异）。
 //!

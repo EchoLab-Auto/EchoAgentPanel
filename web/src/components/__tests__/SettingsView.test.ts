@@ -1,7 +1,7 @@
 //! 设置视图 - 智能体编辑器布局契约测试（2026-09 分区折叠改造）。
 //! 结构：头部信息卡（NeumorphismCard）+ 四个可折叠分区
 //! （基础信息 / 系统提示词 / 启用的能力 / 禁用的能力），
-//! 每个分区标题行带摘要；能力分区内含 插件/包/工具/技能 四个子块。
+//! 每个分区标题行带摘要；能力分区内含 模块/包/工具/技能 四个子块。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
@@ -24,7 +24,7 @@ function seed() {
       enabled: true,
       sessions: 2,
       system_prompt: '',
-      enabled_plugins: ['echo-agent.tools.builtin'],
+      enabled_modules: ['echo-agent.tools.builtin'],
       enabled_tools: [],
       enabled_skills: ['coding'],
     },
@@ -45,13 +45,13 @@ function seed() {
     { name: 'send_private_msg', description: 'd', parameters: null, category: 'builtin', enabled: true, package: 'echo-agent.adapter.qq' },
     { name: 'workspace', description: 'd', parameters: null, category: 'builtin', enabled: true, package: 'echo-agent.workspace' },
   ] as typeof state.tools;
-  state.plugins = [
+  state.modules = [
     { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.tools.builtin', gating: 'persona' },
     { id: 'echo-agent.adapter.qq', name: 'QQ 实例', version: '1', kind: 'instance', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.adapter.qq' },
     { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.workspace', gating: 'persona' },
     { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.future-interaction', gating: 'process' },
     { id: 'echo-agent.management.panel', name: '管理面', version: '1', kind: 'management', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.management.panel', gating: 'process' },
-  ] as typeof state.plugins;
+  ] as typeof state.modules;
 }
 
 async function openTeamEditor() {
@@ -90,8 +90,8 @@ describe('SettingsView 智能体编辑器', () => {
     // 摘要存在
     expect(triggers[0].text()).toContain('启用');
     expect(triggers[1].text()).toContain('继承全局');
-    expect(triggers[2].text()).toContain('1 插件');
-    // 插件黑名单（禁用能力分区）已移除
+    expect(triggers[2].text()).toContain('1 模块');
+    // 模块黑名单（禁用能力分区）已移除
     expect(wrapper.text()).not.toContain('黑名单');
 
     // 默认展开 basic + prompt（面板未折叠）
@@ -101,13 +101,13 @@ describe('SettingsView 智能体编辑器', () => {
     expect(panels[2].classes()).toContain('nm-collapse__panel--collapsed');
   });
 
-  it('能力分区：点击展开后包含 插件 / 包 / 工具 / 技能 四个子块', async () => {
+  it('能力分区：点击展开后包含 模块 / 包 / 工具 / 技能 四个子块', async () => {
     const wrapper = await openTeamEditor();
     const triggers = wrapper.findAll('.nm-collapse__trigger');
     await triggers[2].trigger('click');
     const capsPanel = wrapper.findAll('.nm-collapse__panel')[2];
     const subs = capsPanel.findAll('.sec-sub').map((s) => s.text());
-    expect(subs).toContain('插件');
+    expect(subs).toContain('模块');
     expect(subs).toContain('包（Package）');
     expect(subs).toContain('工具');
     expect(subs).toContain('技能');
@@ -116,12 +116,12 @@ describe('SettingsView 智能体编辑器', () => {
     expect(capsPanel.text()).toContain('send_private_msg');
   });
 
-  it('插件勾选区只显示 Core 判定为 persona 作用域的插件', async () => {
+  it('模块勾选区只显示 Core 判定为 persona 作用域的模块', async () => {
     const wrapper = await openTeamEditor();
     const triggers = wrapper.findAll('.nm-collapse__trigger');
     await triggers[2].trigger('click');
     const capsPanel = wrapper.findAll('.nm-collapse__panel')[2];
-    // 工作区会话（kind=tool → persona）：出现在「插件」勾选区。
+    // 工作区会话（kind=tool → persona）：出现在「模块」勾选区。
     // 回归：曾因 kind=tool 且不在 Panel 自己那份清单里而被隐藏。
     expect(capsPanel.text()).toContain('工作区会话（工具）');
     expect(capsPanel.text()).toContain('内置工具集（工具）');
@@ -139,7 +139,7 @@ describe('SettingsView 智能体编辑器', () => {
     expect(capsPanel.text()).toContain('workspace');
   });
 
-  it('禁用能力分区已移除（插件黑名单不再可配置）', async () => {
+  it('禁用能力分区已移除（模块黑名单不再可配置）', async () => {
     const wrapper = await openTeamEditor();
     // 不存在第 4 个折叠分区，也没有「禁用的能力」标题
     expect(wrapper.findAll('.nm-collapse__trigger').length).toBe(3);

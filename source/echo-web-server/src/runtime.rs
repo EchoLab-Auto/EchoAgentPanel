@@ -1,6 +1,6 @@
 //! Panel 的可嵌入运行库。
 //!
-//! `echo-agent-panel`（独立外壳）与 Core 的 `echo-plugin-panel`（进程内插件）
+//! `echo-agent-panel`（独立外壳）与 Core 的 `echo-module-panel`（进程内模块）
 //! 共用这里，HTTP/WS、静态资源、多上游、SSH 与联邦发现只有一份实现。
 //! 日志 subscriber 由外壳初始化，库绝不写进程级全局状态。
 
@@ -99,7 +99,7 @@ pub struct PanelRuntime;
 impl PanelRuntime {
     /// 在既有 Tokio runtime 的任意 worker 线程中启动。
     ///
-    /// 插件 mount 是同步接口，但宿主可能在多线程 runtime 的 worker 上调用；
+    /// 模块 mount 是同步接口，但宿主可能在多线程 runtime 的 worker 上调用；
     /// 直接 `Handle::block_on` 会 panic。将 listener 建立交给一个短生命周期的
     /// 独立 Tokio worker，启动完成后只把已 bind 的服务任务交给宿主 runtime。
     pub fn start(config: PanelRuntimeConfig) -> Result<RunningPanel> {

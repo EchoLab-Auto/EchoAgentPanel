@@ -1,12 +1,12 @@
-//! 设置视图 - 工具 / 插件工作台契约（2026-09-23 重排版）。
+//! 设置视图 - 工具 / 模块工作台契约（2026-09-23 重排版）。
 //!
 //! 锁定的交互契约：
 //! - 工具：默认按包分组、双行行卡 + hover 快速启停、搜索/状态 chips、
 //!   详情分区（能力说明 / 被谁使用 / 所属包 / 参数表）；
-//! - 插件：默认按来源分组（内部 / 外部），可切到门控语义 / kind / 平铺；
-//!   多 Core 下按选定节点取列表（pluginCatalog），包规模徽标、
-//!   受保护插件不给开关、详情四分区（带来什么 / 被谁使用 / 启停影响 / 技术信息）；
-//! - 交叉跳转：插件成员 chip → 工具/技能分类并选中；工具「所属包」→ 插件分类。
+//! - 模块：默认按来源分组（内部 / 外部），可切到门控语义 / kind / 平铺；
+//!   多 Core 下按选定节点取列表（moduleCatalog），包规模徽标、
+//!   受保护模块不给开关、详情四分区（带来什么 / 被谁使用 / 启停影响 / 技术信息）；
+//! - 交叉跳转：模块成员 chip → 工具/技能分类并选中；工具「所属包」→ 模块分类。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
@@ -74,7 +74,7 @@ function seed() {
       content: '',
     },
   ] as typeof state.skills;
-  state.plugins = [
+  state.modules = [
     {
       id: 'echo-agent.tools.builtin',
       name: '内置工具集',
@@ -135,9 +135,9 @@ function seed() {
       package: 'echo-agent.provider.llm',
       gating: 'process',
     },
-  ] as typeof state.plugins;
+  ] as typeof state.modules;
   state.teams = [
-    { id: 'alix', name: 'Alix', enabled: true, sessions: 0, enabled_plugins: ['echo-agent.adapter.qq'] },
+    { id: 'alix', name: 'Alix', enabled: true, sessions: 0, enabled_modules: ['echo-agent.adapter.qq'] },
   ] as typeof state.teams;
 }
 
@@ -217,8 +217,8 @@ describe('SettingsView 工具工作台', () => {
   });
 
   it('工具详情：包被禁用时显示警示横幅', async () => {
-    // QQ 包插件改为禁用
-    (state.plugins as typeof state.plugins)[1].state = 'failed';
+    // QQ 包模块改为禁用
+    (state.modules as typeof state.modules)[1].state = 'failed';
     const wrapper = await openCategory('工具');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('send_group_msg'))!;
     await row.trigger('click');
@@ -228,32 +228,32 @@ describe('SettingsView 工具工作台', () => {
   });
 });
 
-describe('SettingsView 插件工作台', () => {
+describe('SettingsView 模块工作台', () => {
   beforeEach(() => {
     seed();
     vi.mocked(sendCommand).mockClear();
   });
 
   it('默认按来源分组（内部 / 外部）+ 副标题统计跟随分组维度', async () => {
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    // seed 里 5 个插件都是 builtin=true（旧 Core 缺省也按 true 兼容）
-    expect(groups).toEqual(['内部插件']);
+    // seed 里 5 个模块都是 builtin=true（旧 Core 缺省也按 true 兼容）
+    expect(groups).toEqual(['内部模块']);
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('共 5 项');
-    expect(subtitle).toContain('5 内部插件');
-    // 按来源分组：内部插件一组，附来源提示（"随 Core 发布…"）
+    expect(subtitle).toContain('5 内部模块');
+    // 按来源分组：内部模块一组，附来源提示（"随 Core 发布…"）
     const hints = wrapper.findAll('.caps-list-group__hint').map((h) => h.text());
     expect(hints).toHaveLength(1);
     expect(hints[0]).toContain('随 Core 发布');
   });
 
-  it('外部插件分组：builtin=false 归到「外部插件」', async () => {
-    state.plugins = [
-      ...state.plugins,
+  it('外部模块分组：builtin=false 归到「外部模块」', async () => {
+    state.modules = [
+      ...state.modules,
       {
         id: 'example.external',
-        name: '外部插件',
+        name: '外部模块',
         version: '1',
         kind: 'tool',
         description: '运行期挂载',
@@ -264,46 +264,46 @@ describe('SettingsView 插件工作台', () => {
         gating: 'process',
       },
     ];
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['内部插件', '外部插件']);
+    expect(groups).toEqual(['内部模块', '外部模块']);
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('6 项');
-    expect(subtitle).toContain('1 外部插件');
-    expect(subtitle).toContain('5 内部插件');
+    expect(subtitle).toContain('1 外部模块');
+    expect(subtitle).toContain('5 内部模块');
   });
 
   /**
    * 2026-10-18 报障（二次修正）：QQ 实例描述写着「独立进程」，Panel 却把它
-   * 归到「内部插件」——用户据此质疑分类错了。
+   * 归到「内部模块」——用户据此质疑分类错了。
    *
-   * 第一版修法保留了 `builtin` 判定（把它留在「内部插件」组，只加徽标），
-   * 用户仍然不接受：对使用者而言「外部插件」= 不在 Core 进程内（独立 PID、
-   * 独立生命周期、崩了不带走 Core）。现在 `pluginSource()` 按 `runtime`
-   * 判定，QQ 实例直接落到「外部插件」组。
+   * 第一版修法保留了 `builtin` 判定（把它留在「内部模块」组，只加徽标），
+   * 用户仍然不接受：对使用者而言「外部模块」= 不在 Core 进程内（独立 PID、
+   * 独立生命周期、崩了不带走 Core）。现在 `moduleSource()` 按 `runtime`
+   * 判定，QQ 实例直接落到「外部模块」组。
    */
-  it('运行位置决定分组：runtime=subprocess → 外部插件（即使 builtin=true）', async () => {
+  it('运行位置决定分组：runtime=subprocess → 外部模块（即使 builtin=true）', async () => {
     // QQ 实例：门控 manifest 编译在 Core 里（builtin=true），
     // 但实例实现由独立进程 echo-instance-qq 提供（runtime=subprocess）。
-    state.plugins = state.plugins.map((p) =>
+    state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, runtime: 'subprocess' } : p,
     );
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
 
-    // 分组：外部插件组里出现 QQ 实例
+    // 分组：外部模块组里出现 QQ 实例
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['内部插件', '外部插件']);
+    expect(groups).toEqual(['内部模块', '外部模块']);
     const externalGroup = wrapper
       .findAll('.caps-list-group')
-      .find((g) => g.find('.caps-list-group__name').text() === '外部插件')!;
+      .find((g) => g.find('.caps-list-group__name').text() === '外部模块')!;
     expect(externalGroup.text()).toContain('QQ 实例');
     expect(externalGroup.text()).not.toContain('单会话循环');
 
     // 副标题按运行位置统计
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('共 5 项');
-    expect(subtitle).toContain('1 外部插件');
-    expect(subtitle).toContain('4 内部插件');
+    expect(subtitle).toContain('1 外部模块');
+    expect(subtitle).toContain('4 内部模块');
 
     // 外部组 hint 说明「独立进程」语义（而非「第三方」）
     expect(externalGroup.find('.caps-list-group__hint').text()).toContain('独立进程');
@@ -315,22 +315,22 @@ describe('SettingsView 插件工作台', () => {
     expect(innerRow.text()).not.toContain('独立进程');
   });
 
-  it('runtime=in_process 明确声明时留在「内部插件」组（不受 builtin 影响）', async () => {
+  it('runtime=in_process 明确声明时留在「内部模块」组（不受 builtin 影响）', async () => {
     // 显式 in_process 覆盖任何来源推断
-    state.plugins = state.plugins.map((p) =>
+    state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq'
         ? { ...p, builtin: false, runtime: 'in_process' }
         : p,
     );
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['内部插件']);
-    expect(wrapper.find('.caps-toolbar-title .muted').text()).toContain('5 内部插件');
+    expect(groups).toEqual(['内部模块']);
+    expect(wrapper.find('.caps-toolbar-title .muted').text()).toContain('5 内部模块');
   });
 
   it('旧 Core 缺 runtime 字段：一律按进程内渲染（零变化）', async () => {
     // seed 里不带 runtime（旧 Core 契约）
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).not.toContain('独立进程');
     expect(wrapper.text()).not.toContain('独立进程');
@@ -401,21 +401,21 @@ describe('SettingsView 插件工作台', () => {
   });
 
   it('切到门控语义分组：恢复门控 → 通道 → 模式 → 其它 + 语义提示', async () => {
-    const wrapper = await openCategory('插件');
-    // 分组维度选择器：PLUGIN_GROUP_OPTIONS 的第二项（按门控语义）
+    const wrapper = await openCategory('模块');
+    // 分组维度选择器：MODULE_GROUP_OPTIONS 的第二项（按门控语义）
     const segmented = wrapper.findComponent({ name: 'NeumorphismSegmented' });
     await segmented.vm.$emit('update:modelValue', 'semantic');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['包维度门控', '平台通道', '模式插件（互斥）', '其它']);
+    expect(groups).toEqual(['包维度门控', '平台通道', '模式模块（互斥）', '其它']);
     // 语义提示行（门控/通道/模式各一条）
     expect(wrapper.findAll('.caps-list-group__hint').length).toBe(3);
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('1 包维度门控');
-    expect(subtitle).toContain('1 模式插件');
+    expect(subtitle).toContain('1 模式模块');
   });
 
   it('行内：包规模徽标 / 受保护锁 / 模式标记；**没有启停开关**', async () => {
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     // 包规模：1 工具 · 1 技能
     expect(qqRow.text()).toContain('1 工具 · 1 技能');
@@ -424,57 +424,57 @@ describe('SettingsView 插件工作台', () => {
     const loopRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
     expect(loopRow.text()).toContain('模式');
 
-    // 禁用动作已删除：任何插件行都没有启停开关，只有（受保护插件除外的）重启按钮。
+    // 禁用动作已删除：任何模块行都没有启停开关，只有（受保护模块除外的）重启按钮。
     expect(wrapper.findAll('.caps-skill-item__quick input')).toHaveLength(0);
-    expect(mgmtRow.find('.plugin-restart-btn').exists()).toBe(false);
-    expect(qqRow.find('.plugin-restart-btn').exists()).toBe(true);
+    expect(mgmtRow.find('.module-restart-btn').exists()).toBe(false);
+    expect(qqRow.find('.module-restart-btn').exists()).toBe(true);
   });
 
-  it('行内「重启」：已启用且不受保护的插件可发 RestartPlugin，不改启用状态', async () => {
-    const wrapper = await openCategory('插件');
+  it('行内「重启」：已启用且不受保护的模块可发 RestartModule，不改启用状态', async () => {
+    const wrapper = await openCategory('模块');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
-    const btn = qqRow.find('.plugin-restart-btn');
+    const btn = qqRow.find('.module-restart-btn');
     expect(btn.exists()).toBe(true);
     await btn.trigger('click');
     expect(vi.mocked(sendCommand).mock.calls.map((c) => c[0])).toContainEqual({
-      RestartPlugin: { id: 'echo-agent.adapter.qq' },
+      RestartModule: { id: 'echo-agent.adapter.qq' },
     });
     // 受保护（管理面）不给重启按钮。
     const mgmtRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('管理面'))!;
-    expect(mgmtRow.find('.plugin-restart-btn').exists()).toBe(false);
+    expect(mgmtRow.find('.module-restart-btn').exists()).toBe(false);
   });
 
-  it('装配失败的插件不给行内重启按钮（没有可重载的实例）', async () => {
-    state.plugins = state.plugins.map((p) =>
+  it('装配失败的模块不给行内重启按钮（没有可重载的实例）', async () => {
+    state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, state: 'failed' } : p,
     );
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
-    expect(qqRow.find('.plugin-restart-btn').exists()).toBe(false);
+    expect(qqRow.find('.module-restart-btn').exists()).toBe(false);
   });
 
   it('装配失败：行内出「失败」徽标，详情出失败原因块（与主动禁用区分）', async () => {
-    const reason = 'plugin echo-agent.adapter.qq mount failed: command not found';
-    state.plugins = state.plugins.map((p) =>
+    const reason = 'module echo-agent.adapter.qq mount failed: command not found';
+    state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, state: 'failed', error: reason } : p,
     );
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     expect(qqRow.find('.caps-mark--err').exists()).toBe(true);
     expect(qqRow.find('.caps-mark--err').text()).toContain('失败');
 
     await qqRow.trigger('click');
-    const banner = wrapper.find('.plugin-mount-error');
+    const banner = wrapper.find('.module-mount-error');
     expect(banner.exists()).toBe(true);
     expect(banner.text()).toContain('装配失败');
     expect(banner.text()).toContain('command not found');
   });
 
-  it('配置来源层：技术信息里显示 plugins.toml 的哪一层；缺省说明未声明', async () => {
-    state.plugins = state.plugins.map((p) =>
+  it('配置来源层：技术信息里显示 modules.toml 的哪一层；缺省说明未声明', async () => {
+    state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, config_origin: 'base.toml · layer 0' } : p,
     );
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await qqRow.trigger('click');
     // 技术信息默认折叠 → 展开
@@ -488,28 +488,28 @@ describe('SettingsView 插件工作台', () => {
   });
 
   it('来源维度：builtin=false 出「外部来源」徽标（与运行位置分组正交）', async () => {
-    // 数据插件：manifest 来自插件目录（builtin=false）但实现在进程内。
-    // 分组按运行位置 → 留在「内部插件」组；来源徽标要能看出它不随二进制发布。
-    state.plugins = [
-      ...state.plugins,
+    // 数据模块：manifest 来自模块目录（builtin=false）但实现在进程内。
+    // 分组按运行位置 → 留在「内部模块」组；来源徽标要能看出它不随二进制发布。
+    state.modules = [
+      ...state.modules,
       {
-        id: 'data.plugin',
-        name: '目录数据插件',
+        id: 'data.module',
+        name: '目录数据模块',
         version: '1',
         kind: 'tool',
-        description: '从 plugin.toml 发现',
+        description: '从 module.toml 发现',
         entry: '',
         author: '',
                 builtin: false,
         runtime: 'in_process',
-        package: 'data.plugin',
+        package: 'data.module',
         gating: 'process',
       },
-    ] as typeof state.plugins;
-    const wrapper = await openCategory('插件');
+    ] as typeof state.modules;
+    const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toContain('内部插件'); // 分组仍按运行位置
-    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('目录数据插件'))!;
+    expect(groups).toContain('内部模块'); // 分组仍按运行位置
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('目录数据模块'))!;
     expect(row.text()).toContain('外部来源'); // 但来源可见
 
     await row.trigger('click');
@@ -521,8 +521,8 @@ describe('SettingsView 插件工作台', () => {
     expect(wrapper.find('.skill-source').text()).toContain('外部来源');
   });
 
-  it('内置插件的技术信息显示「随二进制发布」', async () => {
-    const wrapper = await openCategory('插件');
+  it('内置模块的技术信息显示「随二进制发布」', async () => {
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
     const infoTitle = wrapper
@@ -531,19 +531,19 @@ describe('SettingsView 插件工作台', () => {
     await infoTitle.trigger('click');
     const text = wrapper.find('.skill-source').text();
     expect(text).toContain('随二进制发布');
-    // 内置插件不出「外部来源」徽标（不占视觉）。
+    // 内置模块不出「外部来源」徽标（不占视觉）。
     expect(row.text()).not.toContain('外部来源');
   });
 
   it('运行态：failed 出红色「失败」徽标，技术信息显示状态与重启次数', async () => {
-    state.plugins = [
-      ...state.plugins.map((p) =>
+    state.modules = [
+      ...state.modules.map((p) =>
         p.id === 'echo-agent.adapter.qq'
           ? { ...p, state: 'failed', restarts: 3, generation: 9 }
           : p,
       ),
     ];
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     const badge = row.find('.caps-mark--err');
     expect(badge.exists()).toBe(true);
@@ -562,25 +562,25 @@ describe('SettingsView 插件工作台', () => {
   });
 
   it('运行态 ready 不在行卡上喊（只有异常态才出徽标）', async () => {
-    state.plugins = [
-      ...state.plugins.map((p) =>
+    state.modules = [
+      ...state.modules.map((p) =>
         p.id === 'echo-agent.adapter.qq' ? { ...p, state: 'ready', generation: 1 } : p,
       ),
     ];
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     expect(row.text()).not.toContain('运行中');
   });
 
-  it('外部条目：影响文案说明它由 plugins.toml 定义、只能重启不能卸载', async () => {
-    state.plugins = [
-      ...state.plugins,
+  it('外部条目：影响文案说明它由 modules.toml 定义、只能重启不能卸载', async () => {
+    state.modules = [
+      ...state.modules,
       {
         id: 'example-ext',
-        name: '示例外部插件',
+        name: '示例外部模块',
         version: '1',
         kind: 'tool',
-        description: 'plugins.toml 的 stdio 条目',
+        description: 'modules.toml 的 stdio 条目',
         entry: 'example-ext',
         author: '',
                 builtin: false,
@@ -589,24 +589,24 @@ describe('SettingsView 插件工作台', () => {
         gating: 'process',
         state: 'ready',
       },
-    ] as typeof state.plugins;
-    const wrapper = await openCategory('插件');
-    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('示例外部插件'))!;
+    ] as typeof state.modules;
+    const wrapper = await openCategory('模块');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('示例外部模块'))!;
     await row.trigger('click');
-    const impact = wrapper.find('.plugin-impact').text();
-    expect(impact).toContain('plugins.toml');
+    const impact = wrapper.find('.module-impact').text();
+    expect(impact).toContain('modules.toml');
     expect(impact).toContain('只能重启');
   });
 
   it('技术信息：定义文件 / 启动命令 / 环境变量键名（排查「为什么不起来」）', async () => {
-    state.plugins = [
-      ...state.plugins,
+    state.modules = [
+      ...state.modules,
       {
         id: 'example-ext',
-        name: '示例外部插件',
+        name: '示例外部模块',
         version: '1',
         kind: 'tool',
-        description: 'plugins.toml 的 stdio 条目',
+        description: 'modules.toml 的 stdio 条目',
         entry: 'example-ext',
         author: '',
                 builtin: false,
@@ -615,14 +615,14 @@ describe('SettingsView 插件工作台', () => {
         gating: 'process',
         state: 'failed',
         error: 'spawn failed: No such file or directory',
-        source_path: '/home/me/.config/echo-agent-core/plugins.toml',
-        command: '/opt/plugins/example',
+        source_path: '/home/me/.config/echo-agent-core/modules.toml',
+        command: '/opt/modules/example',
         args: ['--mode', 'fast'],
         env_keys: ['EXAMPLE_TOKEN', 'EXAMPLE_HOME'],
       },
-    ] as typeof state.plugins;
-    const wrapper = await openCategory('插件');
-    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('示例外部插件'))!;
+    ] as typeof state.modules;
+    const wrapper = await openCategory('模块');
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('示例外部模块'))!;
     await row.trigger('click');
     const infoTitle = wrapper
       .findAll('.detail-section__title')
@@ -630,18 +630,18 @@ describe('SettingsView 插件工作台', () => {
     await infoTitle.trigger('click');
     const text = wrapper.find('.skill-source').text();
     expect(text).toContain('定义文件');
-    expect(text).toContain('/home/me/.config/echo-agent-core/plugins.toml');
+    expect(text).toContain('/home/me/.config/echo-agent-core/modules.toml');
     expect(text).toContain('启动命令');
     // 命令与参数拼在一起，便于对照报错里的路径。
-    expect(text).toContain('/opt/plugins/example --mode fast');
+    expect(text).toContain('/opt/modules/example --mode fast');
     expect(text).toContain('环境变量');
     expect(text).toContain('EXAMPLE_TOKEN');
     // 值不下发：断言页面里没有形如 KEY=VALUE 的拼接。
     expect(text).not.toContain('EXAMPLE_TOKEN=');
   });
 
-  it('内置插件不显示定义文件/启动命令（没有外部定义）', async () => {
-    const wrapper = await openCategory('插件');
+  it('内置模块不显示定义文件/启动命令（没有外部定义）', async () => {
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
     await row.trigger('click');
     const infoTitle = wrapper
@@ -653,90 +653,90 @@ describe('SettingsView 插件工作台', () => {
     expect(text).not.toContain('启动命令');
   });
 
-  it('插件详情：四分区 + 成员 chips + 启停影响文案', async () => {
-    const wrapper = await openCategory('插件');
+  it('模块详情：四分区 + 成员 chips + 启停影响文案', async () => {
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
     const titles = wrapper.findAll('.detail-section__title').map((t) => t.text());
-    expect(titles.some((t) => t.includes('这个插件带来什么'))).toBe(true);
+    expect(titles.some((t) => t.includes('这个模块带来什么'))).toBe(true);
     expect(titles.some((t) => t.includes('被谁使用'))).toBe(true);
     expect(titles.some((t) => t.includes('启停影响'))).toBe(true);
     expect(titles.some((t) => t.includes('技术信息'))).toBe(true);
     // 成员 chips：工具 + 技能
-    const chips = wrapper.findAll('.plugin-member-chip').map((c) => c.text());
+    const chips = wrapper.findAll('.module-member-chip').map((c) => c.text());
     expect(chips).toContain('send_group_msg');
     expect(chips).toContain('qq-transport');
     // 通道类影响文案
-    expect(wrapper.find('.plugin-impact').text()).toContain('平台通道');
+    expect(wrapper.find('.module-impact').text()).toContain('平台通道');
     // 使用面：Alix 在白名单 → 已启用
     expect(wrapper.find('.skill-usage').text()).toContain('Alix');
     expect(wrapper.find('.skill-usage').text()).toContain('已启用');
   });
 
-  it('插件详情：受保护插件显示警示影响文案且不给开关', async () => {
-    const wrapper = await openCategory('插件');
+  it('模块详情：受保护模块显示警示影响文案且不给开关', async () => {
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('管理面'))!;
     await row.trigger('click');
-    const impact = wrapper.find('.plugin-impact');
-    expect(impact.classes()).toContain('plugin-impact--warn');
+    const impact = wrapper.find('.module-impact');
+    expect(impact.classes()).toContain('module-impact--warn');
     expect(impact.text()).toContain('自锁');
     // 详情头部无启停开关
     expect(wrapper.find('.detail-actions input').exists()).toBe(false);
   });
 
-  it('交叉跳转：插件成员 chip → 工具/技能分类并选中；工具「所属包」→ 插件', async () => {
-    const wrapper = await openCategory('插件');
+  it('交叉跳转：模块成员 chip → 工具/技能分类并选中；工具「所属包」→ 模块', async () => {
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
     // 点工具 chip → 工具分类并选中
-    const toolChip = wrapper.findAll('.plugin-member-chip').find((c) => c.text() === 'send_group_msg')!;
+    const toolChip = wrapper.findAll('.module-member-chip').find((c) => c.text() === 'send_group_msg')!;
     await toolChip.trigger('click');
     expect(wrapper.find('.caps-nav-item--active').text()).toContain('工具');
     expect(wrapper.find('.skill-detail h3').text()).toBe('send_group_msg');
-    // 工具详情的「所属包」按钮 → 插件分类并选中
+    // 工具详情的「所属包」按钮 → 模块分类并选中
     const jumpBtn = wrapper
       .findAll('.skill-source__actions .nm-button')
-      .find((b) => b.text().includes('在「插件」中查看'))!;
+      .find((b) => b.text().includes('在「模块」中查看'))!;
     await jumpBtn.trigger('click');
-    expect(wrapper.find('.caps-nav-item--active').text()).toContain('插件');
+    expect(wrapper.find('.caps-nav-item--active').text()).toContain('模块');
     expect(wrapper.find('.skill-detail h3').text()).toBe('QQ 实例');
   });
 
   it('技术信息折叠：默认收起，点击展开显示 ID/Package/Entry', async () => {
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
-    expect(wrapper.find('.plugin-info__head').text()).toContain('技术信息');
+    expect(wrapper.find('.module-info__head').text()).toContain('技术信息');
     expect(wrapper.find('.skill-source').exists()).toBe(false);
-    await wrapper.find('.plugin-info__head').trigger('click');
+    await wrapper.find('.module-info__head').trigger('click');
     expect(wrapper.find('.skill-source').text()).toContain('echo-agent.adapter.qq');
     expect(wrapper.find('.skill-source').text()).toContain('instance');
   });
 });
 
-describe('多 Core 插件归档（pluginsByCore）', () => {
+describe('多 Core 模块归档（modulesByCore）', () => {
   beforeEach(() => {
     seed();
     vi.mocked(sendCommand).mockClear();
     // 清掉其它用例可能残留的归档
-    state.pluginsByCore = {};
+    state.modulesByCore = {};
     state.upstreams = [];
   });
 
-  it('按 core 归档取数：选定节点后列表只显示该节点的插件', async () => {
-    state.pluginsByCore = {
-      core: [...state.plugins],
+  it('按 core 归档取数：选定节点后列表只显示该节点的模块', async () => {
+    state.modulesByCore = {
+      core: [...state.modules],
       'node-b': [
         {
-          id: 'node-b.plugin',
-          name: 'B 节点插件',
+          id: 'node-b.module',
+          name: 'B 节点模块',
           version: '1',
           kind: 'tool',
           description: '',
           entry: '',
           author: '',
                     builtin: true,
-          package: 'node-b.plugin',
+          package: 'node-b.module',
           core: 'node-b',
         },
       ],
@@ -746,30 +746,30 @@ describe('多 Core 插件归档（pluginsByCore）', () => {
       { name: 'node-b', url: 'ws://b', connectivity: 'online' },
     ] as never;
 
-    const wrapper = await openCategory('插件');
+    const wrapper = await openCategory('模块');
     // 默认（无 activeRegion）→ 唯一/首个来源不确定，但列表必须是归档里的某一份
     const names = rowNames(wrapper);
     expect(names.length).toBeGreaterThan(0);
 
-    // 显式切到 node-b → 只剩 B 的插件
+    // 显式切到 node-b → 只剩 B 的模块
     const select = wrapper.findComponent({ name: 'NeumorphismSelect' });
     await select.vm.$emit('update:modelValue', 'node-b');
-    expect(rowNames(wrapper)).toEqual(['B 节点插件']);
+    expect(rowNames(wrapper)).toEqual(['B 节点模块']);
     // 统计跟随列表（不串显）
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('共 1 项');
-    // 切换节点会**定向**请求该 core 的插件列表（targetCore = 选定节点）
+    // 切换节点会**定向**请求该 core 的模块列表（targetCore = 选定节点）
     expect(vi.mocked(sendPending)).toHaveBeenCalledWith(
-      'RequestPluginsList',
-      'settings:plugins',
+      'RequestModulesList',
+      'settings:modules',
       'node-b',
     );
   });
 
   it('未选节点且只有一个来源：回退到该来源（单上游无壳场景）', async () => {
     // 单上游不加信封 → 事件 core 为 null → 归档键是空串
-    state.pluginsByCore = { '': [...state.plugins] };
-    const wrapper = await openCategory('插件');
+    state.modulesByCore = { '': [...state.modules] };
+    const wrapper = await openCategory('模块');
     expect(rowNames(wrapper).length).toBe(5);
   });
 });

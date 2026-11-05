@@ -23,7 +23,7 @@ const team: TeamInfo = {
   sessions: 0,
   enabled_tools: [],
   enabled_skills: [],
-  enabled_plugins: [],
+  enabled_modules: [],
 };
 
 function seed() {
@@ -33,12 +33,12 @@ function seed() {
   state.tools = [
     { name: 'bash', description: 'd', parameters: null, category: 'builtin', enabled: true, package: 'echo-agent.tools.builtin' },
   ] as typeof state.tools;
-  state.plugins = [
+  state.modules = [
     { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.tools.builtin', gating: 'persona' },
     { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.workspace', gating: 'persona' },
     { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.future-interaction', gating: 'process' },
     { id: 'echo-agent.management.panel', name: '管理面', version: '1', kind: 'management', description: '', entry: '', author: '', builtin: true, package: 'echo-agent.management.panel', gating: 'process' },
-  ] as typeof state.plugins;
+  ] as typeof state.modules;
 }
 
 function mountModal() {
@@ -99,15 +99,15 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
     expect(wrapper.findAll('.agent-config .nm-form-item').length).toBeGreaterThanOrEqual(3);
   });
 
-  it('启用插件区包含包维度门控插件（工作区会话）', () => {
+  it('启用模块区包含包维度门控模块（工作区会话）', () => {
     const wrapper = mountModal();
-    // 回归：workspace 插件（kind=tool）曾因不在允许清单而被隐藏
+    // 回归：workspace 模块（kind=tool）曾因不在允许清单而被隐藏
     expect(wrapper.text()).toContain('工作区会话');
   });
 
-  it('interaction 类插件单列「交互」分组，不混入管理面', () => {
+  it('interaction 类模块单列「交互」分组，不混入管理面', () => {
     const wrapper = mountModal();
-    // 回归：分组曾按「非实例即管理面」粗分，把交互类插件归入管理面。
+    // 回归：分组曾按「非实例即管理面」粗分，把交互类模块归入管理面。
     expect(wrapper.text()).toContain('交互（1）');
     expect(wrapper.text()).toContain('交互示例');
   });
@@ -118,15 +118,15 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
     expect(wrapper.text()).toContain('进程级，对所有人格始终生效');
     // 这些行的勾选框 disabled（Core 判 process）；库的修饰类名是 --disabled
     expect(wrapper.findAll('.nm-checkbox--disabled').length).toBeGreaterThan(0);
-    // 分组仍列出这两个能力（"管理面"组里既有 tool 插件也有 management 插件，
+    // 分组仍列出这两个能力（"管理面"组里既有 tool 模块也有 management 模块，
     // 组头不禁用——组内还有可写的项；只读只作用于那一行）
     expect(wrapper.text()).toContain('交互（1）');
     expect(wrapper.text()).toContain('管理面（3）');
   });
 
-  it('能力区用库 Collapse + Table + Checkbox 渲染（插件黑名单已移除）', () => {
+  it('能力区用库 Collapse + Table + Checkbox 渲染（模块黑名单已移除）', () => {
     const wrapper = mountModal();
-    // 三个能力分区：启用插件 / 启用工具 / 启用技能（禁用插件黑名单已移除）
+    // 三个能力分区：启用模块 / 启用工具 / 启用技能（禁用模块黑名单已移除）
     expect(wrapper.findAll('.agent-config .nm-collapse__item').length).toBe(3);
     expect(wrapper.findAll('.agent-config .nm-table').length).toBeGreaterThan(0);
     expect(wrapper.findAll('.agent-config .nm-checkbox').length).toBeGreaterThan(0);

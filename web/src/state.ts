@@ -29,7 +29,7 @@ import type {
   ReasoningEffort,
   TimelineMessage,
   ToolInfo,
-  PluginInfo,
+  ModuleInfo,
   TeamInfo,
   WorkspaceGitInfo,
   WorkspaceSessionInfo,
@@ -231,7 +231,7 @@ export function resetManagementState(state: AppState): void {
   state.api = null;
   state.skills = [];
   state.tools = [];
-  state.plugins = [];
+  state.modules = [];
   state.instances = [];
   state.federation = null;
   state.federationInvite = null;
@@ -938,14 +938,14 @@ export interface RegionInfo {
 }
 
 /**
- * 一条**插件事件**（Core 的 `PluginEvent`；前端只做展示，不解释语义）。
+ * 一条**模块事件**（Core 的 `ModuleEvent`；前端只做展示，不解释语义）。
  *
- * `name` / `payload` 是插件与 Core 之间的约定（`plugin.mounted` 之类由
+ * `name` / `payload` 是模块与 Core 之间的约定（`module.mounted` 之类由
  * Core 自己发）。保留 `core` 让多上游时能区分是哪个 Core 报的。
  */
-export interface PluginEventEntry {
-  /** 来源插件 id（Core 自身发出的为空串）。 */
-  plugin: string;
+export interface ModuleEventEntry {
+  /** 来源模块 id（Core 自身发出的为空串）。 */
+  module: string;
   /** 事件名（点分小写约定）。 */
   name: string;
   /** 载荷（自由 JSON；展示时按需 stringify）。 */
@@ -957,12 +957,12 @@ export interface PluginEventEntry {
 }
 
 /**
- * 保留的插件事件条数上限。
+ * 保留的模块事件条数上限。
  *
  * 200 条够看到"启动时谁挂上了 + 最近发生了什么"，同时不会让状态快照变得
- * 臃肿（插件事件是高频观测数据，不设上限会无限增长）。
+ * 臃肿（模块事件是高频观测数据，不设上限会无限增长）。
  */
-export const PLUGIN_EVENT_CAP = 200;
+export const MODULE_EVENT_CAP = 200;
 
 export interface AppState {
   connected: boolean;
@@ -1083,20 +1083,20 @@ export interface AppState {
   skills: SkillInfo[];
   /** 已注册的工具定义列表 */
   tools: ToolInfo[];
-  /** 已挂载插件列表（当前 activeRegion 的兼容视图）。 */
-  plugins: PluginInfo[];
-  /** 各 Core 节点的插件列表。 */
-  pluginsByCore: Record<string, PluginInfo[]>;
+  /** 已挂载模块列表（当前 activeRegion 的兼容视图）。 */
+  modules: ModuleInfo[];
+  /** 各 Core 节点的模块列表。 */
+  modulesByCore: Record<string, ModuleInfo[]>;
   /**
-   * 最近的**插件事件**（`PluginEvent`；滚动保留 [`PLUGIN_EVENT_CAP`] 条）。
+   * 最近的**模块事件**（`ModuleEvent`；滚动保留 [`MODULE_EVENT_CAP`] 条）。
    *
    * 用途是排查与观测：谁挂上了、谁发了什么通知。不做领域语义解释——
-   * `name`/`payload` 是插件与 Core 的约定，前端只当活动日志。
+   * `name`/`payload` 是模块与 Core 的约定，前端只当活动日志。
    */
-  pluginEvents: PluginEventEntry[];
+  moduleEvents: ModuleEventEntry[];
   /** Team 成员列表（多 agent） */
   teams: TeamInfo[];
-  /** 工作区会话列表（workspace 插件；当前加载归属的 team 见 workspaceTeamId） */
+  /** 工作区会话列表（workspace 模块；当前加载归属的 team 见 workspaceTeamId） */
   workspaceSessions: WorkspaceSessionInfo[];
   /** 激活的工作区会话 id（null = 未激活） */
   workspaceActive: string | null;
@@ -1109,7 +1109,7 @@ export interface AppState {
   workspaceGeneration: number;
   /** 各会话目录 git 状态的缓存（session_id → 目录结果） */
   workspaceGitBySession: Record<string, WorkspaceGitInfo[]>;
-  /** 文件浏览器缓存（目录绝对路径 → 条目/错误；workspace 插件） */
+  /** 文件浏览器缓存（目录绝对路径 → 条目/错误；workspace 模块） */
   workspaceFiles: Record<string, { entries: WorkspaceFileEntry[]; error: string | null }>;
   /** 会话级 API 覆盖（session_id → profile 名；2026-10）。空值 = 跟随
    * persona 级。Panel 从工作区对话的 api_profile 推导（WorkspaceSessions
@@ -1207,9 +1207,9 @@ export function initialState(): AppState {
     apiMetrics: {},
     skills: [],
     tools: [],
-    plugins: [],
-    pluginEvents: [],
-    pluginsByCore: {},
+    modules: [],
+    moduleEvents: [],
+    modulesByCore: {},
     teams: [],
     workspaceSessions: [],
     workspaceActive: null,
@@ -1999,35 +1999,35 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       state.tools = e.tools;
       return state;
     }
-    case 'PluginsList': {
-      const e = (event as { PluginsList: { plugins: PluginInfo[]; core?: string | null } }).PluginsList;
+    case 'ModulesList': {
+      const e = (event as { ModulesList: { modules: ModuleInfo[]; core?: string | null } }).ModulesList;
       const core = payloadCore(event) ?? e.core ?? '';
-      const plugins = (e.plugins ?? []).map((p) => ({ ...p, builtin: p.builtin ?? true, core }));
-      state.pluginsByCore[core] = plugins;
-      if (managementCoreCurrent(state, core || null)) state.plugins = plugins;
+      const modules = (e.modules ?? []).map((p) => ({ ...p, builtin: p.builtin ?? true, core }));
+      state.modulesByCore[core] = modules;
+      if (managementCoreCurrent(state, core || null)) state.modules = modules;
       return state;
     }
-    case 'PluginEvent': {
+    case 'ModuleEvent': {
       const e = (
         event as {
-          PluginEvent: {
-            plugin?: string;
+          ModuleEvent: {
+            module?: string;
             name: string;
             payload?: unknown;
             at_ms?: number;
           };
         }
-      ).PluginEvent;
+      ).ModuleEvent;
       const core = payloadCore(event) ?? '';
-      const entry: PluginEventEntry = {
-        plugin: e.plugin ?? '',
+      const entry: ModuleEventEntry = {
+        module: e.module ?? '',
         name: e.name,
         payload: e.payload,
         at_ms: e.at_ms,
         core,
       };
-      // 滚动保留（新的在前）：只留最近 PLUGIN_EVENT_CAP 条。
-      state.pluginEvents = [entry, ...state.pluginEvents].slice(0, PLUGIN_EVENT_CAP);
+      // 滚动保留（新的在前）：只留最近 MODULE_EVENT_CAP 条。
+      state.moduleEvents = [entry, ...state.moduleEvents].slice(0, MODULE_EVENT_CAP);
       return state;
     }
     case 'TeamsList': {
@@ -2176,10 +2176,10 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       pushToast(state, e.message, e.success ? 'success' : 'error');
       return state;
     }
-    case 'PluginOpResult': {
+    case 'ModuleOpResult': {
       const e = (
-        event as { PluginOpResult: { id: string; op: string; ok: boolean; message: string } }
-      ).PluginOpResult;
+        event as { ModuleOpResult: { id: string; op: string; ok: boolean; message: string } }
+      ).ModuleOpResult;
       // 结构化回执：成功/失败分开渲染。此前两者都走 `Error`，面板只能靠
       // 文案猜——「已启用」与「启用失败」在 UI 上是同一种提示。
       pushToast(state, e.message, e.ok ? 'success' : 'error');

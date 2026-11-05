@@ -63,7 +63,7 @@ function seed() {
   ] as never;
   state.skills = [];
   state.tools = [];
-  state.plugins = [];
+  state.modules = [];
 }
 
 /**

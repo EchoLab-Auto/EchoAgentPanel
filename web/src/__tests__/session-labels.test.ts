@@ -25,7 +25,7 @@ describe('sessionLabelsFor 平台会话标签', () => {
     state.instances = [];
   });
 
-  it('有 session_labels：直接取插件文案', () => {
+  it('有 session_labels：直接取模块文案', () => {
     state.instances = [
       instance({ session_labels: { dm: 'QQ 私聊', group: 'QQ 群' } }),
     ];

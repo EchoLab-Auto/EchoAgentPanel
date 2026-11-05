@@ -78,12 +78,12 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     // → 53（2026-10 时间线分页：+TimelineEarlier——`RequestTimelineEarlier`
     //   向上翻页，把更早的一页**前插**到已加载列表头部；与 `TrunkTimeline`
     //   分开是因为后者 `full` 的语义是"替换缓存"）。
-    // → 54（2026-10 插件操作回执：+PluginOpResult——`TogglePlugin` /
-    //   `RestartPlugin` 的成功与失败此前都走 `Error`，面板只能靠文案猜；
+    // → 54（2026-10 模块操作回执：+ModuleOpResult——`ToggleModule` /
+    //   `RestartModule` 的成功与失败此前都走 `Error`，面板只能靠文案猜；
     //   现在 `ok` 是字段，toast 按它分流）。
-    // → 56（2026-11 插件事件通道：+PluginEvent——echo-fabric-arch v0.7 的
-    //   `MountContext::emit` 出口 + 注册表自己的 `plugin.mounted` /
-    //   `plugin.unmounted`；前端只做活动日志，不解释词汇）。
+    // → 56（2026-11 模块事件通道：+ModuleEvent——echo-fabric-arch v0.7 的
+    //   `MountContext::emit` 出口 + 注册表自己的 `module.mounted` /
+    //   `module.unmounted`；前端只做活动日志，不解释词汇）。
     // → 57（2026-11 联邦自动发现 P2：+FederationDirectory——应答节点报出
     //   自己的直接邻居（node_id/名称/两套地址/在线/panel_ready）；Panel 汇总
     //   各节点目录得到全网拓扑，并用 Panel 身份密钥逐个补接入点）。

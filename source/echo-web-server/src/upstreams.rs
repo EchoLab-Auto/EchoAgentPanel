@@ -219,7 +219,11 @@ impl UpstreamRegistry {
                         return Err(format!(
                             "上游 `{}` 已由{}配置，忽略本次{}写入",
                             existing.name,
-                            if existing.is_discovered() { "自动发现" } else { "手工" },
+                            if existing.is_discovered() {
+                                "自动发现"
+                            } else {
+                                "手工"
+                            },
                             if discovered { "自动发现" } else { "手工" }
                         ));
                     }
@@ -332,8 +336,8 @@ impl UpstreamRegistry {
                     removed.push(u.name.clone());
                     return false;
                 }
-                let alive = keep_urls.contains(u.url.trim_end_matches('/'))
-                    || keep_names.contains(&lower);
+                let alive =
+                    keep_urls.contains(u.url.trim_end_matches('/')) || keep_names.contains(&lower);
                 let drop = u.is_discovered() && !alive;
                 if drop {
                     removed.push(u.name.clone());
@@ -351,7 +355,9 @@ impl UpstreamRegistry {
             }
         }
         for name in &removed {
-            let _ = self.events.send(UpstreamEvent::Removed { name: name.clone() });
+            let _ = self
+                .events
+                .send(UpstreamEvent::Removed { name: name.clone() });
         }
         removed
     }
@@ -400,10 +406,7 @@ fn persist_to_file(path: &Path, upstreams: &[UpstreamConfig]) -> Result<(), Stri
                 // 来源标记：`discovered` 必须落盘，否则重启后派生条目会
                 // 变成"人工条目"，既不会被清理、也会挡住后续自动发现。
                 if u.is_discovered() {
-                    t.insert(
-                        "source".into(),
-                        toml::Value::String("discovered".into()),
-                    );
+                    t.insert("source".into(), toml::Value::String("discovered".into()));
                 }
                 toml::Value::Table(t)
             })
@@ -807,7 +810,10 @@ mod tests {
     /// 清理只影响派生条目：`keep` 之外的人工条目必须活着。
     #[tokio::test]
     async fn discovered_cleanup_never_touches_manual_entries() {
-        let reg = UpstreamRegistry::new(vec![UpstreamConfig::direct("manual", "ws://m:1", "t")], None);
+        let reg = UpstreamRegistry::new(
+            vec![UpstreamConfig::direct("manual", "ws://m:1", "t")],
+            None,
+        );
         reg.set_panel_key("panel-key-1");
         for name in ["gone", "stays"] {
             reg.upsert(UpstreamConfig {
@@ -861,12 +867,16 @@ mod tests {
                 .into_iter()
                 .map(String::from)
                 .collect();
-        let keep_names: std::collections::HashSet<String> =
-            ["node-self", "unique"].into_iter().map(String::from).collect();
+        let keep_names: std::collections::HashSet<String> = ["node-self", "unique"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         // 前端认出 node-self 就是 core（同一 node_id），并要求删掉它；
         // 顺带把人工条目 "core" 也点名（必须被忽略）。
-        let drop_names: std::collections::HashSet<String> =
-            ["node-self", "core"].into_iter().map(String::from).collect();
+        let drop_names: std::collections::HashSet<String> = ["node-self", "core"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         let removed = reg
             .remove_discovered(&keep_urls, &keep_names, &drop_names)
             .await;

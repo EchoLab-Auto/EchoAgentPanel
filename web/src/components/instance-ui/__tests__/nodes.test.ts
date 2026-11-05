@@ -480,7 +480,7 @@ describe('button 节点（03a §2.7）', () => {
     expect(invokeMock).toHaveBeenCalledTimes(1); // 未新增
   });
 
-  it('错误态显示（如插件返回 unknown method）', async () => {
+  it('错误态显示（如模块返回 unknown method）', async () => {
     invokeMock.mockResolvedValue({ result: null, error: 'unknown method' });
     const w = mountNode({ type: 'button', label: 'B', action: { method: 'no_such_op' } });
     await findButton(w, 'B').trigger('click');

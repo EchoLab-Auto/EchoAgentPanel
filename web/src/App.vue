@@ -229,7 +229,7 @@ state.activeRegion = activeRegion.value;
 // （否则 A 窗口压缩会话 A 时，B 窗口也会弹「已压缩…」——2026-10 用户报告）。
 state.windowSessionId = activeSessionId.value;
 
-// 扩展只拿应用上下文与公开槽位；Panel 壳不加载任何业务插件 UI。
+// 扩展只拿应用上下文与公开槽位；Panel 壳不加载任何业务模块 UI。
 setupPanelExtensions({
   teamId: activeTeamId,
   sessionId: activeSessionId,

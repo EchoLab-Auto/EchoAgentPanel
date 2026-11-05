@@ -118,7 +118,7 @@ export type InstanceOpMethod =
   | 'instance_info'
   | 'get_state';
 
-/** 文件浏览器条目（文件或子目录；workspace 插件）。 */
+/** 文件浏览器条目（文件或子目录；workspace 模块）。 */
 export interface WorkspaceFileEntry {
   name: string;
   path: string;
@@ -157,7 +157,7 @@ export interface WorkspaceConversationInfo {
   api_profile?: string | null;
 }
 
-/** 工作区会话（workspace 插件）：名称 + 多个工作区目录。 */
+/** 工作区会话（workspace 模块）：名称 + 多个工作区目录。 */
 export interface WorkspaceSessionInfo {
   /** 稳定 id（空 = 由 Core 依名称生成）。 */
   id: string;
@@ -274,7 +274,7 @@ export interface TeamInfo {
   system_prompt?: string;
   disabled_tools?: string[];
   disabled_skills?: string[];
-  enabled_plugins?: string[];
+  enabled_modules?: string[];
   enabled_tools?: string[];
   enabled_skills?: string[];
   memory_limit_tokens?: number | null;
@@ -285,8 +285,8 @@ export interface TeamInfo {
   system_skills?: string[];
 }
 
-/** 循环插件 id（唯一模式：每会话 turn 串行排队）。 */
-export const LOOP_SINGLE_PLUGIN_ID = 'echo-agent.loop.single';
+/** 循环模块 id（唯一模式：每会话 turn 串行排队）。 */
+export const LOOP_SINGLE_MODULE_ID = 'echo-agent.loop.single';
 
 /** 后台 shell 会话摘要（Shell 面板终端可视化） */
 export interface ShellSessionInfo {
@@ -311,7 +311,7 @@ export interface ShellTerminalEntry {
   elapsed_ms?: number;
 }
 
-export interface PluginInfo {
+export interface ModuleInfo {
   id: string;
   name: string;
   version: string;
@@ -319,7 +319,7 @@ export interface PluginInfo {
   description: string;
   entry: string;
   author: string;
-  /** true = Core 编译内置；false = 外部插件。旧 Core 缺失时按 true 兼容。 */
+  /** true = Core 编译内置；false = 外部模块。旧 Core 缺失时按 true 兼容。 */
   builtin?: boolean;
   /**
    * 运行形态：`in_process` = 实现编译在 Core 进程内；`subprocess` = 实现由
@@ -329,51 +329,51 @@ export interface PluginInfo {
    * 缺失该字段 = 进程内。
    */
   runtime?: string;
-  /** 插件所属 Core，由 Panel 多节点中继注入。 */
+  /** 模块所属 Core，由 Panel 多节点中继注入。 */
   core?: string | null;
-  /** 所属包 id（横跨 plugin+tool+skill 的组合标签；未声明 = 插件 id） */
+  /** 所属包 id（横跨 module+tool+skill 的组合标签；未声明 = 模块 id） */
   package?: string;
   /**
-   * 作用域：**谁能决定这个插件在某份人格里生效**（由 Core 计算下发）。
+   * 作用域：**谁能决定这个模块在某份人格里生效**（由 Core 计算下发）。
    *
-   * - `persona`：能力型（向模型暴露工具/技能）——出现在「启用插件」勾选区，
-   *   勾选写 `enabled_plugins` 白名单；
+   * - `persona`：能力型（向模型暴露工具/技能）——出现在「启用模块」勾选区，
+   *   勾选写 `enabled_modules` 白名单；
    * - `process`：进程级/基础设施——勾选区不显示（勾了也不生效）。
    *
    * **Panel 不自己算**：跨仓库各写一份判据必然漂移（Core 的
-   * `GATED_PLUGIN_IDS` 与 Panel 的 `PACKAGE_GATED_PLUGIN_IDS` 已经错过两轮：
+   * `GATED_MODULE_IDS` 与 Panel 的 `PACKAGE_GATED_MODULE_IDS` 已经错过两轮：
    * `shell` 漏列导致面板没有 shell 开关；`session`/`transcript` 多列导致两个
    * 勾了不生效的假开关）。旧 Core 缺失该字段 = 按"可显示"兼容。
    */
   gating?: string;
   /**
-   * 挂载失败原因（Core 的 `PluginDescriptor::error`）。
+   * 挂载失败原因（Core 的 `ModuleDescriptor::error`）。
    *
    * 区分「用户主动禁用」与「装配失败被跳过」——两者 `enabled` 都是 false，
    * 但后者需要人去看原因。旧 Core 不发该字段。
    */
   error?: string | null;
   /**
-   * 声明该插件的**配置层**（`plugins.toml` / `base.toml · layer 0`）。
+   * 声明该模块的**配置层**（`modules.toml` / `base.toml · layer 0`）。
    *
    * 空串/缺失 = 配置未提及（编译内置的缺省行为）。回答「这行为什么长这样、
    * 要去哪一层改它」——与 Core 的 `dump-config` 同源。
    */
   config_origin?: string;
   /**
-   * 运行态（子进程插件）：`pending` / `ready` / `draining` / `stopped` /
+   * 运行态（子进程模块）：`pending` / `ready` / `draining` / `stopped` /
    * `failed`。空/缺失 = 进程内实现（没有独立生命周期）。
    *
    * 与 `enabled` 正交：`enabled = true` + `state = 'failed'` 是「配置开了、
    * 进程起不来」——和「用户关掉了」完全不同，不能混为一谈。
    */
   state?: string;
-  /** 崩溃后已自动重启次数（子进程插件）。 */
+  /** 崩溃后已自动重启次数（子进程模块）。 */
   restarts?: number;
-  /** 连接代际（每次就绪自增；子进程插件）。 */
+  /** 连接代际（每次就绪自增；子进程模块）。 */
   generation?: number;
   /**
-   * 插件**定义文件**路径（`plugins.toml` / 数据插件的 `plugin.toml`）；
+   * 模块**定义文件**路径（`modules.toml` / 数据模块的 `module.toml`）；
    * 空 = 编译内置（没有外部定义文件）。
    */
   source_path?: string;
@@ -384,22 +384,22 @@ export interface PluginInfo {
   /** 环境变量**键名**（值 Core 不下发——常含 token / 密钥）。 */
   env_keys?: string[];
   /**
-   * 本插件**要求的服务键**（`Inject::required`；空/缺失 = 无要求）。
+   * 本模块**要求的服务键**（`Inject::required`；空/缺失 = 无要求）。
    *
-   * 与 `error` 配合回答「这个插件为什么不挂载」：Core 在挂载前逐个校验
+   * 与 `error` 配合回答「这个模块为什么不挂载」：Core 在挂载前逐个校验
    * 服务键是否已注册，缺失即拒绝挂载（mount 副作用不会发生）。旧 Core
    * 不发该字段，故为可选。
    */
   required_services?: string[];
   /**
-   * 本插件**提供**的服务键（`Ctx::provide` 注册进服务表的键）。
+   * 本模块**提供**的服务键（`Ctx::provide` 注册进服务表的键）。
    *
    * 依赖树的另一半：`required_services` 是"我需要谁"，`provides_services`
-   * 是"我贡献了什么"。大多数插件不提供任何服务（只消费宿主接缝），
+   * 是"我贡献了什么"。大多数模块不提供任何服务（只消费宿主接缝），
    * 字段为空。旧 Core 不发该字段 = 空数组。
    */
   provides_services?: string[];
-  /** 本插件的**软依赖**（`Inject::optional`；缺失不阻止挂载）。 */
+  /** 本模块的**软依赖**（`Inject::optional`；缺失不阻止挂载）。 */
   optional_services?: string[];
   /**
    * 眼下**还缺**的硬依赖（空/缺失 = 不缺）。
@@ -591,8 +591,8 @@ export type BackendCommand =
       };
     }
   | { DeleteSkill: { name: string } }
-  | 'RequestPluginsList'
-  | { RestartPlugin: { id: string } }
+  | 'RequestModulesList'
+  | { RestartModule: { id: string } }
   | 'RequestTeamsList'
   | { ToggleTeam: { id: string; enabled: boolean } }
   | {
@@ -605,7 +605,7 @@ export type BackendCommand =
         system_skills?: string[];
         disabled_tools?: string[];
         disabled_skills?: string[];
-        enabled_plugins?: string[];
+        enabled_modules?: string[];
         enabled_tools?: string[];
         enabled_skills?: string[];
         memory_limit_tokens?: number | null;
@@ -928,16 +928,16 @@ export type BackendEvent =
   | { ApiMetrics: { entries: ApiMetricsEntry[] } }
   | { SkillsList: { skills: SkillInfo[] } }
   | { ToolsList: { tools: ToolInfo[] } }
-  | { PluginsList: { plugins: PluginInfo[] } }
-  // **插件事件**（echo-fabric-arch v0.7 的事件通道）：插件运行期 `emit` 的
-  // 东西 + 注册表自己的 `plugin.mounted` / `plugin.unmounted`。`name` /
-  // `payload` 是插件与 Core 自行约定的词汇，前端**不解释**、只当活动日志
-  // 展示（新增插件事件不必改前端）。注释放在联合分支**之外**：本文件的
+  | { ModulesList: { modules: ModuleInfo[] } }
+  // **模块事件**（echo-fabric-arch v0.7 的事件通道）：模块运行期 `emit` 的
+  // 东西 + 注册表自己的 `module.mounted` / `module.unmounted`。`name` /
+  // `payload` 是模块与 Core 自行约定的词汇，前端**不解释**、只当活动日志
+  // 展示（新增模块事件不必改前端）。注释放在联合分支**之外**：本文件的
   // 变体提取按 `| { Name:` 的形状解析，块注释夹在中间会让它漏数。
   | {
-      PluginEvent: {
-        /** 来源插件 id（Core 自身发出的为空串）。 */
-        plugin: string;
+      ModuleEvent: {
+        /** 来源模块 id（Core 自身发出的为空串）。 */
+        module: string;
         name: string;
         payload?: unknown;
         /** 服务端毫秒时间戳（排序用，不信任客户端时钟）。 */
@@ -945,7 +945,7 @@ export type BackendEvent =
       };
     }
   | {
-      PluginOpResult: {
+      ModuleOpResult: {
         id: string;
         /** `enable` / `disable` / `restart`。 */
         op: string;

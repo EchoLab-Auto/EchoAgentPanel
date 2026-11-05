@@ -148,7 +148,7 @@ export function promote(failed: string, candidate: string): void {
     sendCommand('RequestState', candidate);
     sendCommand('RequestSystemPrompt', candidate);
     sendCommand('RequestInstanceStatus', candidate);
-    sendCommand('RequestPluginsList', candidate);
+    sendCommand('RequestModulesList', candidate);
     sendCommand({ RequestShellSessions: {} }, candidate);
     sendCommand('RequestFederationStatus', candidate);
     sendCommand('RequestTeamsList', candidate);

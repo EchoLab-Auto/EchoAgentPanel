@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let cfg = PanelConfig::load(&path)?;
     init_tracing(&cfg.logging)?;
 
-    // 独立外壳与 Core 的进程内插件共用同一个运行库；这里只保留
+    // 独立外壳与 Core 的进程内模块共用同一个运行库；这里只保留
     // CLI 覆盖、日志初始化与“等它停”的外壳职责。
     let mut runtime = echo_web_server::runtime::PanelRuntimeConfig::from_panel_config(cfg);
     runtime.config_file = Some(args.config_path());

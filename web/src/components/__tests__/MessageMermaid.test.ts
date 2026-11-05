@@ -34,7 +34,7 @@ describe('会话正文的 Mermaid 图表', () => {
 
   it('agent 消息中的 flowchart 复用 ui-frame 原生图组件', async () => {
     const wrapper = mountItem(
-      '插件依赖如下：\n\n```mermaid\nflowchart LR\n  LLM["llm 服务"] --> Loop["loop 插件"]\n```',
+      '模块依赖如下：\n\n```mermaid\nflowchart LR\n  LLM["llm 服务"] --> Loop["loop 模块"]\n```',
     );
 
     await vi.waitFor(() => expect(wrapper.find('.mermaid-diagram .nm-flow').exists()).toBe(true), {
@@ -47,7 +47,7 @@ describe('会话正文的 Mermaid 图表', () => {
     expect(diagram.findAll('.nm-flow__node')).toHaveLength(2);
     expect(diagram.findAll('.nm-flow__edge')).toHaveLength(1);
     expect(diagram.find('pre').exists()).toBe(false);
-    expect(wrapper.text()).toContain('插件依赖如下');
+    expect(wrapper.text()).toContain('模块依赖如下');
   });
 
   it('`==>` 粗箭头同样进原生画布，并画出加重边', async () => {

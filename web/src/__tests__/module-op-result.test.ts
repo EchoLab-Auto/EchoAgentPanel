@@ -1,6 +1,6 @@
-// 插件操作回执（`PluginOpResult`）：成功与失败分开渲染。
+// 模块操作回执（`ModuleOpResult`）：成功与失败分开渲染。
 //
-// 背景：此前 `TogglePlugin` / `RestartPlugin` 的成功与失败都走
+// 背景：此前 `ToggleModule` / `RestartModule` 的成功与失败都走
 // `Error { session_id: null, message }`——面板只能靠文案猜哪条是"成功"、
 // 哪条是"真错误"，于是「已启用」和「启用失败」在 UI 上是同一种提示。
 // 结构化回执把 ok 变成字段，toast 的 kind 直接由它决定。
@@ -10,10 +10,10 @@ import { initialState, reduce } from '../state';
 import type { AppState } from '../state';
 
 function event(payload: { id: string; op: string; ok: boolean; message: string }) {
-  return { PluginOpResult: payload } as never;
+  return { ModuleOpResult: payload } as never;
 }
 
-describe('PluginOpResult → toast', () => {
+describe('ModuleOpResult → toast', () => {
   let state: AppState;
   beforeEach(() => {
     state = initialState();
@@ -42,9 +42,9 @@ describe('PluginOpResult → toast', () => {
     expect(state.toasts[0].text).toContain('handshake timeout');
   });
 
-  it('不改动插件清单（状态以随后的 PluginsList 为准）', () => {
-    state.plugins = [];
+  it('不改动模块清单（状态以随后的 ModulesList 为准）', () => {
+    state.modules = [];
     reduce(state, event({ id: 'x', op: 'disable', ok: true, message: 'x 已停止' }));
-    expect(state.plugins).toHaveLength(0);
+    expect(state.modules).toHaveLength(0);
   });
 });

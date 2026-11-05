@@ -26,7 +26,7 @@ describe('Panel UI 扩展注册表', () => {
   it('扩展使用隔离 id 注入入口、卡片和应用钩子', () => {
     const beforePick = vi.fn();
     registerPanelExtension({
-      id: 'example.plugin',
+      id: 'example.module',
       railCardSlots: ['summary'],
       entries: [{ id: 'manage', label: '示例', icon: 'folder', when: ({ teamId }) => teamId === 'alix' }],
       railCards: () => [{ id: 'summary', title: '摘要', component }],
@@ -36,10 +36,10 @@ describe('Panel UI 扩展注册表', () => {
       },
     });
     const context = { teamId: 'alix', sessionId: 'local:tui::local_user', core: null };
-    expect(panelEntryActions(context)[0].overlayId).toBe('extension:example.plugin:manage');
+    expect(panelEntryActions(context)[0].overlayId).toBe('extension:example.module:manage');
     expect(panelEntryActions({ ...context, teamId: 'other' })).toEqual([]);
-    expect(panelRailCards('alix')[0].id).toBe('extension:example.plugin:summary');
-    expect(panelRailCardIds()).toEqual(['extension:example.plugin:summary']);
+    expect(panelRailCards('alix')[0].id).toBe('extension:example.module:summary');
+    expect(panelRailCardIds()).toEqual(['extension:example.module:summary']);
     expect(teamLanding('alix')).toBe('example:session');
 
     setupPanelExtensions({
@@ -51,8 +51,8 @@ describe('Panel UI 扩展注册表', () => {
   });
 
   it('拒绝重复或非法扩展 id', () => {
-    registerPanelExtension({ id: 'example.plugin' });
-    expect(() => registerPanelExtension({ id: 'example.plugin' })).toThrow('duplicate');
+    registerPanelExtension({ id: 'example.module' });
+    expect(() => registerPanelExtension({ id: 'example.module' })).toThrow('duplicate');
     expect(() => registerPanelExtension({ id: 'bad id' })).toThrow('invalid');
   });
 });

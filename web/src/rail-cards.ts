@@ -58,7 +58,7 @@ export function railCardsFor(side: RailSide, teamId: string | null): RailCardDef
  * 某列是否**登记**过卡片（桌面两列的显隐与消息区留白的唯一判据，2026-10）。
  *
  * 与 [`railHasVisibleCards`]（「当前可见」）的区别是本函数的全部意义：门控
- * 依赖异步到达的 Core 状态（workspace 激活态 / teams 列表 / 插件
+ * 依赖异步到达的 Core 状态（workspace 激活态 / teams 列表 / 模块
  * 能力），切 agent、工作区会话结束、断连重连的瞬时窗口都会让门控短暂失败。
  * 此前列显隐用「可见卡片数」——左列一旦只放了条件性卡片（文件浏览器 /
  * 临时分支），这些瞬时失败会让**整列**消失再重现，观感就是用户反馈的

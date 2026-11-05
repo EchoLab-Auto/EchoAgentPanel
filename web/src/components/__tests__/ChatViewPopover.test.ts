@@ -78,7 +78,7 @@ describe('ChatView 入口弹层（PanelPopover）', () => {
     const w = mountChatView();
     await nextTick();
     const btn = w.findAll('button').find((b) => b.text().includes('工作区'));
-    expect(btn, '工作区入口按钮应可见（无 team 时插件/工具默认可用）').toBeTruthy();
+    expect(btn, '工作区入口按钮应可见（无 team 时模块/工具默认可用）').toBeTruthy();
     await btn!.trigger('click');
     await nextTick();
 

@@ -1,6 +1,6 @@
 //! 入口行覆盖面板的**单一**打开状态。
-//! 内置与扩展覆盖层共用此状态；扩展 id 使用 `extension:<plugin>:<slot>`
-//! 命名空间，Panel 不需要知道任何插件业务语义。
+//! 内置与扩展覆盖层共用此状态；扩展 id 使用 `extension:<module>:<slot>`
+//! 命名空间，Panel 不需要知道任何模块业务语义。
 
 import { ref } from 'vue';
 

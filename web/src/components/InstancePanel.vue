@@ -187,7 +187,7 @@ function runInstanceOp(op: InstanceOpKind, name: string): void {
     <!-- 无可见实例空态：不显示别的 agent 的实例，也不发任何命令 -->
     <p v-if="visibleInstances.length === 0" class="muted ap-empty">
       （当前智能体没有实例{{ props.teamId ? `：${props.teamId}` : '' }}——Core 侧需为该智能体启用
-      对应平台的「实例」插件并完成实例分配）
+      对应平台的「实例」模块并完成实例分配）
     </p>
 
     <!-- 实例状态行（仅可见实例） -->

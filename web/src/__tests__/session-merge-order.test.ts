@@ -11,8 +11,8 @@
 //!
 //! | 来源 | 谁给的 time | 代码 |
 //! | --- | --- | --- |
-//! | `SessionHistory`（派生） | backend / subagent 用 **carry-forward**（沿用最近一条带时间的事件） | `echo-plugin-management::history` |
-//! | `TrunkTimeline` / 实时推送 | `Utc::now()`（**到达时刻**） | `echo-plugin-management::timeline` |
+//! | `SessionHistory`（派生） | backend / subagent 用 **carry-forward**（沿用最近一条带时间的事件） | `echo-module-management::history` |
+//! | `TrunkTimeline` / 实时推送 | `Utc::now()`（**到达时刻**） | `echo-module-management::timeline` |
 //!
 //! 实测偏差 2251 秒（37 分钟）。身份落空 → 落进 rule 4「新条目」→ 追加到
 //! 合并游标处 → 重复 + 逆序。

@@ -46,7 +46,7 @@ interface ViewOption {
 /** 顺序必须与桌面顶栏一致（chat → settings → shell）。 */
 const OPTIONS: ViewOption[] = [
   { id: 'chat', label: '聊天', hint: '消息、输入与入口行', icon: 'message' },
-  { id: 'settings', label: '设置', hint: 'API、技能、插件与 Core 连接', icon: 'gear' },
+  { id: 'settings', label: '设置', hint: 'API、技能、模块与 Core 连接', icon: 'gear' },
   { id: 'shell', label: 'Shell', hint: 'Shell 会话列表与详情', icon: 'clipboard' },
 ];
 

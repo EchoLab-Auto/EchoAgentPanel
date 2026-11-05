@@ -331,14 +331,14 @@ describe('ChatView 布局契约', () => {
     state.tasks = [];
   });
 
-  it('入口行「任务」按钮：subagent 插件未启用且无会话任务时隐藏', () => {
+  it('入口行「任务」按钮：subagent 模块未启用且无会话任务时隐藏', () => {
     state.teams = [
       {
         id: 'alix',
         name: 'Alix',
         enabled: true,
         sessions: 0,
-        enabled_plugins: ['echo-agent.tools.builtin'],
+        enabled_modules: ['echo-agent.tools.builtin'],
       } as never,
     ];
     state.tasks = [];

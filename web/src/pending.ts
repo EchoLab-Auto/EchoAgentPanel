@@ -48,7 +48,7 @@ export const REQUEST_RESPONSES: Record<string, string> = {
   RequestContext: 'ContextSnapshot',
   RequestSkillsList: 'SkillsList',
   RequestToolsList: 'ToolsList',
-  RequestPluginsList: 'PluginsList',
+  RequestModulesList: 'ModulesList',
   RequestTeamsList: 'TeamsList',
   RequestShellSessions: 'ShellSessionsList',
   RequestWorkspaceSessions: 'WorkspaceSessions',

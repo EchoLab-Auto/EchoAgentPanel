@@ -428,7 +428,7 @@ function coreForCommand(command: BackendCommand): string | null {
 }
 
 /**
- * 切换到某个 core 后重新拉取"单值管理面"数据（配置/技能/工具/插件/实例/
+ * 切换到某个 core 后重新拉取"单值管理面"数据（配置/技能/工具/模块/实例/
  * shell/联邦）。这些响应会被 `managementCoreCurrent` 过滤到 activeRegion，
  * 所以切 core 必须重拉一次，否则会短暂显示上一个 core 的值。
  *
@@ -447,7 +447,7 @@ export function requestActiveRegionManagement(options?: { includeCatalogs?: bool
     sendCommand('RequestSkillsList');
     sendCommand('RequestToolsList');
   }
-  sendCommand('RequestPluginsList');
+  sendCommand('RequestModulesList');
   sendCommand({ RequestShellSessions: {} });
   sendCommand('RequestFederationStatus');
 }

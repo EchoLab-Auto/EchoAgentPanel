@@ -9,7 +9,7 @@ const LOG = [
   ' 2026-10-20T10:00:00Z  INFO ThreadId(01) echo_agent::agent::turn: agent turn started session=s1',
   ' 2026-10-20T10:00:01Z DEBUG ThreadId(01) echo_agent::llm: request payload built',
   ' 2026-10-20T10:00:02Z  WARN ThreadId(01) echo_federation::link: federation dial failing peer=A100-40g',
-  ' 2026-10-20T10:00:03Z ERROR ThreadId(02) echo_plugin_host: restart budget exhausted plugin=adapter-qq',
+  ' 2026-10-20T10:00:03Z ERROR ThreadId(02) echo_module_host: restart budget exhausted module=adapter-qq',
   ' 2026-10-20T10:00:04Z  INFO ThreadId(01) echo_agent::tool: tool call finished tool=bash',
 ].join('\n');
 

@@ -42,10 +42,10 @@
 - 全局时间线聊天（用户 / Agent / 工具 / 系统消息、推理过程折叠展示）
 - 工具调用、思考（推理）与子代理完成统一为 chip 行（连续工作条目合并为一排小圆角矩形图标、点击展开详情；2026-10 一般化）、临时回复分支面板（入口行「任务」弹层，按当前会话过滤）、清单面板
 - API 设置（provider / model / base_url / api_key / profiles；system prompt 在智能体配置弹层 AgentConfigModal 中编辑）；DeepSeek 余额查询（含充值/赠送分账）+ **余额与用量图表**（近 7 天：总览对比图 + profile 卡内嵌 sparkline；数据由 Core 本地积累，含 token 费用估算）
-- 实例管理（描述符驱动，**Panel 无平台专属逻辑**：布局由插件 `InstanceStatus.ui` 声明、动作经 `InvokeInstanceOp` 透传、状态经 `InstanceState` 回推；当前在册的 `echo-agent.instance.qq` 是**进程外插件**（实现在独立进程 `echo-adapter-qq`，不在 Core 内），它提供多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表；启停走实例命令 `StartInstance` / `StopInstance`——2026-10 去适配器化后**已无适配器专用命令**）
+- 实例管理（描述符驱动，**Panel 无平台专属逻辑**：布局由模块 `InstanceStatus.ui` 声明、动作经 `InvokeInstanceOp` 透传、状态经 `InstanceState` 回推；当前在册的 `echo-agent.instance.qq` 是**进程外模块**（实现在独立进程 `echo-adapter-qq`，不在 Core 内），它提供多实例切换、扫码登录（Core 代理走 WS）、门控模式、白名单 / 黑名单、群 / 好友列表；启停走实例命令 `StartInstance` / `StopInstance`——2026-10 去适配器化后**已无适配器专用命令**）
 - 工作区 UI 由独立 `crate-workspace/panel-ui` 扩展提供；默认 Panel 不包含。扩展规则与安装见 `docs/ui-extensions.md`。
 - 边栏「Git」卡（2026-10）：工作区各目录 git 快照（分支 / 领先落后 / 变更总数），**点目录行展开后按「已暂存 / 已修改 / 未跟踪」分别展开文件清单**——计数本身就是开关，明细行带 porcelain 状态字符（`M`/`A`/`D`/`?`）；长路径优先保住文件名（目录前缀只留末两段）。分组依赖 Core 回传 `changed_entries`，老 Core 自动退回扁平路径列表
-- 插件工作台（设置·插件）：支持多 Core 节点聚合展示，按**运行位置**分组（内部 / 外部），卡片标注运行形态与来源，可在线启停
+- 模块工作台（设置·模块）：支持多 Core 节点聚合展示，按**运行位置**分组（内部 / 外部），卡片标注运行形态与来源，可在线启停
 - 技能安装（设置·技能）：Git 来源安装/更新，克隆与构建进度实时可见（不再是长时间静默），失败自动清场并提示残留
 - 上下文快照、深浅主题
 - Core 连接（设置·Core 连接，2026-10 末联邦并入本页）：连接管理统一入口——
@@ -197,8 +197,8 @@ curl -fsSL https://raw.githubusercontent.com/EchoLab-Auto/EchoAgentPanel/main/sc
 - `document/panel/mobile-layout.md` — 移动端布局（<768px：顶栏与视图菜单、入口行横滚提示、卡片 Sheet、软键盘与安全区）
 - `document/panel/chat.md` — 会话视图（入口；细分篇见 `chat-list` / `chat-messages` / `chat-input` / `chat-timeline` / `chat-tools` / `chat-reasoning` / `chat-rail` / `chat-work` / `chat-entry` / `chat-history`）
 - `document/panel/settings.md` — 设置视图外壳（八分类菜单、资源工作区通用契约、界面元素树）+ 七篇分类子文档：
-  `settings-api` / `settings-skills` / `settings-tools` / `settings-plugins` / `settings-agents` / `settings-cores` / `settings-logs`
-  （API 设置、技能与 Git 安装、工具、插件工作台、智能体、Core 连接与联邦、日志与系统）
+  `settings-api` / `settings-skills` / `settings-tools` / `settings-modules` / `settings-agents` / `settings-cores` / `settings-logs`
+  （API 设置、技能与 Git 安装、工具、模块工作台、智能体、Core 连接与联邦、日志与系统）
 - `document/panel/instance-tasks.md` — 实例弹层（描述符驱动，与平台无关）、任务弹层、Shell 视图、HTTP 通道
 - `document/panel/system.md` — 系统交互（Toast、键盘、常量速查）
 - `document/protocol/protocol.md` — 线协议与数据流（命令/事件、时间线同步、事件流连续性）
@@ -218,22 +218,22 @@ Panel 在 WebSocket 建立、重连、切换 Agent/Core 时主动重新请求列
 通道历史再提交更新，超时/错误需可见并可重试；未来协议中增加 request id / version，
 以便 Core 原子化确认和乱序恢复。
 
-## 作为 Core 的可选进程内插件
+## 作为 Core 的可选进程内模块
 
-**插件实现完全在本仓**：`source/echo-plugin-panel/`。它与独立
+**模块实现完全在本仓**：`source/echo-module-panel/`。它与独立
 `echo-agent-panel` 外壳共享 `echo-web-server::runtime`，Core 不持有 Panel
 路由、配置或生命周期实现。
 
-在 Core 的 `plugins.toml` 显式启用后才会监听端口：
+在 Core 的 `modules.toml` 显式启用后才会监听端口：
 
 ```toml
-[[plugin]]
+[[module]]
 id = "echo-agent.panel.web"
 kind = "builtin"
 name = "Web Panel"
 enabled = true
 
-[plugin.config]
+[module.config]
 bind = "127.0.0.1:8080"
 static_dir = "/home/me/.local/libexec/echo-agent-panel/web"
 config_file = "/home/me/.config/echo-agent-panel/panel.toml"
@@ -241,4 +241,4 @@ config_file = "/home/me/.config/echo-agent-panel/panel.toml"
 
 默认不挂载、不监听。`config_file` 可复用现有多上游、SSH 与联邦发现配置；
 对外监听必须 `allow_remote = true` 且配置 `access_token_secret_file`，令牌
-不写进插件诊断配置。独立部署与内嵌部署都受支持，不能在同一端口同时运行。
+不写进模块诊断配置。独立部署与内嵌部署都受支持，不能在同一端口同时运行。

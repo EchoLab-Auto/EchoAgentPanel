@@ -103,7 +103,7 @@ describe('渲染器：解析容错（03a §5.2 / §3.2）', () => {
     expect(w.emitted('warning')).toBeUndefined();
   });
 
-  it('未知 method 照发；插件报错 → 节点错误态', async () => {
+  it('未知 method 照发；模块报错 → 节点错误态', async () => {
     invokeMock.mockResolvedValue({ result: null, error: 'unknown method' });
     const w = mountRenderer({
       version: 1,

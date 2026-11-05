@@ -23,8 +23,8 @@ import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import {
   PACKAGE_DISPLAY_NAMES,
-  isPluginCheckboxVisible,
-  pluginCheckboxState,
+  isModuleCheckboxVisible,
+  moduleCheckboxState,
 } from '../capabilities';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
@@ -50,14 +50,14 @@ const props = withDefaults(
 const emit = defineEmits<{ close: [] }>();
 
 // 弹层每次打开都会重新挂载（v-if）：挂载时拉取能力列表，
-// 确保工具/技能/插件表格有数据（未进过资源页时 state 为空）。
+// 确保工具/技能/模块表格有数据（未进过资源页时 state 为空）。
 // 三类清单独立登记加载跟踪（表格骨架 / 超时重试，见 pending.ts）。
-const { phase: pluginPhase, loading: pluginLoading } = usePending('agent-config:plugins');
+const { phase: modulePhase, loading: moduleLoading } = usePending('agent-config:modules');
 const { phase: toolPhase, loading: toolLoading } = usePending('agent-config:tools');
 const { phase: skillPhase, loading: skillLoading } = usePending('agent-config:skills');
 
-function requestPlugins() {
-  sendPending('RequestPluginsList', 'agent-config:plugins');
+function requestModules() {
+  sendPending('RequestModulesList', 'agent-config:modules');
 }
 function requestTools() {
   sendPending('RequestToolsList', 'agent-config:tools');
@@ -69,11 +69,11 @@ function requestSkills() {
 onMounted(() => {
   requestSkills();
   requestTools();
-  requestPlugins();
+  requestModules();
 });
 
 onUnmounted(() => {
-  releasePending('agent-config:plugins');
+  releasePending('agent-config:modules');
   releasePending('agent-config:tools');
   releasePending('agent-config:skills');
 });
@@ -85,7 +85,7 @@ const systemPrompt = ref('');
 const enabled = ref(true);
 const disabledTools = ref<string[]>([]);
 const disabledSkills = ref<string[]>([]);
-const enabledPlugins = ref<string[]>([]);
+const enabledModules = ref<string[]>([]);
 const enabledTools = ref<string[]>([]);
 const enabledSkills = ref<string[]>([]);
 /** Persona 级 API 供应商引用（'' = 跟随全局默认配置） */
@@ -100,7 +100,7 @@ watch(
     enabled.value = t.enabled;
     disabledTools.value = t.disabled_tools ?? [];
     disabledSkills.value = t.disabled_skills ?? [];
-    enabledPlugins.value = t.enabled_plugins ?? [];
+    enabledModules.value = t.enabled_modules ?? [];
     enabledTools.value = t.enabled_tools ?? [];
     enabledSkills.value = t.enabled_skills ?? [];
     apiProfile.value = t.api_profile ?? '';
@@ -141,17 +141,17 @@ const skillItems = computed<GroupedItem[]>(() =>
 );
 /** 勾选区分组名（按 kind 显示；仅实例/交互为独立组，
  * 其余整类能力项（工具/技能等包维度门控）归入「管理面」）。 */
-const PLUGIN_GROUP_LABELS: Record<string, string> = {
+const MODULE_GROUP_LABELS: Record<string, string> = {
   instance: '实例',
   interaction: '交互',
 };
-/** 插件：实例/交互类与包维度门控插件（按 kind 分组展示）。
- * 判定单一来源 = capabilities.ts::isPluginCheckboxVisible。 */
-const pluginItems = computed<GroupedItem[]>(() =>
-  state.plugins
-    .filter((p) => isPluginCheckboxVisible(p))
+/** 模块：实例/交互类与包维度门控模块（按 kind 分组展示）。
+ * 判定单一来源 = capabilities.ts::isModuleCheckboxVisible。 */
+const moduleItems = computed<GroupedItem[]>(() =>
+  state.modules
+    .filter((p) => isModuleCheckboxVisible(p))
     .map((p) => {
-      const readonly = pluginCheckboxState(p) === 'readonly';
+      const readonly = moduleCheckboxState(p) === 'readonly';
       return {
         key: p.id,
         name: p.name,
@@ -159,13 +159,13 @@ const pluginItems = computed<GroupedItem[]>(() =>
         description: readonly
           ? `${p.description || '（无描述）'} —— 进程级，对所有人格始终生效`
           : p.description || '（无描述）',
-        group: PLUGIN_GROUP_LABELS[p.kind] ?? '管理面',
+        group: MODULE_GROUP_LABELS[p.kind] ?? '管理面',
       };
     }),
 );
 /** 可写的键（只读项不进白名单——它们从来不受人格控制）。 */
-const pluginWritableKeys = computed(() =>
-  pluginItems.value.filter((i) => !i.readonly).map((i) => i.key),
+const moduleWritableKeys = computed(() =>
+  moduleItems.value.filter((i) => !i.readonly).map((i) => i.key),
 );
 /** 按分组聚合成表格模型（组名 + 成员；无分组归入「其他」） */
 interface GroupedTable {
@@ -188,7 +188,7 @@ function groupBy(items: GroupedItem[]): GroupedTable[] {
 }
 const toolGroups = computed(() => groupBy(toolItems.value));
 const skillGroups = computed(() => groupBy(skillItems.value));
-const pluginGroups = computed(() => groupBy(pluginItems.value));
+const moduleGroups = computed(() => groupBy(moduleItems.value));
 
 /** 白名单语义：列表为空 = 全部启用（全选状态） */
 function isItemOn(list: string[], key: string): boolean {
@@ -258,7 +258,7 @@ function toggleRow(list: string[], all: GroupedItem[], row: Record<string, unkno
 
 /** 能力分区（可折叠；默认全展开） */
 const CAP_SECTIONS = [
-  { key: 'plugins', title: '启用插件' },
+  { key: 'modules', title: '启用模块' },
   { key: 'tools', title: '启用工具（按 pkg 分组）' },
   { key: 'skills', title: '启用技能（按 pkg 分组）' },
 ];
@@ -295,7 +295,7 @@ function save() {
         enabled: enabled.value,
         disabled_tools: disabledTools.value,
         disabled_skills: disabledSkills.value,
-        enabled_plugins: enabledPlugins.value,
+        enabled_modules: enabledModules.value,
         enabled_tools: enabledTools.value,
         enabled_skills: enabledSkills.value,
         // 本弹层不编辑这两项，但 `SaveTeam` 是整对象覆盖：不透传就会被清成
@@ -376,22 +376,22 @@ function save() {
 
         <!-- 能力分区（ui-frame NeumorphismCollapse；pkg 分组 + 表格） -->
         <NeumorphismCollapse v-model="openSections" :items="CAP_SECTIONS" size="small">
-          <template #header-plugins>
-            <span class="agent-config__sec-title">启用插件</span>
-            <span class="agent-config__sec-summary">{{ pluginLoading ? '…' : `${pluginItems.length} 项` }}</span>
+          <template #header-modules>
+            <span class="agent-config__sec-title">启用模块</span>
+            <span class="agent-config__sec-summary">{{ moduleLoading ? '…' : `${moduleItems.length} 项` }}</span>
           </template>
-          <template #plugins>
-            <LoadHint :phase="pluginPhase" label="插件清单" @retry="requestPlugins" />
-            <div v-if="!pluginGroups.length && pluginPhase === 'idle'" class="muted">（无）</div>
-            <div v-for="g in pluginGroups" :key="g.group" class="agent-config__pkg">
+          <template #modules>
+            <LoadHint :phase="modulePhase" label="模块清单" @retry="requestModules" />
+            <div v-if="!moduleGroups.length && modulePhase === 'idle'" class="muted">（无）</div>
+            <div v-for="g in moduleGroups" :key="g.group" class="agent-config__pkg">
               <div class="agent-config__pkg-head">
                 <NeumorphismCheckbox
-                  :model-value="isGroupOn(enabledPlugins, g)"
-                  :indeterminate="isGroupPartial(enabledPlugins, g)"
+                  :model-value="isGroupOn(enabledModules, g)"
+                  :indeterminate="isGroupPartial(enabledModules, g)"
                   :disabled="isGroupReadonly(g)"
                   :label="`${g.group}（${g.items.length}）`"
                   size="small"
-                  @update:model-value="enabledPlugins = toggleGroup(enabledPlugins, pluginWritableKeys, g)"
+                  @update:model-value="enabledModules = toggleGroup(enabledModules, moduleWritableKeys, g)"
                 />
               </div>
               <NeumorphismTable
@@ -409,10 +409,10 @@ function save() {
                 </template>
                 <template #cell-check="{ row }">
                   <NeumorphismCheckbox
-                    :model-value="isRowOn(enabledPlugins, row)"
+                    :model-value="isRowOn(enabledModules, row)"
                     :disabled="row.readonly === true"
                     size="small"
-                    @update:model-value="enabledPlugins = toggleRow(enabledPlugins, pluginItems, row)"
+                    @update:model-value="enabledModules = toggleRow(enabledModules, moduleItems, row)"
                   />
                 </template>
               </NeumorphismTable>

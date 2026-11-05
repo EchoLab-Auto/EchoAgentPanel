@@ -6,7 +6,7 @@
 //!   单一「未分类」组）；切到「按分类」时才回到 category 分组；
 //! - 行卡双行结构 + 行内快速启停（不改变选中）；
 //! - 详情分区「生效方式 / 被谁使用 / 来源 / 内容」；
-//! - 包禁用提示（所属插件 disabled → 技能不可用）。
+//! - 包禁用提示（所属模块 disabled → 技能不可用）。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -78,8 +78,8 @@ function seed() {
       system: false,
     },
   ] as typeof state.skills;
-  // QQ 实例包插件被禁用 → 包内技能应显示「包已禁用」
-  state.plugins = [
+  // QQ 实例包模块被禁用 → 包内技能应显示「包已禁用」
+  state.modules = [
     {
       id: 'echo-agent.adapter.qq',
       name: 'QQ 实例',
@@ -92,7 +92,7 @@ function seed() {
       builtin: true,
       package: 'echo-agent.adapter.qq',
     },
-  ] as typeof state.plugins;
+  ] as typeof state.modules;
   state.teams = [
     { id: 'alix', name: 'Alix', enabled: true, sessions: 0, system_skills: ['qq-transport'] },
     { id: 'writer', name: 'Writer', enabled: true, sessions: 0, disabled_skills: ['coding'] },
@@ -144,7 +144,7 @@ describe('SettingsView 技能工作台', () => {
     // 包内 2 个，独立 2 个
     const counts = wrapper.findAll('.caps-count--soft').map((c) => c.text());
     expect(counts).toEqual(['2', '2']);
-    // 包插件被禁用 → 组头提示 + 行内「包已禁用」标记
+    // 包模块被禁用 → 组头提示 + 行内「包已禁用」标记
     expect(wrapper.text()).toContain('所属包已禁用');
     expect(wrapper.findAll('.caps-mark--warn').length).toBe(2);
   });

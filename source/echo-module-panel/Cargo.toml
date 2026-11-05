@@ -1,6 +1,6 @@
 [package]
-name = "echo-plugin-panel"
-description = "可选的进程内 Web Panel 插件：完整实现归 Panel 仓，独立外壳复用同一运行库"
+name = "echo-module-panel"
+description = "可选的进程内 Web Panel 模块：完整实现归 Panel 仓，独立外壳复用同一运行库"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-echo-context = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.14.0" }
-echo-plugin = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.14.0" }
+echo-context = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.15.0" }
+echo-module = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.15.0" }
 echo-web-server = { path = "../echo-web-server" }
 anyhow.workspace = true
 serde.workspace = true

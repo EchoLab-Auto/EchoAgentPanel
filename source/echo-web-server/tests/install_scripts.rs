@@ -4,7 +4,7 @@
 //! 只有等用户在生产上跑才发现。这里用 `bash -n` 做语法门禁，并对"文档承诺
 //! 的开关"做存在性守护——重命名 / 删码后帮助文本与 README 不会脱节。
 //!
-//! 同类门禁见 EchoAgentCore 的 `source/plugin/core/tests/install_script_flag.rs`。
+//! 同类门禁见 EchoAgentCore 的 `source/module/core/tests/install_script_flag.rs`。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -308,7 +308,8 @@ fn installer_supports_both_service_scopes() {
         "system 作用域应写 /etc/systemd/system"
     );
     assert!(
-        install.contains("SYSTEMCTL=(systemctl --user)") && install.contains("SYSTEMCTL=(systemctl)"),
+        install.contains("SYSTEMCTL=(systemctl --user)")
+            && install.contains("SYSTEMCTL=(systemctl)"),
         "两条作用域各有一套 systemctl 前缀"
     );
     for call in [
@@ -327,7 +328,10 @@ fn installer_supports_both_service_scopes() {
         "单元里应注入 ECHO_SERVICE_SCOPE，供 update.sh 读取"
     );
     for placeholder in ["@SCOPE_LINES@", "@SCOPE_ENV@", "@WANTED_BY@"] {
-        assert!(install.contains(placeholder), "render_unit 应替换 {placeholder}");
+        assert!(
+            install.contains(placeholder),
+            "render_unit 应替换 {placeholder}"
+        );
     }
 }
 
@@ -341,12 +345,8 @@ fn rollback_remembers_prior_service_state() {
         install.contains("panel_was_active=0") && install.contains("panel_was_enabled=0"),
         "回滚前必须记录服务原先的 active/enabled 状态"
     );
-    let snapshot_at = install
-        .find("panel_was_active=0")
-        .expect("应有状态快照");
-    let rollback_at = install
-        .find("install_rollback()")
-        .expect("应有回滚函数");
+    let snapshot_at = install.find("panel_was_active=0").expect("应有状态快照");
+    let rollback_at = install.find("install_rollback()").expect("应有回滚函数");
     assert!(
         snapshot_at < rollback_at,
         "状态快照必须在回滚函数定义/安装事务开始之前完成"
@@ -366,11 +366,13 @@ fn unit_templates_carry_scope_placeholders() {
         assert!(text.contains("@SCOPE_LINES@"), "{name} 缺少 @SCOPE_LINES@");
         assert!(text.contains("@SCOPE_ENV@"), "{name} 缺少 @SCOPE_ENV@");
     }
-    let panel = std::fs::read_to_string(
-        repo_root().join("packaging/systemd/echo-agent-panel.service.in"),
-    )
-    .expect("read panel unit template");
-    assert!(panel.contains("@WANTED_BY@"), "panel 单元模板应把 WantedBy 留给安装期决定");
+    let panel =
+        std::fs::read_to_string(repo_root().join("packaging/systemd/echo-agent-panel.service.in"))
+            .expect("read panel unit template");
+    assert!(
+        panel.contains("@WANTED_BY@"),
+        "panel 单元模板应把 WantedBy 留给安装期决定"
+    );
 }
 
 /// updater 也要按作用域选 systemctl：它是 update 单元的主体，重启失败会被判
@@ -378,8 +380,14 @@ fn unit_templates_carry_scope_placeholders() {
 #[test]
 fn updater_respects_service_scope() {
     let update = read_script("update.sh");
-    assert!(update.contains("resolve_service_scope"), "update.sh 应解析服务作用域");
-    assert!(update.contains("ECHO_SERVICE_SCOPE"), "应优先采用单元注入的作用域");
+    assert!(
+        update.contains("resolve_service_scope"),
+        "update.sh 应解析服务作用域"
+    );
+    assert!(
+        update.contains("ECHO_SERVICE_SCOPE"),
+        "应优先采用单元注入的作用域"
+    );
     assert!(
         update.contains("/etc/systemd/system/echo-agent-panel.service"),
         "缺少环境变量时应按单元文件位置探测"
@@ -388,6 +396,9 @@ fn updater_respects_service_scope() {
         "\"${SYSTEMCTL[@]}\" restart echo-agent-panel.service",
         "\"${SYSTEMCTL[@]}\" is-active --quiet echo-agent-panel.service",
     ] {
-        assert!(update.contains(call), "update.sh 应经 SYSTEMCTL 调用：{call}");
+        assert!(
+            update.contains(call),
+            "update.sh 应经 SYSTEMCTL 调用：{call}"
+        );
     }
 }

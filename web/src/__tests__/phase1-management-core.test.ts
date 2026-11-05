@@ -1,6 +1,6 @@
 // Phase 1（2026-10）：管理面（设置/QQ/联邦）绑定"管理目标 core"。
 // - 无 team/session 的管理事件也注入来源 core；
-// - 单值管理面（api/skills/tools/plugins/systemPrompt/instance/federation）只
+// - 单值管理面（api/skills/tools/modules/systemPrompt/instance/federation）只
 //   接受 activeRegion 的响应，避免被广播响应里其他 core 的配置覆盖；
 // - 实例名跨 core 可重复，状态文档按 (core, instance) 存放（instanceUiByKey）。
 import { describe, it, expect, beforeEach } from 'vitest';

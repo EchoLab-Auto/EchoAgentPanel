@@ -26,7 +26,7 @@ import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
 import { checklistKey, sessionKey, sessionScopedKey, teamKey } from '../keys';
-import { isInstancePluginKind, teamPluginEnabled, teamToolAvailable } from '../capabilities';
+import { isInstanceModuleKind, teamModuleEnabled, teamToolAvailable } from '../capabilities';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
 import ChecklistSidebar from './ChecklistSidebar.vue';
@@ -82,7 +82,7 @@ const WARM_BY_OVERLAY: Record<BuiltinOverlayId, keyof typeof loaders> = {
 /**
  * 入口行上的「用户意图」事件 → 预热对应 chunk。
  *
- * 挂在容器上而不是每个按钮：入口行最多 8 个控件、还会随插件能力增减，逐个绑
+ * 挂在容器上而不是每个按钮：入口行最多 8 个控件、还会随模块能力增减，逐个绑
  * 监听每加一个按钮都要改；容器上取一次 `closest` 即可，且 `pointerover` 会
  * 冒泡到容器（`pointerenter` 不冒泡，不能用）。
  *
@@ -792,40 +792,40 @@ function onSelectionChange() {
   }
 }
 
-// 实例按钮显隐：仅当当前 Agent（team）启用了 instance 类插件时显示。
-// 依据 TeamInfo 的 enabled_plugins 白名单判断（插件黑名单已移除），
+// 实例按钮显隐：仅当当前 Agent（team）启用了 instance 类模块时显示。
+// 依据 TeamInfo 的 enabled_modules 白名单判断（模块黑名单已移除），
 // 与 Core apply_capabilities 的过滤语义一致。
-const ADAPTER_PLUGIN_FALLBACK = ['echo-agent.instance.qq'];
+const ADAPTER_MODULE_FALLBACK = ['echo-agent.instance.qq'];
 
 const currentTeam = computed(() => {
   if (!props.activeTeamId) return null;
   return state.teams.find((t) => t.id === props.activeTeamId) ?? null;
 });
 
-/** 当前团队视角下的实例插件 id 列表（无 plugins 数据时回退到内置 id） */
-const instancePluginIds = computed<string[]>(() => {
-  const fromState = state.plugins.filter((p) => isInstancePluginKind(p.kind)).map((p) => p.id);
-  return fromState.length ? fromState : ADAPTER_PLUGIN_FALLBACK;
+/** 当前团队视角下的实例模块 id 列表（无 modules 数据时回退到内置 id） */
+const instanceModuleIds = computed<string[]>(() => {
+  const fromState = state.modules.filter((p) => isInstanceModuleKind(p.kind)).map((p) => p.id);
+  return fromState.length ? fromState : ADAPTER_MODULE_FALLBACK;
 });
 
-/** 当前 Agent 是否启用了至少一个实例插件（决定输入框上是否显示"实例"按钮） */
+/** 当前 Agent 是否启用了至少一个实例模块（决定输入框上是否显示"实例"按钮） */
 const instanceAvailable = computed(() =>
-  instancePluginIds.value.some((id) => teamPluginEnabled(currentTeam.value, id)),
+  instanceModuleIds.value.some((id) => teamModuleEnabled(currentTeam.value, id)),
 );
 
-/** 上下文按钮显隐：management.panel 插件对当前 agent 启用才显示 */
+/** 上下文按钮显隐：management.panel 模块对当前 agent 启用才显示 */
 const contextAvailable = computed(() =>
-  teamPluginEnabled(currentTeam.value, 'echo-agent.management.panel'),
+  teamModuleEnabled(currentTeam.value, 'echo-agent.management.panel'),
 );
 
-/** 清单按钮显隐：checklist 工具可用才显示（2026-09 起插件维度已移除，
+/** 清单按钮显隐：checklist 工具可用才显示（2026-09 起模块维度已移除，
  * 只受工具级白/黑名单与内置工具集包门控）。
  * 工具禁用后同步卸载对应 UI 入口与浮层，并清空本地清单状态。 */
 const checklistAvailable = computed(() =>
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
-// 插件/Team 更新回推后，若清单工具变为不可用，关闭残留弹层并清空徽标数据。
+// 模块/Team 更新回推后，若清单工具变为不可用，关闭残留弹层并清空徽标数据。
 watch(checklistAvailable, (available) => {
   if (!available) {
     if (entryOverlay.value === 'checklist') closeOverlay();
@@ -851,8 +851,8 @@ const sessionChecklists = computed(() => {
   return out;
 });
 
-/** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 插件启用，
- * 或当前会话已有任务记录（即使插件后被禁用，历史任务仍可见）。 */
+/** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 模块启用，
+ * 或当前会话已有任务记录（即使模块后被禁用，历史任务仍可见）。 */
 const sessionTasks = computed(() => {
   const core = state.activeRegion;
   const inCore = (t: { core?: string | null }) => core == null || (t.core ?? null) === core;
@@ -868,11 +868,11 @@ const sessionRunningTaskCount = computed(
 
 const tasksAvailable = computed(
   () =>
-    teamPluginEnabled(currentTeam.value, 'echo-agent.subagent') ||
+    teamModuleEnabled(currentTeam.value, 'echo-agent.subagent') ||
     sessionTasks.value.length > 0,
 );
 
-// 插件/Team 更新回推后，若任务入口变为不可用，关闭残留弹层。
+// 模块/Team 更新回推后，若任务入口变为不可用，关闭残留弹层。
 watch(tasksAvailable, (available) => {
   if (!available && entryOverlay.value === 'tasks') closeOverlay();
 });
@@ -966,7 +966,7 @@ function railHasCards(side: 'left' | 'right'): boolean {
  *
  * 判据是「登记」而不是「当前可见」（2026-10 用户反馈「左侧栏莫名隐藏」）：
  * 卡片门控依赖**异步到达**的 Core 状态（workspace 激活态 / loopMode / teams
- * 列表 / 插件能力）——切 agent、工作区会话结束、断连重连的瞬时窗口都会让
+ * 列表 / 模块能力）——切 agent、工作区会话结束、断连重连的瞬时窗口都会让
  * 门控短暂失败。用「可见卡片数」当判据时整列跟着消失再重现（正文行宽也
  * 跟着抖）；左列若只放了条件性卡片（文件浏览器 / 临时分支），抖动最明显。
  * 登记列表只在用户**拖动落位**时变化，是稳定信号——列不再随业务状态闪烁，

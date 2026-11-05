@@ -28,7 +28,7 @@ export function moveAgentToRegion(
         system_skills: agent.system_skills ?? [],
         disabled_tools: agent.disabled_tools ?? [],
         disabled_skills: agent.disabled_skills ?? [],
-        enabled_plugins: agent.enabled_plugins ?? [],
+        enabled_modules: agent.enabled_modules ?? [],
         enabled_tools: agent.enabled_tools ?? [],
         enabled_skills: agent.enabled_skills ?? [],
         memory_limit_tokens: agent.memory_limit_tokens ?? null,

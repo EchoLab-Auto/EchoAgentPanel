@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildPluginDependencyGraph, HOST_NODE_ID } from '../plugin-deps';
-import type { PluginInfo } from '../protocol';
+import { buildModuleDependencyGraph, HOST_NODE_ID } from '../module-deps';
+import type { ModuleInfo } from '../protocol';
 
-function plugin(partial: Partial<PluginInfo>): PluginInfo {
+function module(partial: Partial<ModuleInfo>): ModuleInfo {
   return {
     id: 'x',
     name: 'X',
@@ -15,12 +15,12 @@ function plugin(partial: Partial<PluginInfo>): PluginInfo {
   };
 }
 
-describe('buildPluginDependencyGraph', () => {
-  it('插件提供的服务成为中间节点，消费方从提供者连边', () => {
-    const graph = buildPluginDependencyGraph([
-      plugin({ id: 'echo-agent.session', name: '会话', provides_services: ['echo-agent.session.factory'] }),
-      plugin({ id: 'echo-agent.loop.single', name: '循环', required_services: ['llm'], provides_services: ['loop'] }),
-      plugin({ id: 'echo-agent.provider.llm', name: 'LLM', provides_services: ['llm'] }),
+describe('buildModuleDependencyGraph', () => {
+  it('模块提供的服务成为中间节点，消费方从提供者连边', () => {
+    const graph = buildModuleDependencyGraph([
+      module({ id: 'echo-agent.session', name: '会话', provides_services: ['echo-agent.session.factory'] }),
+      module({ id: 'echo-agent.loop.single', name: '循环', required_services: ['llm'], provides_services: ['loop'] }),
+      module({ id: 'echo-agent.provider.llm', name: 'LLM', provides_services: ['llm'] }),
     ]);
 
     const ids = graph.nodes.map((n) => n.id);
@@ -38,9 +38,9 @@ describe('buildPluginDependencyGraph', () => {
     expect(ids).not.toContain(HOST_NODE_ID.replace(/[^A-Za-z0-9_-]/g, '_'));
   });
 
-  it('未被任何插件提供的宿主接缝，从「宿主服务表」根节点连边', () => {
-    const graph = buildPluginDependencyGraph([
-      plugin({ id: 'echo-agent.shell', name: 'Shell', required_services: ['echo-agent.host.shell'] }),
+  it('未被任何模块提供的宿主接缝，从「宿主服务表」根节点连边', () => {
+    const graph = buildModuleDependencyGraph([
+      module({ id: 'echo-agent.shell', name: 'Shell', required_services: ['echo-agent.host.shell'] }),
     ]);
 
     const hostId = HOST_NODE_ID.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -51,22 +51,22 @@ describe('buildPluginDependencyGraph', () => {
     expect(edge!.to).toBe('echo-agent_shell');
   });
 
-  it('清单中的插件都以矩形节点展示', () => {
-    const graph = buildPluginDependencyGraph([plugin({ id: 'a', name: 'A' })]);
+  it('清单中的模块都以矩形节点展示', () => {
+    const graph = buildModuleDependencyGraph([module({ id: 'a', name: 'A' })]);
     expect(graph.nodes.find((n) => n.id === 'a')!.shape).toBe('rect');
   });
 
-  it('无依赖边的孤立插件也出现在图里', () => {
-    const graph = buildPluginDependencyGraph([
-      plugin({ id: 'echo-agent.subagent', name: '子代理' }),
+  it('无依赖边的孤立模块也出现在图里', () => {
+    const graph = buildModuleDependencyGraph([
+      module({ id: 'echo-agent.subagent', name: '子代理' }),
     ]);
     expect(graph.nodes.map((n) => n.id)).toContain('echo-agent_subagent');
     expect(graph.edges).toHaveLength(0);
   });
 
   it('节点 id 把非法字符替换成下划线（prodoc-flow 词法）', () => {
-    const graph = buildPluginDependencyGraph([
-      plugin({ id: 'echo-agent.tools.builtin', name: '内置工具', provides_services: ['tools.builtin'] }),
+    const graph = buildModuleDependencyGraph([
+      module({ id: 'echo-agent.tools.builtin', name: '内置工具', provides_services: ['tools.builtin'] }),
     ]);
     expect(graph.nodes.map((n) => n.id)).toContain('echo-agent_tools_builtin');
   });

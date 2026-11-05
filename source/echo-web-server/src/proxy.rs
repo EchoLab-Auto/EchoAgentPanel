@@ -726,11 +726,7 @@ impl BroadcastReplay {
     }
 }
 
-async fn bridge(
-    browser: WebSocket,
-    state: AppState,
-    peer: Option<std::net::SocketAddr>,
-) {
+async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::SocketAddr>) {
     // 浏览器侧的连接与断开此前**都没有日志**：上游那条 "upstream link closed"
     // 是被动结果（浏览器走了 → 连带拆除），却成了唯一可见的线索，于是每次
     // 排查都得从 Core 的 accept 数反推。这里补齐两端，并统一成
@@ -1650,11 +1646,17 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&text).expect("json");
         assert!(value.get("core").is_none(), "回执不得带 core 外壳");
         assert_eq!(value["type"], "event");
-        assert_eq!(value["payload"]["Error"]["session_id"], serde_json::Value::Null);
+        assert_eq!(
+            value["payload"]["Error"]["session_id"],
+            serde_json::Value::Null
+        );
         let message = value["payload"]["Error"]["message"]
             .as_str()
             .expect("message");
-        assert!(message.contains("RequestState"), "回执要带上命令名：{message}");
+        assert!(
+            message.contains("RequestState"),
+            "回执要带上命令名：{message}"
+        );
     }
 
     #[test]
