@@ -718,8 +718,10 @@ if ((START_SERVICE)); then
 fi
 
 INSTALL_TRANSACTION=0
+# `web` 是目录；`rm -f` 无法删除它，会让第二次及后续安装以
+# "Is a directory" 收尾。目录统一交给 rm -rf，普通文件才逐个 rm -f。
 for rollback_file in "$ROLLBACK_DIR"/*; do
-    if [[ -e "$rollback_file" ]]; then
+    if [[ -f "$rollback_file" || -L "$rollback_file" ]]; then
         rm -f -- "$rollback_file"
     fi
 done
