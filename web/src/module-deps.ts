@@ -9,9 +9,6 @@
 import type { ModuleInfo } from './protocol';
 import type { ProDocFlowGraph, ProDocFlowNode, ProDocFlowEdge } from '@echolab-auto/ui-frame/doc';
 
-export const HOST_NODE_ID = '__host__';
-const HOST_LABEL = '宿主服务表';
-
 export interface ModuleDependencyModel {
   graph: ProDocFlowGraph;
   /** 不参与主图的模块，交给另一个紧凑列表展示。 */
@@ -54,13 +51,6 @@ export function buildModuleDependencyModel(modules: ModuleInfo[]): ModuleDepende
     }
   }
 
-  const hasHostDeps = modules.some((module) =>
-    (module.required_services ?? []).some((key) => !providerByKey.has(key)),
-  );
-  if (hasHostDeps) {
-    nodes.push({ id: nodeIdOf(HOST_NODE_ID), label: HOST_LABEL, shape: 'stadium' });
-  }
-
   const connectedIds = new Set<string>();
   for (const module of [...modules].sort(compareModule)) {
     const toId = nodeIdOf(module.id);
@@ -68,8 +58,10 @@ export function buildModuleDependencyModel(modules: ModuleInfo[]): ModuleDepende
     let hasRequired = false;
 
     for (const key of module.required_services ?? []) {
+      // 宿主能力只参与模块挂载，不属于「模块之间」的依赖图。
       const providerId = providerByKey.get(key);
-      const fromId = providerId ? nodeIdOf(providerId) : nodeIdOf(HOST_NODE_ID);
+      if (!providerId) continue;
+      const fromId = nodeIdOf(providerId);
       const label = shortKey(key);
       const edgeKey = `${fromId}→${toId}→${label}`;
       if (seenEdge.has(edgeKey)) continue;

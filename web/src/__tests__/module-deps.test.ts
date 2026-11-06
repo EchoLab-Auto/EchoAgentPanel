@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildModuleDependencyGraph, buildModuleDependencyModel, HOST_NODE_ID } from '../module-deps';
+import { buildModuleDependencyGraph, buildModuleDependencyModel } from '../module-deps';
 import type { ModuleInfo } from '../protocol';
 
 function module(partial: Partial<ModuleInfo>): ModuleInfo {
@@ -34,21 +34,8 @@ describe('buildModuleDependencyGraph', () => {
     expect(edge!.from).toBe('echo-agent_provider_llm');
     expect(edge!.to).toBe('echo-agent_loop_single');
 
-    // 没有依赖宿主接缝的（session 无 required_services），所以不需要宿主根节点
-    expect(ids).not.toContain(HOST_NODE_ID.replace(/[^A-Za-z0-9_-]/g, '_'));
-  });
-
-  it('未被任何模块提供的宿主接缝，从「宿主服务表」根节点连边', () => {
-    const graph = buildModuleDependencyGraph([
-      module({ id: 'echo-agent.shell', name: 'Shell', required_services: ['echo-agent.host.shell'] }),
-    ]);
-
-    const hostId = HOST_NODE_ID.replace(/[^A-Za-z0-9_-]/g, '_');
-    expect(graph.nodes.map((n) => n.id)).toContain(hostId);
-    const edge = graph.edges.find((e) => e.label === 'host.shell');
-    expect(edge).toBeDefined();
-    expect(edge!.from).toBe(hostId);
-    expect(edge!.to).toBe('echo-agent_shell');
+    // 宿主服务表不作为节点出现。
+    expect(ids).not.toContain('__host__');
   });
 
   it('清单中的模块都以矩形节点展示', () => {
@@ -97,12 +84,5 @@ describe('可随依赖关系调整的图模型', () => {
     ]);
   });
 
-  it('模块提供者与消费者同时存在时才进入主图，服务未接线则归宿主', () => {
-    const model = buildModuleDependencyModel([
-      module({ id: 'echo-agent.shell', name: 'Shell', required_services: ['echo-agent.host.shell'] }),
-    ]);
-    expect(model.edgeCount).toBe(1);
-    expect(model.graph.edges[0].from).toBe('__host__');
-    expect(model.isolated).toHaveLength(0);
-  });
+
 });
