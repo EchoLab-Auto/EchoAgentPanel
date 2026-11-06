@@ -2431,16 +2431,8 @@ watch(
               <div class="module-deps-view__hint">
                 从左到右 = 服务提供者 → 服务消费者；边上是服务键。依赖改变时层级和连线会自动重排。
               </div>
-              <DocFlowCanvas v-if="moduleDepModel.edgeCount > 0" :graph="moduleDepModel.graph" height="560px" />
-              <NeumorphismEmpty v-else description="当前没有模块间服务依赖" />
-              <section v-if="moduleDepModel.isolated.length" class="module-deps-isolated">
-                <div class="module-deps-isolated__title">无服务依赖 · {{ moduleDepModel.isolated.length }}</div>
-                <div class="module-deps-isolated__items">
-                  <span v-for="module in moduleDepModel.isolated" :key="module.id" class="module-deps-isolated__item">
-                    {{ module.name || module.id }}<small>{{ module.id.replace(/^echo-agent\./, '') }}</small>
-                  </span>
-                </div>
-              </section>
+              <DocFlowCanvas :graph="moduleDepModel.graph" height="560px" />
+
             </div>
           </template>
 

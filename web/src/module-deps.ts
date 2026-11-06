@@ -1,8 +1,8 @@
 //! 模块依赖图：仅由 fabric-arch 的服务键关系生成，不写死模块拓扑。
 //!
 //! 视图组织：
-//! - 主图只放存在依赖关系的模块，拓扑层级由 ui-frame 自动计算；
-//! - 没有依赖关系的模块由 SettingsView 单独列出，避免挤占主图；
+//! - 全部模块都作为节点；无依赖模块按类别排成独立节点列；
+//! - 有依赖关系的模块仍由 ui-frame 按服务键自动分层。
 //! - 节点标签是「名称 · 短 ID」，不依赖具体模块名称也能辨认；
 //! - 边只承担服务键标签，方向始终是提供者 → 消费者。
 
@@ -11,7 +11,7 @@ import type { ProDocFlowGraph, ProDocFlowNode, ProDocFlowEdge } from '@echolab-a
 
 export interface ModuleDependencyModel {
   graph: ProDocFlowGraph;
-  /** 不参与主图的模块，交给另一个紧凑列表展示。 */
+  /** 没有依赖边的模块，用于辅助展示；它们也包含在主图中。 */
   isolated: ModuleInfo[];
   /** 依赖关系的数量，供空状态与说明使用。 */
   edgeCount: number;
@@ -52,10 +52,17 @@ export function buildModuleDependencyModel(modules: ModuleInfo[]): ModuleDepende
   }
 
   const connectedIds = new Set<string>();
+  // 先登记所有节点：无依赖模块不能被过���掉；稳定排序保证依赖变化之外的
+  // 布局不发生无意义漂移。
+  for (const module of [...modules].sort(compareModule)) {
+    nodes.push({
+      id: nodeIdOf(module.id),
+      label: `${module.name || shortModuleId(module.id)} · ${shortModuleId(module.id)}`,
+      shape: 'rect',
+    });
+  }
   for (const module of [...modules].sort(compareModule)) {
     const toId = nodeIdOf(module.id);
-    const hasProvider = (module.provides_services ?? []).length > 0;
-    let hasRequired = false;
 
     for (const key of module.required_services ?? []) {
       // 宿主能力只参与模块挂载，不属于「模块之间」的依赖图。
@@ -68,16 +75,9 @@ export function buildModuleDependencyModel(modules: ModuleInfo[]): ModuleDepende
       seenEdge.add(edgeKey);
       edges.push({ from: fromId, to: toId, label });
       connectedIds.add(fromId).add(toId);
-      hasRequired = true;
     }
 
-    if (hasProvider || hasRequired) {
-      nodes.push({
-        id: toId,
-        label: `${module.name || shortModuleId(module.id)} · ${shortModuleId(module.id)}`,
-        shape: 'rect',
-      });
-    }
+    // 孤立节点已经在上方登记；有依赖的节点也保留同一标签。
   }
 
   const connectedModules = new Set(

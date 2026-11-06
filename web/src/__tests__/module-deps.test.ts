@@ -48,7 +48,7 @@ describe('buildModuleDependencyGraph', () => {
     const model = buildModuleDependencyModel([
       module({ id: 'echo-agent.subagent', name: '子代理' }),
     ]);
-    expect(model.graph.nodes).toHaveLength(0);
+    expect(model.graph.nodes.map((n) => n.id)).toContain('echo-agent_subagent');
     expect(model.isolated.map((m) => m.id)).toContain('echo-agent.subagent');
     expect(model.graph.edges).toHaveLength(0);
   });
@@ -69,7 +69,7 @@ describe('可随依赖关系调整的图模型', () => {
       module({ id: 'echo-agent.shell', name: 'Shell', required_services: ['tools.builtin'] }),
       module({ id: 'echo-agent.panel.web', name: 'Web Panel' }),
     ]);
-    expect(first.graph.nodes.map((n) => n.id)).not.toContain('echo-agent_panel_web');
+    expect(first.graph.nodes.map((n) => n.id)).toContain('echo-agent_panel_web');
     expect(first.isolated.map((m) => m.id)).toEqual(['echo-agent.panel.web']);
     expect(first.graph.nodes.find((n) => n.id === 'echo-agent_loop_single')?.label).toContain('loop.single');
     expect(first.graph.edges.map((e) => e.label).sort()).toEqual(['loop', 'tools.builtin'].sort());
