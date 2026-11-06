@@ -55,7 +55,7 @@ import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
 import type { ModuleInfo, SkillInfo, TeamInfo, ToolInfo } from '../protocol';
 import { MarkdownRenderer, DocFlowCanvas } from '@echolab-auto/ui-frame/doc';
-import { buildModuleDependencyGraph } from '../module-deps';
+import { buildModuleDependencyModel } from '../module-deps';
 // 子设置页按需加载（2026-10 审计修复）：五个子页约 2300 行（含 LogView
 // 挂载即开始的 5s 轮询），此前全随设置视图进首包；改为首次切入对应
 // 分类时才加载（vite 对每个 import() 自动分包）。
@@ -769,7 +769,7 @@ const moduleCatalog = computed(() => {
 const moduleViewMode = ref<'list' | 'deps'>('list');
 
 /** 当前节点的模块依赖图（宿主服务表 → 模块 → 模块）。 */
-const moduleDepGraph = computed(() => buildModuleDependencyGraph(moduleCatalog.value));
+const moduleDepModel = computed(() => buildModuleDependencyModel(moduleCatalog.value));
 
 const MODULE_FILTERS: { key: ModuleFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -2429,9 +2429,18 @@ watch(
           <template v-else-if="activeCategory === 'module' && moduleViewMode === 'deps'">
             <div class="module-deps-view">
               <div class="module-deps-view__hint">
-                从左到右 = 从被依赖到依赖方。                边上的文字是被消费的服务键（`echo-agent.` 前缀省略）。
+                从左到右 = 服务提供者 → 服务消费者；边上是服务键。依赖改变时层级和连线会自动重排。
               </div>
-              <DocFlowCanvas :graph="moduleDepGraph" height="520px" />
+              <DocFlowCanvas v-if="moduleDepModel.edgeCount > 0" :graph="moduleDepModel.graph" height="560px" />
+              <NeumorphismEmpty v-else description="当前没有模块间服务依赖" />
+              <section v-if="moduleDepModel.isolated.length" class="module-deps-isolated">
+                <div class="module-deps-isolated__title">无服务依赖 · {{ moduleDepModel.isolated.length }}</div>
+                <div class="module-deps-isolated__items">
+                  <span v-for="module in moduleDepModel.isolated" :key="module.id" class="module-deps-isolated__item">
+                    {{ module.name || module.id }}<small>{{ module.id.replace(/^echo-agent\./, '') }}</small>
+                  </span>
+                </div>
+              </section>
             </div>
           </template>
 
@@ -4297,6 +4306,37 @@ watch(
   color: var(--nm-text-secondary);
   line-height: 1.5;
   flex-shrink: 0;
+}
+
+.module-deps-isolated {
+  flex-shrink: 0;
+  border-top: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.08));
+  padding: 12px 4px 4px;
+}
+.module-deps-isolated__title {
+  color: var(--nm-text-secondary);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.module-deps-isolated__items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.module-deps-isolated__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  background: var(--nm-surface-raised);
+  font-size: 12px;
+}
+.module-deps-isolated__item small {
+  color: var(--nm-text-secondary);
+  font-size: 10.5px;
+  font-family: var(--nm-font-mono, monospace);
 }
 
 /* 模块详情：成员 chips（点击跳转到工具/技能分类并选中） */

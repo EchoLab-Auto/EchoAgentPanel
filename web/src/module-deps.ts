@@ -1,84 +1,106 @@
-//! 模块依赖树：把 `ModuleInfo` 的 `required_services` / `provides_services`
-//! 转成 `ProDocFlowGraph`（ui-frame 原生画布可直接渲染的图模型）。
+//! 模块依赖图：仅由 fabric-arch 的服务键关系生成，不写死模块拓扑。
 //!
-//! 图的方向是**「被依赖 → 依赖方」**（从左到右 = 从提供者到消费者），
-//! 与 mermaid 的 `A --> B`（A 被 B 依赖）一致，所以读法是：
-//! 左边的模块先挂载，右边的模块依赖它提供的服务。
-//!
-//! 服务键不是节点——它是**边上的标签**。节点只有模块（加上一个虚拟的
-//! 「宿主服务表」根节点，承载"不是任何模块提供"的宿主接缝）。
-//! 这样树里每层都是模块，不会出现"模块 → 服务 → 模块"的双层锯齿。
+//! 视图组织：
+//! - 主图只放存在依赖关系的模块，拓扑层级由 ui-frame 自动计算；
+//! - 没有依赖关系的模块由 SettingsView 单独列出，避免挤占主图；
+//! - 节点标签是「名称 · 短 ID」，不依赖具体模块名称也能辨认；
+//! - 边只承担服务键标签，方向始终是提供者 → 消费者。
 
 import type { ModuleInfo } from './protocol';
 import type { ProDocFlowGraph, ProDocFlowNode, ProDocFlowEdge } from '@echolab-auto/ui-frame/doc';
 
-/** 宿主服务表（虚拟根节点 id）：承载"不是任何模块提供"的宿主接缝。 */
 export const HOST_NODE_ID = '__host__';
-
-/** 宿主接缝的显示名（依赖树上根节点的标签）。 */
 const HOST_LABEL = '宿主服务表';
 
-/** 服务键的短名（`echo-agent.host.shell` → `host.shell`），让边标签可读。 */
+export interface ModuleDependencyModel {
+  graph: ProDocFlowGraph;
+  /** 不参与主图的模块，交给另一个紧凑列表展示。 */
+  isolated: ModuleInfo[];
+  /** 依赖关系的数量，供空状态与说明使用。 */
+  edgeCount: number;
+}
+
+export function shortModuleId(id: string): string {
+  return id.replace(/^echo-agent\./, '');
+}
+
 function shortKey(key: string): string {
   return key.replace(/^echo-agent\./, '');
 }
 
-/** 节点 id 必须匹配 `[A-Za-z_][\w-]*`（prodoc-flow 的词法）。 */
 function nodeIdOf(id: string): string {
   return id.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
+function compareModule(a: ModuleInfo, b: ModuleInfo): number {
+  return shortModuleId(a.id).localeCompare(shortModuleId(b.id), 'en');
+}
+
 /**
- * 构建模块依赖图。
+ * 生成可随依赖调整自动重排的模型。
  *
- * 布局策略：
- * - 根节点是「宿主服务表」，所有"不被任何模块提供"的宿主接缝从它出发；
- * - 提供服务的模块（`provides_services` 非空）成为中间节点；
- * - 每个模块的 `required_services` 决定它的入边来自谁：
- *   - 若某个其他模块 `provides_services` 含该键 → 从那个模块连过来；
- *   - 否则 → 从「宿主服务表」连过来（宿主在装配期注册的接缝）。
- *
- * 方向统一为 LR（左 = 先挂载/被依赖，右 = 后挂载/依赖方）。
+ * 不维护 `loop → tools → shell` 之类的静态布局：新增、移除或修改任何
+ * required/provides 键后，节点层级、连线及孤立节点归属都会自动更新。
  */
-export function buildModuleDependencyGraph(modules: ModuleInfo[]): ProDocFlowGraph {
+export function buildModuleDependencyModel(modules: ModuleInfo[]): ModuleDependencyModel {
   const nodes: ProDocFlowNode[] = [];
   const edges: ProDocFlowEdge[] = [];
   const seenEdge = new Set<string>();
-
-  // 键 → 提供者模块 id（后声明覆盖先声明，与 Ctx::provide 的 fail-closed 一致：
-  // 实际运行中同键不会被允许重复提供，所以这里不存在歧义）。
   const providerByKey = new Map<string, string>();
-  for (const p of modules) {
-    for (const key of p.provides_services ?? []) {
-      providerByKey.set(key, p.id);
+
+  for (const module of modules) {
+    for (const key of module.provides_services ?? []) {
+      providerByKey.set(key, module.id);
     }
   }
 
-  const hasHostDeps = modules.some((p) =>
-    (p.required_services ?? []).some((key) => !providerByKey.has(key)),
+  const hasHostDeps = modules.some((module) =>
+    (module.required_services ?? []).some((key) => !providerByKey.has(key)),
   );
-
   if (hasHostDeps) {
     nodes.push({ id: nodeIdOf(HOST_NODE_ID), label: HOST_LABEL, shape: 'stadium' });
   }
 
-  for (const p of modules) {
-    const nodeId = nodeIdOf(p.id);
-    nodes.push({ id: nodeId, label: p.name || p.id, shape: 'rect' });
+  const connectedIds = new Set<string>();
+  for (const module of [...modules].sort(compareModule)) {
+    const toId = nodeIdOf(module.id);
+    const hasProvider = (module.provides_services ?? []).length > 0;
+    let hasRequired = false;
 
-    for (const key of p.required_services ?? []) {
+    for (const key of module.required_services ?? []) {
       const providerId = providerByKey.get(key);
       const fromId = providerId ? nodeIdOf(providerId) : nodeIdOf(HOST_NODE_ID);
-      const toId = nodeId;
       const label = shortKey(key);
       const edgeKey = `${fromId}→${toId}→${label}`;
       if (seenEdge.has(edgeKey)) continue;
       seenEdge.add(edgeKey);
       edges.push({ from: fromId, to: toId, label });
+      connectedIds.add(fromId).add(toId);
+      hasRequired = true;
+    }
+
+    if (hasProvider || hasRequired) {
+      nodes.push({
+        id: toId,
+        label: `${module.name || shortModuleId(module.id)} · ${shortModuleId(module.id)}`,
+        shape: 'rect',
+      });
     }
   }
 
-  // 没有任何依赖边的模块也要出现在图里（孤立节点），否则"装了哪些模块"
-  // 在树上会漏掉那些纯策略/纯身份模块（它们只声明存在性，不消费服务）。
-  return { direction: 'LR', nodes, edges, errors: [] };
+  const connectedModules = new Set(
+    modules.filter((module) => connectedIds.has(nodeIdOf(module.id))).map((module) => module.id),
+  );
+  const isolated = modules.filter((module) => !connectedModules.has(module.id));
+
+  return {
+    graph: { direction: 'LR', nodes, edges, errors: [] },
+    isolated,
+    edgeCount: edges.length,
+  };
+}
+
+/** 兼容旧调用方；新视图应使用 buildModuleDependencyModel。 */
+export function buildModuleDependencyGraph(modules: ModuleInfo[]): ProDocFlowGraph {
+  return buildModuleDependencyModel(modules).graph;
 }
