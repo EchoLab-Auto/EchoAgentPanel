@@ -1040,3 +1040,22 @@ html[data-corners='continuous'] {
   border-radius: 4px;
   background: var(--panel-hover, rgba(0, 0, 0, 0.06));
 }
+
+/* ── 浮层与 toast 的层级（2026-11 用户报「点开浮层按不到」）──────────────
+   toast 容器的 z-index 是 `--nm-z-toast`（500），浮层是 `--nm-z-popover`
+   （300）——于是**刚弹出的 toast 会盖住刚打开的浮层**：右侧边栏卡片的浮层
+   向上展开，正好落在 top-right 的 toast 区里，最上面一两项点不动。
+   语义上该反过来：浮层是用户**正在操作的**东西，通知是可等的信息。
+   只抬"含会话 API 面板"的浮层，不改库的默认层级——否则所有弹层都会盖住
+   toast，用户反而看不到「保存成功」这类确认。
+
+   为什么用 `:has()` 而不是给组件加 class：`NeumorphismPopover` 是多根组件
+   （触发器 + Teleport 出去的浮层），Vue 的 attribute fallthrough 在根上
+   落不下来——class 加了也贴不到真正的 `.nm-popover` 元素（实测 class 里
+   没有它）。`:has()` 从内容反查浮层根，不依赖库是否透传属性。 */
+.nm-popover:has(.api-picker__panel) {
+  /* `!important` 是必须的：浮层的 z-index 由组件用**内联 style** 写入
+     （`useZIndex` 的层级自增），样式表规则对不过内联样式——实测不加仍是
+     300，toast 照样压在上面。 */
+  z-index: calc(var(--nm-z-toast, 500) + 10) !important;
+}

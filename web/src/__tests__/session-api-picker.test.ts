@@ -138,6 +138,49 @@ describe('会话级 API：入口在「当前会话」侧栏卡片', () => {
     tui.unmount();
   });
 
+  // 2026-11 用户报「点开弹出的框超出边界，按不到」。
+  //
+  // 两个独立成因，都要钉住：
+  // ① 浮层写死 `position="top"`：内容比触发点上方的空间高时被顶到视口外
+  //    （实测 1440×900 下 y=-40，最上面两项点不到）→ 改用 `auto` 让库做
+  //    flip + 夹边；
+  // ② 选项全铺开 → 浮层高过视口 → 选项区改为独立滚动，高度按视口收缩。
+  it('e2) 浮层不用固定方位、选项区可滚动（防溢出视口）', async () => {
+    const wrapper = mountPicker();
+    // ① 方位交给 auto：写死 top/bottom 任一侧都可能在窄高窗口里溢出
+    const popover = wrapper.findComponent({ name: 'NeumorphismPopover' });
+    expect(popover.props('position')).toBe('auto');
+
+    // ② 选项包在滚动容器里（头部/脚注留在容器外，滚到哪儿都看得见归属）
+    await openPicker(wrapper);
+    const list = document.querySelector('.api-picker__list');
+    expect(list, '选项必须包在可滚动的列表容器里').toBeTruthy();
+    expect(list!.querySelectorAll('.api-picker__option').length).toBe(3);
+    // 头部与脚注不在滚动区内
+    expect(list!.querySelector('.api-picker__head')).toBeNull();
+    expect(list!.querySelector('.api-picker__hint')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('e3) 选中即收起浮层（否则面板留在屏幕上，看着像没生效）', async () => {
+    const wrapper = mountPicker();
+    const options = await openPicker(wrapper);
+    // 展开态：浮层出现在 body（Teleport），带 `--visible` 类。
+    expect(document.querySelector('.nm-popover'), '先确认已展开').toBeTruthy();
+
+    options[1]!.click();
+    await nextTick();
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 300)); // 等离场过渡跑完
+    await nextTick();
+
+    // NeumorphismPopover 没有受控 visible prop：只改本地 `open` 只会换箭头
+    // 图标，面板会留在屏幕上。这条断言覆盖"必须调它暴露的 hide()"。
+    expect(document.querySelector('.nm-popover--visible')).toBeNull();
+    expect(wrapper.find('.api-picker__trigger').attributes('aria-expanded')).toBe('false');
+    wrapper.unmount();
+  });
+
   it('e) 回归：「会话」面板不再渲染会话级 API 下拉', () => {
     // 曾经的 `.sw-api` 行内下拉必须彻底消失（否则两处入口会各说各话）。
     const wrapper = mount(SessionSwitcher, {

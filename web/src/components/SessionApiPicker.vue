@@ -55,6 +55,21 @@ const effective = computed(() =>
  */
 const open = ref(false);
 
+/**
+ * 浮层组件句柄。
+ *
+ * `NeumorphismPopover` 的可见性由**它自己**持有（没有受控 prop），所以
+ * "选完就收起"必须调它暴露的 `hide()`——只改本地 `open` 只是改了我们自己的
+ * 图标，面板会留在屏幕上（实测：选完仍开着，看着像没生效）。
+ */
+const popRef = ref<{ hide: () => void } | null>(null);
+
+/** 收起浮层（选完 / 无需改动时统一走这里）。 */
+function close() {
+  popRef.value?.hide();
+  open.value = false;
+}
+
 /** `local:workspace:` 通道才有持久化载体（Core 侧同判据）。 */
 const persistent = computed(() => sessionApiPersistent(props.sessionId));
 
@@ -78,11 +93,11 @@ const options = computed(() => [
 /** 提交：空值 = 清除覆盖（`ClearSessionApi`），否则 `SetSessionApi`。 */
 function choose(value: string) {
   if (!props.teamId) {
-    open.value = false;
+    close();
     return;
   }
   if (value === current.value) {
-    open.value = false;
+    close();
     return;
   }
   // 乐观更新：Core 若拒绝（profile 解析失败）会 emit Error，届时以回推为准。
@@ -100,7 +115,7 @@ function choose(value: string) {
       target,
     );
   }
-  open.value = false;
+  close();
 }
 
 /**
@@ -121,8 +136,13 @@ const triggerTitle = computed(() => {
 </script>
 
 <template>
+  <!-- `position="auto"`：浮层内建 flips + 视口夹边。写死 `top` 时，只要
+       内容比触发点上方的空间高，浮层就被顶到视口外（实测 1440×900 下
+       y=-40，最上面两个选项点不到）。内容高度这边也做了收缩上限（见
+       `.api-picker__list`），两条一起保证"永远整块在视口内"。 -->
   <NeumorphismPopover
-    position="top"
+    ref="popRef"
+    position="auto"
     trigger="click"
     :width="280"
     class="api-picker"
@@ -145,24 +165,29 @@ const triggerTitle = computed(() => {
           <span class="api-picker__title">本会话 API</span>
           <span class="api-picker__scope">{{ effective.scope }}</span>
         </div>
-        <button
-          v-for="option in options"
-          :key="option.value || '__persona__'"
-          type="button"
-          role="option"
-          class="api-picker__option"
-          :class="{ 'api-picker__option--active': option.value === current }"
-          :aria-selected="option.value === current"
-          @click="choose(option.value)"
-        >
-          <span class="api-picker__check" aria-hidden="true">
-            <PanelIcon v-if="option.value === current" name="check" size="xs" tone="accent" />
-          </span>
-          <span class="api-picker__text">
-            <span class="api-picker__name">{{ option.name }}</span>
-            <span v-if="option.detail" class="api-picker__detail">{{ option.detail }}</span>
-          </span>
-        </button>
+        <!-- 选项区独立滚动：供应商池可能十几个 profile，全部铺开会让浮层
+             高过视口（那就是"点不到"的直接原因）。头部与脚注留在滚动区外，
+             滚到哪儿都看得见"这是改哪个会话的 API"。 -->
+        <div class="api-picker__list">
+          <button
+            v-for="option in options"
+            :key="option.value || '__persona__'"
+            type="button"
+            role="option"
+            class="api-picker__option"
+            :class="{ 'api-picker__option--active': option.value === current }"
+            :aria-selected="option.value === current"
+            @click="choose(option.value)"
+          >
+            <span class="api-picker__check" aria-hidden="true">
+              <PanelIcon v-if="option.value === current" name="check" size="xs" tone="accent" />
+            </span>
+            <span class="api-picker__text">
+              <span class="api-picker__name">{{ option.name }}</span>
+              <span v-if="option.detail" class="api-picker__detail">{{ option.detail }}</span>
+            </span>
+          </button>
+        </div>
         <div class="api-picker__hint">
           {{
             persistent
@@ -252,6 +277,25 @@ const triggerTitle = computed(() => {
   color: var(--nm-text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 选项区滚动上限。
+ *
+ * 依据是**可用高度**而不是"多少个 profile"：浮层要整块落进视口，能给的
+ * 高度 = 视口 −（头部 + 脚注 + 浮层内边距 + 触发点附近的余量）。
+ * 320 是"再多也懒得滚"的舒适上限；120 是下限（再矮也要能看到两三项，
+ * 否则滚动条本身成了主要交互）。用 dvh 兼顾移动端地址栏收起/展开。
+ *
+ * 实测过的反例：只写 `100dvh - 240px` 时，520px 高的窗口里浮层仍有
+ * 390px 高、下沿溢出 13px（`bottom:533 > vh:520`）——这正是用户报的
+ * "超出边界、按不到"。 */
+.api-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: clamp(120px, calc(100dvh - 320px), 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .api-picker__option {
