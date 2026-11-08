@@ -304,6 +304,25 @@ function localLanding(teamId: string | null): string {
 
 
 /** 用户在「会话」切换器点选（用户意图；程序化切换走 selectSession）。 */
+/**
+ * 会话标签切换（2026-11）：目标是 `(session, team, core)` 三元组。
+ *
+ * 为什么必须带上 team/core：同一个 `local:tui::local_user` 在每个 core 的
+ * 每个人格下都存在，只按 session id 切会落到"另一个 core 的同名会话"
+ * 上（2026-10 串台事故的形状）。这里先钉住归属再切会话。
+ */
+function onTabSelect(sessionId: string, teamId: string | null, core: string | null) {
+  if (teamId && (teamId !== activeTeamId.value || core !== activeRegion.value)) {
+    // 复用既有切换路径：它会重建 timeline 缓存视图并重置会话落点，
+    // 紧接着下面的 selectSession 覆盖成标签自己的会话。
+    onTeamSelect(teamId, core);
+  } else if (!teamId && core && core !== activeRegion.value) {
+    applyActiveTeam(activeTeamId.value, core);
+  }
+  beforeSessionPick(sessionId);
+  selectSession(sessionId, 'tab-select');
+}
+
 function onSessionPick(id: string) {
   // 会话归属 core 即当前 agent 的归属 core：同名 team 跨 core 时，选中
   // 另一 core 的会话必须同步钉住 core，否则事件过滤会漏掉该会话的推送。
@@ -590,6 +609,7 @@ watch(
             @cancel="cancelWork"
             @select-team="onTeamSelect"
             @select-session="onSessionPick"
+            @select-tab="onTabSelect"
             @open-shell-detail="openShellDetail"
           />
         </KeepAlive>

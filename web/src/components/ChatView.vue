@@ -20,6 +20,8 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import { useChatScroll } from '@echolab-auto/ui-frame/composables/useChatScroll';
 import { ChatComposer, type ChatMessage } from '@echolab-auto/ui-frame/chat';
 import PanelIcon from './PanelIcon.vue';
+import ChatTabs from './ChatTabs.vue';
+import { chatTabs, ensureChatTabsLoaded, syncActiveTab, type ChatTab } from '../chat-tabs';
 import { state } from '../store';
 import { checklistsForSession, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
@@ -143,8 +145,32 @@ const emit = defineEmits<{
   cancel: [];
   selectTeam: [id: string | null, core: string | null];
   selectSession: [id: string];
+  /** 标签切换：目标是三元组，App 需同时钉住 core / team（见 chat-tabs.ts）。 */
+  selectTab: [sessionId: string, teamId: string | null, core: string | null];
   openShellDetail: [sessionId: string, core: string | null];
 }>();
+
+// ── 会话标签条（2026-11）─────────────────────────────────────────────
+//
+// 标签组是 per-window 的模块状态（`chat-tabs.ts`），这里只做两件事：
+// 1) **任何**到达某会话的路径都登记一个标签（会话切换器 / 工作区激活 /
+//    刷新恢复），用户不必先"新建标签"；
+// 2) 把点选/关闭的结果交回 App（只有它能同时改 activeSessionId、team、core）。
+ensureChatTabsLoaded();
+watch(
+  () => [state.activeRegion ?? null, props.activeTeamId ?? null, props.sessionId] as const,
+  ([core, teamId, sessionId]) => syncActiveTab(core, teamId, sessionId),
+  { immediate: true },
+);
+
+/** 标签条占位高度（px）；0 = 没有标签（不占位，也不改侧栏上界）。 */
+const CHAT_TABS_HEIGHT = 34;
+const tabsHeight = computed(() => (chatTabs.value.length ? CHAT_TABS_HEIGHT : 0));
+const tabsTop = computed(() => `${tabsHeight.value}px`);
+
+function onTabSelect(tab: ChatTab): void {
+  emit('selectTab', tab.sessionId, tab.teamId, tab.core);
+}
 
 const input = ref('');
 /** 待发送图片（data URL 形式） */
@@ -1062,7 +1088,9 @@ function syncOverlayInset() {
   const bottomBase = Number.parseFloat(entryBottom.value) || 170;
   const bottom = Math.max(0, Math.round(bottomBase + RAIL_ENTRY_GAP + keyboardInset.value));
   overlayInset.value = {
-    top: 0,
+    // 标签条在会话视图顶部：覆盖面板的上界必须让过它，否则点开面板就看不见
+    // 现在有哪几个会话标签（切换成本反而升高）。
+    top: tabsHeight.value,
     bottom,
     left: Math.max(0, Math.round(t.left - r.left + padLeft)),
     right: Math.max(0, Math.round(r.right - t.right + padRight)),
@@ -1070,6 +1098,7 @@ function syncOverlayInset() {
 }
 
 let overlayObserver: ResizeObserver | null = null;
+watch(tabsHeight, () => syncOverlayInset());
 onMounted(() => {
   syncOverlayInset();
   if (typeof ResizeObserver === 'undefined') return;
@@ -1734,7 +1763,15 @@ function mediaSrc(img: string): string {
 </script>
 
 <template>
-  <div ref="viewRootRef" class="chat-view" :class="{ 'chat-view--overlay-open': anyOverlayOpen }" @paste="onPaste">
+  <div
+    ref="viewRootRef"
+    class="chat-view"
+    :class="{ 'chat-view--overlay-open': anyOverlayOpen, 'chat-view--tabs': tabsHeight > 0 }"
+    @paste="onPaste"
+  >
+    <!-- 会话标签条（2026-11）：点选 = 切到该 (core, team, session)；`+` 打开
+         已有的「会话」覆盖面板挑一个（不新增第二套选择器）。 -->
+    <ChatTabs @select="onTabSelect" @create="toggleOverlay('sessions')" />
     <!-- 上下文入口：输入框上方左侧，磨砂玻璃按钮 -->
     <div
       ref="entryRowRef"
@@ -2319,7 +2356,9 @@ function mediaSrc(img: string): string {
    空列仅在拖动中出现（作为投放区），因此平时只剩有卡片的列。 */
 .chat-rail {
   position: absolute;
-  top: 0;
+  /* 标签条占位：有标签时侧栏整体下移，避免卡片被标签条压住（两者都在
+     会话视图顶部，侧栏是绝对定位、不参与 flex 布局）。 */
+  top: v-bind(tabsTop);
   /* 下界统一让出入口行（底部功能条）：入口行高 37px（实测，由按钮尺寸决定）
      + 8px 间隙 = `RAIL_ENTRY_GAP`。**与覆盖面板的 `overlayInset.bottom` 同源**
      ——会话区覆盖面板的上下边界要对齐侧栏，所以两处都读这一个常量。 */

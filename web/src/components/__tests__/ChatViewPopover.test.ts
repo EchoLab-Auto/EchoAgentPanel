@@ -16,6 +16,7 @@ import ChatView from '../ChatView.vue';
 import { state } from '../../store';
 import { entryOverlay } from '../../overlays';
 import { registerPanelExtension } from '../../extensions/registry';
+import { chatTabs, resetChatTabs } from '../../chat-tabs';
 
 const WorkspacePanelStub = defineComponent({
   name: 'WorkspacePanel',
@@ -54,6 +55,7 @@ function mountChatView() {
 }
 
 afterEach(() => {
+  resetChatTabs();
   wrapper?.unmount();
   wrapper = null;
   document.body.innerHTML = '';
@@ -121,8 +123,10 @@ describe('ChatView 入口弹层（PanelPopover）', () => {
     const overlay = w.element.querySelector('.session-overlay') as HTMLElement | null;
     expect(overlay).not.toBeNull();
     const style = overlay!.getAttribute('style') ?? '';
-    // 上沿 = 会话视图顶（与侧栏 top 一致）
-    expect(style).toContain('top: 0px');
+    // 上沿 = 会话视图顶 —— 但标签条（2026-11）在顶部占一行时，覆盖面板必须
+    // 让过它：否则点开面板就看不见有哪几个会话标签，切换成本反而升高。
+    // 该用例打开的是内置「工作区」覆盖面板，此时必有当前会话的标签。
+    expect(style).toContain(`top: ${chatTabs.value.length ? 34 : 0}px`);
     // 下沿 = 侧栏下界：entryBottom 初值 170 + RAIL_ENTRY_GAP 45 = 215
     // （窄屏另加 keyboardInset；jsdom 下无键盘）
     expect(style).toContain('bottom: 215px');
