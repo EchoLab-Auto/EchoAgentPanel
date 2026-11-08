@@ -1,11 +1,15 @@
 //! 会话级 API 的**入口位置**契约（2026-11 用户要求）。
 //!
-//! 背景：会话级 API 覆盖原来是「会话」覆盖面板里每行一个下拉。两个问题：
-//! ① 切会话时看不到当前用的是哪个 API（要打开面板才知道）；② 行内下拉与
-//! 行选中挤在同一行，靠 `@click.stop` 分隔，动一下就配错。
+//! 位置演变（2026-11 用户两次调整后的终态）：
+//! ① 原位置：「会话」覆盖面板每行一个下拉——切会话时看不到当前用的是哪个
+//!    API，且行内下拉与行选中挤在一行（靠 `@click.stop` 分隔，容易配错）；
+//! ② 中间态：搬到输入区状态行的 API 徽标；
+//! ③ 终态（用户要求）：入口放在右侧边栏的**「当前会话」卡片**——配置属于
+//!    会话属性，和会话名 / 上下文容量在一起才合乎诊断顺序。输入区状态行只
+//!    保留只读展示。
 //!
-//! 现在改为：输入区状态行的 API 徽标即入口（显示当前生效者，点开可改），
-//! 「会话」面板不再有 API 下拉。本测试锁定这两件事。
+//! 本测试锁定：卡片行呈现、点开可改、命令定向、持久化边界如实标注，以及
+//! 「会话」面板不再有第二处入口。
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
@@ -56,14 +60,7 @@ beforeEach(() => {
 
 function mountPicker(over: Record<string, unknown> = {}) {
   return mount(SessionApiPicker, {
-    props: {
-      sessionId: WORKSPACE,
-      teamId: 'alice',
-      core: 'core-a',
-      effectiveLabel: 'moonshot / k3',
-      effectiveScope: 'agent「Alice」',
-      ...over,
-    },
+    props: { sessionId: WORKSPACE, teamId: 'alice', core: 'core-a', ...over },
     attachTo: document.body,
   });
 }
@@ -81,11 +78,16 @@ async function openPicker(wrapper: ReturnType<typeof mountPicker>) {
   return Array.from(document.querySelectorAll<HTMLElement>('.api-picker__option'));
 }
 
-describe('会话级 API：入口在状态行、不在「会话」面板', () => {
-  it('a) 徽标显示当前生效的 provider/model，并标出凭据来源层级', () => {
+describe('会话级 API：入口在「当前会话」侧栏卡片', () => {
+  it('a) 卡片行显示当前生效的 provider/model，并标出来源层级', () => {
+    // Alice 的 api_profile = kimi → provider/model 取自该 profile
+    state.teams = [
+      { id: 'alice', name: 'Alice', enabled: true, sessions: 0, api_profile: 'kimi' },
+    ] as never;
     const wrapper = mountPicker();
     expect(wrapper.find('.api-picker__label').text()).toBe('moonshot / k3');
-    expect(wrapper.find('.api-picker__trigger').attributes('title')).toContain('agent「Alice」');
+    expect(wrapper.find('.api-picker__source').text()).toBe('agent「Alice」');
+    expect(wrapper.find('.api-picker__trigger').attributes('title')).toContain('profile「kimi」');
     wrapper.unmount();
   });
 
@@ -130,7 +132,7 @@ describe('会话级 API：入口在状态行、不在「会话」面板', () => 
     workspace.unmount();
     document.body.innerHTML = '';
 
-    const tui = mountPicker({ sessionId: TUI, effectiveScope: '全局激活' });
+    const tui = mountPicker({ sessionId: TUI });
     await openPicker(tui);
     expect(document.querySelector('.api-picker__hint')?.textContent).toContain('仅在本次运行有效');
     tui.unmount();

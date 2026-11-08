@@ -20,10 +20,10 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import { useChatScroll } from '@echolab-auto/ui-frame/composables/useChatScroll';
 import { ChatComposer, type ChatMessage } from '@echolab-auto/ui-frame/chat';
 import PanelIcon from './PanelIcon.vue';
-import SessionApiPicker from './SessionApiPicker.vue';
 import ChatTabs from './ChatTabs.vue';
 import { chatTabs, ensureChatTabsLoaded, syncActiveTab, type ChatTab } from '../chat-tabs';
 import { state } from '../store';
+import { effectiveSessionApi, profileMissing } from '../session-api';
 import { checklistsForSession, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
@@ -1151,48 +1151,27 @@ const activityText = computed(() => {
 });
 
 /**
- * **当前会话真正生效的** API profile：`{ name, scope }`。
+ * **当前会话真正生效的** API（解析口径见 `../session-api`）。
  *
- * 解析顺序与 Core 完全一致（会话级覆盖 → persona 引用 → 全局激活 → 顶层默认）：
- *
- *   ① 会话级覆盖 `state.sessionApiOverrides[sessionId]`
- *      （工作区对话自己的 `api_profile`，Core 侧 `set_session_provider`）
- *   ② 当前 agent 的 `[agent.teams.*].api_profile`
- *      （Core `apply_named_profile`：把该 profile 的 provider/model **合入**
- *      这个 persona 自己的顶层字段，只影响该 agent 的会话）
- *   ③ 全局 `active_api`（`[agent].active_api`，`apply_active_profile`）
- *   ④ 都没有 → 顶层默认配置（`[agent].provider` / `[agent].model`）
- *
- * 为什么第 ② 层必须在这里（2026-10 修 bug）：徽标此前只解析 ①③④，于是切到
- * `api_profile` 与全局 `active_api` 不同的 agent 时——本机「EchoCode」
- * （`deepseek-self-1` / `deepseek-flash`）对全局 `kimi`——**入口行卡片写着
- * `deepseek-flash`、徽标却仍显示 `kimi / k3.1-pro`**：同一个界面对"这条回答
- * 用哪个 API"给出两个互相矛盾的答案，用户无从判断哪个是真的。
- * 现在 ② 与 `AgentSwitcher.resolveModel` 同源，卡片与徽标不可能再打架。
+ * 状态行只**显示**它；可编辑入口在右侧边栏的「当前会话」卡片上（用户要求：
+ * 配置属于会话属性，应当和会话名/上下文容量放在一起，而不是塞在输入区底部）。
  */
-const apiEffective = computed<{ name: string; scope: string }>(() => {
-  const override = state.sessionApiOverrides[props.sessionId] ?? '';
-  if (override) return { name: override, scope: '本会话覆盖' };
-  const team = currentTeam.value ?? state.teams[0] ?? null;
-  const persona = team?.api_profile ?? '';
-  if (persona) return { name: persona, scope: `agent「${team?.name || team?.id || ''}」` };
-  const global = state.api?.active_api ?? '';
-  if (global) return { name: global, scope: '全局激活' };
-  return { name: '', scope: '顶层默认配置' };
-});
+const apiEffective = computed(() =>
+  effectiveSessionApi(state, props.sessionId, props.activeTeamId ?? null),
+);
+const apiLabel = computed(() => apiEffective.value.label);
 
-/** 徽标文案：`provider / model`（profile 取不到时回落顶层，与 Core 同语义）。 */
-const apiLabel = computed(() => {
-  const api = state.api;
-  if (!api) return '';
-  const { name } = apiEffective.value;
-  const profile = name ? api.profiles?.find((x) => x.name === name) : undefined;
-  const provider = profile?.provider || api.provider || '';
-  const model = profile?.model || api.model || '';
-  if (!provider && !model) return '';
-  if (!provider) return model;
-  if (!model) return provider;
-  return `${provider} / ${model}`;
+/**
+ * 只读徽标的悬停说明：生效层级 + profile 名。
+ *
+ * 编辑入口不在这里（在侧栏「当前会话」卡片），但"这个 API 是哪来的"仍要
+ * 随手可查——排障时最常问的就是"为什么切了 agent 模型没变"。
+ */
+const apiStatusTitle = computed(() => {
+  const { name, scope, label } = apiEffective.value;
+  const profile = name ? ` · profile「${name}」` : '';
+  const missing = profileMissing(state, name) ? '（供应商池中无此 profile，实际回落顶层默认）' : '';
+  return `当前会话 API：${label || '未知'}\n来源：${scope}${profile}${missing}`;
 });
 
 /** 推理消息所属会话当前是否仍在输出（thinking / tool / subagent）——打字机准入条件之一。 */
@@ -2307,18 +2286,10 @@ function mediaSrc(img: string): string {
                  用户要"随时能看出这条回答是哪个 API 产出的"。三层来源（会话
                  覆盖 / agent 的 api_profile / 全局 active_api）取最靠前的一层
                  ——即本会话实际生效者，见 setup 里的 `apiEffective`。 -->
-            <!-- 徽标容器保留 `.chat-status__api`（宽度/省略号/行高都在那套规则里），
-                 交互交给里面的 picker。 -->
-            <span v-if="apiLabel" class="chat-status__api">
-              <SessionApiPicker
-                :session-id="props.sessionId"
-                :team-id="props.activeTeamId ?? null"
-                :core="state.activeRegion ?? null"
-                :effective-label="apiLabel"
-                :effective-scope="apiEffective.scope"
-                :profile-name="apiEffective.name"
-              />
-            </span>
+            <!-- 只读展示：可编辑入口在右侧边栏「当前会话」卡片上（见
+                 `SessionContextCard`）。输入区这行是"这次输入会得到什么响应"的
+                 状态提示，不放配置动作。 -->
+            <span v-if="apiLabel" class="chat-status__api" :title="apiStatusTitle">{{ apiLabel }}</span>
             <!-- 右：相位文案，仅忙碌时存在。live region 只包这一段——API 名是
                  静态信息，重复播报只会吵。 -->
             <span v-if="activityText" class="chat-status__live" role="status" aria-live="polite">

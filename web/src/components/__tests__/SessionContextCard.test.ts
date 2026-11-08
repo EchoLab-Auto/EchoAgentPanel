@@ -93,6 +93,39 @@ describe('SessionContextCard', () => {
     expect(wrapper.get('.session-context__meter-head').text()).toContain('2%');
   });
 
+  // 2026-11 用户要求：会话级 API 的可编辑入口放在这张卡片上。
+  // 位置取舍：配置属于"这个会话"的属性，与会话名 / 容量同卡才合乎诊断顺序；
+  // 输入区状态行只保留只读展示（见 ChatView）。
+  it('卡片内提供会话级 API 入口，且随会话切换跟随', async () => {
+    state.api = {
+      provider: 'moonshot',
+      model: 'k3',
+      active_api: '',
+      profiles: [{ name: 'kimi', provider: 'moonshot', model: 'k3' }],
+    } as never;
+    state.sessionApiOverrides = { 'session-a': 'kimi' };
+    wrapper = mount(SessionContextCard, { props: { teamId: 'alix' } });
+    await nextTick();
+    const picker = wrapper.findComponent({ name: 'SessionApiPicker' });
+    expect(picker.exists(), '「当前会话」卡片上必须有 API 入口').toBe(true);
+    expect(picker.props('sessionId')).toBe('session-a');
+    expect(picker.props('teamId')).toBe('alix');
+    // 会话级覆盖生效时，卡片行显示覆盖值而不是 persona/全局值
+    expect(wrapper.get('.api-picker__label').text()).toBe('moonshot / k3');
+    expect(wrapper.get('.api-picker__source').text()).toBe('本会话覆盖');
+
+    // 切会话 → 入口跟着指向新会话（不能停在旧会话上改错对象）
+    state.sessions.push(session('session-b', '工作区 / base'));
+    railSessionId.value = 'session-b';
+    await nextTick();
+    expect(wrapper.findComponent({ name: 'SessionApiPicker' }).props('sessionId')).toBe('session-b');
+    // 新会话没有覆盖 → 来源不再是「本会话覆盖」；给了 persona 级 api_profile
+    // 就落到 agent 级（这正是徽标与卡片必须共用同一解析口径的原因）。
+    (state.teams[0] as { api_profile?: string }).api_profile = 'kimi';
+    await nextTick();
+    expect(wrapper.get('.api-picker__source').text()).toContain('agent');
+  });
+
   it('一轮回答结束时刷新快照，不建立轮询', async () => {
     wrapper = mount(SessionContextCard, { props: { teamId: 'alix' } });
     expect(sendCommand).toHaveBeenCalledTimes(1);

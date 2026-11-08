@@ -13,6 +13,7 @@ import { sessionScopedKey } from '../keys';
 import { state } from '../store';
 import { contextSnapshotFor } from '../context-cache';
 import PanelIcon from './PanelIcon.vue';
+import SessionApiPicker from './SessionApiPicker.vue';
 
 const props = defineProps<{ teamId: string | null }>();
 
@@ -176,6 +177,17 @@ watch(activityPhase, (phase, previous) => {
     >
       {{ pendingText }}
     </div>
+
+    <!-- 会话级 API（2026-11 用户要求：可展开修改的入口放在「当前会话」卡片）。
+         放在容量之后：先看"是哪个会话、装了多少"，再看"它用哪个模型"——顺序
+         即诊断顺序（上下文爆了先看容量，回答不对先看 API）。快照未到时也渲染：
+         API 是会话属性，不该被"上下文还在读"挡住。 -->
+    <SessionApiPicker
+      v-if="railSessionId"
+      :session-id="railSessionId"
+      :team-id="teamId"
+      :core="core ?? null"
+    />
   </section>
 </template>
 

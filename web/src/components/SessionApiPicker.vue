@@ -25,6 +25,7 @@ import NeumorphismPopover from '@echolab-auto/ui-frame/components/NeumorphismPop
 import PanelIcon from './PanelIcon.vue';
 import { sendCommand } from '../connection';
 import { state } from '../store';
+import { effectiveSessionApi, profileMissing, sessionApiPersistent } from '../session-api';
 
 const props = defineProps<{
   /** 目标会话（当前正在看的那个）。 */
@@ -33,15 +34,17 @@ const props = defineProps<{
   teamId: string | null;
   /** 会话归属 core（多上游时定向，否则命令可能落到别的节点）。 */
   core: string | null;
-  /** 当前生效的 `provider / model`（父组件已按四层顺序解析好）。 */
-  effectiveLabel: string;
-  /** 生效层级说明（"本会话覆盖" / "agent「X」" / "全局激活" / 顶层默认）。 */
-  effectiveScope: string;
-  /** 生效的 profile 名（空 = 顶层默认配置，没有 profile 可报）。 */
-  profileName?: string;
-  /** 回退标签（跨会话切换时避免闪空）。 */
-  fallback?: boolean;
 }>();
+
+/**
+ * 生效 API 由本组件自己解析（`../session-api` 是唯一口径）。
+ *
+ * 为什么不用 props 传：状态行与侧栏卡片都要显示同一件事，各自持有一份"已解析
+ * 好"的值就会分叉（2026-10 就是这么出现"卡片说 deepseek、徽标说 kimi"的）。
+ */
+const effective = computed(() =>
+  effectiveSessionApi(state, props.sessionId, props.teamId),
+);
 
 /**
  * 浮层开合状态。
@@ -53,7 +56,7 @@ const props = defineProps<{
 const open = ref(false);
 
 /** `local:workspace:` 通道才有持久化载体（Core 侧同判据）。 */
-const persistent = computed(() => props.sessionId.startsWith('local:workspace:'));
+const persistent = computed(() => sessionApiPersistent(props.sessionId));
 
 /** 当前会话的覆盖值（空 = 跟随 persona）。 */
 const current = computed(() => state.sessionApiOverrides[props.sessionId] ?? '');
@@ -107,8 +110,10 @@ function choose(value: string) {
  * 出自哪个 profile（同一 provider 常有多个 profile 指向不同端点/key）。
  */
 const triggerTitle = computed(() => {
-  const profile = props.profileName ? ` · profile「${props.profileName}」` : '';
-  const head = `当前会话 API：${props.effectiveLabel || '未知'}\n来源：${props.effectiveScope}${profile}`;
+  const { name, scope, label } = effective.value;
+  const profile = name ? ` · profile「${name}」` : '';
+  const missing = profileMissing(state, name) ? '（供应商池中无此 profile，实际回落顶层默认）' : '';
+  const head = `当前会话 API：${label || '未知'}\n来源：${scope}${profile}${missing}`;
   return persistent.value
     ? `${head}\n点开可改为其它供应商（会写入该工作区对话）`
     : `${head}\n点开可改为其它供应商（本会话不是工作区通道，改动仅在本次运行有效）`;
@@ -123,17 +128,22 @@ const triggerTitle = computed(() => {
     class="api-picker"
     @visible-change="(visible: boolean) => (open = visible)"
   >
-    <!-- 触发器：沿用状态行的纯文字徽标（不加外框），补一个可点的语义。 -->
+    <!-- 触发器：卡片里的一行（左标签 / 中当前值 / 右展开箭头），与
+         「会话名称」「上下文容量」同一视觉节奏。 -->
     <button type="button" class="api-picker__trigger" :title="triggerTitle" :aria-expanded="open">
-      <span class="api-picker__label">{{ effectiveLabel || '未知 API' }}</span>
-      <PanelIcon name="chevron-up" size="xs" tone="muted" />
+      <span class="api-picker__caption">API 配置</span>
+      <span class="api-picker__value">
+        <span class="api-picker__label">{{ effective.label || '未知' }}</span>
+        <span v-if="effective.name" class="api-picker__source">{{ effective.scope }}</span>
+      </span>
+      <PanelIcon :name="open ? 'chevron-down' : 'chevron-right'" size="xs" tone="muted" />
     </button>
 
     <template #content>
       <div class="api-picker__panel" role="listbox" aria-label="会话 API">
         <div class="api-picker__head">
           <span class="api-picker__title">本会话 API</span>
-          <span class="api-picker__scope">{{ effectiveScope }}</span>
+          <span class="api-picker__scope">{{ effective.scope }}</span>
         </div>
         <button
           v-for="option in options"
@@ -166,30 +176,52 @@ const triggerTitle = computed(() => {
 </template>
 
 <style scoped>
-/* 触发器：只抵一档视觉层次——它就是状态行里那行小字，多一个「可点」的暗示。 */
+/* 触发器：卡片里的一行（与「会话名称」「上下文容量」同节奏）。
+   常态不画边框（卡片里已经有分隔线），悬停才浮现可点区域。 */
 .api-picker__trigger {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  max-width: 100%;
+  gap: 8px;
+  width: 100%;
   min-width: 0;
-  padding: 0;
+  padding: 3px 4px;
+  margin: 0 -4px;
   border: none;
+  border-radius: 8px;
   background: transparent;
   color: var(--nm-text-primary);
   font: inherit;
-  font-size: 11px;
-  line-height: var(--chat-status-h, 17px);
-  opacity: 0.75;
+  text-align: left;
   cursor: pointer;
 }
 .api-picker__trigger:hover {
-  opacity: 1;
-  color: var(--panel-accent);
+  background: var(--panel-hover);
+}
+.api-picker__caption {
+  flex: none;
+  color: var(--nm-text-secondary);
+  font-size: 11px;
+}
+.api-picker__value {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .api-picker__label {
   overflow: hidden;
-  min-width: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 来源层级（会话覆盖 / agent / 全局）：同名 provider/model 出自不同层级时
+   唯一的区分线索，常驻但压低对比度。 */
+.api-picker__source {
+  overflow: hidden;
+  color: var(--nm-text-secondary);
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
