@@ -176,6 +176,88 @@ describe('会话历史通道（RequestSessionHistory → SessionHistory）', () 
     expect(state.sessionHistory[KEY].messages[1].tool?.output).toBeNull();
   });
 
+  it('e) 孤儿工具行按开始时刻落位，不被甩到更晚的回答之后', () => {
+    // 快照里没有这次工具调用（ToolCall 事件被压缩吃掉 / 派生早于调用），
+    // 但同回合更晚的正文在快照里。旧实现按“到达时刻 = 最新”把它 append 到
+    // 整段快照之后 → 工具卡插在更晚的回答后面（用户可见的顺序错乱）。
+    dispatch(
+      {
+        SessionHistory: {
+          team_id: 't',
+          session_id: 's1',
+          messages: [
+            { kind: 'user', content: 'go', session_id: 's1', time: 100, seq: 1 },
+            { kind: 'backend', content: '第二步的结论', session_id: 's1', time: 200, seq: 2 },
+          ],
+          total: 2,
+          truncated: false,
+          max_seq: 5,
+        },
+      },
+      'core-a',
+    );
+    state.trunk = [
+      {
+        key: 'w-tool',
+        role: 'tool',
+        content: 'bash',
+        // 真实开始时刻早于第二条正文（快照派生用的也是开始时刻）。
+        time: 150,
+        sessionId: 's1',
+        tool: { name: 'bash', input: '{}', output: 'ok', status: 'succeeded', startedAtMs: 150_000 },
+      },
+    ];
+    const merged = sessionMessagesFor(state, 's1', 't');
+    expect(merged.map((m) => m.role)).toEqual(['user', 'tool', 'backend']);
+    expect(merged[1].content).toBe('bash');
+  });
+
+  it('f) 无 tool_call_id 的工具行按「工具名 + 开始时刻」认领快照条目（不新增行）', () => {
+    dispatch(
+      {
+        SessionHistory: {
+          team_id: 't',
+          session_id: 's1',
+          messages: [
+            {
+              kind: 'tool',
+              content: 'bash',
+              session_id: 's1',
+              time: 10,
+              seq: 1,
+              tool: {
+                name: 'bash',
+                input: '{}',
+                output: null,
+                failed: false,
+                tool_call_id: '',
+                started_at_ms: 10_000,
+              },
+            },
+          ],
+          total: 1,
+          truncated: false,
+          max_seq: 0,
+        },
+      },
+      'core-a',
+    );
+    state.trunk = [
+      {
+        key: 'w-tool',
+        role: 'tool',
+        content: 'bash',
+        time: 10,
+        sessionId: 's1',
+        tool: { name: 'bash', input: '{}', output: 'done', status: 'succeeded', startedAtMs: 10_000 },
+      },
+    ];
+    const merged = sessionMessagesFor(state, 's1', 't');
+    expect(merged.length, '同一行被就地补丁，不得新增').toBe(1);
+    expect(merged[0].tool?.output).toBe('done');
+    expect(state.sessionHistory[KEY].messages[0].tool?.output).toBeNull();
+  });
+
   it('d) 无快照：退回窗口过滤（现行为）', () => {
     state.trunk = [
       { key: 'x1', role: 'user', content: 'm', time: 1, sessionId: 'sX' },

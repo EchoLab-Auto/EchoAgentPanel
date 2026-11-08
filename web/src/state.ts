@@ -564,7 +564,14 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
     // 4) 新条目：落在当前输出位置。
     //    游标还没建立（trunk 缺少前驱条目，例如已滚出窗口）时用**时间**兜底
     //    ——在尚未输出的快照条目里找第一条更晚的，把它之前的先铺出去。
-    if (!cursorEstablished) {
+    //
+    //    **工具行例外**（2026-11 顺序修复）：每一条都重新按时间锚定，而不是
+    //    只认第一次。工具行的 `time` 是执行开始时刻（真实时序），而它往往
+    //    在快照里没有对应条目（`tool_call_id` 缺失 / 压缩吃掉 ToolCall）——
+    //    此时若沿用“游标已建立就一路 append”，它会被甩到整段快照之后，表现
+    //    为“早开始的工具卡排在更晚的回答后面”。重新锚定只在锚点仍在未输出
+    //    区间时生效（`flushThrough` 不回退游标），所以乱序风险为零。
+    if (!cursorEstablished || w.role === 'tool') {
       const anchor = timeInsertIndexFrom(out, w, snap);
       flushThrough(anchor - 1);
       cursorEstablished = true;
@@ -617,6 +624,14 @@ function stripWireElision(text: string): string {
 interface SnapshotIndex {
   byRoleTime: Map<string, number[]>;
   byToolCallId: Map<string, number>;
+  /**
+   * 工具名 + 开始时刻（epoch ms）→ 快照下标。
+   *
+   * 为什么需要：`tool_call_id` 是**新 Core** 才有的字段，且历史派生时若
+   * `ToolCall` 事件已被压缩/归档吃掉就只剩 `ToolResult`（id 为空）。这类
+   * 工具行没有 id 可配，只能靠“同一个工具、同一个开始时刻”认出来。
+   */
+  byToolStart: Map<string, number>;
   /** 工具名 → 最后一个 `running` 工具行的下标（名字兜底用）。 */
   byToolNameRunning: Map<string, number>;
   /**
@@ -630,6 +645,9 @@ interface SnapshotIndex {
 }
 
 const roleTimeKey = (role: string, time: number): string => `${role}|${time}`;
+
+/** 工具行身份：名字 + 开始时刻（epoch ms；无 id 时的配对键）。 */
+const toolStartKey = (name: string, startedAtMs: number): string => `${name}|${startedAtMs}`;
 
 /**
  * 内容签名：角色 + 归一化正文（**全文**，不截断——截断会把同一段长回答的
@@ -668,6 +686,7 @@ function buildSnapshotIndex(list: DisplayMessage[]): SnapshotIndex {
   const index: SnapshotIndex = {
     byRoleTime: new Map(),
     byToolCallId: new Map(),
+    byToolStart: new Map(),
     byToolNameRunning: new Map(),
     bySignature: new Map(),
   };
@@ -681,6 +700,9 @@ function buildSnapshotIndex(list: DisplayMessage[]): SnapshotIndex {
     if (tool) {
       // 存**最后一个**：原判据自后向前找（后到的是同一 call 的最新态）。
       if (tool.toolCallId) index.byToolCallId.set(tool.toolCallId, i);
+      if (typeof tool.startedAtMs === 'number') {
+        index.byToolStart.set(toolStartKey(tool.name, tool.startedAtMs), i);
+      }
       if (tool.status === 'running') index.byToolNameRunning.set(tool.name, i);
       // 工具行不进内容索引：同名工具连排是常态，`content` 只是工具名、
       // 不具身份性（配对一律走 tool_call_id，见 `findToolEntryInIndex`）。
@@ -711,6 +733,12 @@ function findToolEntryInIndex(
     const hit = index.byToolCallId.get(tool.toolCallId);
     // 索引命中的下标必须仍然指向同一条（补丁会换对象，但 call id 不变）。
     return hit !== undefined && list[hit]?.role === 'tool' ? hit : -1;
+  }
+  // 无 id（旧 Core / 结果先到）：开始时刻是唯一的身份。它不受运行态影响，
+  // 因此放在下面的 running 兜底**之前**——先认身份，再猜状态。
+  if (typeof tool.startedAtMs === 'number') {
+    const hit = index.byToolStart.get(toolStartKey(tool.name, tool.startedAtMs));
+    if (hit !== undefined && list[hit]?.role === 'tool') return hit;
   }
   if (tool.output == null) return -1;
   const hit = index.byToolNameRunning.get(tool.name);
@@ -1544,7 +1572,10 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         const duplicate = duplicateIndex >= 0;
         if (duplicate) repositionCompletedTool(state, duplicateIndex, startedAtMs);
         if (!duplicate) {
-          pushTo(state, 'tool', e.tool_name, Math.floor(Date.now() / 1000), {
+          // `time` 必须是**真实开始时刻**：它是合并历史快照时唯一的时间锚。
+          // 用到达时刻会让"早开始、晚投影"的工具行被当成最新条目甩到末尾
+          // （实测症状：工具卡插在更晚的 AgentOutput 之后）。
+          pushTo(state, 'tool', e.tool_name, Math.floor(startedAtMs / 1000), {
             sessionId: e.session_id,
             animate: true,
             entry, // 条目身份（旧版 Core 为 undefined → 不写字段）
