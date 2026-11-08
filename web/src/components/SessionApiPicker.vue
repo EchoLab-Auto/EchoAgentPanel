@@ -25,7 +25,12 @@ import NeumorphismPopover from '@echolab-auto/ui-frame/components/NeumorphismPop
 import PanelIcon from './PanelIcon.vue';
 import { sendCommand } from '../connection';
 import { state } from '../store';
-import { effectiveSessionApi, profileMissing, sessionApiPersistent } from '../session-api';
+import {
+  effectiveSessionApi,
+  profileMissing,
+  rememberSessionApiOverride,
+  sessionApiPersistent,
+} from '../session-api';
 
 const props = defineProps<{
   /** 目标会话（当前正在看的那个）。 */
@@ -115,6 +120,11 @@ function choose(value: string) {
       target,
     );
   }
+  // 非工作区通道的覆盖 Core 只存内存（`persist_session_api_profile` 直接跳过
+  // 非 `local:workspace:`），刷新页面后没有任何事件能读回来。Panel 自己记一份
+  // 并在重连时重放（见 `session-api.ts` 的"为什么必须由 Panel 记"）。
+  // 工作区对话不记：那边的真值在对话 JSON 里，记第二份会让"别处清除"失效。
+  rememberSessionApiOverride(props.core, props.teamId, props.sessionId, value || null);
   close();
 }
 
@@ -131,7 +141,7 @@ const triggerTitle = computed(() => {
   const head = `当前会话 API：${label || '未知'}\n来源：${scope}${profile}${missing}`;
   return persistent.value
     ? `${head}\n点开可改为其它供应商（会写入该工作区对话）`
-    : `${head}\n点开可改为其它供应商（本会话不是工作区通道，改动仅在本次运行有效）`;
+    : `${head}\n点开可改为其它供应商（非工作区会话：Panel 记住并在重连时重放，Core 重启后失效）`;
 });
 </script>
 
@@ -192,7 +202,7 @@ const triggerTitle = computed(() => {
           {{
             persistent
               ? '写入该工作区对话，重启后仍生效。'
-              : '非工作区会话：仅在本次运行有效（重启回到 persona 配置）。'
+              : '非工作区会话：Panel 记住并在重连时重放（Core 重启后回到 persona 配置）。'
           }}
         </div>
       </div>

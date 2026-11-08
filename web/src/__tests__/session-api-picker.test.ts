@@ -23,6 +23,7 @@ vi.mock('../connection', () => ({
 import SessionApiPicker from '../components/SessionApiPicker.vue';
 import SessionSwitcher from '../components/SessionSwitcher.vue';
 import { state } from '../store';
+import { cachedSessionApiOverrides } from '../session-api';
 import type { SessionInfo } from '../protocol';
 
 const WORKSPACE = 'local:workspace:echo-agent/v:local_user';
@@ -134,8 +135,34 @@ describe('会话级 API：入口在「当前会话」侧栏卡片', () => {
 
     const tui = mountPicker({ sessionId: TUI });
     await openPicker(tui);
-    expect(document.querySelector('.api-picker__hint')?.textContent).toContain('仅在本次运行有效');
+    const hint = document.querySelector('.api-picker__hint')?.textContent ?? '';
+    // 非工作区会话的真相（2026-11）：Core 只存内存，持久化落在 Panel 侧
+    // （localStorage + 重连重放）。说"仅在本次运行有效"已不成立，但也不能
+    // 承诺"重启后仍生效"——Core 重启后要靠 Panel 连上来才能装回去。
+    expect(hint).toContain('重放');
+    expect(hint).toContain('Core 重启后');
+    expect(hint).not.toContain('重启后仍生效');
     tui.unmount();
+  });
+
+  it('d2) 非工作区会话选择后写进 Panel 缓存（刷新后能重放）；工作区不写', async () => {
+    localStorage.clear();
+    const tui = mountPicker({ sessionId: TUI });
+    const options = await openPicker(tui);
+    // 索引 0 = 「跟随 persona」，1 = kimi，2 = deepseek
+    options[2]!.click();
+    await nextTick();
+    expect(cachedSessionApiOverrides('core-a', 'alice')).toEqual({ [TUI]: 'deepseek' });
+    tui.unmount();
+    document.body.innerHTML = '';
+
+    const workspace = mountPicker();
+    const woptions = await openPicker(workspace);
+    woptions[2]!.click();
+    await nextTick();
+    // 工作区对话的真值在对话 JSON（Core 写），Panel 记第二份会让"别处清除"复活
+    expect(cachedSessionApiOverrides('core-a', 'alice')).toEqual({ [TUI]: 'deepseek' });
+    workspace.unmount();
   });
 
   // 2026-11 用户报「点开弹出的框超出边界，按不到」。

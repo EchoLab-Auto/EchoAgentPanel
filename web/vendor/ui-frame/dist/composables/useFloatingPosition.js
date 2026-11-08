@@ -1,56 +1,64 @@
-import { ref as F, watch as D, onBeforeUnmount as T } from "vue";
-const U = {
+import { ref as c, watch as G, onBeforeUnmount as J } from "vue";
+const K = {
   bottom: "top",
   top: "bottom",
   left: "right",
   right: "left"
 };
-function G(x) {
+function Q(O) {
   const {
     trigger: A,
     open: E,
-    placement: r,
+    placement: u,
     floating: d,
-    offset: c,
-    candidates: l = ["bottom", "top", "right", "left"],
-    flipHysteresis: L = 48,
-    minSpace: k = 120,
-    estimateSize: H = { width: 200, height: 120 },
-    lockPlacement: h,
-    onFrame: w
-  } = x, p = F(null), P = F(0), q = r.value === "auto" ? l[0] : r.value, o = F(q);
-  function a() {
-    return (c == null ? void 0 : c.value) ?? 0;
+    offset: v,
+    candidates: r = ["bottom", "top", "right", "left"],
+    flipHysteresis: C = 48,
+    minSpace: D = 120,
+    estimateSize: P = { width: 200, height: 120 },
+    lockPlacement: g,
+    onFrame: p
+  } = O, m = c(null), W = c(0), h = c({ width: 0, height: 0 }), M = u.value === "auto" ? r[0] : u.value, a = c(M);
+  let b = 0;
+  function l() {
+    return (v == null ? void 0 : v.value) ?? 0;
   }
-  function B() {
+  function x() {
     const t = d == null ? void 0 : d.value;
     return {
-      width: (t == null ? void 0 : t.offsetWidth) ?? H.width,
-      height: (t == null ? void 0 : t.offsetHeight) ?? H.height
+      width: (t == null ? void 0 : t.offsetWidth) ?? P.width,
+      height: (t == null ? void 0 : t.offsetHeight) ?? P.height
     };
   }
-  function v(t) {
+  function y(t) {
     return {
-      bottom: window.innerHeight - t.bottom - a(),
-      top: t.top - a(),
-      right: window.innerWidth - t.right - a(),
-      left: t.left - a()
+      bottom: window.innerHeight - t.bottom - l(),
+      top: t.top - l(),
+      right: window.innerWidth - t.right - l(),
+      left: t.left - l()
     };
   }
-  function I(t) {
-    const i = v(t), e = B();
-    for (const n of l) {
-      const s = (n === "bottom" || n === "top" ? e.height : e.width) + 8;
-      if (i[n] >= s) return n;
+  function T(t) {
+    const n = y(t), i = x();
+    b = i.height;
+    for (const e of r) {
+      const o = (e === "bottom" || e === "top" ? i.height : i.width) + 8;
+      if (n[e] >= o) return e;
     }
-    return l[0];
+    return r[0];
   }
-  function S(t, i) {
-    const e = v(t), n = U[i];
-    return e[i] < k && e[n] > e[i] + L ? n : i;
+  function L(t, n) {
+    const i = y(t), e = K[n];
+    return i[n] < D && i[e] > i[n] + C ? e : n;
   }
-  function g(t) {
+  function z(t) {
+    var B;
     if (!A.value || typeof window > "u") return;
+    const n = x();
+    if ((h.value.width !== n.width || h.value.height !== n.height) && (h.value = { width: n.width, height: n.height }), !t && u.value === "auto" && !w) {
+      const I = ((B = d == null ? void 0 : d.value) == null ? void 0 : B.offsetHeight) ?? 0;
+      I > 0 && Math.abs(I - b) > 8 && (t = !0);
+    }
     const i = A.value.getBoundingClientRect(), e = {
       top: i.top,
       bottom: i.bottom,
@@ -59,44 +67,45 @@ function G(x) {
       width: i.width,
       height: i.height
     };
-    let n;
-    h != null && h.value && !b ? n = o.value : r.value === "auto" ? n = t ? I(e) : o.value : n = t ? S(e, r.value) : S(e, o.value), b = !1;
-    const s = n !== o.value;
-    (t || s) && (P.value = v(e)[n]);
-    const f = p.value;
-    (!f || f.top !== e.top || f.bottom !== e.bottom || f.left !== e.left || f.right !== e.right || f.width !== e.width || f.height !== e.height) && (p.value = e), (s || t) && (o.value = n);
+    let o;
+    g != null && g.value && !w ? o = a.value : u.value === "auto" ? o = t ? T(e) : a.value : o = t ? L(e, u.value) : L(e, a.value), w = !1;
+    const q = o !== a.value;
+    (t || q) && (W.value = y(e)[o]);
+    const s = m.value;
+    (!s || s.top !== e.top || s.bottom !== e.bottom || s.left !== e.left || s.right !== e.right || s.width !== e.width || s.height !== e.height) && (m.value = e), (q || t) && (a.value = o);
   }
-  let u = null, m = !1, b = !0;
-  function y() {
-    m = !0;
+  let f = null, H = !1, w = !0;
+  function S() {
+    H = !0;
   }
-  function W() {
-    u = null;
-    const t = m;
-    m = !1, g(t), w == null || w(), E.value && typeof window < "u" && (u = window.requestAnimationFrame(W));
+  function k() {
+    f = null;
+    const t = H;
+    H = !1, z(t), p == null || p(), E.value && typeof window < "u" && (f = window.requestAnimationFrame(k));
   }
-  function O() {
-    typeof window > "u" || u !== null || (u = window.requestAnimationFrame(W));
+  function U() {
+    typeof window > "u" || f !== null || (f = window.requestAnimationFrame(k));
   }
-  function z() {
-    u !== null && typeof window < "u" && (window.cancelAnimationFrame(u), u = null);
+  function F() {
+    f !== null && typeof window < "u" && (window.cancelAnimationFrame(f), f = null);
   }
-  function C() {
-    g(!0);
+  function j() {
+    z(!0);
   }
-  return D(E, (t) => {
-    t ? (typeof window < "u" && window.addEventListener("resize", y), g(!0), O()) : (z(), typeof window < "u" && window.removeEventListener("resize", y), o.value = r.value === "auto" ? l[0] : r.value, b = !0);
-  }), T(() => {
-    z(), typeof window < "u" && window.removeEventListener("resize", y);
+  return G(E, (t) => {
+    t ? (typeof window < "u" && window.addEventListener("resize", S), z(!0), U()) : (F(), typeof window < "u" && window.removeEventListener("resize", S), a.value = u.value === "auto" ? r[0] : u.value, w = !0, b = 0);
+  }), J(() => {
+    F(), typeof window < "u" && window.removeEventListener("resize", S);
   }), {
-    actualPlacement: o,
-    rect: p,
-    available: P,
-    refresh: C,
-    stop: z
+    actualPlacement: a,
+    rect: m,
+    floatingSize: h,
+    available: W,
+    refresh: j,
+    stop: F
   };
 }
 export {
-  G as default,
-  G as useFloatingPosition
+  Q as default,
+  Q as useFloatingPosition
 };

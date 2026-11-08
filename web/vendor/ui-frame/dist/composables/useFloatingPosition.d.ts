@@ -47,6 +47,16 @@ export interface UseFloatingPositionReturn {
     actualPlacement: Ref<FloatingPlacement>;
     /** 触发器视口 rect（逐帧更新，仅变化时写入） */
     rect: Ref<FloatingRect | null>;
+    /**
+     * 浮层**实测**尺寸（逐帧更新，仅变化时写入；未挂载为 0×0）。
+     *
+     * 消费方拿它把浮层夹进视口：位置由 `rect` 驱动，但"盒子有多高"只有量了才
+     * 知道——内容异步渲染（列表、图片、折叠块）时高度会在打开后继续变。
+     */
+    floatingSize: Ref<{
+        width: number;
+        height: number;
+    }>;
     /** 当前侧可用空间 px（打开/翻转/resize 时重估，滚动中冻结防抖动） */
     available: Ref<number>;
     /** 立即全量重算（方向 + rect + 可用空间） */

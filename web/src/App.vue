@@ -12,6 +12,7 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import { state } from './store';
 import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';
+import { replaySessionApiOverrides } from './session-api';
 import { requestActiveRegionManagement, requestTimeline, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
 import { currentTeam } from './capabilities';
@@ -502,6 +503,24 @@ watch(
     // 全量重拉（设置页可能开着，需要立即显示新 core 的列表）。
     requestActiveRegionManagement({ includeCatalogs: prev !== null });
   },
+);
+
+// ── 会话级 API 覆盖的重放（2026-11 用户报"刷新后不保留"）────────────────
+//
+// Core 只给工作区对话持久化覆盖（`persist_session_api_profile` 对非
+// `local:workspace:` 通道直接返回）；TUI / QQ / shell 的覆盖只是 Core 内存里的
+// `session_providers` 条目，Panel 刷新后没有任何事件能读回来——徽标回落成
+// persona 值，而 Core 仍在按覆盖路由（界面和实际路由打架）。
+//
+// 折中：Panel 自己记（localStorage）+ 连上时重放。三个依赖缺一不可：
+// region（决定槽位）、team（命令必须显式带归属）、供应商池（判悬空引用）。
+watch(
+  () => [state.activeRegion, activeTeamId.value, state.api?.profiles?.length ?? 0] as const,
+  ([region, team, profiles]) => {
+    if (!region || !team || !profiles) return;
+    replaySessionApiOverrides(state, region, team, sendCommand);
+  },
+  { immediate: true },
 );
 
 // ── Toast 桥：state.toasts 只是转发队列，立刻泵进库 ToastProvider 并排空 ──
