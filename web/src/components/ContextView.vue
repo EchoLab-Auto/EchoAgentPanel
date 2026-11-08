@@ -11,6 +11,7 @@ import { state } from '../store';
 import { sessionScopedKey } from '../keys';
 import { sendCommand, sendPending } from '../connection';
 import { releasePending, usePending } from '../pending';
+import { contextSnapshotFor } from '../context-cache';
 import { useToast } from '@echolab-auto/ui-frame/composables/useToast';
 import PanelIcon from './PanelIcon.vue';
 import LoadHint from './LoadHint.vue';
@@ -101,10 +102,11 @@ const snapshot = computed(() => {
   // 内多个人格都有 `local:tui::local_user`，按二维键取会串显。只支持新 Core
   // （2026-11 起 Core 一律带 team_id），不再回退二维键——回退会让"键写错"
   // 表现成"读到别人的快照"。
-  return (
-    state.contexts[
-      sessionScopedKey(targetCore.value, targetTeamId.value, targetSessionId.value ?? '')
-    ] ?? null
+  return contextSnapshotFor(
+    state,
+    targetCore.value,
+    targetTeamId.value,
+    targetSessionId.value ?? '',
   );
 });
 const blocks = computed(() => snapshot.value?.blocks ?? []);

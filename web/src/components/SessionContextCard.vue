@@ -5,12 +5,13 @@
 //! (core, team, session) 读取，避免多会话 / 多 Agent 间串显。这里的总占用
 //! 包含提示词块与历史；Core 的 total_tokens 只计历史，不能直接当作总占用。
 
-import { computed, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import NeumorphismProgress from '@echolab-auto/ui-frame/components/NeumorphismProgress';
 import { sendCommand } from '../connection';
 import { railSessionId } from '../rail-cards';
 import { sessionScopedKey } from '../keys';
 import { state } from '../store';
+import { contextSnapshotFor } from '../context-cache';
 import PanelIcon from './PanelIcon.vue';
 
 const props = defineProps<{ teamId: string | null }>();
@@ -32,7 +33,7 @@ const sessionName = computed(
 );
 const snapshot = computed(() =>
   railSessionId.value
-    ? state.contexts[sessionScopedKey(core.value, teamId.value, railSessionId.value)] ?? null
+    ? contextSnapshotFor(state, core.value, teamId.value, railSessionId.value)
     : null,
 );
 const used = computed(() => {
@@ -52,6 +53,10 @@ const percentText = computed(() => {
 const progressVariant = computed(() =>
   percent.value >= 90 ? 'error' : percent.value >= 70 ? 'warning' : 'primary',
 );
+/** 等待偏慢或已超时（模板给提示加粗，不改颜色语义）。 */
+const pendingLate = computed(
+  () => !!requestedAt.value && Date.now() - requestedAt.value >= CONTEXT_SLOW_MS,
+);
 
 function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
@@ -59,12 +64,65 @@ function formatTokens(value: number): string {
   return String(value);
 }
 
+/**
+ * 请求发出的时刻（0 = 没有在等）。
+ *
+ * 为什么要记：快照没到时界面只有一句「正在读取上下文…」，用户无法判断
+ * 是"Core 还在算"还是"响应根本没回来"。这里按等待时长把文案分成三档
+ * （正常 / 偏慢 / 超时），超过 `CONTEXT_TIMEOUT_MS` 明确让用户点刷新
+ * ——把静默等待变成可判断、可操作的状态。
+ */
+const requestedAt = ref(0);
+const nowTick = ref(0);
+let tickTimer: number | undefined;
+
+const CONTEXT_SLOW_MS = 6_000;
+const CONTEXT_TIMEOUT_MS = 20_000;
+
+function startTicking() {
+  if (tickTimer !== undefined) return;
+  tickTimer = window.setInterval(() => {
+    nowTick.value = Date.now();
+    if (snapshot.value) stopTicking(); // 已到达：立刻停表，不做后台空转
+  }, 500);
+}
+
+function stopTicking() {
+  if (tickTimer === undefined) return;
+  window.clearInterval(tickTimer);
+  tickTimer = undefined;
+}
+
+onBeforeUnmount(stopTicking);
+
 function requestSnapshot() {
   if (!railSessionId.value) return;
+  requestedAt.value = Date.now();
+  nowTick.value = requestedAt.value;
+  startTicking();
   sendCommand({
     RequestContext: { team_id: teamId.value, session_id: railSessionId.value },
   });
 }
+
+/** 快照到达即清零等待态（含跨会话切换后的旧等待）。 */
+watch(snapshot, (value) => {
+  if (value) {
+    requestedAt.value = 0;
+    stopTicking();
+  }
+});
+
+/** 等待态文案：正常 / 偏慢（带秒数）/ 超时。 */
+const pendingText = computed(() => {
+  if (!railSessionId.value) return '请选择会话';
+  if (!state.connected) return '等待连接 Core';
+  void nowTick.value; // 500ms 刻度驱动重算
+  const waited = requestedAt.value ? Date.now() - requestedAt.value : 0;
+  if (waited >= CONTEXT_TIMEOUT_MS) return '上下文读取超时，点右上角刷新重试';
+  if (waited >= CONTEXT_SLOW_MS) return `上下文读取较慢（已等 ${Math.round(waited / 1000)} 秒）…`;
+  return '正在读取上下文…';
+});
 
 watch([railSessionId, teamId, core], requestSnapshot, { immediate: true });
 
@@ -111,8 +169,12 @@ watch(activityPhase, (phase, previous) => {
         <span>tokens</span>
       </div>
     </template>
-    <div v-else class="session-context__pending">
-      {{ railSessionId ? (state.connected ? '正在读取上下文…' : '等待连接 Core') : '请选择会话' }}
+    <div
+      v-else
+      class="session-context__pending"
+      :class="{ 'session-context__pending--late': pendingLate }"
+    >
+      {{ pendingText }}
     </div>
   </section>
 </template>
@@ -185,5 +247,9 @@ watch(activityPhase, (phase, previous) => {
 .session-context__pending {
   padding: 5px 0;
   line-height: 1.5;
+}
+/* 偏慢/超时：加一档对比度，避免"卡着但看起来像在正常加载"。 */
+.session-context__pending--late {
+  color: var(--nm-text-primary);
 }
 </style>
