@@ -10,7 +10,7 @@ import { sessionKey } from '../keys';
 import { coreDisplay } from '../state';
 import { releasePending, usePending } from '../pending';
 import LoadHint from './LoadHint.vue';
-
+import PanelIcon from './PanelIcon.vue';
 /** 当前 agent（team）：Shell 列表只显示该 agent 的后台会话，
  *  不串显其他 agent（去主智能体：team_id 必填）。 */
 const props = defineProps<{ teamId: string | null }>();
@@ -77,8 +77,15 @@ onUnmounted(() => releasePending('shell:sessions'));
       <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="startShell">
         新建
       </NeumorphismButton>
-      <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="refresh">
-        刷新
+      <NeumorphismButton
+        size="small"
+        variant="glass"
+        :disabled="!state.connected"
+        title="刷新 Shell 会话"
+        aria-label="刷新 Shell 会话"
+        @click="refresh"
+      >
+        <PanelIcon name="refresh" size="sm" />
       </NeumorphismButton>
     </div>
     <LoadHint :phase="listPhase" label="Shell 会话" @retry="refresh" />

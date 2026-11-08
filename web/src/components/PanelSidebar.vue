@@ -1,4 +1,5 @@
 <script setup lang="ts">
+//! 边栏卡片栈（chat-rail 内容；左右两列共用同一组件，`side` 区分）：
 //! 内置连接状态、当前会话 / Shell 与扩展卡片统一排列
 //! （RailStack：折叠为横条、分隔条拖动调整上下空间、卡片可拖到另一列，均持久化）。
 //!
@@ -17,12 +18,11 @@ import { lazy } from '../lazy';
 import { railCardsFor } from '../rail-cards';
 import type { RailSide } from '../rail-layout';
 import RailStack, { type RailCardDef } from './RailStack.vue';
-// 右栏卡片按需加载（2026-10 审计）：连接状态卡 / 文件浏览器 / Shell 列表
-// 合计约 1100 行 + 依赖，不在首帧关键路径上（右栏在挂载后渲染）——转为
-// 异步 chunk，首屏 JS 不再被它们拖累。
+// 右栏卡片按需加载：不在首帧关键路径上，转为异步 chunk。
 const ConnectionStatusCard = lazy(() => import('./ConnectionStatusCard.vue'), 'ConnectionStatusCard');
 const SessionContextCard = lazy(() => import('./SessionContextCard.vue'), 'SessionContextCard');
 const ShellList = lazy(() => import('./ShellList.vue'), 'ShellList');
+
 const props = withDefaults(
   defineProps<{
     teamId: string | null;
@@ -48,8 +48,6 @@ const emit = defineEmits<{
 
 /** 本列渲染的卡片：门控 × 用户排序（共享注册表 `rail-cards.ts`）。 */
 const cards = computed<RailCardDef[]>(() => railCardsFor(props.side, props.teamId));
-
-
 </script>
 
 <template>
