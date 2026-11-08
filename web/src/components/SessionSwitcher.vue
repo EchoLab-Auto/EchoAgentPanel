@@ -17,11 +17,9 @@
 //! platform 无匹配实例回退「私聊/群聊」（session-labels.ts）。
 
 import { computed } from 'vue';
-import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
 import { state } from '../store';
-import { panelCanConfigureSessionApi, panelSessionPresentation } from '../extensions/registry';
+import { panelSessionPresentation } from '../extensions/registry';
 import { sessionScopedKey } from '../keys';
-import { sendCommand } from '../connection';
 import { sessionLabelsFor } from '../session-labels';
 import { type SessionInfo } from '../protocol';
 
@@ -155,35 +153,6 @@ function coreBadge(session: SessionInfo & { core?: string | null }): string | nu
   return state.knownCores.size > 0 && session.core ? session.core : null;
 }
 
-/** 是否允许按会话覆盖 API：由通道所属扩展声明。 */
-function canConfigureApi(session: SessionInfo): boolean {
-  return panelCanConfigureSessionApi(session);
-}
-
-/** 下拉选项：首项空值 = 跟随 persona；其余为全局供应商池。列表为空也至少有首项。 */
-const apiOptions = computed(() => [
-  { label: '跟随 persona', value: '' },
-  ...(state.api?.profiles ?? []).map((p) => ({ label: p.name, value: p.name })),
-]);
-
-function apiValue(session: SessionInfo): string {
-  return state.sessionApiOverrides[session.id] ?? '';
-}
-
-function onApiChange(session: SessionInfo & { core?: string | null }, value: unknown) {
-  const teamId = session.team_id ?? props.activeTeamId ?? state.teams[0]?.id;
-  if (!teamId) return;
-  const profile = typeof value === 'string' ? value : '';
-  if (profile === apiValue(session)) return;
-  // 乐观更新；Core 回推 WorkspaceSessions 时以持久化结果为准。
-  if (profile) {
-    state.sessionApiOverrides[session.id] = profile;
-    sendCommand({ SetSessionApi: { team_id: teamId, session_id: session.id, profile } }, session.core ?? undefined);
-  } else {
-    delete state.sessionApiOverrides[session.id];
-    sendCommand({ ClearSessionApi: { team_id: teamId, session_id: session.id } }, session.core ?? undefined);
-  }
-}
 </script>
 
 <template>
@@ -215,22 +184,6 @@ function onApiChange(session: SessionInfo & { core?: string | null }, value: unk
         <span class="sw-label">{{ sessionTag(session).label }}</span>
         <span v-if="coreBadge(session)" class="sw-core">{{ coreBadge(session) }}</span>
         <span v-if="isBusy(session)" class="sw-busy">●</span>
-        <!-- 会话级 API 下拉（2026-10）：仅工作区通道（有持久化载体）；点击不触发行选 -->
-        <div
-          v-if="canConfigureApi(session)"
-          class="sw-api"
-          :title="`会话级 API：${apiValue(session) || '跟随 persona'}`"
-          @click.stop
-          @keydown.stop
-        >
-          <NeumorphismSelect
-            :model-value="apiValue(session)"
-            :options="apiOptions"
-            size="small"
-            aria-label="会话级 API"
-            @update:model-value="(v: unknown) => onApiChange(session, v)"
-          />
-        </div>
       </div>
     </div>
   </div>
@@ -304,17 +257,4 @@ function onApiChange(session: SessionInfo & { core?: string | null }, value: unk
   white-space: nowrap;
 }
 .sw-busy { color: var(--panel-ok, #2ea46e); font-size: 10px; }
-/* 会话级 API 下拉（2026-10）：工作区通道行内配置，宽度自适应内容 */
-.sw-api {
-  flex: 0 0 132px;
-  width: 132px;
-  min-width: 0;
-}
-.sw-api :deep(.nm-select__wrapper) {
-  font-size: 10px;
-}
-.sw-api :deep(.nm-select__face) {
-  padding: 2px 6px;
-  min-height: 24px;
-}
 </style>

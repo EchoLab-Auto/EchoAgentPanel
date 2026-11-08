@@ -524,7 +524,8 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     state.sessionApiOverrides[SESSION] = 'session-profile';
     wrapper = mountChatView(SESSION);
     expect(wrapper.find('.chat-status__api').text()).toBe('kimi / k3-session');
-    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('本会话覆盖');
+    // 悬停说明（含生效层级）现在在可点的徽标触发按钮上（2026-11 迁移）
+    expect(wrapper.find('.api-picker__trigger').attributes('title')).toContain('本会话覆盖');
     wrapper.unmount();
 
     // 两层都空 → 顶层默认配置
@@ -532,7 +533,7 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     state.api!.active_api = '';
     wrapper = mountChatView(SESSION);
     expect(wrapper.find('.chat-status__api').text()).toBe('deepseek / top-level-model');
-    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('顶层默认配置');
+    expect(wrapper.find('.api-picker__trigger').attributes('title')).toContain('顶层默认配置');
     wrapper.unmount();
   });
 
@@ -569,21 +570,22 @@ describe('状态行（2026-10：从入口行浮条搬进输入区）', () => {
     // 切到 api_profile 与全局 active_api 不同的 agent → 徽标必须跟着变
     await wrapper.setProps({ activeTeamId: 'EchoCode' });
     expect(wrapper.find('.chat-status__api').text()).toBe('deepseek / deepseek-flash');
-    const title = wrapper.find('.chat-status__api').attributes('title') ?? '';
+    const title = wrapper.find('.api-picker__trigger').attributes('title') ?? '';
     expect(title).toContain('agent「EchoCode」');
     expect(title).toContain('deepseek-self-1');
 
     // agent 没有 api_profile → 回落全局 active_api（并如实标注层级）
     await wrapper.setProps({ activeTeamId: 'plain' });
     expect(wrapper.find('.chat-status__api').text()).toBe('kimi / k3.1-pro');
-    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('全局激活');
+    expect(wrapper.find('.api-picker__trigger').attributes('title')).toContain('全局激活');
 
     // 会话级覆盖仍最高优先（即便 agent 自己有 profile）
     await wrapper.setProps({ activeTeamId: 'EchoCode' });
     state.sessionApiOverrides[SESSION] = 'kimi';
     await nextTick();
     expect(wrapper.find('.chat-status__api').text()).toBe('kimi / k3.1-pro');
-    expect(wrapper.find('.chat-status__api').attributes('title')).toContain('本会话覆盖');
+    // 悬停说明（含生效层级）现在在可点的徽标触发按钮上（2026-11 迁移）
+    expect(wrapper.find('.api-picker__trigger').attributes('title')).toContain('本会话覆盖');
     wrapper.unmount();
   });
 

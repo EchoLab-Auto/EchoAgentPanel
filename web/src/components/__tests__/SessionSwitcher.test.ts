@@ -145,27 +145,20 @@ describe('SessionSwitcher 会话切换', () => {
     expect(tag!.classes()).toContain('tag-accent');
   });
 
-  it('会话级 API 下拉：仅工作区通道行渲染（profile 列表为空也显示）', () => {
+  // 2026-11 用户要求：会话级 API 的配置入口搬到「输入区状态行的 API 徽标」，
+  // 会话面板只负责挑会话。这里锁定"面板里不再有第二处入口"——两处入口会
+  // 各说各话（一个显示 persona 级、一个显示会话级），用户无从判断哪个生效。
+  it('会话行不再渲染会话级 API 下拉（入口已迁到状态行）', () => {
     state.api = null;
     state.sessionApiOverrides = {};
     state.sessions.push(
       session({ id: 'local:workspace:echo-agent:local_user', scope: 'workspace', nickname: 'echo-agent', last_active: 99 }),
     );
     const wrapper = mountSwitcher();
-    const rows = wrapper.findAll('.sw-item');
-    const ws = rows.find((r) => r.text().includes('echo-agent'))!;
-    expect(ws.find('.sw-api .nm-select__wrapper').exists()).toBe(true);
-    const evence = rows.find((r) => r.text().includes('Evence'))!;
-    expect(evence.find('.sw-api').exists()).toBe(false);
-  });
-
-  it('会话级 API 下拉：点击不触发行选', async () => {
-    state.sessions.push(
-      session({ id: 'local:workspace:echo-agent:local_user', scope: 'workspace', nickname: 'echo-agent', last_active: 99 }),
-    );
-    const wrapper = mountSwitcher();
-    await wrapper.find('.sw-api').trigger('click');
-    expect(wrapper.emitted('select')).toBeUndefined();
+    expect(wrapper.find('.sw-api').exists()).toBe(false);
+    expect(wrapper.find('.nm-select').exists()).toBe(false);
+    // 行本身仍在（挑会话的功能不受影响）
+    expect(wrapper.findAll('.sw-item').length).toBeGreaterThan(1);
   });
 
   it('运行中会话显示忙碌点', () => {

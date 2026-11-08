@@ -20,6 +20,7 @@ import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevic
 import { useChatScroll } from '@echolab-auto/ui-frame/composables/useChatScroll';
 import { ChatComposer, type ChatMessage } from '@echolab-auto/ui-frame/chat';
 import PanelIcon from './PanelIcon.vue';
+import SessionApiPicker from './SessionApiPicker.vue';
 import ChatTabs from './ChatTabs.vue';
 import { chatTabs, ensureChatTabsLoaded, syncActiveTab, type ChatTab } from '../chat-tabs';
 import { state } from '../store';
@@ -1194,18 +1195,6 @@ const apiLabel = computed(() => {
   return `${provider} / ${model}`;
 });
 
-/** apiLabel 的悬停说明：profile 名 + 生效层级（徽标上看不到这两层）。 */
-const apiTitle = computed(() => {
-  const { name, scope } = apiEffective.value;
-  // 引用悬空（profile 被删/改名）：Core 的 apply_named_profile 会保留顶层值，
-  // 徽标也回落到顶层——但得说明白，否则用户会以为徽标在骗人。
-  const missing = !!name && !!state.api && !state.api.profiles?.some((p) => p.name === name);
-  const note = missing ? '（供应商池中无此 profile，实际回落顶层默认）' : '';
-  return name
-    ? `API：${apiLabel.value || '未知'}\n来源：${scope} · profile「${name}」${note}`
-    : `API：${apiLabel.value || '未知'}\n来源：${scope}`;
-});
-
 /** 推理消息所属会话当前是否仍在输出（thinking / tool / subagent）——打字机准入条件之一。 */
 function reasoningSessionRunning(sessionId: string | undefined): boolean {
   if (!sessionId) return false;
@@ -2318,7 +2307,18 @@ function mediaSrc(img: string): string {
                  用户要"随时能看出这条回答是哪个 API 产出的"。三层来源（会话
                  覆盖 / agent 的 api_profile / 全局 active_api）取最靠前的一层
                  ——即本会话实际生效者，见 setup 里的 `apiEffective`。 -->
-            <span v-if="apiLabel" class="chat-status__api" :title="apiTitle">{{ apiLabel }}</span>
+            <!-- 徽标容器保留 `.chat-status__api`（宽度/省略号/行高都在那套规则里），
+                 交互交给里面的 picker。 -->
+            <span v-if="apiLabel" class="chat-status__api">
+              <SessionApiPicker
+                :session-id="props.sessionId"
+                :team-id="props.activeTeamId ?? null"
+                :core="state.activeRegion ?? null"
+                :effective-label="apiLabel"
+                :effective-scope="apiEffective.scope"
+                :profile-name="apiEffective.name"
+              />
+            </span>
             <!-- 右：相位文案，仅忙碌时存在。live region 只包这一段——API 名是
                  静态信息，重复播报只会吵。 -->
             <span v-if="activityText" class="chat-status__live" role="status" aria-live="polite">
