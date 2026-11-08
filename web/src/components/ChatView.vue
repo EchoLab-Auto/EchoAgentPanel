@@ -1830,8 +1830,10 @@ function mediaSrc(img: string): string {
         :session-id="props.sessionId"
         :inset="overlayInset"
         :ignore="entryRowRef"
-        @select-session="pickSession"
+        :host="viewRootRef"
         @changed="syncEntryScroll"
+        @select-session="pickSession"
+        @close="closeOverlay()"
       />
       <NeumorphismButton
         v-if="instanceAvailable"

@@ -16,11 +16,14 @@ const props = defineProps<{
   sessionId: string;
   inset: OverlayInset | null;
   ignore?: HTMLElement | null;
+  /** 弹层的定位宿主（会话视图）。入口按钮留在入口行，弹层 teleport 到此处。 */
+  host?: HTMLElement | null;
 }>();
 
 const emit = defineEmits<{
   selectSession: [id: string];
   changed: [];
+  close: [];
 }>();
 
 const slotContext = computed<PanelSlotContext>(() => ({
@@ -78,22 +81,27 @@ function open(overlayId: string): void {
       <span>{{ item.action.label }}</span>
     </NeumorphismButton>
   </div>
-  <SessionOverlay
-    v-for="item in overlays"
-    :key="item.overlayId"
-    :open="entryOverlay === item.overlayId"
-    :inset="props.inset"
-    :ignore="props.ignore"
-    :label="item.overlay.label"
-    @close="setEntryOverlay(null)"
-  >
-    <component
-      :is="item.overlay.component"
-      :team-id="props.teamId"
-      :session-id="props.sessionId"
-      @select-session="(id: string) => emit('selectSession', id)"
-    />
-  </SessionOverlay>
+  <!-- 按钮在入口行内，但弹层不能以入口行为绝对定位包含块：
+       entry-row 只有一行高，inset 却是相对 chat-view 计算的，直接渲染会把
+       面板压成细条。Teleport 到 chat-view 后与内置弹层共用同一定位参照。 -->
+  <Teleport :to="props.host ?? 'body'" :disabled="!props.host">
+    <SessionOverlay
+      v-for="item in overlays"
+      :key="item.overlayId"
+      :open="entryOverlay === item.overlayId"
+      :inset="props.inset"
+      :ignore="props.ignore"
+      :label="item.overlay.label"
+      @close="setEntryOverlay(null)"
+    >
+      <component
+        :is="item.overlay.component"
+        :team-id="props.teamId"
+        :session-id="props.sessionId"
+        @select-session="(id: string) => { emit('selectSession', id); emit('close'); }"
+      />
+    </SessionOverlay>
+  </Teleport>
 </template>
 
 <style scoped>

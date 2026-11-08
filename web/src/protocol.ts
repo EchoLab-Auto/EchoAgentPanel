@@ -26,6 +26,8 @@ export interface FederationPeerInfo {
   /** 对端 node_id（链路在线时 Core 回填；离线/旧 Core 缺失——2026-10
    * 组建向导用于「已互联」精确判定与拓扑渲染，缺失时按名字兜底）。 */
   node_id?: string | null;
+  /** 对端握手宣告名；显示用，不替代 name 这个策略/路由键。 */
+  node_name?: string | null;
   /** 连续拨号失败次数（成功建链清零；2026-10 地址漂移事故新增——
    * 面板把"持续连不上"显性化）。 */
   consecutive_failures?: number;

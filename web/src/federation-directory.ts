@@ -110,6 +110,9 @@ function identityOf(value: unknown): string {
  *    注意区域 id 在学不到时会回落到接入点名本身，那种值不是身份，要排除。
  */
 export function upstreamNodeId(name: string): string {
+  // FederationStatus 是节点自己的握手身份，优先于区域/邻居等派生信息。
+  const ownStatus = identityOf(state.federations[name]?.node_id);
+  if (ownStatus) return ownStatus;
   const own = identityOf(state.federationDirectories[name]?.node_id);
   if (own) return own;
   const region = state.regions[name];

@@ -84,7 +84,10 @@ describe('ChatView 入口弹层（PanelPopover）', () => {
 
     const overlay = w.element.querySelector('.session-overlay');
     expect(overlay).not.toBeNull();
-    expect(overlay!.querySelector('.stub-workspace-panel')).not.toBeNull();
+    // 扩展入口的按钮在 entry-row 内，但绝对定位弹层必须挂在 chat-view
+    // 内且不能留在入口行；否则一行高度会把面板压成细条。
+    expect(w.element.contains(overlay!)).toBe(true);
+    expect(w.element.querySelector('.entry-row .session-overlay')).toBeNull();
     expect(document.querySelector('panelpopover')).toBeNull();
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

@@ -36,6 +36,7 @@ import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTe
 import { state } from '../store';
 import { sendCommand } from '../connection';
 import { currentRegion } from '../state';
+import { federatedPeerLabel } from '../federation-names';
 import type { BackendCommand } from '../protocol';
 import type { FederationPeerInfo, FederationStatus } from '../state';
 
@@ -664,7 +665,7 @@ const onlinePeers = computed(() =>
 /** 迁移目标下拉（库 Select options；空值 = 自动选首个在线节点）。 */
 const migrateOptions = computed(() => [
   { label: '（自动：首个在线节点）', value: '' },
-  ...onlinePeers.value.map((p) => ({ label: p.name, value: p.name })),
+  ...onlinePeers.value.map((p) => ({ label: federatedPeerLabel(p.name, p.node_id, p.node_name), value: p.name })),
 ]);
 /** 迁移要求前端持有的当前会话（global 聚合视图无单一归属，不支持）。 */
 const canMigrate = computed(
@@ -878,7 +879,9 @@ function migrateSession() {
           <div class="fed-core__id">
             <div class="fed-core__name">{{ c.label }}</div>
             <div v-if="c.fed" class="fed-sub">
-              节点 {{ c.fed.node_name || c.fed.node_id }}
+              节点 {{ c.label }}
+              <span v-if="c.fed.node_name && c.fed.node_name !== c.label"> · {{ c.fed.node_name }}</span>
+              <span v-if="c.fed.node_id"> · {{ c.fed.node_id }}</span>
               <template v-if="c.fed.listen"> · 监听 {{ c.fed.listen }}</template>
               · {{ c.onlinePeers }}/{{ c.peers.length }} peer 在线
             </div>
@@ -1056,7 +1059,7 @@ function migrateSession() {
               />
             </span>
             <div class="fed-peer-main">
-              <div class="fed-peer-name">{{ p.name }}</div>
+              <div class="fed-peer-name" :title="`路由名 ${p.name}`">{{ federatedPeerLabel(p.name, p.node_id, p.node_name) }}</div>
               <div class="fed-peer-url">
                 {{ p.url || '（仅接受连入）' }}
                 <template v-if="p.node_id"> · 节点 {{ p.node_id }}</template>

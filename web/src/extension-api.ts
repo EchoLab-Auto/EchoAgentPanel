@@ -12,6 +12,7 @@ export { confirmDialog } from './confirm';
 export { scopedKey, sessionKey, teamKey } from './keys';
 export { currentTeam, teamModuleEnabled, teamToolAvailable } from './capabilities';
 export { entryOverlay, setEntryOverlay, toggleEntryOverlay } from './overlays';
+export { federatedPeerLabel, remoteDirectoryLabel } from './federation-names';
 export {
   definePanelExtension,
   registerPanelExtension,
