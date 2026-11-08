@@ -40,6 +40,7 @@ export function shellSessionCount(teamId: string | null): number {
 export function railCardsFor(side: RailSide, teamId: string | null): RailCardDef[] {
   const defs: Record<string, RailCardDef | null> = {
     status: { id: 'status', title: '连接状态', compact: true },
+    session: { id: 'session', title: '当前会话', compact: true },
     shell: {
       id: 'shell',
       title: 'Shell',

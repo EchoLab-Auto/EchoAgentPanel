@@ -167,13 +167,14 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.workspaceTeamId = 'alix';
     const wrapper = await mountSidebar();
     const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
-    // [连接状态, 文件浏览器, Git, Shell]——Git 卡紧跟文件浏览器（同一工作区）
+    // [连接状态, 文件浏览器, Git, 当前会话, Shell]——Git 卡紧跟文件浏览器（同一工作区）
     expect(titles[0]).toContain('连接状态');
     expect(titles[1]).toContain('文件浏览器');
     expect(titles[1]).toContain('框架');
     expect(titles[2]).toContain('Git');
     expect(titles[2]).toContain('框架');
-    expect(titles[3]).toContain('Shell');
+    expect(titles[3]).toContain('当前会话');
+    expect(titles[4]).toContain('Shell');
   });
 
   it('Git 状态卡：无激活工作区时不渲染（与文件浏览器同一门控）', async () => {
@@ -222,13 +223,13 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.workspaceActive = 'core';
     state.workspaceTeamId = 'alix';
     const wrapper = await mountSidebar();
-    // 卡片：[连接状态(紧凑), 文件浏览器, Git, Shell]；与紧凑卡相邻的分隔条不可拖，
-    // 其余（文件浏览器 ↔ Git ↔ Shell）都可拖。
+    // 卡片：[连接状态(紧凑), 文件浏览器, Git, 当前会话(紧凑), Shell]；
+    // 与紧凑卡相邻的分隔条不可拖，只有文件浏览器 ↔ Git 可拖。
     const dividers = wrapper.findAll('.rail-stack__divider');
-    expect(dividers.length).toBe(3);
+    expect(dividers.length).toBe(4);
     expect(dividers[0].classes()).not.toContain('rail-stack__divider--draggable');
     expect(dividers[1].classes()).toContain('rail-stack__divider--draggable');
-    expect(dividers[2].classes()).toContain('rail-stack__divider--draggable');
+    expect(dividers[2].classes()).not.toContain('rail-stack__divider--draggable');
     // 折叠上方卡片（文件浏览器）后该分隔条不可拖
     const filesHead = wrapper
       .findAll('.rail-stack__head')

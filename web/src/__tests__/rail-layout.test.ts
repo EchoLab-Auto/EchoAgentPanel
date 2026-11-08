@@ -45,7 +45,7 @@ describe('rail-layout 默认与归一化', () => {
     // 右侧原样保留 status（shell 已去重），并把未登记的 files/git/branches 按规范顺序补进去
     expect(normalized.right).toContain('status');
     expect(normalized.right).not.toContain('shell');
-    expect(new Set(normalized.right)).toEqual(new Set(['status', 'extension:test:files', 'extension:test:git', 'branches']));
+    expect(new Set(normalized.right)).toEqual(new Set(['status', 'session', 'extension:test:files', 'extension:test:git', 'branches']));
     // 补齐后的顺序仍按规范顺序（files 在 branches 之前）
     expect(normalized.right.indexOf('extension:test:files')).toBeLessThan(normalized.right.indexOf('branches'));
   });
@@ -69,7 +69,7 @@ describe('rail-layout 落位语义', () => {
 
     placeCardAfter('branches', 'right', 'extension:test:files');
     // 摘出 branches 后插到 files 之后：[status, files, branches, git, shell]
-    expect(railLayout.right).toEqual(['status', 'extension:test:files', 'branches', 'extension:test:git', 'shell']);
+    expect(railLayout.right).toEqual(['status', 'extension:test:files', 'branches', 'extension:test:git', 'session', 'shell']);
 
     placeCardAfter('branches', 'right', 'does-not-exist');
     expect(railLayout.right[railLayout.right.length - 1]).toBe('branches');
@@ -98,11 +98,11 @@ describe('rail-layout 落位语义', () => {
   it('placeCard（按序号）：仅用于可见列表与存储列表一致时', () => {
     resetRailLayout();
     placeCard('branches', 'right', 0);
-    expect(railLayout.right).toEqual(['branches', 'status', 'extension:test:files', 'extension:test:git', 'shell']);
+    expect(railLayout.right).toEqual(['branches', 'status', 'extension:test:files', 'extension:test:git', 'session', 'shell']);
   });
 
   it('cardsFor：按列内顺序 × 可见性过滤（不可见卡片不占位）', () => {
-    expect(cardsFor('right', (id) => id !== 'extension:test:files')).toEqual(['status', 'extension:test:git', 'shell', 'branches']);
+    expect(cardsFor('right', (id) => id !== 'extension:test:files')).toEqual(['status', 'extension:test:git', 'session', 'shell', 'branches']);
     placeCardAfter('shell', 'left', null);
     expect(cardsFor('left', () => true)).toEqual(['shell']);
   });

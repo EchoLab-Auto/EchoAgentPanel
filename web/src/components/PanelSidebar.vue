@@ -1,10 +1,10 @@
 <script setup lang="ts">
-//! 边栏卡片栈（chat-rail 内容；左右两列共用同一组件，`side` 区分）：
-//! 内置状态/Shell 与扩展卡片统一排列
+//! 内置连接状态、当前会话 / Shell 与扩展卡片统一排列
 //! （RailStack：折叠为横条、分隔条拖动调整上下空间、卡片可拖到另一列，均持久化）。
 //!
 //! 卡片门控（与所在列无关）：
 //! - 连接状态：常驻（Core 管理通道 + 各 QQ 实例；紧凑卡，固定高度）
+//! - 当前会话：常驻（名称 + 上下文占用；紧凑卡，按窗口会话隔离）
 //! - 扩展卡片：由扩展按自身能力和数据门控
 //! - Shell：常驻（与 LLM 工具共用同一会话体系）
 //!
@@ -21,8 +21,8 @@ import RailStack, { type RailCardDef } from './RailStack.vue';
 // 合计约 1100 行 + 依赖，不在首帧关键路径上（右栏在挂载后渲染）——转为
 // 异步 chunk，首屏 JS 不再被它们拖累。
 const ConnectionStatusCard = lazy(() => import('./ConnectionStatusCard.vue'), 'ConnectionStatusCard');
+const SessionContextCard = lazy(() => import('./SessionContextCard.vue'), 'SessionContextCard');
 const ShellList = lazy(() => import('./ShellList.vue'), 'ShellList');
-
 const props = withDefaults(
   defineProps<{
     teamId: string | null;
@@ -61,6 +61,9 @@ const cards = computed<RailCardDef[]>(() => railCardsFor(props.side, props.teamI
   >
     <template #status>
       <ConnectionStatusCard />
+    </template>
+    <template #session>
+      <SessionContextCard :team-id="teamId" />
     </template>
     <template #shell>
       <ShellList :team-id="teamId" @open-detail="(id, core) => emit('openShellDetail', id, core)" />
