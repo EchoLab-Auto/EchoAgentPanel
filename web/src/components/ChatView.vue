@@ -3415,6 +3415,19 @@ function mediaSrc(img: string): string {
   }
 }
 
+/* ── 横屏/矮视口（2026-11）：底部留白按实际遮挡量收 ──────────────────────
+   桌面与竖屏的 190px/165px 是给「输入框最多 5 行」预留的。横屏手机高度只有
+   390，消息区被压到 ~282px，190 的留白占了 2/3 —— 滚到底时最后一条消息悬在
+   输入区上方老远，看着像"列表没内容了"。
+   实测遮挡量：输入区顶 281、视口底 390 → 109px，留 16px 呼吸 = 125。
+   只在 coarse + 矮视口生效：桌面矮窗口（笔记本 1280×400）不是这个形态，
+   它的输入框仍可能展开到 5 行。 */
+@media (pointer: coarse) and (max-height: 520px) {
+  .chat-view__list {
+    padding-bottom: 125px;
+  }
+}
+
 /* ── 触屏：控件高度必须 ≥ 44px（2026-10-29 随字号下调一并修正）─────────
    ui-frame 的 `base.scss` 在 `pointer: coarse` 下给所有 `:where(button)`
    加了 `min-height: 44px` —— `.chat-view__attach-btn` 是原生 <button>，
