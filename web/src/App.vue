@@ -32,7 +32,13 @@ const ShellPanel = lazy(() => import('./components/ShellPanel.vue'), 'ShellPanel
 import FullscreenToggleButton from './components/FullscreenToggleButton.vue';
 import ThemeToggleButton from './components/ThemeToggleButton.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import { mobileCardsDrawerOpen, mobileViewSheetOpen } from './mobile-sheets';
+import {
+  closeMobileSheet,
+  initMobileSheetHistory,
+  mobileCardsDrawerOpen,
+  mobileSheet,
+  mobileViewSheetOpen,
+} from './mobile-sheets';
 import MobileViewSheet from './components/MobileViewSheet.vue';
 import PanelIcon from './components/PanelIcon.vue';
 import { railSessionId } from './rail-cards';
@@ -42,6 +48,10 @@ import { readPref, readTabOnly, writePref, writeTabOnly } from './tab-prefs';
 // 竖屏移动端（2026-10）：断点与库同源（innerWidth < 768）。移动端隐藏
 // 全屏按钮（CSS），顶栏出现「卡片」入口（打开 ChatView 内的卡片抽屉）。
 const { isMobile } = useTouchDevice();
+
+// 移动端「返回」键：先关底部 Sheet，而不是直接退出应用（2026-11 移动端体检）。
+// 幂等；桌面也挂着但从不触发（没有 Sheet 时 popstate 不拦截）。
+initMobileSheetHistory();
 
 /**
  * 移动端顶栏标题（2026-10 布局 v2）：品牌让位给「当前在哪」。
@@ -205,6 +215,14 @@ function onTeamSelect(next: string | null, core?: string | null) {
 
 function setView(next: View) {
   view.value = next;
+  // 移动端：切视图前先收掉底部 Sheet（2026-11 移动端体检）。
+  //
+  // 两个 Sheet 的开关住在 `mobile-sheets.ts`（模块级单值，跨组件通信），而
+  // 抽屉本体在 ChatView 里、视图菜单本体在 App 里。切视图会卸载 ChatView，
+  // 但**单值不会跟着重置**——于是 `mobileSheet` 仍停在 'cards'，回到聊天时
+  // 抽屉会自己弹出来（"幽灵抽屉"）。这里在唯一入口上收口，任何切换来源
+  // （顶栏、☰ 菜单、Shell 卡详情）都覆盖到。
+  if (mobileSheet.value !== null) closeMobileSheet();
   try {
     writePref(VIEW_KEY, next);
   } catch {

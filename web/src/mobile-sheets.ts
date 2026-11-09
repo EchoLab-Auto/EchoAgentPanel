@@ -21,19 +21,78 @@ export type MobileSheet = 'cards' | 'view' | null;
 /** 当前打开的 Sheet（null = 都关闭）。 */
 export const mobileSheet = ref<MobileSheet>(null);
 
-/** 打开指定 Sheet（自动关掉另一个）。 */
+/** 是否为"打开 Sheet"压入过一条 history（用于 Android 返回键，见下）。 */
+let historyPushed = false;
+/** 正在响应 popstate 的自关闭（此时不能再调 history.back()，否则连退两层）。 */
+let closingByPop = false;
+
+/**
+ * 打开指定 Sheet（自动关掉另一个）。
+ *
+ * ## 为什么动 history（2026-11 移动端逻辑补全）
+ *
+ * 手机（尤其 Android Chrome / PWA 独立窗口）的「返回」是**系统级手势/按键**。
+ * 本应用是固定视口 SPA、没有路由，返回键在没有历史记录时直接**退出应用**——
+ * 于是"打开卡片抽屉 → 按返回想关掉它 → 应用没了"。这是移动端最常见的一类
+ * 逻辑缺陷，桌面根本不会暴露。
+ *
+ * 修法（标准做法）：打开 Sheet 时压入一条历史条目，按返回时先消费掉它并关
+ * 面板；用户主动关闭（点遮罩 / 选中项）时把这条还回去，避免历史栈越攒越深
+ * （否则要按 N 次返回才能退出）。
+ *
+ * 用 `try` 包住：部分 WebView 在 file:// / 受限上下文里不允许 pushState。
+ */
 export function openMobileSheet(sheet: Exclude<MobileSheet, null>): void {
+  if (mobileSheet.value === sheet) return;
   mobileSheet.value = sheet;
+  if (historyPushed) return;
+  try {
+    window.history.pushState({ echoSheet: sheet }, '');
+    historyPushed = true;
+  } catch {
+    historyPushed = false;
+  }
 }
 
-/** 关闭全部 Sheet。 */
+/** 关闭全部 Sheet（用户主动关闭会把 history 条目还回去）。 */
 export function closeMobileSheet(): void {
+  if (mobileSheet.value === null && !historyPushed) return;
   mobileSheet.value = null;
+  if (!historyPushed) return;
+  historyPushed = false;
+  // 响应 popstate 的自关闭：那一条已经被"返回"消费掉了，不能再后退。
+  if (closingByPop) {
+    closingByPop = false;
+    return;
+  }
+  try {
+    window.history.back();
+  } catch {
+    // 没有可回退的历史：忽略（面板已关，功能不受影响）
+  }
 }
 
 /** 切换指定 Sheet（已开则关）。 */
 export function toggleMobileSheet(sheet: Exclude<MobileSheet, null>): void {
-  mobileSheet.value = mobileSheet.value === sheet ? null : sheet;
+  if (mobileSheet.value === sheet) closeMobileSheet();
+  else openMobileSheet(sheet);
+}
+
+/**
+ * 挂上返回键监听（幂等；`App.vue` 启动时调一次）。
+ *
+ * 只在**有 Sheet 打开**时拦截：其它情况下不干预历史，交给浏览器默认行为
+ * （用户确实想离开时就应该离开）。
+ */
+let popListening = false;
+export function initMobileSheetHistory(): void {
+  if (popListening || typeof window === 'undefined') return;
+  popListening = true;
+  window.addEventListener('popstate', () => {
+    if (mobileSheet.value === null) return;
+    closingByPop = true;
+    closeMobileSheet();
+  });
 }
 
 /**
@@ -45,7 +104,8 @@ export function toggleMobileSheet(sheet: Exclude<MobileSheet, null>): void {
 export const mobileCardsDrawerOpen = computed<boolean>({
   get: () => mobileSheet.value === 'cards',
   set: (value: boolean) => {
-    mobileSheet.value = value ? 'cards' : null;
+    if (value) openMobileSheet('cards');
+    else closeMobileSheet();
   },
 });
 
@@ -53,6 +113,7 @@ export const mobileCardsDrawerOpen = computed<boolean>({
 export const mobileViewSheetOpen = computed<boolean>({
   get: () => mobileSheet.value === 'view',
   set: (value: boolean) => {
-    mobileSheet.value = value ? 'view' : null;
+    if (value) openMobileSheet('view');
+    else closeMobileSheet();
   },
 });

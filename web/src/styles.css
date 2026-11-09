@@ -969,6 +969,37 @@ html[data-corners='continuous'] {
     display: inline-flex;
   }
 
+  /* ── 触控目标补足（2026-11 移动端体检）─────────────────────────────────
+     `pointer: coarse` 那条全局规则只管 `:where(button)` 的 **min-height**，
+     宽度不管——于是顶栏三个图标钮实测仍只有 30~34px 宽：
+       · 主题切换 `.nm-theme-toggle__btn` 30
+       · 全屏 `.fullscreen-toggle--compact` 34
+     消息头的复制键 24 宽同理（`.nm-chat-copy`）。
+     手机上 30px 宽要靠指尖精确命中，且主题切换三个钮紧挨着 —— 点错就是
+     换错主题（要切回来还得再点两下）。这里只加宽：
+       · 主题钮 36（组宽 90→108，顶栏仍放得下；320 屏品牌收为省略号）
+       · 全屏 40（图标 16 居中，视觉差别在 3px 内）
+       · 复制键不改布局宽（它在消息头右端，左侧是 spacer），用 ::after 把
+         命中区撑到 40×40 —— 不吃任何正文空间。 */
+  #app .nm-theme-toggle__btn {
+    min-width: 36px;
+  }
+  #app .topbar-actions .fullscreen-toggle--compact {
+    min-width: 40px;
+  }
+  .msg-item__copy {
+    position: relative;
+  }
+  .msg-item__copy::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 40px;
+    height: 40px;
+    transform: translate(-50%, -50%);
+  }
+
   /* ── 主区：给底部安全区留白（输入区自身也有，这里兜住视图滚动端） ── */
   .main {
     padding-bottom: 0;

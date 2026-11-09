@@ -242,4 +242,35 @@ watch(
   background: var(--panel-hover);
   color: var(--panel-accent);
 }
+
+/* ── 触控目标（2026-11 移动端体检）────────────────────────────────────────
+   实测（375×667，is_mobile + has_touch）：关闭标签 18×18、新建标签 28 宽
+   —— 手机上要靠指尖精确命中，而误触标签本体 = 切会话（比"点不中"更糟）。
+
+   只放大**命中区**：关闭按钮视觉 24（原 18）已经够点，再用 `::before` 撑到
+   40×40；新建按钮直接放到 36 宽（图标居中，视觉不变）。不改标签条的 DOM
+   顺序与横向滚动行为。
+
+   ⚠️ 必须写在本文件**最后**：上面的基础规则（`.chat-tabs__close{width:18px}`
+   等）与这里同特异性，靠源码顺序决定胜负——写在前面的移动段会被后面的
+   基础规则覆盖（实测：规则在文件里、但按钮仍是 18px）。 */
+@media (max-width: 767px) {
+  .chat-tabs__close {
+    position: relative;
+    width: 24px;
+    height: 24px;
+  }
+  .chat-tabs__close::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 40px;
+    height: 40px;
+    transform: translate(-50%, -50%);
+  }
+  .chat-tabs__create {
+    width: 36px;
+  }
+}
 </style>

@@ -1170,7 +1170,8 @@ watch(
      整页反而更长。340 是「列数 × 单卡高度」的最优点；2560 宽屏自动升到 5 列。
      grid-auto-rows: 1fr 让同一行的卡片等高。 */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  /* 同上：`min(340px, 100%)` 让极窄屏（320）也不会把卡片撑出容器。 */
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
   grid-auto-rows: 1fr;
   gap: 14px;
   margin-top: 10px;
@@ -1402,9 +1403,13 @@ watch(
   font-size: 12px;
 }
 .api-metrics__charts {
-  /* 宽屏两张并排（各约占一半），窄屏自动堆叠；最小 420px 保证折线可读 */
+  /* 宽屏两张并排（各约占一半），窄屏自动堆叠。
+     最小宽用 `min(420px, 100%)` 而不是裸 420px：裸值在 375px 屏上会让每个
+     轨道仍占 420px（`auto-fit` 只影响列数，不会缩到比 min 更窄）——整个
+     网格宽出容器 61px，图表得横向滑才看得全（2026-11 移动端体检实测：
+     `.api-metrics__chart w=420`，detail 面板 scrollWidth 432 > client 359）。 */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
   gap: 14px;
 }
 .api-metrics__chart {

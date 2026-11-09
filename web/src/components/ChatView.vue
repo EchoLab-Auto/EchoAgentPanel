@@ -3390,7 +3390,11 @@ function mediaSrc(img: string): string {
     font-size: 11px;
   }
   .chat-status__api {
-    font-size: 10px;
+    /* 10 → 11（2026-11 移动端体检）：10px 在 375 提宽手机上要贴着看清，
+       而它承载的是"这条回答用哪个 provider/model"——排障时最该一眼看到
+       的信息。仍窄于正文 12，压得住层级；行高由 --chat-status-h 定，
+       该行高度与三处等距契约都不受影响。 */
+    font-size: 11px;
   }
 }
 
