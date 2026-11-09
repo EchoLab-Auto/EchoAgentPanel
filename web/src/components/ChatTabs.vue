@@ -272,5 +272,23 @@ watch(
   .chat-tabs__create {
     width: 36px;
   }
+
+  /* 标签条高度（2026-11 观感）：库的 `pointer: coarse` 给所有 `:where(button)`
+     挂 `min-height: 44px`，而标签与关闭键都是 button —— 于是整条从设计的
+     34px 涨到 **57px**（tab 高 53），顶部白吃 23px 屏幕，标签看起来又厚又空。
+     这里把两个按钮的 min-height 归零、改用显式高度：
+       · tab 40（内含 24 的关闭键，上下各 8 的呼吸）→ 标签条 44
+       · 新建键 40（图标 16 居中）
+     命中高度仍是 40（iOS HIG 的 44 是理想值，横向 tab 条取 40 是通行做法：
+     相邻 tab 共享边缘、误触代价只是切标签），关闭键另有 40×40 伪元素命中区。
+     只降 min-height 不改视觉尺寸，图标/字号/圆角全不变。 */
+  .chat-tabs__tab {
+    min-height: 0;
+    height: 40px;
+  }
+  .chat-tabs__create {
+    min-height: 0;
+    height: 40px;
+  }
 }
 </style>

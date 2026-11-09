@@ -105,8 +105,15 @@ describe('ChatView 竖屏移动端', () => {
       .map((m) => m[1])
       .join('\n');
     expect(entryRules).toMatch(/overflow-x:\s*auto/);
-    // 右界 8px 且让开横屏刘海（max(8px, env(safe-area-inset-right, 0px))）
-    expect(entryRules).toMatch(/right:\s*max\(8px,\s*env\(safe-area-inset-right/);
+    // 右界与输入区同一条竖线（2026-11 观感：入口行原本钉 8px，而输入区是
+    // `--composer-inset`（3% 屏宽 = 11~14px），两个并列浮动件差 3~6px 读作
+    // "没对齐"）。两边都取 max(--composer-inset, safe-area)。
+    expect(entryRules).toMatch(
+      /right:\s*max\(var\(--composer-inset,\s*12px\),\s*env\(safe-area-inset-right/,
+    );
+    expect(entryRules).toMatch(
+      /left:\s*max\(var\(--composer-inset,\s*12px\),\s*env\(safe-area-inset-left/,
+    );
     expect(entryRules).toMatch(/v-bind\(keyboardInsetPx\)/);
     // 输入区贴底后不再叠加 safe-area（safe-area 已不参与纵向布局）
     expect(entryRules, '入口行纵向只跟 entryBottom + 键盘').toMatch(

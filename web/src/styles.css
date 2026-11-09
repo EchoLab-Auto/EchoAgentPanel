@@ -969,6 +969,64 @@ html[data-corners='continuous'] {
     display: inline-flex;
   }
 
+  /* ── 底部 Sheet 的口径（2026-11 观感）──────────────────────────────────
+     库的抽屉是桌面口径：header padding 24/32 + 关闭键 32 → 实测 header
+     **93px 高**（含 coarse 的 44 min-height），而抽屉本身只有 658 高 ——
+     标题行吃掉 1/7 屏，看起来像"半个抽屉都是标题"。body 的 32px 内边距
+     同理：390 屏内容宽只剩 326，卡片两侧空一大块。
+
+     移动口径：header 56（标题 15px + 关闭键 36），body 16。
+
+     选择器为什么写三段 `body .nm-drawer .nm-drawer__xxx`：库的规则编译成
+     `.nm-drawer__body[data-v-00425a52]` —— 属性选择器与类**同级**，所以它是
+     (0,2,0)。特异性按「id / 类 / 元素」字典序比较，**类数优先**：我最初写的
+     `body .nm-drawer__body` 是 (0,1,2)，类数 1 < 2 → 输，实测 computed 仍是
+     32px（`html body ...` 也一样输）。必须把类数凑到 2 以上：这里 (0,2,1)。
+     `#app` 前缀在这里用不上——抽屉 Teleport 到 body，不在 #app 子树内。 */
+  body .nm-drawer .nm-drawer__header {
+    padding: 8px 16px;
+    min-height: 56px;
+  }
+  body .nm-drawer .nm-drawer__title {
+    font-size: 15px;
+  }
+  body .nm-drawer .nm-drawer__close {
+    min-height: 0;
+    width: 36px;
+    height: 36px;
+  }
+  body .nm-drawer .nm-drawer__body {
+    padding: 16px;
+  }
+
+  /* ── 工作行 chip 高度（2026-11 观感）───────────────────────────────────
+     库在 coarse 下给 `:where(button)` 的 44px min-height 把「思考」胶囊从
+     设计的 26px 拉到 44 —— 一回合十几个工具/思考交替，每个工作行白占
+     18px，整段运行记录看起来稀稀拉拉。收回设计高度，命中区用伪元素补：
+     chip 横向排布、纵向留白本来就有，扩出去的命中区不会与相邻行抢点击。 */
+  .work-run-group__chip {
+    min-height: 0;
+  }
+  .work-run-group__chip::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 40px;
+    transform: translateY(-50%);
+  }
+
+  /* 移动端滚动条：原生实现是"滚动时临时浮现"，不需要常驻细条（桌面才需要
+     位置提示）。基础规则里的 `scrollbar-width: thin` 在部分 Android WebView
+     上会画一条常驻灰边。 */
+  .chat-view__list {
+    scrollbar-width: none;
+  }
+  .chat-view__list::-webkit-scrollbar {
+    display: none;
+  }
+
   /* ── 触控目标补足（2026-11 移动端体检）─────────────────────────────────
      `pointer: coarse` 那条全局规则只管 `:where(button)` 的 **min-height**，
      宽度不管——于是顶栏三个图标钮实测仍只有 30~34px 宽：
@@ -989,6 +1047,15 @@ html[data-corners='continuous'] {
   }
   .msg-item__copy {
     position: relative;
+    /* 复制键不再撑高「角色 / 时间」行（2026-11 观感）。
+       库在 coarse 下给它 `min-height: 44px`，而 `.msg-item__head` 是气泡
+       **内部顶部**的一行 —— head 从 18px 涨到 44px，实测正文距气泡上沿
+       54px、距下沿只有 8px：每个气泡都"上重下轻"，一屏看上去像气泡之间
+       隔了一道空带。视觉高度收回 22，命中区由下面的 ::after（40×40）兜住。
+       （这条必须在全局样式表里：`.msg-item__copy` 属于 MessageItem 子组件，
+       ChatView 的 scoped 规则不穿透。） */
+    min-height: 0;
+    height: 22px;
   }
   .msg-item__copy::after {
     content: '';

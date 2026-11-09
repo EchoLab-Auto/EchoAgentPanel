@@ -3131,8 +3131,11 @@ function mediaSrc(img: string): string {
      右界 8px 保证可滑到底（此前无右界、右侧按钮超出屏外不可达）。
      隐藏滚动条（触摸滑动本身有惯性反馈）。 */
   .entry-row {
-    left: max(8px, env(safe-area-inset-left, 0px));
-    right: max(8px, env(safe-area-inset-right, 0px));
+    /* 与输入区左缘严格对齐（2026-11 观感）：原本钉 8px，而输入区是
+       `--composer-inset`（3% 屏宽 = 11~14px）——两颗并列的浮动件差 3~6px，
+       肉眼读作"没对齐"。 */
+    left: max(var(--composer-inset, 12px), env(safe-area-inset-left, 0px));
+    right: max(var(--composer-inset, 12px), env(safe-area-inset-right, 0px));
     /* 键盘弹出时与输入区同步抬升（入口行锚在输入区上方）。
        `entryBottom = 输入区高 + 24`（24 = 桌面口径的 12 底距 + 12 间隙）。
        移动端输入区底距已改为 --composer-inset(14px)，故这里不再叠加 safe-area
@@ -3320,16 +3323,31 @@ function mediaSrc(img: string): string {
     border-radius: var(--composer-inner-radius) !important;
   }
 
-  /* 消息气泡：窄屏减少两侧浪费 */
+  /* 消息气泡：窄屏减少两侧浪费；上下内边距 8 → 10（2026-11 观感）——
+     气泡顶部有「角色 / 时间」行（24px），正文距上沿原本 34 / 距下沿 8，
+     看着像正文被压在底部。上下各加 2px 把比例拉回 36 : 10。 */
   .chat-view__list :deep(.msg-item__bubble) {
     max-width: 88%;
+    padding-top: 10px;
+    padding-bottom: 10px;
   }
 
   /* 消息区底部留白：输入区贴底后占位从 110px 降到 82px（14 底距 + 68 高），
      桌面口径的 190px 在这里会空出一大块，收到 130px（= 82 + 48 余量）；
      键盘弹出时按 keyboardInset 同步加高，否则最新消息被键盘压住。 */
   .chat-view__list {
-    padding-bottom: calc(150px + v-bind(keyboardInsetPx));
+    /* 左右内边距（2026-11 观感）：桌面由 `trayPadLeft/Right`（侧栏列宽）给出，
+       窄屏侧栏不存在 → 两个变量都是 0，而基础规则的 `padding: 18px var(...)`
+       被 `padding-left/right: v-bind(...)` 覆盖成 0 —— 实测气泡 x=0 / right=vw，
+       **直接贴着屏幕边缘出血**（用户气泡右缘被裁一半圆角）。这里给回
+       `--composer-inset`（3% 屏宽，11~14px）：气泡、入口行、输入区左缘由此
+       全部对齐同一条竖线。 */
+    padding-left: max(var(--composer-inset, 12px), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--composer-inset, 12px), env(safe-area-inset-right, 0px));
+    /* 底部留白：输入区贴底（高 91）+ 入口行（46）都在消息区之上悬浮，
+       滚到底时最后一条必须停在**入口行上方**。实测 150px 时最后一条气泡
+       bottom=691、入口行顶=683 —— 差 8px 被压住；165 留出呼吸。 */
+    padding-bottom: calc(165px + v-bind(keyboardInsetPx));
   }
 
   /* 会话区覆盖面板的几何已统一由 `SessionOverlay` 按消息区矩形计算
