@@ -468,6 +468,8 @@ export function toDisplayMessage(message: TimelineMessage): DisplayMessage {
     seq: message.seq,
     // 位置序号：分页锚点（永不变更；seq 会因就地更新而乱序）。
     ord: message.ord,
+    // 压缩前归档名（只有压缩提示行带）：渲染层据此给「查看压缩前的历史」。
+    archive: message.archive || undefined,
   };
   if (message.kind === 'user') {
     // 子代理完成回报（合并钩子）：不作为用户气泡，走专用紧凑行。

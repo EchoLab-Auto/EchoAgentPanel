@@ -92,8 +92,12 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     //   done/total，面板画进度条）。
     // → 59（2026-10 作用域普查：+Notice——会话级操作回执从 `Error` 独立出来，
     //   带 session_id/ok，面板只在本窗口展示，且不再误冻结流式行）。
+    // → 58（2026-11 压缩前历史：+SessionArchives / +SessionArchiveHistory
+    //   ——压缩把事件日志前缀换成摘要、原件写进 `archives/`，那段历史在时间线
+    //   里永久消失。前者只列文件名与大小（stat），后者按名回读并投影；刻意
+    //   不复用 `SessionHistory`（它带 max_seq 水位线，会被实时合并认领）。
     const variants = eventVariantNames();
-    expect(variants.size).toBe(56);
+    expect(variants.size).toBe(58);
   });
 
   it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {

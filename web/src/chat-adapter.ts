@@ -84,6 +84,8 @@ export interface ChatMessageWithImages extends ChatMessage {
   subagent?: SubagentEventInfo;
   /** 覆盖基类 ChatToolCall：追加计时字段（结构兼容）。 */
   tool?: ChatToolCallWithTiming;
+  /** 压缩前归档名（只有「上下文已压缩」提示行带；2026-11）。 */
+  archive?: string;
 }
 
 /**
@@ -130,6 +132,7 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
       entries: mergeReasoning(m.branch.msgs),
     },
     subagent: m.subagent,
+    archive: m.archive,
     source: m.source && {
         // ui-frame 的 ChatMessageSource 属性名是 `adapterName`（外部库快照，不改）；
         // 协议侧字段是 `instance_name`（Core 去适配器化后的名字）。

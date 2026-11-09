@@ -523,6 +523,26 @@ export interface TimelineMessage {
    * 既稳定又能二分——用 `seq` 会因非单调而漏条目。
    */
   ord?: number;
+  /**
+   * 对应的**压缩前归档**文件名（只有「上下文已压缩」提示行带；2026-11）。
+   *
+   * 压缩把事件日志的前缀换成一条摘要，原件写进 `archives/`——那段历史在
+   * 投影与时间线里永久消失。这一行是唯一的线索：面板据此给出「查看压缩前
+   * 的历史」入口（`RequestSessionArchiveHistory` 按这个名字回读）。
+   */
+  archive?: string | null;
+}
+
+/** 一份压缩前归档的元信息（`RequestSessionArchives` 响应的一项）。 */
+export interface SessionArchiveEntry {
+  /** 文件名（读取时按它寻址）。 */
+  name: string;
+  /** 归档时间（epoch 秒；0 = 解析不出）。 */
+  created_at?: number;
+  /** 文件大小（字节）。 */
+  size?: number;
+  /** 归档原因（如 `precompact`；无后缀为空串）。 */
+  reason?: string;
 }
 
 export interface ChecklistState {
@@ -665,6 +685,18 @@ export type BackendCommand =
   // 无近期活动的会话条目——面板激活会话时改从事件日志派生完整历史（Core 响应
   // `SessionHistory`）。limit 缺省/null = Core 默认上限。
   | { RequestSessionHistory: { team_id?: string | null; session_id: string; limit?: number | null } }
+  /** 列出压缩前归档（只 stat，不解析内容）。 */
+  | { RequestSessionArchives: { team_id?: string | null } }
+  /** 读一份压缩前归档并按会话投影（只读；不进实时合并）。 */
+  | {
+      RequestSessionArchiveHistory: {
+        team_id?: string | null;
+        session_id: string;
+        /** 归档文件名（来自 `SessionArchives`；不接受路径）。 */
+        archive: string;
+        limit?: number | null;
+      };
+    }
   | { InstallSkillFromGit: { url: string; name?: string | null; branch?: string | null } }
   | { UpdateSkillFromGit: { name: string } }
   | { RemoveSkillSource: { name: string } }
@@ -869,6 +901,18 @@ export type BackendEvent =
   // messages = 事件日志派生的完整历史；total = 总条目数；truncated = limit 截断；
   // max_seq = 派生时快照水位（合并窗口增量用，见 state.ts::sessionMessagesFor）。
   | { SessionHistory: { team_id?: string | null; session_id: string; messages: TimelineMessage[]; total: number; truncated: boolean; max_seq?: number } }
+  | { SessionArchives: { team_id?: string | null; archives: SessionArchiveEntry[] } }
+  | {
+      SessionArchiveHistory: {
+        team_id?: string | null;
+        session_id: string;
+        archive: string;
+        messages: TimelineMessage[];
+        total: number;
+        truncated: boolean;
+        error?: string | null;
+      };
+    }
   | { ShellSessionsList: { sessions: ShellSessionInfo[]; team_id?: string | null } }
   | { ShellSessionStarted: { session: ShellSessionInfo } }
   | { ShellExecStarted: { session_id: string; seq: number; command: string } }

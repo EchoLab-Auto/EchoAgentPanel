@@ -22,13 +22,14 @@ import { ChatComposer, type ChatMessage } from '@echolab-auto/ui-frame/chat';
 import PanelIcon from './PanelIcon.vue';
 import ChatTabs from './ChatTabs.vue';
 import { chatTabs, ensureChatTabsLoaded, syncActiveTab, type ChatTab } from '../chat-tabs';
+
 import { state } from '../store';
 import { effectiveSessionApi, profileMissing } from '../session-api';
 import { checklistsForSession, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
-import { checklistKey, sessionKey, sessionScopedKey, teamKey } from '../keys';
+import { archiveKey, checklistKey, sessionKey, sessionScopedKey, teamKey } from '../keys';
 import { isInstanceModuleKind, teamModuleEnabled, teamToolAvailable } from '../capabilities';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
@@ -141,6 +142,103 @@ const props = defineProps<{
   sessionId: string;
   activeTeamId?: string | null;
 }>();
+
+/**
+ * 「查看压缩前的历史」（2026-11）。
+ *
+ * 压缩把事件日志的前缀换成一条摘要、原件写进 `archives/`——那段内容在
+ * 时间线与投影里永久消失。提示行带着归档名（`TimelineMessage.archive`），
+ * 用户点它就在这里发一次只读回读。
+ *
+ * 回读**不进入实时合并**（`state.sessionArchives` 单独存），所以看归档不会
+ * 污染当前会话的窗口/水位线；关掉覆盖层就回到实时视图。
+ */
+const archiveView = ref<string | null>(null);
+
+function openArchive(archive: string): void {
+  if (!archive) return;
+  archiveView.value = archive;
+  const teamId = props.activeTeamId ?? null;
+  // 清单没拉过就先拉一次（只 stat 20 个文件，很便宜）：横幅要显示归档的
+  // 时间与体积，提示行也要据此判断"这份还在不在"。
+  if (!archiveList.value.length) sendCommand({ RequestSessionArchives: { team_id: teamId } });
+  sendCommand({
+    RequestSessionArchiveHistory: {
+      team_id: teamId,
+      session_id: props.sessionId,
+      archive,
+      limit: 500,
+    },
+  });
+}
+
+// 归档清单按人格拉取（只 stat，不解析内容）：连上即拉一次，换人格再拉一次。
+// 清单用来给"上下文已压缩"提示行标注「归档已清理」，也给横幅提供时间/体积。
+//
+// ⚠️ 这个 watch 必须在 `props` 定义**之后**（`immediate: true` 会立刻读它）。
+watch(
+  () => [state.connected, props.activeTeamId] as const,
+  ([connected]) => {
+    if (!connected) return;
+    sendCommand({ RequestSessionArchives: { team_id: props.activeTeamId ?? null } });
+  },
+  { immediate: true },
+);
+
+/** 当前人格的归档清单（未拉取 = 空数组）。 */
+const archiveList = computed(
+  () => state.sessionArchiveList[teamKey(state.activeRegion, props.activeTeamId ?? null)] ?? [],
+);
+
+/**
+ * 某个归档名是否还在（`undefined` = 清单未拉，不做判断）。
+ *
+ * 归档每份 20+ MB、只保留最近 20 份 —— 压缩频繁时较早的那几份会被轮转
+ * 掉，而"上下文已压缩"提示行是**永久**留在时间线里的。不判断就会出现
+ * "点了才发现没有"（2026-11 实测第一次就撞上）。
+ */
+function archiveAvailability(name: string): boolean | undefined {
+  const list = archiveList.value;
+  if (!list.length) return undefined;
+  return list.some((entry) => entry.name === name);
+}
+
+function closeArchive(): void {
+  archiveView.value = null;
+}
+
+/** 当前打开的归档回放（按 `(core, team, archive)` 取）。 */
+const archiveData = computed(() => {
+  const archive = archiveView.value;
+  if (!archive) return null;
+  const key = archiveKey(state.activeRegion, props.activeTeamId ?? null, archive);
+  return state.sessionArchives[key] ?? null;
+});
+
+/** 横幅里的归档元信息（时间 + 大小；取不到就空着）。 */
+const archiveMeta = computed(() => {
+  const archive = archiveView.value;
+  if (!archive) return '';
+  const key = teamKey(state.activeRegion, props.activeTeamId ?? null);
+  const entry = (state.sessionArchiveList[key] ?? []).find((item) => item.name === archive);
+  if (!entry) return '';
+  const parts: string[] = [];
+  if (entry.created_at) {
+    parts.push(formatTime(entry.created_at));
+  }
+  if (entry.size) {
+    parts.push(`${(entry.size / 1024 / 1024).toFixed(1)} MB`);
+  }
+  return parts.length ? ` · ${parts.join(' · ')}` : '';
+});
+
+/** 归档回放的消息 → 渲染消息（复用同一套 `toChatMessage`）。 */
+const archiveRows = computed<ChatMessageWithImages[]>(() => {
+  const data = archiveData.value;
+  if (!data) return [];
+  return data.messages.map((message) => toChatMessage(message));
+});
+
 const emit = defineEmits<{
   send: [content: string, images: string[]];
   cancel: [];
@@ -1968,13 +2066,46 @@ function mediaSrc(img: string): string {
          行模型由面板自组：连续工作条目（工具调用 + 思考 + 子代理完成）合并
          为一排小圆角矩形 chip（WorkRunGroup），其余消息逐条 MessageItem。 -->
     <div class="chat-view__tray">
+      <!-- 压缩前归档回放（2026-11）：**同一个滚动区**（不是弹窗）——用户要
+           对照着看"当初聊了什么"，弹窗会挡掉实时消息、也放不下长历史。
+           顶部一条横幅说明"你在看只读快照"，关掉即回实时。 -->
+      <div v-if="archiveView" class="chat-view__archive-bar">
+        <span class="chat-view__archive-title">
+          压缩前的历史（只读快照）{{ archiveMeta }}
+        </span>
+        <button type="button" class="chat-view__archive-close" @click="closeArchive()">
+          回到当前
+        </button>
+      </div>
       <div
         ref="listRef"
         class="chat-view__list"
         role="log"
         aria-live="polite"
+        :class="{ 'chat-view__list--archive': archiveView }"
         @scroll="handleScroll"
       >
+      <!-- 归档回放：只渲染快照内容（不参与吸底/翻页/工作行分组——快照是
+           历史事实，不需要"加载更早"）。 -->
+      <template v-if="archiveView">
+        <div v-if="archiveData?.error" class="chat-view__archive-error">
+          {{ archiveData.error }}
+        </div>
+        <div v-else-if="!archiveData" class="chat-view__empty">
+          <NeumorphismSpinner size="large" />
+          <span>正在读取归档…</span>
+        </div>
+        <template v-else>
+          <p v-if="archiveData.truncated" class="chat-view__archive-hint">
+            归档共 {{ archiveData.total }} 条，这里显示最近
+            {{ archiveData.messages.length }} 条。
+          </p>
+          <div v-for="msg in archiveRows" :key="msg.id" class="chat-view__item chat-view__item--msg">
+            <MessageItem :message="msg" :format-time="formatTime" />
+          </div>
+        </template>
+      </template>
+      <template v-else>
       <div v-if="messageRows.length === 0" class="chat-view__empty">
         <template v-if="!connected">
           <NeumorphismSpinner size="large" />
@@ -2030,9 +2161,19 @@ function mediaSrc(img: string): string {
                 </span>
               </template>
             </div>
-            <MessageItem :message="row.message" :format-time="formatTime" />
+            <MessageItem
+              :message="row.message"
+              :format-time="formatTime"
+              :archive-available="
+                (row.message as ChatMessageWithImages).archive
+                  ? archiveAvailability((row.message as ChatMessageWithImages).archive!)
+                  : undefined
+              "
+              @open-archive="openArchive"
+            />
           </div>
         </template>
+      </template>
       </template>
       </div>
       <!-- 「回到底部」：离开底部时浮现（信号来自 useChatScroll；落位与
@@ -2442,6 +2583,60 @@ function mediaSrc(img: string): string {
      （2026-09-30 修复：此前为 block，对齐失效导致全部左对齐固定宽）。 */
   display: flex;
   flex-direction: column;
+}
+
+/* ── 压缩前归档回放（2026-11）───────────────────────────────────────────
+   横幅在滚动区**外面**（sticky 会跟着滚动、也会被会话外壳裁掉），所以它是
+   `.chat-view__tray` 的第一个 flex 子项：占一行、不滚动，始终能点「回到当前」。 */
+.chat-view__archive-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--nm-border-color);
+  background: color-mix(in srgb, var(--nm-surface-raised) 60%, transparent);
+  color: var(--nm-text-secondary);
+  font-size: 12px;
+}
+.chat-view__archive-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-view__archive-close {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--nm-border-color);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--nm-text-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-view__archive-close:hover {
+  background: var(--panel-hover);
+}
+/* 归档回放列表：不需要给输入区让位（它不进实时流），底部留白收到常规量。 */
+.chat-view__list--archive {
+  padding-bottom: 24px;
+}
+.chat-view__archive-hint {
+  margin: 0 0 8px;
+  color: var(--nm-text-placeholder);
+  font-size: 12px;
+}
+.chat-view__archive-error {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nm-chat-system-color) 12%, transparent);
+  color: var(--nm-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* 空态占位（行模型自组后由面板提供）；加载三态：转圈 + 文案垂直堆叠 */

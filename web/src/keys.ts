@@ -51,3 +51,18 @@ export function sessionScopedKey(
 export function teamKey(core: string | null | undefined, teamId: string | null | undefined): string {
   return scopedKey(core, teamId ?? '');
 }
+
+/**
+ * 压缩前归档的复合键 `(core, team, archive)`（2026-11）。
+ *
+ * 同一会话可能有多份归档（每次压缩一份），而且归档是**人格级文件**
+ * （`echo-sessions-<team>-…json`）——键里必须同时带上这三个维度，
+ * 否则 A 会话的归档回放会顶掉 B 的。
+ */
+export function archiveKey(
+  core: string | null | undefined,
+  teamId: string | null | undefined,
+  archive: string,
+): string {
+  return scopedKey(core, `${teamId ?? ''}\u0000${archive}`);
+}

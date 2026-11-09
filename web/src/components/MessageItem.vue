@@ -28,7 +28,29 @@ const props = defineProps<{
   message: ChatMessageWithImages;
   /** 时间格式化（秒级 Unix 时间戳）；缺省由本组件兜底 */
   formatTime?: (time: number) => string;
+  /**
+   * 该行指向的归档**是否还在**（2026-11）。
+   *
+   * `undefined` = 还不知道（清单未拉）——照常可点，失败由 Core 报原因；
+   * `false` = 清单里没有它（归档每份 ~20MB，只保留最近 20 份，旧压缩的
+   * 那几份会被轮转掉）。此时按钮标灰并说明，而不是让人点开再吃一个错误。
+   */
+  archiveAvailable?: boolean;
 }>();
+
+/**
+ * 请求查看「压缩前的历史」（2026-11）。
+ *
+ * 只有 `system` 行、且该行带 `archive`（Core 在压缩时把归档名写进提示行）
+ * 时才发出。事件冒泡到 ChatView——那里有 team/core 上下文可以发命令，
+ * 本组件只负责"点哪儿"。
+ */
+const emit = defineEmits<{
+  (event: 'open-archive', archive: string): void;
+}>();
+
+/** 该行指向的压缩前归档（无 → 不渲染入口）。 */
+const archiveName = computed(() => props.message.archive ?? '');
 
 const { t } = useLocale();
 
@@ -79,6 +101,24 @@ const timeLabel = computed(() => {
     <div class="msg-item__content">
       <span class="msg-item__system-text">{{ message.content }}</span>
       <span v-if="timeLabel" class="msg-item__system-time">{{ timeLabel }}</span>
+      <!-- 压缩前历史入口（2026-11）：压缩把事件日志前缀换成摘要、原件写进
+           archives/，那段内容在时间线里永久消失——这一行是唯一线索，
+           所以入口就挂在它上面（而不是藏在设置里）。 -->
+      <button
+        v-if="archiveName"
+        type="button"
+        class="msg-item__archive-btn"
+        :class="{ 'msg-item__archive-btn--gone': props.archiveAvailable === false }"
+        :disabled="props.archiveAvailable === false"
+        :title="
+          props.archiveAvailable === false
+            ? '该归档已被清理（archives 只保留最近 20 份）'
+            : `查看压缩前的历史（归档 ${archiveName}）`
+        "
+        @click="emit('open-archive', archiveName)"
+      >
+        {{ props.archiveAvailable === false ? '归档已清理' : '查看压缩前的历史' }}
+      </button>
     </div>
   </div>
   <!-- 外壳 = ui-frame NeumorphismCard，**材质全部走组件默认**（2026-10-29 用户
@@ -301,5 +341,32 @@ const timeLabel = computed(() => {
 .msg-item__system-time {
   font-size: 11px;
   color: var(--nm-text-disabled);
+}
+
+/* 「查看压缩前的历史」：系统提示行里的次级动作。
+   小、可点、不与正文抢视觉（正文是灰细字），但必须在触屏上点得到——
+   min-height 交给粗指针规则兜（`.msg-item__archive-btn` 是原生 button，
+   ui-frame 的 coarse 规则已覆盖 min-height: 44px）。 */
+.msg-item__archive-btn {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--nm-border-color);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--nm-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.msg-item__archive-btn:hover {
+  color: var(--nm-text-primary);
+  border-color: var(--nm-text-secondary);
+}
+/* 归档已被轮转清理：保留入口（让用户知道"这里曾经有历史"）但不可点。 */
+.msg-item__archive-btn--gone {
+  opacity: 0.55;
+  cursor: default;
+  text-decoration: line-through;
 }
 </style>
