@@ -1056,6 +1056,9 @@ html[data-corners='continuous'] {
        ChatView 的 scoped 规则不穿透。） */
     min-height: 0;
     height: 22px;
+    /* 元信息行现在在气泡**外面**（2026-11），这一行的高度就是消息行顶部
+       那 22px。收住高度后 head 与气泡之间只有 2px 间隙，视觉上"标签贴着
+       气泡上沿"，比原来塞在气泡里更像消息的注脚。 */
   }
   .msg-item__copy::after {
     content: '';

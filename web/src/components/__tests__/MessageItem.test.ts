@@ -181,11 +181,19 @@ describe('MessageItem 消息行', () => {
     const style = raw.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
     // 只看声明本身：注释里会提到 box-shadow / border-radius 之类字样
     const decls = style.replace(/\/\*[\s\S]*?\*\//g, '');
-    /** 取某个选择器块的声明体（CSS 是扁平的，够用） */
-    const blockOf = (sel: string): string =>
-      new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 's').exec(
-        decls,
-      )?.[1] ?? '';
+    /**
+     * 取某个选择器（可能是逗号列表里的一项）所在规则的声明体。
+     *
+     * 为什么要处理逗号列表：`.a, .b { … }` 是同一份声明，两条选择器各自都
+     * 「拥有」它。此前只按单选择器匹配，把合并写法误判成"规则不存在"。
+     */
+    const blockOf = (sel: string): string => {
+      for (const rule of decls.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+        const selectors = rule[1].split(',').map((part: string) => part.trim());
+        if (selectors.includes(sel)) return rule[2];
+      }
+      return '';
+    };
     // 材质零覆盖（2026-10-29 用户要求「用组件原生的」）：气泡的三个自有类里
     // 不得出现任何材质声明——阴影、底色、圆角全部由 NeumorphismCard 决定。
     for (const sel of ['.msg-item__bubble', '.msg-item__bubble--user', '.msg-item__bubble--agent']) {
@@ -199,7 +207,9 @@ describe('MessageItem 消息行', () => {
     // 版面仍在面板侧
     expect(blockOf('.msg-item__bubble')).toMatch(/padding:/);
     expect(blockOf('.msg-item__bubble')).toMatch(/max-width:\s*100%/);
-    expect(blockOf('.msg-item__bubble--user')).toMatch(/align-self:\s*flex-end/);
-    expect(blockOf('.msg-item__bubble--agent')).toMatch(/align-self:\s*flex-start/);
+    // 对齐职责 2026-11 上移到消息行（元信息行搬出气泡后，气泡在消息行里是
+    // stretch 子项，不需要自己 align-self）
+    expect(blockOf('.msg-item--user')).toMatch(/align-self:\s*flex-end/);
+    expect(blockOf('.msg-item--agent')).toMatch(/align-self:\s*flex-start/);
   });
 });

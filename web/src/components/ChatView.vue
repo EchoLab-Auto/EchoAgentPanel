@@ -3323,13 +3323,12 @@ function mediaSrc(img: string): string {
     border-radius: var(--composer-inner-radius) !important;
   }
 
-  /* 消息气泡：窄屏减少两侧浪费；上下内边距 8 → 10（2026-11 观感）——
-     气泡顶部有「角色 / 时间」行（24px），正文距上沿原本 34 / 距下沿 8，
-     看着像正文被压在底部。上下各加 2px 把比例拉回 36 : 10。 */
-  .chat-view__list :deep(.msg-item__bubble) {
+  /* 消息宽度：窄屏减少两侧浪费。上限挂在**消息行**上（2026-11）——元信息行
+     搬出气泡后，气泡是消息行的 stretch 子项，`88%` 若还写在气泡上就是相对
+     消息行自身求解（无意义）；挂在消息行上才真正是"消息列宽的 88%"。
+     气泡的上下内边距 8 → 10 已在 MessageItem 里统一（桌面同值，不���分端）。 */
+  .chat-view__list :deep(.msg-item) {
     max-width: 88%;
-    padding-top: 10px;
-    padding-bottom: 10px;
   }
 
   /* 消息区底部留白：输入区贴底后占位从 110px 降到 82px（14 底距 + 68 高），

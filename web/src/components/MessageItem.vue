@@ -86,15 +86,21 @@ const timeLabel = computed(() => {
        背景与阴影——阴影 = 组件默认档（elevation 2：ambient + 8px/20px 暗侧 +
        4px/12px 亮侧），底色 = `--nm-surface-color`，圆角 = 默认 24px。
        面板只做**版面**两件事：`no-padding`（库 body 留白 24px 对气泡过大）+
-       根节点 padding 与 `align-self`。`role` / `aria-label` 经 attrs 透传到
-       卡片根节点，无障碍语义不变。 -->
-  <NeumorphismCard
+       根节点 padding。`role` / `aria-label` 经 attrs 透传到卡片根节点，
+       无障碍语义不变。 -->
+  <!-- 消息行 = 「元信息行 + 气泡」两段（2026-11 版面修复）──────────────
+       元信息（角色 / 来源 / 时间 / 复制）原本住在气泡**内部顶端**，于是：
+       · 气泡上沿到正文 34px、下沿只剩 8px——每条都"上重下轻"，一屏看上去
+         像气泡之间隔了一道空带；气泡越高，头部那 20px 越是白占正文空间；
+       · 复制键的 44px 触控高度直接把头部行撑成 44（移动端），压掉的气泡
+         内部空间比按钮本身大得多。
+       移到气泡外层后，气泡只剩正文，内外边距回到对称；元信息成为消息行的
+       第一段（与气泡同宽、同侧对齐），语义也更准：它描述的是**这条消息**，
+       不是气泡这个容器。 -->
+  <div
     v-else
-    no-padding
-    class="msg-item__bubble"
-    :class="isUser ? 'msg-item__bubble--user' : 'msg-item__bubble--agent'"
-    role="article"
-    :aria-label="isUser ? t('chatRoleUser') : t('chatRoleAgent')"
+    class="msg-item"
+    :class="isUser ? 'msg-item--user' : 'msg-item--agent'"
   >
     <div class="msg-item__head">
       <span v-if="!isUser" class="msg-item__role">{{ t('chatRoleAgent') }}</span>
@@ -103,14 +109,22 @@ const timeLabel = computed(() => {
       <span class="msg-item__spacer" />
       <ChatCopyButton class="msg-item__copy" :text="message.content" />
     </div>
-    <div class="msg-item__content">
+    <NeumorphismCard
+      no-padding
+      class="msg-item__bubble"
+      :class="isUser ? 'msg-item__bubble--user' : 'msg-item__bubble--agent'"
+      role="article"
+      :aria-label="isUser ? t('chatRoleUser') : t('chatRoleAgent')"
+    >
+      <div class="msg-item__content">
       <!-- 流式中走纯文本（2026-10 P0）：Markdown 渲染器对每条 delta 全量
            重解析（O(deltas × 长度)），终值时一次成型（O(长度)）。 -->
-      <span v-if="streamingPlain" class="msg-item__stream">{{ message.content }}</span>
-      <MarkdownLazy v-else-if="!isUser" :content="message.content" />
-      <template v-else>{{ message.content }}</template>
-    </div>
-  </NeumorphismCard>
+        <span v-if="streamingPlain" class="msg-item__stream">{{ message.content }}</span>
+        <MarkdownLazy v-else-if="!isUser" :content="message.content" />
+        <template v-else>{{ message.content }}</template>
+      </div>
+    </NeumorphismCard>
+  </div>
 </template>
 
 <style scoped>
@@ -120,23 +134,49 @@ const timeLabel = computed(() => {
    24px，四角等值）、`overflow: hidden` 裁剪全部由卡片组件自己决定——
    面板想调外观就该去改 ui-frame，而不是在宿主里叠一层。
    面板在此只负责**版面**：宽度、内边距、对齐。 */
+/* ── 消息行：元信息行 + 气泡（2026-11）───────────────────────────────────
+   为什么要有这层：见 template 上方的说明。这里只说版面契约——
+   · 宽度由**内容**决定（flex item 非 stretch），上下限交给外层（ChatView
+     的 `max-width: 88%` 挂在 `.msg-item` 上，占的是消息列宽的比例）；
+   · `align-items: stretch` 让气泡铺满消息行宽度，于是元信息行与气泡同宽、
+     左缘严格对齐；短消息时气泡会跟随元信息行（"Agent 12:34 + 复制"约
+     120px）略宽一点——这正是微信 / Telegram 的做法，比让时间戳溢出气泡
+     左侧好看得多。 */
+.msg-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 对齐仅对 flex 列容器（.chat-view__item--msg）生效，见 ChatView。
+   角色区分只剩「左右对齐」这一重——色调与圆角都交回组件的统一材质。 */
+.msg-item--user {
+  align-self: flex-end;
+}
+
+.msg-item--agent {
+  align-self: flex-start;
+}
+
 .msg-item__bubble {
   /* 宽度动态化（2026-09-30 语义保持）：解除库默认上限 min(78%, 640px)——
      短消息贴内容收紧，长消息/代码/表格随**消息列可用宽度**伸展（列宽本身
      随左右侧栏卡片显隐动态变化，见 ChatView 的托盘 padding）。 */
   max-width: 100%;
-  /* padding 属版面（卡片带 no-padding，body 留白为 0）：8px 14px */
-  padding: var(--nm-spacing-sm) var(--nm-spacing-14);
+  /* padding 属版面（卡片带 no-padding，body 留白为 0）。
+     上下对称（2026-11）：元信息行搬出去后，气泡里只剩正文，8px 与 14px 的
+     不对称已经没有必要。 */
+  padding: 10px var(--nm-spacing-14);
 }
 
-/* 对齐仅对 flex 列容器（.chat-view__item--msg）生效，见 ChatView。
-   角色区分只剩「左右对齐」这一重——色调与圆角都交回组件的统一材质。 */
-.msg-item__bubble--user {
-  align-self: flex-end;
-}
-
+/* 类名仍然留在气泡上（外部样式与测试按它取元素），但布局职责已交给
+   `.msg-item--user/--agent`：气泡在消息行里是 stretch 子项，不需要 align-self。 */
+.msg-item__bubble--user,
 .msg-item__bubble--agent {
-  align-self: flex-start;
+  align-self: stretch;
 }
 
 /* system：居中平铺（细线夹文本），无气泡 */
@@ -163,7 +203,24 @@ const timeLabel = computed(() => {
   display: flex;
   align-items: center;
   gap: var(--nm-spacing-xs);
-  margin-bottom: var(--nm-spacing-2xs);
+  /* 与气泡的间距由 `.msg-item` 的 gap(2px) 给出（2026-11） */
+  min-width: 0;
+}
+/* 元信息文本可省略，复制键不让位（2026-11）：head 的 max-content 参与消息行
+   宽度计算，所以短气泡本来就跟 head 同宽；但超长来源（`实例 · 群 · 用户名`
+   三段拼起来）在窄屏会顶到 `max-width: 88%` 上限，那时必须牺牲标签而不是
+   按钮——复制键是这里唯一的操作。 */
+.msg-item__role,
+.msg-item__source,
+.msg-item__time {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-item__copy {
+  flex: none;
 }
 .msg-item__spacer {
   flex: 1;
@@ -173,7 +230,8 @@ const timeLabel = computed(() => {
   transition: opacity 0.2s ease;
 }
 @media (hover: hover) {
-  .msg-item__bubble:hover .msg-item__copy {
+  /* 悬停目标变成整条消息行（2026-11）：复制键已不在气泡内部 */
+  .msg-item:hover .msg-item__copy {
     opacity: 1;
   }
 }
