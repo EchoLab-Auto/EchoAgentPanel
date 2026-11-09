@@ -1050,6 +1050,28 @@ html[data-corners='continuous'] {
     display: none;
   }
 
+  /* ── toast 不盖顶栏（2026-11 观感）──────────────────────────────────────
+     移动端 toast 走 top-center（右上角贴近拇指区，容易误触遮挡），容器贴
+     `top: 0`。实测一条 106px 高的多行提示从 y=16 就开始，把顶栏（0..56）
+     整条盖住 —— 而顶栏上有 ☰ / 卡片 / 主题三个入口，正好是"要处理提示"时
+     最想点的东西；连接状态类提示还会一次来 4~5 条。
+
+     下移到顶栏之下（56 + safe-area），上内边距收到 8。
+
+     选择器必须凑够**两个类**：库编译后是 `.nm-toast-container--top-center
+     [data-v-*]` = (0,2,0)，而属性选择器与类同级。我先写的
+     `body .nm-toast-container--top-center` 是 (0,1,2) —— element 选择器只加
+     element 计数，不加类计数，所以类数 1 < 2 直接输（实测 computed top 仍是
+     0px，连临时插入的探针规则也一样输，只有 `!important` 能赢）。这里写成
+     `body .nm-toast-container.nm-toast-container--top-center` = (0,2,1)。
+     `#app` 用不上：toast Teleport 到 body，不在 #app 子树内。 */
+  body .nm-toast-container.nm-toast-container--top-center,
+  body .nm-toast-container.nm-toast-container--top-left,
+  body .nm-toast-container.nm-toast-container--top-right {
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: 8px;
+  }
+
   /* ── 触控目标补足（2026-11 移动端体检）─────────────────────────────────
      `pointer: coarse` 那条全局规则只管 `:where(button)` 的 **min-height**，
      宽度不管——于是顶栏三个图标钮实测仍只有 30~34px 宽：

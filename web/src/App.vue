@@ -686,7 +686,13 @@ watch(
     </NeumorphismLayout>
 
     <!-- 移动端 toast 位置：窄屏改 top-center（右上角贴近拇指操作区易误触遮挡），
-         桌面维持 top-right。position 是库的响应式 prop，旋转/拉伸实时跟随。 -->
+         桌面维持 top-right。position 是库的响应式 prop，旋转/拉伸实时跟随。
+         位置见 styles.css 的「toast 不盖顶栏」段：容器在窄屏下移到顶栏之下。
+         条数上限没做分端——库的 `useToast` 在 setup 里对 `maxCount` **求值一次**
+         （非响应式），而 `isMobile` 来自 `useTouchDevice`、真值要等它的
+         onMounted；首屏那批"上游恢复在线"提示正好落在这个窗口里，传进去的
+         仍是桌面值（实测库里生效的是默认 5，不是 8 也不是 3），改它不产生
+         效果还留个假象。真正的问题是"盖住顶栏"，那一条已由 CSS 解决。 -->
     <NeumorphismToastProvider
       ref="toastProvider"
       :position="isMobile ? 'top-center' : 'top-right'"
