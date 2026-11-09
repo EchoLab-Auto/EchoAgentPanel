@@ -666,9 +666,17 @@ watch(
              收进视图菜单后必须显式说明，否则像页面坏了。 -->
         <div v-else-if="view === 'shell'" class="shell-empty">
           <p class="shell-empty__title">还没有 Shell 会话</p>
+          <!-- 入口描述必须分端（2026-11）：窄屏**没有右侧边栏**（卡片改从顶栏
+               「卡片」按钮的底部抽屉进入），原本文案让人去一个屏幕外的地方找。 -->
           <p class="shell-empty__hint">
-            在会话视图右侧边栏的「Shell」卡片里新建一个，或让模型调用
-            <code>shell_start</code> 工具创建。
+            <template v-if="isMobile">
+              点顶栏的「卡片」，在「Shell」卡片里新建一个，或让模型调用
+              <code>shell_start</code> 工具创建。
+            </template>
+            <template v-else>
+              在会话视图右侧边栏的「Shell」卡片里新建一个，或让模型调用
+              <code>shell_start</code> 工具创建。
+            </template>
           </p>
           <NeumorphismButton size="small" variant="glass" @click="setView('chat')">
             回到聊天

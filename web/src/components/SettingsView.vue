@@ -13,7 +13,7 @@
 //! 数据来自后端 SkillsList / ToolsList / ModulesList / TeamsList 事件，打开时主动拉取；
 //! API 配置随 state.api 事件更新。
 
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { lazy } from '../lazy';
 
 const props = defineProps<{
@@ -72,6 +72,37 @@ const TOOL_OTHER = '扩展工具';
 // ── 一级菜单：当前分类 ──
 type CategoryKey = 'api' | 'skill' | 'tool' | 'module' | 'team' | 'cores' | 'system' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
+
+// ── 一级菜单的横向可滚性（2026-11 移动端观感）────────────────────────────
+//
+// 窄屏把 8 个分类压成一条横滑 tab 条（实测总宽 735 / 可视 359，要滑一半才
+// 看得到「系统 / 日志」）。问题有两个，都属"用户不知道有东西在那儿"：
+//   ① 右缘没有提示——滚动条被隐藏，看着就是"到底了"；
+//   ② 切分类（或从别处跳到某分类）后，选中的 tab 可能整条滚出视野，
+//      当前在哪反而看不出来。
+// 处理方式与 ChatView 的 `entry-row` 完全一致：可滚且未到底时在右缘叠一个
+// 「›」（sticky、pointer-events: none）；分类变化时把选中项滚进视野。
+const capsNavRef = ref<HTMLElement | null>(null);
+const navScrollable = ref(false);
+const navAtEnd = ref(false);
+
+function syncNavScroll(): void {
+  const el = capsNavRef.value;
+  if (!el) return;
+  // 1px 容差：设备像素比与亚像素取整会让 scrollLeft 差零点几像素
+  navScrollable.value = el.scrollWidth > el.clientWidth + 1;
+  navAtEnd.value = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+}
+
+watch(activeCategory, async () => {
+  await nextTick();
+  syncNavScroll();
+  // 选中项滚进视野（`inline: 'nearest'` 只在不完全可见时才滚，不会把整条
+  // 拖到左端）
+  const el = capsNavRef.value?.querySelector<HTMLElement>('.caps-nav-item--active');
+  el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+});
+
 
 // ── 列表加载跟踪（pending.ts）：四类清单各自的加载/慢/超时三态 ──
 // 竖屏移动端（2026-10）：断点与库内 useTouchDevice 同源（innerWidth < 768）。
@@ -1931,6 +1962,12 @@ function refresh() {
 
 onMounted(refresh);
 
+// 一级菜单的可滚性要等首次布局（含字体）完成才准，`onMounted` 后再量一次。
+onMounted(async () => {
+  await nextTick();
+  syncNavScroll();
+});
+
 // 列表更新后，保持选中的对象指向最新数据
 watch(
   () => state.skills,
@@ -1973,8 +2010,10 @@ watch(
 
 <template>
   <div class="caps">
-    <!-- 一级菜单 -->
-    <nav class="caps-nav">
+    <!-- 一级菜单。窄屏是横滑 tab 条（8 项总宽 > 可视宽），`navScrollable &&
+         !navAtEnd` 时右缘叠一个「›」提示还有更多——滚动条在窄屏被隐藏，
+         没有它就只能靠"划一下试试"。 -->
+    <nav ref="capsNavRef" class="caps-nav" @scroll.passive="syncNavScroll">
       <div
         v-for="cat in categories"
         :key="cat.key"
@@ -1987,6 +2026,7 @@ watch(
       </div>
       <div class="caps-nav-spacer" />
       <NeumorphismButton size="small" variant="glass" :loading="settingsLoading" @click="refresh">刷新</NeumorphismButton>
+      <span v-if="navScrollable && !navAtEnd" class="caps-nav__more" aria-hidden="true">›</span>
     </nav>
 
     <!-- 分类工作区 -->
@@ -2007,7 +2047,8 @@ watch(
           <h3>{{ currentCategory.label }}</h3>
           <span class="muted">{{ toolbarSubtitle }}</span>
         </div>
-        <div class="caps-toolbar-actions">
+        <!-- 列表侧动作（新建 / Git 安装）：详情态没有作用对象，不渲染 -->
+        <div v-if="!mobileDetailOpen" class="caps-toolbar-actions">
           <template v-if="activeCategory === 'skill'">
             <NeumorphismButton size="small" variant="glass" @click="openGitModal">
               Git 安装
@@ -2025,8 +2066,10 @@ watch(
         </div>
       </div>
 
-      <!-- 工作台筛选栏（技能 / 工具 / 模块）：搜索 + 状态筛选 + 分组维度 -->
-      <div v-if="activeCategory === 'skill'" class="caps-filters">
+      <!-- 工作台筛选栏（技能 / 工具 / 模块）：搜索 + 状态筛选 + 分组维度。
+           详情态不渲染（2026-11）：它筛的是**列表**，而详情态列表已隐藏，
+           111px 高的搜索 + chips + 分组维度纯属占位（实测把详情推到 y=346）。 -->
+      <div v-if="activeCategory === 'skill' && !mobileDetailOpen" class="caps-filters">
         <NeumorphismInput
           v-model="skillSearch"
           placeholder="搜索名称 / 描述 / 触发词"
@@ -4431,6 +4474,27 @@ watch(
     flex: 0 0 auto;
   }
 
+  /* 「右边还有分类」提示（2026-11）：sticky 右贴边，不随内容滚走；左缘渐隐
+     用 mask（不引入新色值，深浅主题都成立）；pointer-events: none 避免挡住
+     最后一个 tab 的点击。与 ChatView 的 `.entry-row__more` 同一套配方。 */
+  .caps-nav__more {
+    position: sticky;
+    right: 0;
+    flex: 0 0 auto;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 32px;
+    margin-left: -32px;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--nm-text-secondary);
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 45%);
+    mask-image: linear-gradient(to right, transparent, #000 45%);
+  }
+
   /* ── 工作区与工具条 ── */
   .caps-toolbar {
     flex-wrap: wrap;
@@ -4483,6 +4547,23 @@ watch(
   .caps-workspace--mobile-detail .caps-resizer {
     display: none;
   }
+  /* ── 详情态：列表侧的操作与筛选条收起（2026-11）─────────────────────
+     现场（技能 → 点进某个条目，390×844 实测）：
+       nav 64..110 / toolbar 118..235 / filters 235..346 / 详情 346..836
+     进详情后屏幕上方 40% 还是**列表用的东西**：标题、Git 安装、新建技能、
+     搜索框、状态 chips、分组维度——它们操作的全是被隐藏的列表，真正要看
+     的详情被推到 y=346。
+
+     为什么靠模板条件而不是 CSS：`.caps-toolbar` / `.caps-filters` 是
+     `.caps-workspace` 的**兄弟**（都在 `.caps-body` 里），
+     `.caps-workspace--mobile-detail .caps-filters` 这类后代选择器永远不匹配
+     ——第一版就是这么写的，实测 filters 仍 111px 高。所以条件写在模板上
+     （`!mobileDetailOpen`），这里只留工具栏自身的收窄。 */
+  .caps-workspace--mobile-detail ~ .caps-toolbar,
+  .caps-mobile-back ~ .caps-toolbar-title h3 {
+    font-size: 12px;
+  }
+
   /* 移动端列表全宽（inline 宽度已不绑定）；去掉右分隔线 */
   .caps-list {
     width: auto;
