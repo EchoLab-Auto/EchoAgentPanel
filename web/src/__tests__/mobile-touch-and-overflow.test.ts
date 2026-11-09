@@ -43,17 +43,23 @@ describe('移动端体检：网格最小宽不得越过容器', () => {
 });
 
 describe('移动端体检：触控目标', () => {
-  it('标签关闭键：视觉 24，命中区 40×40（移动段内）', () => {
-    const mobileStart = tabsVue.indexOf('@media (max-width: 767px)');
-    expect(mobileStart, 'ChatTabs 应有窄屏段').toBeGreaterThan(0);
+  it('标签关闭键：视觉 24，命中区 40×40（coarse 段内）', () => {
+    // 2026-11 第二轮：这组规则从「窄屏段」搬到「coarse 段」——手机横屏
+    // （844×390）宽度越过 768 断点但仍是触屏，挂宽度维度会让同一台设备
+    // 转个方向就变样（实测退回 57 / 44 / 44）。
+    const mobileStart = tabsVue.indexOf('@media (pointer: coarse)');
+    expect(mobileStart, 'ChatTabs 应有 coarse 段').toBeGreaterThan(0);
     const seg = tabsVue.slice(mobileStart);
     expect(seg, '关闭键视觉尺寸应放大到 24').toMatch(/\.chat-tabs__close\s*\{[^}]*width:\s*24px/);
     // 命中区靠伪元素撑开（不改布局，避免挤压标签）
     expect(seg).toMatch(/\.chat-tabs__close::before\s*\{[^}]*width:\s*40px/);
-    expect(seg, '新建标签应加宽到 36').toMatch(/\.chat-tabs__create\s*\{\s*width:\s*36px/);
+    expect(seg, '新建标签应加宽到 36').toMatch(/\.chat-tabs__create\s*\{[^}]*width:\s*36px/);
+    // 标签条高度定死（否则 content 撑出 48，滚动位置会跳）
+    expect(seg, '标签条高度应定死 44').toMatch(/\.chat-tabs\s*\{\s*height:\s*44px/);
   });
 
   it('顶栏图标钮加宽：主题 36 / 全屏 40（全局移动段内）', () => {
+    // 顶栏那两颗钮只在移动端顶栏出现（桌面顶栏是带文字的大钮），所以留窄屏段
     const start = css.indexOf('@media (max-width: 767.98px)');
     expect(start).toBeGreaterThanOrEqual(0);
     const seg = css.slice(start);
@@ -61,10 +67,14 @@ describe('移动端体检：触控目标', () => {
     expect(seg).toMatch(/fullscreen-toggle--compact\s*\{\s*min-width:\s*40px/);
   });
 
-  it('消息复制键用伪元素撑命中区（不吃正文宽度）', () => {
-    const start = css.indexOf('@media (max-width: 767.98px)');
+  it('消息复制键用伪元素撑命中区（coarse 段，与视口宽度无关）', () => {
+    const start = css.indexOf('@media (pointer: coarse)');
+    expect(start, 'styles.css 应有 coarse 段').toBeGreaterThanOrEqual(0);
     const seg = css.slice(start);
     expect(seg).toMatch(/\.msg-item__copy::after\s*\{[^}]*width:\s*40px/);
+    // 视觉高度收回设计值（否则元信息行被 44 撑高）
+    expect(seg).toMatch(/\.msg-item__copy\s*\{[^}]*height:\s*22px/);
+    expect(seg).toMatch(/\.work-run-group__chip\s*\{[^}]*min-height:\s*0/);
   });
 });
 

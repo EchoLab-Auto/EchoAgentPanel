@@ -841,6 +841,47 @@ html[data-corners='continuous'] {
   .ctx-entry.nm-button {
     min-height: 44px;
   }
+
+  /* ── 触屏下"收回视觉高度"（2026-11 观感）───────────────────────────────
+     下面三条都是同一个病：ui-frame 在 coarse 下给 `:where(button)` 挂
+     `min-height: 44px`，把**设计高度**直接顶掉。它们先写在窄屏段里，实测
+     手机**横屏**（844×390，coarse=true / narrow=false）又退回 57 / 44 / 44
+     ——同一台设备转个方向观感就变，明显是规则挂错了维度。触控目标与视口
+     宽度无关，所以整组搬到 `pointer: coarse`：视觉高度收回设计值，命中区
+     用伪元素补足（真机上"点得到"由命中区负责，与视觉高度无关）。
+
+     · 工作行 chip：26 → 被撑到 44。一回合十几个工具/思考交替，每个白占
+       18px，整段运行记录稀稀拉拉。命中区补成 40 高（横向满宽）。
+     · 消息元信息行（角色/时间/复制）：复制键 44 高会把整行从 18 抬到 44。
+       head 现在在气泡**外面**（见 MessageItem），这一行的高度就是消息行
+       顶部那 22px；命中区 40×40。 */
+  .work-run-group__chip {
+    min-height: 0;
+  }
+  .work-run-group__chip::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 40px;
+    transform: translateY(-50%);
+  }
+
+  .msg-item__copy {
+    position: relative;
+    min-height: 0;
+    height: 22px;
+  }
+  .msg-item__copy::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 40px;
+    height: 40px;
+    transform: translate(-50%, -50%);
+  }
 }
 
 @media (max-width: 767.98px) {
@@ -999,24 +1040,6 @@ html[data-corners='continuous'] {
     padding: 16px;
   }
 
-  /* ── 工作行 chip 高度（2026-11 观感）───────────────────────────────────
-     库在 coarse 下给 `:where(button)` 的 44px min-height 把「思考」胶囊从
-     设计的 26px 拉到 44 —— 一回合十几个工具/思考交替，每个工作行白占
-     18px，整段运行记录看起来稀稀拉拉。收回设计高度，命中区用伪元素补：
-     chip 横向排布、纵向留白本来就有，扩出去的命中区不会与相邻行抢点击。 */
-  .work-run-group__chip {
-    min-height: 0;
-  }
-  .work-run-group__chip::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 0;
-    right: 0;
-    height: 40px;
-    transform: translateY(-50%);
-  }
-
   /* 移动端滚动条：原生实现是"滚动时临时浮现"，不需要常驻细条（桌面才需要
      位置提示）。基础规则里的 `scrollbar-width: thin` 在部分 Android WebView
      上会画一条常驻灰边。 */
@@ -1044,30 +1067,6 @@ html[data-corners='continuous'] {
   }
   #app .topbar-actions .fullscreen-toggle--compact {
     min-width: 40px;
-  }
-  .msg-item__copy {
-    position: relative;
-    /* 复制键不再撑高「角色 / 时间」行（2026-11 观感）。
-       库在 coarse 下给它 `min-height: 44px`，而 `.msg-item__head` 是气泡
-       **内部顶部**的一行 —— head 从 18px 涨到 44px，实测正文距气泡上沿
-       54px、距下沿只有 8px：每个气泡都"上重下轻"，一屏看上去像气泡之间
-       隔了一道空带。视觉高度收回 22，命中区由下面的 ::after（40×40）兜住。
-       （这条必须在全局样式表里：`.msg-item__copy` 属于 MessageItem 子组件，
-       ChatView 的 scoped 规则不穿透。） */
-    min-height: 0;
-    height: 22px;
-    /* 元信息行现在在气泡**外面**（2026-11），这一行的高度就是消息行顶部
-       那 22px。收住高度后 head 与气泡之间只有 2px 间隙，视觉上"标签贴着
-       气泡上沿"，比原来塞在气泡里更像消息的注脚。 */
-  }
-  .msg-item__copy::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 40px;
-    height: 40px;
-    transform: translate(-50%, -50%);
   }
 
   /* ── 主区：给底部安全区留白（输入区自身也有，这里兜住视图滚动端） ── */
