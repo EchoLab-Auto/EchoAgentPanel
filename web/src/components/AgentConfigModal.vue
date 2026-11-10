@@ -14,7 +14,6 @@ import NeumorphismDivider from '@echolab-auto/ui-frame/components/NeumorphismDiv
 import { NeumorphismFormItem } from '@echolab-auto/ui-frame/components/NeumorphismForm';
 import NeumorphismInput from '@echolab-auto/ui-frame/components/NeumorphismInput';
 import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSelect';
-import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwitch';
 import NeumorphismTable from '@echolab-auto/ui-frame/components/NeumorphismTable';
 import NeumorphismTextarea from '@echolab-auto/ui-frame/components/NeumorphismTextarea';
 import PanelIcon from './PanelIcon.vue';
@@ -82,7 +81,6 @@ onUnmounted(() => {
 const name = ref('');
 const description = ref('');
 const systemPrompt = ref('');
-const enabled = ref(true);
 const disabledTools = ref<string[]>([]);
 const disabledSkills = ref<string[]>([]);
 const enabledModules = ref<string[]>([]);
@@ -97,7 +95,6 @@ watch(
     name.value = t.name;
     description.value = t.description;
     systemPrompt.value = t.system_prompt ?? '';
-    enabled.value = t.enabled;
     disabledTools.value = t.disabled_tools ?? [];
     disabledSkills.value = t.disabled_skills ?? [];
     enabledModules.value = t.enabled_modules ?? [];
@@ -292,7 +289,9 @@ function save() {
         name: name.value.trim(),
         description: description.value.trim(),
         system_prompt: systemPrompt.value,
-        enabled: enabled.value,
+        // 启停不在本弹层编辑（2026-11：运行控制挪到智能体列表的行操作里）——
+        // 原样透传，避免整对象覆盖把用户的启停状态清成默认值。
+        enabled: props.team.enabled,
         disabled_tools: disabledTools.value,
         disabled_skills: disabledSkills.value,
         enabled_modules: enabledModules.value,
@@ -353,11 +352,6 @@ function save() {
             placeholder="留空则继承全局系统提示词"
           />
         </NeumorphismFormItem>
-
-        <div class="agent-config__row">
-          <span>启用（禁用即卸载记忆）</span>
-          <NeumorphismSwitch v-model="enabled" size="small" />
-        </div>
 
         <NeumorphismDivider dashed inset />
 
@@ -545,13 +539,6 @@ function save() {
 /* 库 FormItem 自带标签与下边距；弹层内收窄一点更紧凑 */
 .agent-config__body :deep(.nm-form-item) {
   margin-bottom: 10px;
-}
-.agent-config__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 13px;
-  margin: 2px 0 10px;
 }
 .agent-config__group { margin-bottom: 10px; }
 .agent-config__group-title { font-size: 12px; font-weight: 600; color: var(--nm-text-secondary); margin-bottom: 6px; }

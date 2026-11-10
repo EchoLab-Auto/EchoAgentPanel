@@ -10,6 +10,9 @@
 //!   3) 内层不存在手写原生输入/表格（回归为裸元素即失败）。
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mount } from '@vue/test-utils';
 import AgentConfigModal from '../AgentConfigModal.vue';
 import { state } from '../../store';
@@ -89,7 +92,6 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
     for (const cls of [
       '.nm-input', // 名称 / 描述
       '.nm-textarea', // 系统提示词
-      '.nm-switch', // 启用
       '.nm-select', // API 供应商
       '.nm-divider', // 分组分隔
     ]) {
@@ -97,6 +99,24 @@ describe('AgentConfigModal 内层元素 = ui-frame 组件', () => {
     }
     // 库 FormItem 提供标签
     expect(wrapper.findAll('.agent-config .nm-form-item').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('不在这里编辑启停（运行控制归智能体列表的行操作）', () => {
+    // 2026-11：启停是运行控制，和静态配置的生命周期不同——放进配置表单会
+    // 诱使用户"保存"一次就把当前运行态固化成配置（启动失败会被写成停用）。
+    const wrapper = mountModal();
+    expect(wrapper.find('.agent-config .nm-switch').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('启用（禁用即卸载记忆');
+  });
+
+  it('保存时原样透传启停状态（整对象覆盖不能把它清成默认值）', () => {
+    // `SaveTeam` 是整对象覆盖：本弹层不再编辑 `enabled`，但仍必须把它带回去
+    // ——漏传就等于"每保存一次配置就把启用状态重置成默认值"。
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'AgentConfigModal.vue'),
+      'utf-8',
+    );
+    expect(source).toContain('enabled: props.team.enabled');
   });
 
   it('启用模块区包含包维度门控模块（工作区会话）', () => {

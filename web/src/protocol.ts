@@ -271,7 +271,22 @@ export interface TeamInfo {
    * 裸帧 / 未标注）。同一 id 可能出现在多个 core 上，人格身份是 (core, id)。
    */
   core?: string | null;
+  /**
+   * **配置态**：该人格是否启用（`teams.<id>.enabled`）。
+   *
+   * 与 {@link running} 分开（2026-11）：此前这个字段上报的是"运行时 map 里
+   * 有没有它"，于是任何**没能启动**的原因（模块装配失败、工厂报错）都会被
+   * 界面显示成"已禁用"——用户在配置里点一次保存，就把一次临时故障固化成了
+   * 持久的 `enabled = false`。
+   */
   enabled: boolean;
+  /**
+   * **运行态**：该人格现在是否有活着的实例（旧 Core 不下发 → undefined）。
+   *
+   * `enabled && running === false` = 启动失败 / 正在重建：界面要显示"未运行"，
+   * 而不是谎报"已禁用"。
+   */
+  running?: boolean;
   sessions: number;
   system_prompt?: string;
   disabled_tools?: string[];

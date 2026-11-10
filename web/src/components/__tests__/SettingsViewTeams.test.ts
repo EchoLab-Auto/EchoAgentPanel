@@ -141,6 +141,61 @@ describe('SettingsView · 智能体 × 多 Core', () => {
     });
   });
 
+  // ── 启停（2026-11 单轨化之后的行为契约）────────────────────────────
+  //
+  // 启停从"配置表单里的一个开关"挪到"列表行/详情的操作按钮"：它是**运行
+  // 控制**，与静态配置的生命周期不同。同时 `TeamInfo` 把配置态（enabled）
+  // 与运行态（running）分开上报——否则一次启动失败会被显示成"已停用"，
+  // 用户点一下保存就把临时故障固化成持久配置。
+
+  it('启停是操作区的按钮，不在配置表单里', async () => {
+    const wrapper = await openTeam('Alix', 'core-a');
+    // 详情面板的操作区出现「停用」（该条 enabled=true）
+    expect(buttonByText(wrapper, '停用')).toBeTruthy();
+    // 配置表单里不该再有启停开关（那是配置弹层的事，且已移除）
+    expect(wrapper.text()).not.toContain('启用（禁用即卸载记忆');
+  });
+
+  it('点「停用」= ToggleTeam(enabled: false) 定向到该条目的 core', async () => {
+    const wrapper = await openTeam('Alix', 'core-b');
+    await buttonByText(wrapper, '停用')!.trigger('click');
+
+    expect(sendCommand).toHaveBeenCalledTimes(1);
+    expect(sendCommand.mock.calls[0]).toEqual([
+      { ToggleTeam: { id: 'alix', enabled: false } },
+      'core-b',
+    ]);
+  });
+
+  it('已停用的条目：按钮变成「启用」，点它发 enabled: true', async () => {
+    state.teams = (state.teams as never as Array<Record<string, unknown>>).map((t) =>
+      t.id === 'alix' && t.core === 'core-b' ? { ...t, enabled: false, running: false } : t,
+    ) as never;
+    const wrapper = await openTeam('Alix', 'core-b');
+    await buttonByText(wrapper, '启用')!.trigger('click');
+
+    expect(sendCommand.mock.calls[0]).toEqual([
+      { ToggleTeam: { id: 'alix', enabled: true } },
+      'core-b',
+    ]);
+  });
+
+  it('列表行区分「已停用」与「未运行」（配置态 vs 运行态）', async () => {
+    state.teams = (state.teams as never as Array<Record<string, unknown>>).map((t) => {
+      if (t.id === 'alix' && t.core === 'core-a') return { ...t, enabled: false, running: false };
+      if (t.id === 'alix' && t.core === 'core-b') return { ...t, enabled: true, running: false };
+      return t;
+    }) as never;
+    const wrapper = mount(SettingsView);
+    await wrapper.findAll('.caps-nav-item').find((n) => n.text().includes('智能体'))!.trigger('click');
+
+    const rows = wrapper.findAll('.caps-list-item').map((r) => r.text());
+    // enabled=false → 已停用（这是用户的选择）
+    expect(rows.some((t) => t.includes('Alix') && t.includes('已停用'))).toBe(true);
+    // enabled=true 但 running=false → 未运行（这是故障，需要人看）
+    expect(rows.some((t) => t.includes('Alix') && t.includes('未运行'))).toBe(true);
+  });
+
   it('DeleteTeam 定向到该条目的 core（不是 activeRegion）', async () => {
     // activeRegion = core-a，删的是 core-b 上的那一条
     const wrapper = await openTeam('Alix', 'core-b');

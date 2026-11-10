@@ -1435,7 +1435,7 @@ const teamSectionOpen = ref<string[]>(['basic', 'prompt']);
 
 /** 分区摘要：基础（启用态 + 运行区域） */
 const teamBasicSummary = computed(() => {
-  const base = teamFormEnabled.value ? '启用' : '禁用';
+  const base = teamFormEnabled.value ? '启用' : '停用';
   // 多区域部署下把区域并进摘要：「这个 agent 在哪台机器上」是一等信息，
   // 不该只藏在折叠分区里的选择器里（列表行同样带徽标，见 teamList 渲染）。
   return multiRegion.value ? `${base} · ${coreDisplay(state, teamFormCore.value).name}` : base;
@@ -1481,6 +1481,8 @@ async function startTeamCreate() {
   teamFormCore.value = state.activeRegion;
   teamFormDescription.value = '';
   teamFormPrompt.value = '';
+  // 启停不在表单里编辑（2026-11）：新建时默认启用，编辑时跟随该人格现状，
+  // 保存时原样透传（`SaveTeam` 是整对象覆盖，漏传等于重置）。
   teamFormEnabled.value = true;
   teamFormDisabledTools.value = [];
   teamFormDisabledSkills.value = [];
@@ -2501,7 +2503,16 @@ watch(
               >
                 {{ coreDisplay(state, t.core).name }}
               </span>
-              <span v-if="!t.enabled" class="muted caps-list-item__flag">已禁用</span>
+              <!-- 配置态与运行态分开显示（2026-11）：配置说"启用"但实例不在，
+                   是启动失败/正在重建，不该谎报成"已停用"。 -->
+              <span v-if="!t.enabled" class="muted caps-list-item__flag">已停用</span>
+              <span
+                v-else-if="t.running === false"
+                class="caps-list-item__flag caps-list-item__flag--warn"
+                title="配置为启用，但当前没有运行实例（启动失败或正在重建）"
+              >
+                未运行
+              </span>
             </div>
             <div v-if="teamList.length === 0 && teamPhase === 'idle'" class="muted caps-list-empty">（暂无智能体）</div>
           </template>
@@ -2786,6 +2797,23 @@ watch(
                   编辑
                 </NeumorphismButton>
                 <NeumorphismButton
+                  size="small"
+                  variant="glass"
+                  :title="
+                    selectedTeam.enabled
+                      ? '停止该智能体：卸下运行实例（不删配置、不删磁盘上的会话），之后收不到任何消息'
+                      : '重新启用：经同一装配流程重建实例'
+                  "
+                  @click="
+                    sendCommand(
+                      { ToggleTeam: { id: selectedTeam!.id, enabled: !selectedTeam!.enabled } },
+                      selectedTeam!.core ?? undefined,
+                    )
+                  "
+                >
+                  {{ selectedTeam.enabled ? '停用' : '启用' }}
+                </NeumorphismButton>
+                <NeumorphismButton
                   v-if="teamsInCore(selectedTeam.core) > 1"
                   size="small"
                   variant="glass"
@@ -2801,18 +2829,27 @@ watch(
                 单会话
               </NeumorphismTag>
             </div>
+            <!-- 启停是**运行控制**，不是配置项（2026-11）：放在操作区，与编辑
+                 并列；静态配置（提示词/能力白名单）留在配置弹层里。 -->
             <div class="detail-field">
-              <span>启用（禁用即卸载记忆，再次启用重新挂载）</span>
-              <NeumorphismSwitch
-                :model-value="selectedTeam.enabled"
+              <span>运行状态</span>
+              <NeumorphismTag
+                v-if="!selectedTeam.enabled"
                 size="small"
-                @change="
-                  sendCommand(
-                    { ToggleTeam: { id: selectedTeam!.id, enabled: $event } },
-                    selectedTeam!.core ?? undefined,
-                  )
-                "
-              />
+              >
+                已停用（未加载，磁盘上的会话与事件日志保留）
+              </NeumorphismTag>
+              <NeumorphismTag
+                v-else-if="selectedTeam.running === false"
+                variant="error"
+                size="small"
+              >
+                未运行（启动失败或正在重建）
+              </NeumorphismTag>
+              <NeumorphismTag v-else-if="selectedTeam.running === true" variant="info" size="small">
+                运行中
+              </NeumorphismTag>
+              <span v-else class="muted">（该 Core 未上报运行状态）</span>
             </div>
             <p class="muted">{{ selectedTeam.description || '（无描述）' }}</p>
             <div class="detail-field">
@@ -2876,9 +2913,23 @@ watch(
                 <div class="team-hero__main">
                   <div class="team-hero__title">
                     <span>{{ teamFormIsEdit ? teamFormName || teamFormId || '未命名' : '新建智能体' }}</span>
-                    <NeumorphismTag :variant="teamFormEnabled ? 'success' : 'info'" size="small">
-                      {{ teamFormEnabled ? '已启用' : '已禁用' }}
+                    <!-- 状态标签读**当前运行时**（selectedTeam），不是表单快照：
+                         启停按钮立即生效，标签要跟着变；配置说启用但实例不在
+                         时显示「未运行」——那是故障，不是用户的停用选择。 -->
+                    <NeumorphismTag
+                      v-if="teamFormIsEdit && selectedTeam && !selectedTeam.enabled"
+                      size="small"
+                    >
+                      已停用
                     </NeumorphismTag>
+                    <NeumorphismTag
+                      v-else-if="teamFormIsEdit && selectedTeam && selectedTeam.running === false"
+                      variant="error"
+                      size="small"
+                    >
+                      未运行
+                    </NeumorphismTag>
+                    <NeumorphismTag v-else variant="success" size="small">已启用</NeumorphismTag>
                   </div>
                   <div class="team-hero__id">
                     {{ teamFormIsEdit ? teamFormId : 'ID 待填写' }} · {{ teamBasicSummary }}
@@ -2932,9 +2983,6 @@ watch(
                   </NeumorphismFormItem>
                   <NeumorphismFormItem label="描述" name="description">
                     <NeumorphismInput v-model="teamFormDescription" placeholder="专注文档写作" />
-                  </NeumorphismFormItem>
-                  <NeumorphismFormItem label="启用" name="enabled">
-                    <NeumorphismSwitch v-model="teamFormEnabled" size="small" />
                   </NeumorphismFormItem>
                 </template>
 
@@ -3076,6 +3124,27 @@ watch(
                 >
                   {{ teamFormDirty ? '● 有未保存的更改' : '○ 无更改' }}
                 </span>
+                <!-- 启停是**运行控制**，与"保存"分开（2026-11）：点它立即
+                     生效，不会把当前运行态顺手写进配置——此前它是表单里的
+                     一个开关，用户改完别的字段一保存就把"现在跑不跑"固化成了
+                     配置，启动失败也被写成"停用"。 -->
+                <NeumorphismButton
+                  v-if="teamFormIsEdit && selectedTeam"
+                  variant="glass"
+                  :title="
+                    selectedTeam.enabled
+                      ? '停止该智能体：卸下运行实例（不删配置、不删磁盘上的会话），之后收不到任何消息'
+                      : '重新启用：经同一装配流程重建实例'
+                  "
+                  @click="
+                    sendCommand(
+                      { ToggleTeam: { id: selectedTeam.id, enabled: !selectedTeam.enabled } },
+                      selectedTeam.core ?? undefined,
+                    )
+                  "
+                >
+                  {{ selectedTeam.enabled ? '停用' : '启用' }}
+                </NeumorphismButton>
                 <NeumorphismButton
                   v-if="teamFormIsEdit && selectedTeam && teamsInCore(selectedTeam.core) > 1"
                   variant="glass"
@@ -3611,6 +3680,11 @@ watch(
 .caps-list-item__flag {
   font-size: 11px;
   flex-shrink: 0;
+}
+/* 「未运行」= 需要人看一眼（配置说启用、实例却不在）：用错误色，别和
+   灰度提示混在一起——这两种状态的处理方式完全不同。 */
+.caps-list-item__flag--warn {
+  color: var(--nm-color-error, #d9534f);
 }
 .caps-list-empty {
   padding: 12px;
