@@ -29,24 +29,37 @@ const props = defineProps<{
   /** 时间格式化（秒级 Unix 时间戳）；缺省由本组件兜底 */
   formatTime?: (time: number) => string;
   /**
-   * 该行指向的归档**是否还在**（2026-11）。
+   * 压缩前历史是否**已展开**（2026-11）。
    *
-   * `undefined` = 还不知道（清单未拉）——照常可点，失败由 Core 报原因；
-   * `false` = 清单里没有它（归档每份 ~20MB，只保留最近 20 份，旧压缩的
-   * 那几份会被轮转掉）。此时按钮标灰并说明，而不是让人点开再吃一个错误。
+   * 展开 = Core 把归档里的前缀派生后接在同一份历史前面（`expand_depth`），
+   * 所以展开后这里看到的就是一条连续的上下文，不需要任何拼接。
    */
-  archiveAvailable?: boolean;
+  archiveExpanded?: boolean;
+  /**
+   * 已展开的前提上是否还有**更深一层**的压缩边界。
+   *
+   * 压缩链实测可达 6 层（每次压缩一份归档）：每点一次「展开更早的」多展开
+   * 一层（Core 一次只解析一份 20+ MB 的归档）。
+   */
+  archiveHasOlder?: boolean;
+  /**
+   * 更早的历史读不到了（归档已被轮转清理，`archives/` 只保留最近 20 份）。
+   *
+   * 此时不给「继续展开」，而是标灰说明——不让用户点了才吃一个错误。
+   */
+  archiveUnavailable?: boolean;
 }>();
 
 /**
- * 请求查看「压缩前的历史」（2026-11）。
+ * 展开 / 收起压缩前的历史（2026-11）。
  *
  * 只有 `system` 行、且该行带 `archive`（Core 在压缩时把归档名写进提示行）
- * 时才发出。事件冒泡到 ChatView——那里有 team/core 上下文可以发命令，
- * 本组件只负责"点哪儿"。
+ * 时才发出。事件冒泡到 ChatView——那里知道当前会话的展开层数，也持有发
+ * 命令的上下文（本组件只负责"点哪儿"）。
  */
 const emit = defineEmits<{
-  (event: 'open-archive', archive: string): void;
+  (event: 'expand-archive'): void;
+  (event: 'collapse-archive'): void;
 }>();
 
 /** 该行指向的压缩前归档（无 → 不渲染入口）。 */
@@ -102,23 +115,42 @@ const timeLabel = computed(() => {
       <span class="msg-item__system-text">{{ message.content }}</span>
       <span v-if="timeLabel" class="msg-item__system-time">{{ timeLabel }}</span>
       <!-- 压缩前历史入口（2026-11）：压缩把事件日志前缀换成摘要、原件写进
-           archives/，那段内容在时间线里永久消失——这一行是唯一线索，
-           所以入口就挂在它上面（而不是藏在设置里）。 -->
-      <button
-        v-if="archiveName"
-        type="button"
-        class="msg-item__archive-btn"
-        :class="{ 'msg-item__archive-btn--gone': props.archiveAvailable === false }"
-        :disabled="props.archiveAvailable === false"
-        :title="
-          props.archiveAvailable === false
-            ? '该归档已被清理（archives 只保留最近 20 份）'
-            : `查看压缩前的历史（归档 ${archiveName}）`
-        "
-        @click="emit('open-archive', archiveName)"
-      >
-        {{ props.archiveAvailable === false ? '归档已清理' : '查看压缩前的历史' }}
-      </button>
+           archives/，那段内容在时间线里永久消失——这一行就是分界，所以入口
+           挂在它上面（而不是藏在设置里）。
+
+           展开后**内容就在上面**（Core 把它接进了同一份历史），这里只留
+           「展开更早的 / 收起」——压缩链可达 6 层，逐层展开。 -->
+      <template v-if="archiveName">
+        <button
+          v-if="props.archiveUnavailable"
+          type="button"
+          class="msg-item__archive-btn msg-item__archive-btn--gone"
+          disabled
+          title="更早的归档已被清理（archives 只保留最近 20 份）"
+        >
+          更早的归档已清理
+        </button>
+        <template v-else>
+          <button
+            v-if="!props.archiveExpanded || props.archiveHasOlder"
+            type="button"
+            class="msg-item__archive-btn"
+            :title="`从归档 ${archiveName} 展开压缩前的历史`"
+            @click="emit('expand-archive')"
+          >
+            {{ props.archiveExpanded ? '展开更早的压缩历史' : '展开压缩前的历史' }}
+          </button>
+          <button
+            v-if="props.archiveExpanded"
+            type="button"
+            class="msg-item__archive-btn msg-item__archive-btn--quiet"
+            title="收起压缩前的历史，只看当前上下文"
+            @click="emit('collapse-archive')"
+          >
+            收起
+          </button>
+        </template>
+      </template>
     </div>
   </div>
   <!-- 外壳 = ui-frame NeumorphismCard，**材质全部走组件默认**（2026-10-29 用户
@@ -363,6 +395,16 @@ const timeLabel = computed(() => {
   color: var(--nm-text-primary);
   border-color: var(--nm-text-secondary);
 }
+/* 「收起」：同一行的次级动作，比展开弱一档（展开才是主路径）。 */
+.msg-item__archive-btn--quiet {
+  border-color: transparent;
+  color: var(--nm-text-disabled);
+}
+.msg-item__archive-btn--quiet:hover {
+  color: var(--nm-text-secondary);
+  border-color: var(--nm-border-color);
+}
+
 /* 归档已被轮转清理：保留入口（让用户知道"这里曾经有历史"）但不可点。 */
 .msg-item__archive-btn--gone {
   opacity: 0.55;

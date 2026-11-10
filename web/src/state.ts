@@ -33,10 +33,9 @@ import type {
   TeamInfo,
   WorkspaceGitInfo,
   WorkspaceSessionInfo,
-  SessionArchiveEntry,
 } from './protocol';
 
-import { archiveKey, checklistKey, scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
+import { checklistKey, scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
 import { acceptPanelEvent } from './extensions/registry';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -1077,30 +1076,20 @@ export interface AppState {
   checklists: Record<string, ChecklistEntry[]>;
   /** 按会话派生的显示历史（`SessionHistory` 事件；key = checklistKey(core, team, session)）。
    * 合并策略：历史快照 + 窗口增量（seq > baseSeq 的窗口条目；工具按 tool_call_id 就地补丁）。 */
-  sessionHistory: Record<string, { messages: DisplayMessage[]; total: number; truncated: boolean; baseSeq: number }>;
-  /**
-   * **压缩前归档**的只读回放（2026-11）。
-   *
-   * 压缩会把事件日志的前缀换成一条摘要，原件写进 `archives/`——那段历史在
-   * 时间线与投影里永久消失，只能按归档名回读。这里刻意与 `sessionHistory`
-   * 分开存：
-   * - 它**不参与实时合并**（没有 baseSeq 水位线，也不该认领窗口条目）；
-   * - 键带归档名（同一会话可能有多份，回看不同的快照）。
-   */
-  sessionArchives: Record<
+  sessionHistory: Record<
     string,
     {
-      archive: string;
-      sessionId: string;
       messages: DisplayMessage[];
       total: number;
       truncated: boolean;
-      error: string | null;
-      loading: boolean;
+      /** 合并水位线（`SessionHistory.max_seq`）。 */
+      baseSeq: number;
+      /** 上面还有更早的历史**没展开**（压缩边界存在且归档还在）。 */
+      hasOlder?: boolean;
+      /** 上面还有历史，但归档已被轮转清理（读不到）。 */
+      olderUnavailable?: boolean;
     }
   >;
-  /** 各人格的归档清单（key = `teamKey(core, team)`）。 */
-  sessionArchiveList: Record<string, SessionArchiveEntry[]>;
   toasts: Toast[];
   /** 目录选择器浏览结果（RequestBrowseDirectories 响应，2026-10）：
    * 键 = 复合 (activeRegion, 请求 path \u0000 '' 表示根列表) → 结果。
@@ -1258,8 +1247,6 @@ export function initialState(): AppState {
     instanceUiByKey: {},
     checklists: {},
     sessionHistory: {},
-    sessionArchives: {},
-    sessionArchiveList: {},
     toasts: [],
     browseDirectories: {},
     remoteApiProfiles: {},
@@ -1809,7 +1796,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       return state;
     }
     case 'SessionHistory': {
-      const e = (event as { SessionHistory: { team_id?: string | null; session_id: string; messages: TimelineMessage[]; total: number; truncated?: boolean; max_seq?: number; core?: string | null } }).SessionHistory;
+      const e = (event as { SessionHistory: { team_id?: string | null; session_id: string; messages: TimelineMessage[]; total: number; truncated?: boolean; max_seq?: number; has_older?: boolean; older_unavailable?: boolean; core?: string | null } }).SessionHistory;
       if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) return state;
       const key = checklistKey(evtCore(e), e.team_id ?? null, e.session_id);
       // baseSeq（合并水位线）：优先取服务端下发的 max_seq（派生时快照水位，
@@ -1820,6 +1807,10 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         total: e.total,
         truncated: !!e.truncated,
         baseSeq: e.max_seq ?? fallbackBase,
+        // 展开状态（2026-11）：`has_older` 驱动分隔行上的「展开更早的」；
+        // `older_unavailable` = 归档已被轮转清理，按钮改文案并禁用。
+        hasOlder: !!e.has_older,
+        olderUnavailable: !!e.older_unavailable,
       };
       // 常驻上限（2026-10 内存治理）：此前是最多 **64** 份快照、且按插入序
       // 淘汰（与"最近用过"无关）。实测每份 ≤1000 条、真实内容约 300 字节/条
@@ -1828,46 +1819,6 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       // 现在：上限 12 份；**本次写入的会话视为最近使用**（重新插入到末尾），
       // 淘汰最旧的**非本次**会话——不会把刚拉到的快照立刻删掉。
       pruneSessionHistory(state, key);
-      return state;
-    }
-    case 'SessionArchives': {
-      // 归档清单（只 stat 出来的元信息）。按 (core, team) 存——人格级，
-      // 与 `RequestSessionArchives` 的 team_id 同口径。
-      const e = (event as { SessionArchives: { team_id?: string | null; archives: SessionArchiveEntry[] } }).SessionArchives;
-      const key = teamKey(evtCore(e), e.team_id ?? null);
-      state.sessionArchiveList[key] = [...(e.archives ?? [])].sort(
-        (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0),
-      );
-      return state;
-    }
-    case 'SessionArchiveHistory': {
-      // 压缩前归档的只读回放。**不进实时合并**：归档不参与水位线/认领，
-      // 它是"某个时间点的快照"，与窗口增量无关（见 state.sessionArchives 注释）。
-      const e = (
-        event as {
-          SessionArchiveHistory: {
-            team_id?: string | null;
-            session_id: string;
-            archive: string;
-            messages: TimelineMessage[];
-            total: number;
-            truncated: boolean;
-            error?: string | null;
-          };
-        }
-      ).SessionArchiveHistory;
-      const core = evtCore(e);
-      if (core != null && state.activeRegion != null && core !== state.activeRegion) return state;
-      const key = archiveKey(core, e.team_id ?? null, e.archive);
-      state.sessionArchives[key] = {
-        archive: e.archive,
-        sessionId: e.session_id,
-        messages: toDisplayMessages(e.messages ?? []),
-        total: e.total,
-        truncated: !!e.truncated,
-        error: e.error ?? null,
-        loading: false,
-      };
       return state;
     }
     case 'AgentOutput': {

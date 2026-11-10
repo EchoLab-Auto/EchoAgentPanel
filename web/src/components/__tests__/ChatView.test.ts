@@ -837,7 +837,13 @@ describe('会话历史补拉（RequestSessionHistory，2026-10）', () => {
       // 渐进式拉取（2026-10 内存/切会话治理）：首拉 300 条（渲染窗口 200
       // + 余量），用户点「加载更早」把窗口扩到界外时再 +300。
       // 此前固定 1000 条——切一次会话白拉 5 倍量（实测 33 ms）。
-      RequestSessionHistory: { team_id: 'alix', session_id: 'sess-open', limit: 300 },
+      RequestSessionHistory: {
+        team_id: 'alix',
+        session_id: 'sess-open',
+        limit: 300,
+        // 默认折叠（2026-11 压缩前历史）：不展开归档 = 不传层数。
+        expand_depth: null,
+      },
     });
     wrapper.unmount();
   });
@@ -867,7 +873,12 @@ describe('会话历史补拉（RequestSessionHistory，2026-10）', () => {
     const calls = historyCallsFor('sess-reconnect');
     expect(calls.length).toBe(1);
     expect(calls[0][0]).toEqual({
-      RequestSessionHistory: { team_id: null, session_id: 'sess-reconnect', limit: 300 },
+      RequestSessionHistory: {
+        team_id: null,
+        session_id: 'sess-reconnect',
+        limit: 300,
+        expand_depth: null,
+      },
     });
     wrapper.unmount();
   });

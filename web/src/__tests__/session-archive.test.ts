@@ -1,19 +1,19 @@
-//! 压缩前归档回放（2026-11）：Core 侧清单/回读 + Panel 侧入口与渲染。
+//! 压缩前历史（2026-11）：Core 把归档前缀接进同一条消息流，面板只做入口。
 //!
-//! ## 为什么需要这层
+//! ## 设计要点
 //!
-//! 压缩做的不是"给日志加个标记"：它把被替换的前缀事件**从日志里摘掉**，
-//! 换成一条 `Compaction` 事件（摘要 + 归档路径）。于是"压缩前到底聊了什么"
-//! 在投影、显示时间线、面板里都永久消失——只有 `archives/` 那份快照还留着。
-//! 用户要回看，只能靠它。
+//! 压缩把被替换的前缀事件**从日志里摘掉**，换成一条 `Compaction` 事件
+//! （摘要 + 归档路径）——那段历史在投影、时间线、面板里都永久消失，只剩
+//! `archives/` 那份快照。
 //!
-//! 本文件锁定三件事：
-//! 1. reducer：清单与回放分别落到 `sessionArchiveList` / `sessionArchives`，
-//!    且回放**不进** `sessionHistory`（否则会被实时合并当成"最新快照"认领）；
-//! 2. 提示行：`TimelineMessage.archive` 透传到 `DisplayMessage` 与
-//!    `ChatMessage`（少了它就没有入口）；
-//! 3. 归档清理：归档只保留最近 20 份，提示行却是永久的——清单里没有的名字
-//!    要显示"已清理"而不是让人点了才吃错误。
+//! 展开不放在前端做：边界是**事件级**的（`replaced_count` 按会话数事件，
+//! 一次工具调用 + 结果 = 2 事件 = 1 行），而且压缩链可达 6 层。前端拿消息数
+//! 去切会切歪，还要自己处理递归与去重。所以面板只发 `expand_depth`，Core
+//! 把归档前缀派生后**拼在同一份历史前面**返回——面板因此看到的是一条连续的
+//! 上下文：同一滚动区、同一套行模型、同一个「加载更早」。
+//!
+//! 本文件锁定：协议透传、reducer 的展开状态、默认折叠、以及"不误把归档当成
+//! 实时快照"（那会让合并逻辑吞掉窗口条目）。
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -23,7 +23,6 @@ import { fileURLToPath } from 'node:url';
 import { reduce } from '../state';
 import { toDisplayMessage } from '../state_domains/timeline';
 import { toChatMessage } from '../chat-adapter';
-import { archiveKey, checklistKey } from '../keys';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = (...parts: string[]) => readFileSync(join(here, '..', ...parts), 'utf-8');
@@ -32,8 +31,6 @@ function freshState() {
   return {
     activeRegion: null,
     sessionHistory: {},
-    sessionArchives: {},
-    sessionArchiveList: {},
     trunk: [],
   } as never;
 }
@@ -48,7 +45,7 @@ const COMPACTION_LINE = {
   archive: 'echo-sessions-EchoCode-20261109-022842-820-precompact.json',
 };
 
-describe('压缩前归档：协议透传', () => {
+describe('压缩前历史：协议透传', () => {
   it('TimelineMessage.archive → DisplayMessage.archive', () => {
     const display = toDisplayMessage(COMPACTION_LINE as never);
     expect(display.archive).toBe('echo-sessions-EchoCode-20261109-022842-820-precompact.json');
@@ -72,95 +69,112 @@ describe('压缩前归档：协议透传', () => {
   });
 });
 
-describe('压缩前归档：reducer', () => {
-  it('SessionArchives 按 (core, team) 落表，并按时间倒序', () => {
+describe('压缩前历史：reducer', () => {
+  it('SessionHistory 落到 sessionHistory，并保留展开状态', () => {
     const state = freshState();
     const next = reduce(state, {
-      SessionArchives: {
-        team_id: 'EchoCode',
-        archives: [
-          { name: 'a-old.json', created_at: 100, size: 10, reason: 'precompact' },
-          { name: 'b-new.json', created_at: 300, size: 20, reason: '' },
-        ],
-      },
-    } as never);
-    const list = (next as { sessionArchiveList: Record<string, { name: string }[]> })
-      .sessionArchiveList;
-    expect(list['EchoCode']!.map((entry) => entry.name)).toEqual(['b-new.json', 'a-old.json']);
-  });
-
-  it('SessionArchiveHistory 落到 sessionArchives，**不**写 sessionHistory', () => {
-    const state = freshState();
-    const next = reduce(state, {
-      SessionArchiveHistory: {
-        team_id: 'EchoCode',
-        session_id: 'local:tui::local_user',
-        archive: 'x-precompact.json',
-        messages: [COMPACTION_LINE, { ...COMPACTION_LINE, seq: 13, ord: 8, kind: 'user', content: '早前的问题' }],
-        total: 2,
-        truncated: false,
-      },
-    } as never);
-    const typed = next as unknown as {
-      sessionArchives: Record<string, { archive: string; messages: unknown[] }>;
-      sessionHistory: Record<string, unknown>;
-    };
-    const key = archiveKey(null, 'EchoCode', 'x-precompact.json');
-    expect(typed.sessionArchives[key]!.archive).toBe('x-precompact.json');
-    expect(typed.sessionArchives[key]!.messages).toHaveLength(2);
-    // 关键：归档不进实时历史槽——它没有 baseSeq 水位线，进去会被合并逻辑
-    // 当成"最新快照"去认领窗口条目，把实时消息吞掉。
-    expect(
-      typed.sessionHistory[checklistKey(null, 'EchoCode', 'local:tui::local_user')],
-    ).toBeUndefined();
-  });
-
-  it('读取失败的归档也留一条记录（带 error，面板据此显示原因）', () => {
-    const state = freshState();
-    const next = reduce(state, {
-      SessionArchiveHistory: {
+      SessionHistory: {
         team_id: 'EchoCode',
         session_id: 's',
-        archive: 'gone.json',
+        messages: [COMPACTION_LINE],
+        total: 1,
+        truncated: false,
+        max_seq: 12,
+        has_older: true,
+        older_unavailable: false,
+      },
+    } as never);
+    const hist = (
+      next as unknown as {
+        sessionHistory: Record<
+          string,
+          { messages: unknown[]; hasOlder: boolean; olderUnavailable: boolean; baseSeq: number }
+        >;
+      }
+    ).sessionHistory;
+    const key = Object.keys(hist)[0]!;
+    expect(hist[key]!.messages).toHaveLength(1);
+    expect(hist[key]!.hasOlder).toBe(true);
+    expect(hist[key]!.olderUnavailable).toBe(false);
+    // 水位线来自 max_seq：合并窗口增量靠它判"快照已覆盖"。
+    expect(hist[key]!.baseSeq).toBe(12);
+  });
+
+  it('归档被轮转清理时标 older_unavailable（面板据此禁用展开）', () => {
+    const state = freshState();
+    const next = reduce(state, {
+      SessionHistory: {
+        team_id: 'EchoCode',
+        session_id: 's',
+        messages: [COMPACTION_LINE],
+        total: 1,
+        truncated: false,
+        has_older: false,
+        older_unavailable: true,
+      },
+    } as never);
+    const hist = (next as unknown as { sessionHistory: Record<string, { olderUnavailable: boolean; hasOlder: boolean }> })
+      .sessionHistory;
+    const entry = hist[Object.keys(hist)[0]!]!;
+    expect(entry.olderUnavailable).toBe(true);
+    // 读不到就别再给"继续展开"——否则用户点了只吃一个错误。
+    expect(entry.hasOlder).toBe(false);
+  });
+
+  it('缺省的 has_older / older_unavailable 解为 false（旧 Core 仍可用）', () => {
+    const state = freshState();
+    const next = reduce(state, {
+      SessionHistory: {
+        team_id: null,
+        session_id: 's',
         messages: [],
         total: 0,
         truncated: false,
-        error: '该归档已被清理（archives 只保留最近 20 份）',
       },
     } as never);
-    const typed = next as unknown as {
-      sessionArchives: Record<string, { error: string | null; messages: unknown[] }>;
-    };
-    const entry = typed.sessionArchives[archiveKey(null, 'EchoCode', 'gone.json')]!;
-    expect(entry.error).toContain('已被清理');
-    expect(entry.messages).toEqual([]);
+    const hist = (next as unknown as { sessionHistory: Record<string, { hasOlder: boolean; olderUnavailable: boolean }> })
+      .sessionHistory;
+    const entry = hist[Object.keys(hist)[0]!]!;
+    expect(entry.hasOlder).toBe(false);
+    expect(entry.olderUnavailable).toBe(false);
   });
 });
 
-describe('压缩前归档：面板入口', () => {
-  const messageItem = src('components', 'MessageItem.vue');
+describe('压缩前历史：面板只做入口', () => {
   const chatView = src('components', 'ChatView.vue');
+  const messageItem = src('components', 'MessageItem.vue');
 
-  it('提示行上的按钮只在带 archive 时出现（不是每条 system 行都有）', () => {
-    expect(messageItem).toContain('v-if="archiveName"');
-    expect(messageItem).toContain('@click="emit(\'open-archive\', archiveName)"');
+  it('请求带 expand_depth（展开层数），不是把归档单独拉出来拼', () => {
+    expect(chatView).toContain('expand_depth');
+    expect(chatView).not.toContain('RequestSessionArchiveHistory');
+    expect(chatView).not.toContain('RequestSessionArchives');
   });
 
-  it('归档已被清理时按钮禁用并改名（不让用户点了才吃错误）', () => {
-    expect(messageItem).toContain("props.archiveAvailable === false ? '归档已清理' : '查看压缩前的历史'");
-    expect(messageItem).toContain(':disabled="props.archiveAvailable === false"');
+  it('默认折叠：层数从 0 起，按会话记忆', () => {
+    expect(chatView).toContain('const archiveDepth = ref(0)');
+    expect(chatView).toContain('storedArchiveDepth');
+    expect(chatView).toContain('persistArchiveDepth');
   });
 
-  it('ChatView 回读走 RequestSessionArchiveHistory，且带归档名', () => {
-    expect(chatView).toContain('RequestSessionArchiveHistory');
-    expect(chatView).toContain('archive,');
-    // 只读快照：横幅 + 「回到当前」，不做"加载更早"（归档不参与分页）
-    expect(chatView).toContain('chat-view__archive-bar');
-    expect(chatView).toContain('回到当前');
+  it('分隔行上给「展开 / 收起」，归档已清理时禁用并说明', () => {
+    expect(messageItem).toContain("emit('expand-archive')");
+    expect(messageItem).toContain("emit('collapse-archive')");
+    expect(messageItem).toContain('更早的归档已清理');
+    expect(messageItem).toContain('展开压缩前的历史');
   });
 
-  it('归档清单按人格拉取（判断"还在不在"的前提）', () => {
-    expect(chatView).toContain('RequestSessionArchives');
-    expect(chatView).toContain('archiveAvailability');
+  it('展开后把视线落到压缩边界（否则新内容���渲染窗口之外）', () => {
+    expect(chatView).toContain('focusArchiveBoundary');
+    expect(chatView).toContain('data-archive-boundary');
+    expect(chatView).toContain('renderWindow.value = needed');
+  });
+
+  it('展开用的是同一条历史（没有再开一份只读快照的存储）', () => {
+    // 旧实现把归档回放单独存进 state.sessionArchives —— 那会让面板自己拼边界，
+    // 而且没有水位线语义，容易与实时合并打架。现在只有 sessionHistory。
+    expect(chatView).not.toContain('sessionArchives');
+    const state = src('state.ts');
+    expect(state).not.toContain('sessionArchives');
+    expect(state).not.toContain('sessionArchiveList');
   });
 });
