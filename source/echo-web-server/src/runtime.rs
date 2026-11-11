@@ -26,6 +26,12 @@ pub struct PanelRuntimeConfig {
     pub access_token: String,
     pub media_dir: PathBuf,
     pub media_cache_dir: PathBuf,
+    /// 是否跑在 Core 进程内（`echo-module-panel`）而不是独立外壳。
+    ///
+    /// 前端据此区分形态：内嵌时「Panel 自身」的版本/更新/重启都由 Core 负责，
+    /// 独立时才是这个二进制自己的事。运行期行为**不因它分叉**——两条形态共用
+    /// 同一条中继代码路径（见模块文档）。
+    pub embedded: bool,
 }
 
 impl PanelRuntimeConfig {
@@ -42,6 +48,8 @@ impl PanelRuntimeConfig {
             access_token: cfg.server.access_token,
             media_dir,
             media_cache_dir,
+            // 独立外壳（`echo-agent-panel`）走这条构造：不是内嵌。
+            embedded: false,
         }
     }
 }
@@ -206,7 +214,8 @@ impl PanelRuntime {
             Arc::from(config.media_dir.to_string_lossy().into_owned().as_str()),
             Arc::from(config.access_token.as_str()),
             tunnels,
-        );
+        )
+        .with_embedded(config.embedded);
         if !config.access_token.is_empty() {
             info!("access token auth enabled for WS/HTTP API");
         } else if !config.bind.starts_with("127.0.0.1") && !config.bind.starts_with("localhost") {
@@ -274,6 +283,7 @@ mod tests {
             access_token: String::new(),
             media_dir: std::env::temp_dir(),
             media_cache_dir: std::env::temp_dir(),
+            embedded: false,
         }
     }
 

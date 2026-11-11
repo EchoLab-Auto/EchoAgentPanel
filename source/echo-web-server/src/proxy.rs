@@ -98,6 +98,11 @@ pub struct AppState {
     pub tunnels: Arc<crate::ssh::SshTunnels>,
     /// 访问令牌（空 = 无认证；见 config::ServerSection::access_token）。
     pub access_token: Arc<str>,
+    /// 是否跑在 Core 进程内（`echo-module-panel`）而不是独立外壳。
+    ///
+    /// 只影响**展示**（`/api/panel-identity`）：两种形态的中继、鉴权、
+    /// 静态资源路径完全一致，所以这里不是分支开���，只是身份标注。
+    pub embedded: bool,
 }
 
 impl AppState {
@@ -115,7 +120,14 @@ impl AppState {
             media_dir,
             tunnels,
             access_token,
+            embedded: false,
         }
+    }
+
+    /// 标注运行形态（内嵌 / 独立）。独立外壳不调用它（默认 `false`）。
+    pub fn with_embedded(mut self, embedded: bool) -> Self {
+        self.embedded = embedded;
+        self
     }
 
     /// 校验请求凭据：token 为空（未配置）恒放行；否则比对 Bearer 头或

@@ -224,7 +224,7 @@ Panel 在 WebSocket 建立、重连、切换 Agent/Core 时主动重新请求列
 `echo-agent-panel` 外壳共享 `echo-web-server::runtime`，Core 不持有 Panel
 路由、配置或生命周期实现。
 
-在 Core 的 `modules.toml` 显式启用后才会监听端口：
+默认不挂载、不监听。在 Core 的 `modules.toml` 显式启用即可：
 
 ```toml
 [[module]]
@@ -233,12 +233,40 @@ kind = "builtin"
 name = "Web Panel"
 enabled = true
 
+# 下面全部可选——不写就自动取值（见「零配置」一节）。
 [module.config]
-bind = "127.0.0.1:8080"
-static_dir = "/home/me/.local/libexec/echo-agent-panel/web"
-config_file = "/home/me/.config/echo-agent-panel/panel.toml"
+# bind = "127.0.0.1:8081"
+# static_dir = "/home/me/.local/libexec/echo-agent-panel/web"
+# config_file = "/home/me/.config/echo-agent-panel/panel.toml"
 ```
 
-默认不挂载、不监听。`config_file` 可复用现有多上游、SSH 与联邦发现配置；
-对外监听必须 `allow_remote = true` 且配置 `access_token_secret_file`，令牌
-不写进模块诊断配置。独立部署与内嵌部署都受支持，不能在同一端口同时运行。
+### 零配置（2026-11 内嵌形态完善）
+
+内嵌形态此前要手填三样东西，任何一样缺了就是"启用了却起不来"。现在：
+
+| 需要什么 | 现在怎么来 |
+|---|---|
+| **前端目录** | 自动发现，第一个含 `index.html` 的胜出：`ECHO_PANEL_STATIC_DIR` → 可执行文件同级 `web/`、`panel-web/` → `<prefix>/libexec/echo-agent-panel/web` → `~/.local/libexec/echo-agent-panel/web` → `~/.config/echo-agent-panel/web` |
+| **连自己的地址与令牌** | 组合根注入（复用 `core.toml` 的 `[core] management_address` / `management_access_token`）。**不必**再写 `core_access_token_secret_file`——令牌不进模块配置面 |
+| **端口** | 默认 `127.0.0.1:8080`；被独立 Panel 占着时启动失败，错误里点名占用者并给出两条出路（停独立 Panel / 换 `bind`） |
+
+所以本机已经在跑独立 Panel 的机器上，只要**换一个端口**就能同时试内嵌：
+
+```toml
+[module.config]
+bind = "127.0.0.1:8081"
+```
+
+`config_file` 仍指向独立 Panel 的 TOML：**多上游 / SSH / 联邦发现只该有一份
+配置**，内嵌与独立复用同一份（复制到模块配置里两份必然漂移）。
+
+### 形态差异只有一处：谁负责生命周期
+
+两种形态共用同一条中继代码路径（内嵌时 Panel 连的是自己所在进程的管理面），
+功能完全一致。唯一区别是**归属**：内嵌时面板与 Core 同生共死，"重启面板"
+等于重启 Core。前端通过 `GET /api/panel-identity` 的 `embedded` 字段得知形态，
+在「设置·Core 连接」页头标注出来。
+
+对外监听必须 `allow_remote = true` **且**配置 `access_token_secret_file`，
+令牌不写进模块诊断配置。独立部署与内嵌部署都受支持，但**不能在同一端口
+同时运行**。

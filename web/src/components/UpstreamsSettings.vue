@@ -24,8 +24,20 @@ import { panelFetch } from '../connection';
 import { state } from '../store';
 import { removeSessionsOfCore, type UpstreamStatus } from '../state';
 import { refreshUpstreams } from '../upstreams';
+import { panelIsEmbedded } from '../federation-directory';
 
 type AccessMode = 'direct' | 'ssh';
+
+/**
+ * 本 Panel 是否内嵌在 Core 进程里（2026-11 内嵌形态）。
+ *
+ * 只用于**说明归属**：内嵌时面板与 Core 同生共死，"重启面板"等于重启 Core；
+ * 独立时两者互不影响。功能一致，所以这里只做一行提示，不隐藏任何操作。
+ */
+const embedded = ref(false);
+onMounted(async () => {
+  embedded.value = await panelIsEmbedded();
+});
 
 const ACCESS_OPTIONS = [
   { label: '直连', value: 'direct' },
@@ -280,6 +292,10 @@ onMounted(() => {
           Panel 同时连接的上游 Core（聚合视图）。配置写回 Panel 配置文件持久化；
           变更即时生效，无需重启。云服务器只开 SSH 端口时选「SSH 隧道」接入。
         </div>
+        <div v-if="embedded" class="up-mode">
+          当前 Panel <strong>内嵌在 Core 进程内</strong>运行（`echo-module-panel`）：
+          它与 Core 同生共死，重启面板等于重启 Core。
+        </div>
       </div>
       <div class="up-actions">
         <NeumorphismButton :size="32" :loading="refreshing" @click="refreshNow">刷新</NeumorphismButton>
@@ -410,6 +426,8 @@ onMounted(() => {
 .up-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .up-title { font-size: 15px; font-weight: 600; }
 .up-sub { color: var(--nm-text-secondary, #888); margin-top: 2px; max-width: 520px; }
+/* 运行形态提示（内嵌 / 独立）：说明归属，不隐藏任何操作。 */
+.up-mode { color: var(--nm-text-secondary, #888); margin-top: 6px; max-width: 520px; font-size: 12px; line-height: 1.5; }
 .up-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .up-error-card { padding: 10px 12px; color: var(--nm-color-error); font-size: 12px; }
 .up-form { padding: 14px; display: flex; flex-direction: column; gap: 12px; }

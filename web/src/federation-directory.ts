@@ -37,6 +37,8 @@ import type { FederatedNodeInfo } from './state';
 export interface PanelIdentityView {
   panel_key_set: boolean;
   discover: boolean;
+  /** 是否跑在 Core 进程内（`echo-module-panel`）。缺字段 = 旧版后端 = 独立。 */
+  embedded?: boolean;
 }
 
 /** 发现节流：两轮发现之间的最短间隔（目录事件可能很密）。 */
@@ -52,17 +54,32 @@ async function panelIdentity(): Promise<PanelIdentityView> {
   if (identityCache) return identityCache;
   try {
     const res = await panelFetch('/api/panel-identity');
-    if (!res.ok) return { panel_key_set: false, discover: false };
+    if (!res.ok) return { panel_key_set: false, discover: false, embedded: false };
     const view = (await res.json()) as PanelIdentityView;
     identityCache = {
       panel_key_set: !!view.panel_key_set,
       discover: !!view.discover,
+      embedded: !!view.embedded,
     };
     return identityCache;
   } catch {
     // 后端不可达：本帧不做发现（下次事件再试）。
-    return { panel_key_set: false, discover: false };
+    return { panel_key_set: false, discover: false, embedded: false };
   }
+}
+
+/**
+ * 本 Panel 的运行形态：`true` = 跑在 Core 进程内（`echo-module-panel`）。
+ *
+ * 用途只有一个——**说清谁负责什么**：内嵌时 Panel 的版本与生命周期归 Core
+ * （重启 Panel = 重启 Core），独立时才是这个二进制自己的事。功能上两种形态
+ * 完全一致，所以别用它来关功能。
+ *
+ * 后端不可达时返回 `false`（= 按独立形态展示）：把"连不上"误判成内嵌会让
+ * 用户去找一个不存在的 Core 面板设置。
+ */
+export async function panelIsEmbedded(): Promise<boolean> {
+  return (await panelIdentity()).embedded === true;
 }
 
 /** 测试注入：清空能力缓存与节流表。 */
