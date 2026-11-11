@@ -519,12 +519,19 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
   const claimed = new Uint8Array(out.length);
   let snap = 0; // 下一个待输出的快照条目下标
   let cursorEstablished = false;
+  // 已输出的最大 time（0 = 还没有）。用于**预筛**迟到条目，见 `lateArrivals`。
+  let lastPushedTime = 0;
+  // 迟到条目（time 比已输出的更早）：合并结束后统一搬移，见
+  // `reorderLateArrivals`。只记**引用**，不记下标（搬移会让下标失效）。
+  const lateArrivals: DisplayMessage[] = [];
 
   /** 把快照里 [snap, upto] 的条目都输出（跳过被覆盖的那条本身）。 */
   const flushThrough = (upto: number) => {
     while (snap <= upto) {
       resultOf[snap] = result.length;
-      result.push(out[snap]!);
+      const entry = out[snap]!;
+      result.push(entry);
+      if (entry.time > lastPushedTime) lastPushedTime = entry.time;
       snap += 1;
     }
   };
@@ -583,13 +590,73 @@ export function sessionMessagesFor(state: AppState, sessionId: string, teamId: s
       flushThrough(anchor - 1);
       cursorEstablished = true;
     }
+    // **迟到条目**（2026-11 顺序修复第二轮）：锚点只在「尚未输出」的区间里
+    // 找，一旦游标越过它该在的位置（同秒并列、快照时间非单调、条目先被
+    // `flushThrough` 成批铺出），`timeInsertIndexFrom` 找不到锚点 → 直接
+    // append 到末尾，且**没有回退机制**。实测症状：开始于 110 的工具排在
+    // 200 的回答之后。
+    //
+    // 这里只做**记���**，真正的搬移放到合并结束后统一做（`reorderLateArrivals`）：
+    // 合并期间 `resultOf` 存的是 result 下标，中途插入会让所有已记下标偏移。
+    if (w.time > 0 && result.length > 0 && w.time < lastPushedTime) {
+      lateArrivals.push(w);
+    }
     result.push(w);
+    if (w.time > lastPushedTime) lastPushedTime = w.time;
   }
   // 收尾：剩余快照条目按原序输出。
   flushThrough(out.length - 1);
+  if (lateArrivals.length > 0) reorderLateArrivals(result, lateArrivals);
   return result;
 }
 
+/**
+ * 把**迟到条目**搬到它按时间该在的位置（2026-11 顺序修复第二轮）。
+ *
+ * ## 为什么需要单独一趟
+ *
+ * 合并是「快照 ⊕ 窗口」的两路归并，快照内部顺序是**权威的**（Core 事件
+ * 日志的 append 顺序），但它的 `time` 列并不单调：`AssistantMessage` 用
+ * 落盘时刻、工具行用 `started_at_ms`、旧事件用 carry-forward（实测 6105 条
+ * 派生条目里有 68 处时间递减）。所以**不能对整体按 time 排序**——那会把
+ * 权威顺序打乱成另一堆错乱。
+ *
+ * 能动的只有"实时窗口里迟到的那几条"：它们本来就没有权威位置，只能靠
+ * 时间推断。合并结束后对它们逐个做「摘出 → 向前找到第一个不更晚的位置」，
+ * 快照条目的相对顺序天然不变（只插不排）。
+ *
+ * ## 边界（刻意保守）
+ *
+ * - **不越过用户消息**：`user` 是回合边界，工具/回答越过它跑到上一句话
+ *   之前一定是错的。
+ * - **只向前、不向后**：只在 `time` 比前一条更晚时才退，遇同秒即停（稳定）。
+ * - **回退上限** [`LATE_ARRIVAL_LOOKBACK`]：防止时间戳严重异常（跨天 carry-
+ *   forward）时把一条工具甩到几百条之前。
+ *
+ * 多次搬移按 `late` 的原顺序处理（= trunk 到达顺序），后到的同秒条目不会
+ * 越过先到的，trunk 内的相对顺序因此保持。
+ */
+function reorderLateArrivals(list: DisplayMessage[], late: DisplayMessage[]): void {
+  for (const item of late) {
+    const from = list.indexOf(item);
+    if (from < 0) continue; // 已被补丁换掉对象（不应发生，保守跳过）
+    let to = from;
+    let steps = 0;
+    while (to > 0 && steps < LATE_ARRIVAL_LOOKBACK) {
+      const prev = list[to - 1]!;
+      if (prev.role === 'user') break; // 回合边界
+      if (!(prev.time > item.time)) break; // 前一条不更晚 → 位置正确
+      to -= 1;
+      steps += 1;
+    }
+    if (to === from) continue;
+    list.splice(from, 1);
+    list.splice(to, 0, item);
+  }
+}
+
+/** 迟到条目单次回退的最大步数（见 [`reorderLateArrivals`]）。 */
+const LATE_ARRIVAL_LOOKBACK = 400;
 /** Core `elide_reasoning_for_wire` 写入的截断标记（`{head}…\n（较早的推理已截断：原文 N 字）`）。 */
 const WIRE_ELISION_MARK = '…\n（较早的推理已截断：原文 ';
 
