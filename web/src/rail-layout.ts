@@ -12,7 +12,7 @@
 //! 那份状态**按卡片 id** 存，与所在列无关——卡片换列后折叠态与高度比例保留。
 
 import { reactive, watch } from 'vue';
-import { panelRailCardIds } from './extensions/registry';
+import { panelExtensionsRevision, panelRailCardIds } from './extensions/registry';
 
 export type RailSide = 'left' | 'right';
 
@@ -43,6 +43,9 @@ export function __normalizeForTest(raw: string | null): RailLayout {
 }
 
 function normalize(raw: string | null): RailLayout {
+  // 首访（没有持久化布局）：先给内置卡的默认布局，扩展卡槽位由下面的
+  // `syncExtensionSlots` watcher 补——**不能**在这里补，因为本函数可能在
+  // 扩展注册之前执行（见 watcher 的注释）。
   if (!raw) return defaultLayout();
   let parsed: Partial<RailLayout>;
   try {
@@ -115,6 +118,37 @@ watch(
   // flush: 'sync' —— 落位是用户动作，写盘不等下一帧（关页/切视图都不丢）。
   { deep: true, flush: 'sync' },
 );
+
+/**
+ * 把**已注册**的扩展卡槽位补进布局（2026-11「文件浏览器 / Git 卡片消失」根治）。
+ *
+ * ## 为什么必须有这一步
+ *
+ * 卡片槽位只能从已注册的扩展算出来（`panelRailCardIds()` → 各扩展的
+ * `railCardSlots`），而布局数组是渲染的**唯一**真源（`railCardsFor` 按它
+ * 过滤）：不在数组里的卡**永远不渲染**，门控再满足也没用。
+ *
+ * 此前补位只发生在 `normalize()` 里，于是有两条必坏路径：
+ *
+ * 1. **首访没有持久化布局** —— `normalize(null)` 直接 `return defaultLayout()`，
+ *    走的是「内置卡默认布局」那条短路，**根本不进 `fillUnplaced`**。新浏览器 /
+ *    新端口 / 清过缓存 / 隐私模式（localStorage 抛错 → raw = null）一律如此：
+ *    文件浏览器与 Git 卡片从第一次访问起就不存在。
+ * 2. **扩展注册晚于本模块求值** —— 模块级 `reactive(load())` 在 import 时执行，
+ *    此时 `extensions.value` 还可能是空的，槽位算不出来。
+ *
+ * 所以补位不能绑在「初始化那一刻」，必须绑在「注册表变化」上：`watch` 注册表
+ * 并在 `immediate` 时也跑一遍，把两种时序都覆盖掉。
+ *
+ * 幂等：`seen` 含两列现有全部 id，已在任一列（含用户拖到左列）的不重复加；
+ * 顺序按 `fillUnplaced` 的规范序插入，用户既有排序不受影响。
+ */
+function syncExtensionSlots(): void {
+  const seen = new Set<string>([...railLayout.left, ...railLayout.right]);
+  fillUnplaced(railLayout, seen);
+}
+
+watch(panelExtensionsRevision, syncExtensionSlots, { immediate: true });
 
 /** 某卡片当前所在列（未登记 = 右）。 */
 export function sideOf(cardId: string): RailSide {
