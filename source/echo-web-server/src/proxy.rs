@@ -104,7 +104,7 @@ pub struct AppState {
     pub auth: Arc<crate::security::PanelAuth>,
     /// 监听地址（`/api/security` 用它提示"对外暴露却没开认证"）。
     pub bind: String,
-    /// 是否跑在 Core 进程内（`echo-module-panel`）而不是独立外壳。
+    /// 是否跑在 Core 进程内（`agent-module-panel`）而不是独立外壳。
     ///
     /// 只影响**展示**（`/api/panel-identity`）：两种形态的中继、鉴权、
     /// 静态资源路径完全一致，所以这里不是分支开���，只是身份标注。

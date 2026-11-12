@@ -1,4 +1,4 @@
-//! # echo-module-panel — 可选的进程内 Web Panel（实现完全归 Panel 仓）
+//! # agent-module-panel — 可选的进程内 Web Panel（实现完全归 Panel 仓）
 //!
 //! 本模块只做 **Core 模块生命周期 ↔ Panel 运行库** 的适配：HTTP/WS 路由、
 //! 前端、上游与 SSH 隧道仍由 Panel 仓的 `echo-web-server` 拥有。独立

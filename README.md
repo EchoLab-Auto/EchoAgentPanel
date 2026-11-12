@@ -247,7 +247,7 @@ Panel 在 WebSocket 建立、重连、切换 Agent/Core 时主动重新请求列
 
 ## 作为 Core 的可选进程内模块
 
-**模块实现完全在本仓**：`source/echo-module-panel/`。它与独立
+**模块实现完全在本仓**：`source/agent-module-panel/`。它与独立
 `echo-agent-panel` 外壳共享 `echo-web-server::runtime`，Core 不持有 Panel
 路由、配置或生命周期实现。
 

@@ -37,7 +37,7 @@ import type { FederatedNodeInfo } from './state';
 export interface PanelIdentityView {
   panel_key_set: boolean;
   discover: boolean;
-  /** 是否跑在 Core 进程内（`echo-module-panel`）。缺字段 = 旧版后端 = 独立。 */
+  /** 是否跑在 Core 进程内（`agent-module-panel`）。缺字段 = 旧版后端 = 独立。 */
   embedded?: boolean;
 }
 
@@ -69,7 +69,7 @@ async function panelIdentity(): Promise<PanelIdentityView> {
 }
 
 /**
- * 本 Panel 的运行形态：`true` = 跑在 Core 进程内（`echo-module-panel`）。
+ * 本 Panel 的运行形态：`true` = 跑在 Core 进程内（`agent-module-panel`）。
  *
  * 用途只有一个——**说清谁负责什么**：内嵌时 Panel 的版本与生命周期归 Core
  * （重启 Panel = 重启 Core），独立时才是这个二进制自己的事。功能上两种形态

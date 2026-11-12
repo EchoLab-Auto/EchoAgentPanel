@@ -224,7 +224,7 @@ pub struct PanelIdentityView {
     pub panel_key_set: bool,
     /// 是否启用自动发现（`panel_key_set && [federation] discover`）。
     pub discover: bool,
-    /// 是否跑在 Core 进程内（`echo-module-panel`）。
+    /// 是否跑在 Core 进程内（`agent-module-panel`）。
     ///
     /// 前端用它区分两种形态：内嵌时 Panel 的生命周期与版本都归 Core，
     /// 「重启 Panel」实际是重启 Core。

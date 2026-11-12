@@ -1,5 +1,5 @@
 [package]
-name = "echo-module-panel"
+name = "agent-module-panel"
 description = "可选的进程内 Web Panel 模块：完整实现归 Panel 仓，独立外壳复用同一运行库"
 version.workspace = true
 edition.workspace = true

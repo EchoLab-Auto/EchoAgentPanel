@@ -46,6 +46,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-module-panel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "echo-context",
+ "echo-module",
+ "echo-web-server",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -725,21 +740,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "toml",
- "tracing",
-]
-
-[[package]]
-name = "echo-module-panel"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "echo-context",
- "echo-module",
- "echo-web-server",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 

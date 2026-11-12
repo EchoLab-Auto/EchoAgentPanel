@@ -1,6 +1,6 @@
 //! Panel 的可嵌入运行库。
 //!
-//! `echo-agent-panel`（独立外壳）与 Core 的 `echo-module-panel`（进程内模块）
+//! `echo-agent-panel`（独立外壳）与 Core 的 `agent-module-panel`（进程内模块）
 //! 共用这里，HTTP/WS、静态资源、多上游、SSH 与联邦发现只有一份实现。
 //! 日志 subscriber 由外壳初始化，库绝不写进程级全局状态。
 
@@ -31,7 +31,7 @@ pub struct PanelRuntimeConfig {
     /// 与 `access_token` 分开：可以先存令牌、稍后再开强制（见
     /// `config::ServerSection::require_token` 的说明）。
     pub require_token: bool,
-    /// 是否跑在 Core 进程内（`echo-module-panel`）而不是独立外壳。
+    /// 是否跑在 Core 进程内（`agent-module-panel`）而不是独立外壳。
     ///
     /// 前端据此区分形态：内嵌时「Panel 自身」的版本/更新/重启都由 Core 负责，
     /// 独立时才是这个二进制自己的事。运行期行为**不因它分叉**——两条形态共用
