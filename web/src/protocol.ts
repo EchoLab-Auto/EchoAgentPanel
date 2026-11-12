@@ -752,6 +752,34 @@ export type BackendCommand =
       };
     }
   | { RequestBrowseDirectories: { path?: string | null } }
+  // ── ProDoc 文档群（prodoc 模块）────────────────────────────────
+  // 内容不走这条回执，而是模块事件 `prodoc.bundle`（见 state.moduleEvents）。
+  | { RequestProDocBundle: { team_id?: string | null; root: string } }
+  | { BrowseProDocDirs: { path?: string | null } }
+  | { ProDocRoots: Record<string, never> }
+  /** 文档图检查：报告走模块事件 `prodoc.report`（不占回执）。 */
+  | { ProDocCheck: { team_id?: string | null; root: string } }
+  | { ReadProDocFile: { team_id?: string | null; root: string; path: string; request_id?: string } }
+  | {
+      SaveProDocFile: {
+        team_id?: string | null;
+        root: string;
+        path: string;
+        content: string;
+        /** 客户端依据的磁盘内容；缺省 = 无条件覆盖（新建走这条）。 */
+        base?: string | null;
+        request_id?: string;
+      };
+    }
+  | {
+      DeleteProDocFile: {
+        team_id?: string | null;
+        root: string;
+        path: string;
+        base?: string | null;
+        request_id?: string;
+      };
+    }
   | 'StartAllInstances'
   | 'StopAllInstances'
   | 'RequestSelfUpdate'
