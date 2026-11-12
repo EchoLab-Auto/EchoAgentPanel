@@ -237,37 +237,121 @@ fn generate_token() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// 写回配置文件：读 → 只改 `[server]` 的两个键 → tmp+rename。
+/// 写回配置文件：**按行改写** `[server]` 的两个键 → 校验 → tmp+rename。
 ///
-/// 读不到 / 解析失败时**绝不从空树起步覆写**（会把 `[[cores]]`、`[federation]`
-/// 等段静默抹掉）；只有"文件不存在"才允许从空树起步。
+/// ## 为什么不是 `toml::Table` 往返
+///
+/// 那样会把整份文件重排并**丢掉所有注释**（实测：一次保存把 `panel.toml` 里
+/// "为什么必须开认证"那段说明整块抹掉了）。配置文件里的注释是运维文档的
+/// 一部分，改一个键不该销毁它。所以这里只做行级替换：命中 `access_token`
+/// / `require_token` 两行就换掉，缺了就插在该段里，其余每一行——注释、
+/// 空行、其他键、其他段——**逐字不动**。
+///
+/// 改完先做一次 TOML 解析校验：手写行编辑万一破坏了结构（例如文件里
+/// 本身就有重复的 `[server]` 段），宁可报错不写，也不要留下一个起不来的
+/// 配置文件。
 fn persist_to_file(path: &Path, token: &str, require: bool) -> Result<(), String> {
-    let mut root: toml::Table = match std::fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(|e| {
-            format!(
-                "解析 {} 失败（拒绝覆盖）：{e}",
-                path.display()
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
+    let original = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(format!("读取 {} 失败：{e}", path.display())),
     };
-    let server = root
-        .entry("server".to_string())
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-    let Some(server) = server.as_table_mut() else {
-        return Err(format!(
-            "{} 的 [server] 不是表，拒绝改写",
+    let updated = rewrite_server_section(&original, token, require);
+    toml::from_str::<toml::Table>(&updated).map_err(|e| {
+        format!(
+            "改写 {} 后不是合法 TOML（已放弃写入，原文件未动）：{e}",
             path.display()
-        ));
-    };
-    server.insert("access_token".into(), toml::Value::String(token.to_string()));
-    server.insert("require_token".into(), toml::Value::Boolean(require));
-    let text = toml::to_string_pretty(&root).map_err(|e| format!("配置序列化失败：{e}"))?;
+        )
+    })?;
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("写入 {} 失败：{e}", tmp.display()))?;
+    std::fs::write(&tmp, updated).map_err(|e| format!("写入 {} 失败：{e}", tmp.display()))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("替换 {} 失败：{e}", path.display()))?;
     Ok(())
+}
+
+/// TOML 基本字符串的转义（只需处理 `\` 与 `"`；令牌已拒绝控制字符）。
+fn toml_string(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+/// 在 `[server]` 段里替换/插入两个键，其余行逐字保留。
+fn rewrite_server_section(text: &str, token: &str, require: bool) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let mut header: Option<usize> = None;
+    let mut in_server = false;
+    let mut token_at: Option<usize> = None;
+    let mut require_at: Option<usize> = None;
+
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        // 段头：`[server]` / `[ server ]`。其余段头只用来结束本段。
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let name = trimmed
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .trim();
+            in_server = name == "server";
+            if in_server && header.is_none() {
+                header = Some(index);
+            }
+            continue;
+        }
+        if !in_server {
+            continue;
+        }
+        let Some((key, _)) = trimmed.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "access_token" => token_at = Some(index),
+            "require_token" => require_at = Some(index),
+            _ => {}
+        }
+    }
+
+    let token_line = format!("access_token = {}", toml_string(token));
+    let require_line = format!("require_token = {require}");
+
+    match header {
+        Some(section) => {
+            // 就地替换
+            if let Some(at) = token_at {
+                lines[at] = token_line.clone();
+            }
+            if let Some(at) = require_at {
+                lines[at] = require_line.clone();
+            }
+            // 缺的键插在另一个键之后（都在缺时插在段头之后），保持可读顺序。
+            let mut inserts: Vec<(usize, String)> = Vec::new();
+            if token_at.is_none() {
+                let after = require_at.unwrap_or(section);
+                inserts.push((after, token_line.clone()));
+            }
+            if require_at.is_none() {
+                let after = token_at.unwrap_or(section);
+                inserts.push((after, require_line.clone()));
+            }
+            // 从后往前插，避免下标漂移；同一位置时保持（access_token, require_token）。
+            inserts.sort_by(|a, b| b.0.cmp(&a.0));
+            for (after, line) in inserts {
+                lines.insert(after + 1, line);
+            }
+        }
+        None => {
+            // 没有 `[server]` 段：追加一个（前面留一个空行，别贴住上一段）。
+            if lines.last().is_some_and(|line| !line.trim().is_empty()) {
+                lines.push(String::new());
+            }
+            lines.push("[server]".to_string());
+            lines.push(token_line);
+            lines.push(require_line);
+        }
+    }
+
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
 }
 
 // ── HTTP 面 ───────────────────────────────────────────────────────────────
@@ -475,6 +559,67 @@ url = "ws://127.0.0.1:3132"
         assert!(text.contains("[[cores]]"));
         assert!(text.contains("ws://127.0.0.1:3132"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// **注释必须留着**（2026-11 实测事故）：早先的实现用 `toml::Table`
+    /// 往返，一次保存就把 `panel.toml` 里"为什么必须开认证"那段说明整块
+    /// 抹掉了——配置文件里的注释是运维文档的一部分。
+    #[test]
+    fn persist_preserves_comments_and_layout() {
+        let dir = std::env::temp_dir().join(format!("panel-security-cmt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("panel.toml");
+        let original = r#"# 顶部说明：这份文件由人维护
+[server]
+bind_address = "0.0.0.0:8080"
+# 访问令牌：非空时全站要求 Bearer
+access_token = "old-token-value-here"
+static_dir = "web/dist"
+
+# 联邦：Panel 身份密钥
+[federation]
+discover = true
+"#;
+        std::fs::write(&path, original).unwrap();
+        persist_to_file(&path, "0123456789abcdef", true).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# 顶部说明：这份文件由人维护"), "{text}");
+        assert!(text.contains("# 访问令牌：非空时全站要求 Bearer"), "{text}");
+        assert!(text.contains("# 联邦：Panel 身份密钥"), "{text}");
+        // 被替换的那一行只换值，位置不变（注释仍紧跟在它上面）
+        assert!(text.contains("access_token = \"0123456789abcdef\""), "{text}");
+        assert!(!text.contains("old-token-value-here"), "{text}");
+        // 缺的键插进本段，不跑到别的段里
+        let server_part = text.split("[federation]").next().unwrap();
+        assert!(server_part.contains("require_token = true"), "{text}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 段里没有这两个键 → 插进去；没有 `[server]` 段 → 追加一段。
+    #[test]
+    fn missing_keys_and_section_are_added() {
+        let with_section = rewrite_server_section("[server]\nstatic_dir = \"web/dist\"\n", "tok", false);
+        assert!(with_section.contains("access_token = \"tok\""), "{with_section}");
+        assert!(with_section.contains("require_token = false"), "{with_section}");
+        assert!(with_section.contains("static_dir = \"web/dist\""), "{with_section}");
+
+        let without = rewrite_server_section("[logging]\nlevel = \"info\"\n", "tok", true);
+        assert!(without.contains("[server]"), "{without}");
+        assert!(without.contains("[logging]"), "{without}");
+        // 生成的文本必须是合法 TOML
+        let parsed: toml::Table = toml::from_str(&without).expect("valid toml");
+        assert_eq!(
+            parsed["server"]["access_token"].as_str(),
+            Some("tok")
+        );
+    }
+
+    /// 令牌里的 `"` 与 `\\` 必须转义成合法 TOML（不然写出来的文件起不来）。
+    #[test]
+    fn tokens_with_quotes_are_escaped() {
+        let text = rewrite_server_section("[server]\n", "a\"b\\c", true);
+        let parsed: toml::Table = toml::from_str(&text).expect("valid toml");
+        assert_eq!(parsed["server"]["access_token"].as_str(), Some("a\"b\\c"));
     }
 
     /// 没有可写回的配置文件时：改动仍生效，但如实返回 persisted=false。
