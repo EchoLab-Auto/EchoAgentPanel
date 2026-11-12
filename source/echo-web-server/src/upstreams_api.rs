@@ -339,6 +339,14 @@ pub fn routes() -> axum::Router<AppState> {
             axum::routing::delete(delete_upstream),
         )
         .route("/api/panel-identity", axum::routing::get(panel_identity))
+        // 面板安全（2026-11）：访问令牌 + 是否强制认证，运行期可改。
+        // 走同一个 route_layer（`require_auth`）：认证开启时，读它本身也要
+        // 凭据——否则任何能碰到端口的人都能读到令牌摘要。
+        .route(
+            "/api/security",
+            axum::routing::get(crate::security::get_security)
+                .post(crate::security::post_security),
+        )
         .route("/api/upstreams/prune", axum::routing::post(prune_upstreams))
 }
 

@@ -96,8 +96,14 @@ pub struct AppState {
     pub media_dir: Arc<str>,
     /// SSH 隧道管理器（SSH 接入的上游；媒体拉取/远端日志也经它）。
     pub tunnels: Arc<crate::ssh::SshTunnels>,
-    /// 访问令牌（空 = 无认证；见 config::ServerSection::access_token）。
-    pub access_token: Arc<str>,
+    /// 访问安全（令牌 + 是否强制认证，运行期可改）。
+    ///
+    /// 此前是一个 `Arc<str>` 快照：改令牌只能改配置再重启，于是轮换泄漏的
+    /// 令牌必然经历一段服务中断。现在由 [`crate::security::PanelAuth`] 持有，
+    /// 支持热改、热轮换（并踢掉旧连接）。
+    pub auth: Arc<crate::security::PanelAuth>,
+    /// 监听地址（`/api/security` 用它提示"对外暴露却没开认证"）。
+    pub bind: String,
     /// 是否跑在 Core 进程内（`echo-module-panel`）而不是独立外壳。
     ///
     /// 只影响**展示**（`/api/panel-identity`）：两种形态的中继、鉴权、
@@ -119,9 +125,17 @@ impl AppState {
             static_dir,
             media_dir,
             tunnels,
-            access_token,
+            auth: crate::security::PanelAuth::new(access_token.to_string(), true),
+            bind: String::new(),
             embedded: false,
         }
+    }
+
+    /// 换用运行期可变的凭据状态（运行库用；测试仍可走 [`Self::new`]）。
+    pub fn with_auth(mut self, auth: Arc<crate::security::PanelAuth>, bind: String) -> Self {
+        self.auth = auth;
+        self.bind = bind;
+        self
     }
 
     /// 标注运行形态（内嵌 / 独立）。独立外壳不调用它（默认 `false`）。
@@ -130,18 +144,12 @@ impl AppState {
         self
     }
 
-    /// 校验请求凭据：token 为空（未配置）恒放行；否则比对 Bearer 头或
-    /// `?token=` 查询参数（WS 握手场景浏览器无法自定义头）。
+    /// 校验请求凭据（委托 [`crate::security::PanelAuth`]）。
+    ///
+    /// 判定是"未强制认证 → 恒放行；否则比对 Bearer 头或 `?token=`"（WS
+    /// 握手时浏览器无法自定义头，只能走查询参数）。
     pub fn authorized(&self, headers: &axum::http::HeaderMap, query_token: Option<&str>) -> bool {
-        if self.access_token.is_empty() {
-            return true;
-        }
-        let bearer = headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
-        bearer == Some(self.access_token.as_ref())
-            || query_token == Some(self.access_token.as_ref())
+        self.auth.authorized(headers, query_token)
     }
 
     /// 上游健康快照（管理 API 用）。
@@ -1418,6 +1426,14 @@ async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::Sock
     // （含 Pong）即断开整条链路；每 30s 向浏览器发 Ping）。
     let (browser_ping_tx, mut browser_ping_rx) = tokio::sync::mpsc::channel::<()>(8);
     let peer_for_read = peer_desc.clone();
+    // 凭据轮换 → 主动断开本连接（2026-11，见 `security` 模块文档）。
+    //
+    // 不同步检查的话，用旧令牌建立的连接会一直活着——而那正是轮换想要解决的
+    // 问题。2s 轮询一个原子读，成本可忽略；断开后前端自动重连（它在收到轮换
+    // 响应时已把新令牌写进 localStorage）。
+    let auth_probe = state.auth.clone();
+    let auth_epoch = auth_probe.epoch();
+    let mut epoch_tick = tokio::time::interval(std::time::Duration::from_secs(2));
     let browser_read = tokio::spawn(async move {
         let mut last_frame = Instant::now();
         let mut hb = tokio::time::interval(heartbeat_interval());
@@ -1474,6 +1490,16 @@ async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::Sock
                             reason = "browser sent close";
                             break;
                         }
+                    }
+                }
+                _ = epoch_tick.tick() => {
+                    if auth_probe.epoch() != auth_epoch {
+                        info!(
+                            peer = %peer_for_read,
+                            "auth token rotated — closing relay so the browser reconnects with the new token"
+                        );
+                        reason = "auth token rotated";
+                        break;
                     }
                 }
                 _ = hb.tick() => {

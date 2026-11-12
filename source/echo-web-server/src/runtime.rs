@@ -26,6 +26,11 @@ pub struct PanelRuntimeConfig {
     pub access_token: String,
     pub media_dir: PathBuf,
     pub media_cache_dir: PathBuf,
+    /// 访问令牌是否**强制**（`[server] require_token`；缺省 true）。
+    ///
+    /// 与 `access_token` 分开：可以先存令牌、稍后再开强制（见
+    /// `config::ServerSection::require_token` 的说明）。
+    pub require_token: bool,
     /// 是否跑在 Core 进程内（`echo-module-panel`）而不是独立外壳。
     ///
     /// 前端据此区分形态：内嵌时「Panel 自身」的版本/更新/重启都由 Core 负责，
@@ -48,6 +53,7 @@ impl PanelRuntimeConfig {
             access_token: cfg.server.access_token,
             media_dir,
             media_cache_dir,
+            require_token: cfg.server.require_token,
             // 独立外壳（`echo-agent-panel`）走这条构造：不是内嵌。
             embedded: false,
         }
@@ -208,16 +214,31 @@ impl PanelRuntime {
                 }
             }
         }
+        // 访问安全：令牌 + 是否强制，运行期可改（改完写回 config_file）。
+        //
+        // `config_file` 是**唯一**可写回的落点：内嵌形态没配它时，改动只在本
+        // 进程内生效，`POST /api/security` 会如实回 `persisted: false`。
+        let auth = crate::security::PanelAuth::new(
+            config.access_token.clone(),
+            config.require_token,
+        );
+        auth.attach_config(config.config_file.clone());
         let state = crate::proxy::AppState::new(
             registry,
             Arc::from(config.static_dir.to_string_lossy().into_owned().as_str()),
             Arc::from(config.media_dir.to_string_lossy().into_owned().as_str()),
-            Arc::from(config.access_token.as_str()),
+            Arc::from(""),
             tunnels,
         )
+        .with_auth(auth, config.bind.clone())
         .with_embedded(config.embedded);
-        if !config.access_token.is_empty() {
+        if config.require_token && !config.access_token.is_empty() {
             info!("access token auth enabled for WS/HTTP API");
+        } else if config.require_token && config.access_token.is_empty() {
+            warn!(
+                "require_token = true but access_token is empty — auth is NOT enforced \
+                 (set a token in 设置·面板 → 安全)"
+            );
         } else if !config.bind.starts_with("127.0.0.1") && !config.bind.starts_with("localhost") {
             warn!("no access token configured and not bound to localhost — panel is OPEN to the network; set access_token");
         }
@@ -283,6 +304,7 @@ mod tests {
             access_token: String::new(),
             media_dir: std::env::temp_dir(),
             media_cache_dir: std::env::temp_dir(),
+            require_token: true,
             embedded: false,
         }
     }

@@ -55,6 +55,22 @@ pub struct ServerSection {
     /// 127.0.0.1 场景使用）。
     #[serde(default)]
     pub access_token: String,
+    /// 是否**要求**访问令牌认证（2026-11）。
+    ///
+    /// 此前"是否生效"由 `access_token` 非空隐式决定，于是"先配好令牌、等
+    /// 所有浏览器都拿到再统一开认证"做不到——存进去的那一刻就锁门了。拆成
+    /// 两个键之后：令牌可以先存着（`require_token = false`），确认各处都
+    /// 拿到之后再打开。
+    ///
+    /// `require_token = true` 但令牌为空时**不会**锁门（`enforced = false`），
+    /// 面板的「设置·面板 → 安全」会把这件事明说——否则用户会把自己关在门外。
+    /// 缺省 true：保持"配了令牌就生效"的旧行为。
+    #[serde(default = "default_true")]
+    pub require_token: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for ServerSection {
@@ -65,6 +81,7 @@ impl Default for ServerSection {
             media_dir: String::new(),
             media_cache_dir: String::new(),
             access_token: String::new(),
+            require_token: true,
         }
     }
 }

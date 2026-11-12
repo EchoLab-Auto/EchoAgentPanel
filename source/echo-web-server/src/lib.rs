@@ -6,6 +6,7 @@ pub mod log;
 pub mod media;
 pub mod proxy;
 pub mod runtime;
+pub mod security;
 pub mod ssh;
 pub mod static_files;
 pub mod upstreams;

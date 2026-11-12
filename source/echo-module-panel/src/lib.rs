@@ -84,6 +84,8 @@ struct Config {
     /// 浏览器侧访问令牌（空 = 不认证）。
     access_token: Option<String>,
     access_token_secret_file: Option<PathBuf>,
+    /// 是否强制认证（缺省 = 沿用 `config_file` 的值，再缺省 true）。
+    require_token: Option<bool>,
     /// 独立 Panel 的 TOML：多上游 / SSH / 联邦发现的**唯一**来源。
     config_file: Option<PathBuf>,
     media_dir: Option<PathBuf>,
@@ -314,6 +316,10 @@ fn runtime_config(
     if cfg.allow_remote && access_token.is_empty() {
         anyhow::bail!("内嵌 Panel 拒绝在没有 access_token_secret_file 的情况下对外监听");
     }
+    let require_token = cfg
+        .require_token
+        .or_else(|| panel.as_ref().map(|p| p.server.require_token))
+        .unwrap_or(true);
     Ok(PanelRuntimeConfig {
         config_file: cfg.config_file.map(|path| expand_home(&path)),
         bind,
@@ -323,6 +329,7 @@ fn runtime_config(
         access_token,
         media_dir,
         media_cache_dir,
+        require_token,
         // 内嵌形态的标识：前端据此显示"内嵌于 Core"，也说明为什么
         // 「Panel 自更新」这类动作在本形态下没有意义。
         embedded: true,

@@ -64,13 +64,17 @@ const LogView = lazy(() => import('./LogView.vue'), 'LogView');
 const FederationSettings = lazy(() => import('./FederationSettings.vue'), 'FederationSettings');
 const UpstreamsSettings = lazy(() => import('./UpstreamsSettings.vue'), 'UpstreamsSettings');
 const SelfUpdateSettings = lazy(() => import('./SelfUpdateSettings.vue'), 'SelfUpdateSettings');
+const PanelSecuritySettings = lazy(
+  () => import('./PanelSecuritySettings.vue'),
+  'PanelSecuritySettings',
+);
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
 const TOOL_OTHER = '扩展工具';
 
 // ── 一级菜单：当前分类 ──
-type CategoryKey = 'api' | 'skill' | 'tool' | 'module' | 'team' | 'cores' | 'system' | 'logs';
+type CategoryKey = 'api' | 'skill' | 'tool' | 'module' | 'team' | 'cores' | 'panel' | 'system' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
 
 // ── 一级菜单的横向可滚性（2026-11 移动端观感）────────────────────────────
@@ -136,6 +140,9 @@ const categories = computed(() => [
   { key: 'module' as const, label: '模块', count: (moduleLoading.value ? null : state.modules.length) as number | null },
   { key: 'team' as const, label: '智能体', count: (teamLoading.value ? null : state.teams.length) as number | null },
   { key: 'cores' as const, label: 'Core 连接', count: null as number | null },
+  // 面板自身（2026-11）：目前只有「安全」（访问令牌 + 是否强制认证）。
+  // 放在「系统」之前：它管的是这个 Web 界面本身，而「系统」管的是 Core。
+  { key: 'panel' as const, label: '面板', count: null as number | null },
   // 连接管理合并页（2026-10：联邦并入）：上游 Core + 联邦节点。
   { key: 'system' as const, label: '系统', count: null as number | null },
   { key: 'logs' as const, label: '日志', count: null as number | null },
@@ -1130,6 +1137,7 @@ const EMPTY_HINT: Record<CategoryKey, string> = {
   module: '在左侧列表选择模块查看详情与启停',
   team: '在左侧列表选择智能体进行配置；或点右上角「新建智能体」',
   cores: '',
+  panel: '',
   system: '',
   logs: '',
 };
@@ -2192,6 +2200,15 @@ watch(
             :active-session-id="props.activeSessionId"
             :active-team-id="props.activeTeamId"
           />
+        </div>
+      </div>
+
+      <!-- 面板工作区（2026-11）：面板自身的安全设置。
+           与「Core 连接」分开：那页管的是上游与联邦，这页管的是"谁能打开这个
+           Web 界面"。 -->
+      <div v-else-if="activeCategory === 'panel'" class="caps-workspace">
+        <div class="caps-detail-pane">
+          <PanelSecuritySettings />
         </div>
       </div>
 
