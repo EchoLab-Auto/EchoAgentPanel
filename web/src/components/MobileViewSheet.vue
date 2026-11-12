@@ -25,11 +25,20 @@ import PanelIcon from './PanelIcon.vue';
 import type { IconName } from '@echolab-auto/ui-frame/icons';
 import { mobileViewSheetOpen, closeMobileSheet } from '../mobile-sheets';
 
-export type PanelView = 'chat' | 'settings' | 'shell';
+export type BuiltinPanelView = 'chat' | 'settings' | 'shell';
+/** 扩展视图 id（`ext:<extensionId>:<viewId>`，见 registry 的 `PanelMainView`）。 */
+export type PanelView = BuiltinPanelView | `ext:${string}`;
 
 const props = defineProps<{
   /** 当前视图（决定哪一项打勾）。 */
   view: PanelView;
+  /**
+   * 扩展提供的主区视图（App 侧已按 `when` 门控过滤）。
+   *
+   * 由父组件传入而不是这里自己去查注册表：门控依赖 team 能力，App 已经有
+   * 那份 computed 了，再查一次只会多一个可能不同步的副本。
+   */
+  extensions?: Array<{ viewId: string; label: string; hint?: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -37,7 +46,7 @@ const emit = defineEmits<{
 }>();
 
 interface ViewOption {
-  id: PanelView;
+  id: BuiltinPanelView;
   label: string;
   hint: string;
   icon: IconName;
@@ -57,8 +66,10 @@ const open = computed({
   },
 });
 
-function pick(id: PanelView): void {
-  emit('select', id);
+function pick(id: PanelView | string): void {
+  // 扩展项的 `viewId` 在 props 里是 `string`（父组件 map 出来时窄化丢了）；
+  // 运行时它就是 `ext:<ext>:<id>`，与 `PanelView` 的扩展分支同形。
+  emit('select', id as PanelView);
   closeMobileSheet();
 }
 </script>
@@ -82,6 +93,32 @@ function pick(id: PanelView): void {
         </span>
         <PanelIcon
           v-if="props.view === opt.id"
+          name="check"
+          size="sm"
+          tone="ok"
+          class="view-sheet__mark"
+        />
+      </button>
+      <!-- 扩展视图：与内置项同形，排在末尾（桌面顶栏同序）。图标统一用
+           `file-text`——扩展没法在运行时把图标塞进 PanelIcon 的注册表，
+           逐个查表反而会让"图标名写错"变成运行时空白。 -->
+      <button
+        v-for="item in props.extensions ?? []"
+        :key="item.viewId"
+        type="button"
+        class="view-sheet__item"
+        :class="{ 'is-active': props.view === item.viewId }"
+        :aria-current="props.view === item.viewId ? 'page' : undefined"
+        :data-extension-view="item.viewId"
+        @click="pick(item.viewId)"
+      >
+        <PanelIcon name="file-text" size="md" tone="inherit" />
+        <span class="view-sheet__text">
+          <span class="view-sheet__label">{{ item.label }}</span>
+          <span v-if="item.hint" class="view-sheet__hint">{{ item.hint }}</span>
+        </span>
+        <PanelIcon
+          v-if="props.view === item.viewId"
           name="check"
           size="sm"
           tone="ok"

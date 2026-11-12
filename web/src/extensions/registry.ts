@@ -36,6 +36,45 @@ export interface PanelOverlay {
   component: Component;
 }
 
+/**
+ * 扩展提供的**主区视图**（顶栏可切换的一级视图，与「聊天 / 设置 / Shell」同级）。
+ *
+ * ## 为什么需要这个扩展点
+ *
+ * `overlays` 是"浮层"：它盖在当前视图之上、依赖 `SessionOverlay` 的几何，适合
+ * 列表与表单这类**看一眼就关**的内容。但有些扩展的内容本身就是一个工作区
+ * （文档画布、图编辑器、日志流），它需要
+ *
+ * - 独占整个主区（浮层里塞一个可平移缩放的画布，边框浪费得可惜）；
+ * - 被当成"我现在在做的事"记住（切走再回来还在原处，刷新后仍是那一项）；
+ * - 在移动端的视图菜单里与聊天/设置并列，而不是埋在某个按钮后面。
+ *
+ * 这些都是**视图**的特征，所以给它一个视图级的扩展点，而不是让扩展去模拟。
+ *
+ * ## 契约
+ *
+ * - `id` 在扩展内唯一；完整视图 id 由注册表加命名空间（`ext:<extension>:<id>`），
+ *   避免两个扩展撞 id。
+ * - `when` 用于门控（模块未启用时**不出现**按钮，而不是点进去报错）。
+ * - 组件拿到 `teamId` / `sessionId` / `core` 三个 prop（与 overlay 一致），
+ *   好让它能按人格/区域取数据。
+ * - 视图自己负责占满主区：宿主只给一个 `position: relative` 的容器，padding
+ *   与滚动都由视图决定（画布类视图需要的是"零 padding + 自己控制滚动"）。
+ */
+export interface PanelMainView {
+  /** 扩展内稳定 id（完整 id 见 [`mainViewId`]）。 */
+  id: string;
+  /** 顶栏 / 移动端菜单里的名字。 */
+  label: string;
+  /** PanelIcon 的图标名。 */
+  icon: IconName;
+  /** 移动端菜单里的一行说明（可选）。 */
+  hint?: string;
+  component: Component;
+  /** 门控：不满足时该视图不出现在任何入口（默认可见）。 */
+  when?(context: PanelSlotContext): boolean;
+}
+
 export interface PanelRailCard {
   id: string;
   title: string;
@@ -66,6 +105,8 @@ export interface PanelExtension {
   hooks?: PanelExtensionHooks;
   entries?: PanelEntryAction[];
   overlays?: PanelOverlay[];
+  /** 主区视图：顶栏可切换的一级视图（见 [`PanelMainView`]）。 */
+  mainViews?: PanelMainView[];
   /** 扩展提供的稳定卡片槽位，用于即使用户暂无数据也保留布局。 */
   railCardSlots?: string[];
   /** 动态卡片：可用于按 team/session 计算门控、标题和计数。 */
@@ -123,6 +164,44 @@ export function panelEntryActions(context: PanelSlotContext): Array<{
     }
   }
   return result;
+}
+
+/**
+ * 主区视图的完整 id（`ext:<extensionId>:<viewId>`）。
+ *
+ * 加命名空间的原因与 overlay 相同：`mainViews[].id` 只需在扩展内唯一，两个扩展
+ * 都写 `docs` 是完全正常的。持久化到 `view` 偏好里的必须是完整 id，否则刷新后
+ * 会切到"另一个扩展的同名视图"。
+ */
+export function mainViewId(extensionId: string, viewId: string): string {
+  return `ext:${extensionId}:${viewId}`;
+}
+
+/** 全部可用主区视图（按注册顺序；`context` 用于 `when` 门控）。 */
+export function panelMainViews(context: PanelSlotContext): Array<{
+  extensionId: string;
+  view: PanelMainView;
+  viewId: string;
+}> {
+  void extensions.value;
+  return extensions.value.flatMap((extension) =>
+    (extension.mainViews ?? [])
+      .filter((view) => (view.when ? view.when(context) : true))
+      .map((view) => ({
+        extensionId: extension.id,
+        view,
+        viewId: mainViewId(extension.id, view.id),
+      })),
+  );
+}
+
+/** 按完整 id 找一个主区视图（找不到 = 扩展被卸载 / 门控关闭）。 */
+export function findMainView(context: PanelSlotContext, id: string): {
+  extensionId: string;
+  view: PanelMainView;
+  viewId: string;
+} | null {
+  return panelMainViews(context).find((item) => item.viewId === id) ?? null;
 }
 
 export function panelOverlays(): Array<{

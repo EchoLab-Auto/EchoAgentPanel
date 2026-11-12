@@ -146,6 +146,24 @@ body {
   flex-direction: column;
 }
 
+/*
+ * 扩展主区视图的容器（2026-11）。
+ *
+ * 只做三件事：占满主区、建立定位上下文、**不加 padding**。
+ * padding 交给视图自己——画布类视图（可平移缩放的文档图、图编辑器）需要的是
+ * 贴边渲染，宿主统一加 16px 会逼它们写负 margin 抵消；而列表类视图自己加
+ * padding 毫无难度。
+ */
+.extension-view {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* ── 实例 ── */
 .instance-item {
   display: flex;

@@ -18,8 +18,11 @@ import { scheduleNode } from './scheduler';
 import { currentTeam } from './capabilities';
 import {
   beforeSessionPick,
+  findMainView,
+  panelMainViews,
   setupPanelExtensions,
   teamLanding,
+  type PanelSlotContext,
 } from './extensions/registry';
 import 'virtual:panel-extensions';
 import ChatView from './components/ChatView.vue';
@@ -63,6 +66,9 @@ initMobileSheetHistory();
 const mobileTitle = computed<string>(() => {
   if (view.value === 'settings') return '设置';
   if (view.value === 'shell') return 'Shell';
+  // 扩展视图：用它的 label（移动端顶栏只显示"我在哪"，不显示品牌）。
+  const ext = extensionViews.value.find((item) => item.viewId === view.value);
+  if (ext) return ext.view.label;
   return currentTeam(state)?.name?.trim() || '聊天';
 });
 
@@ -76,7 +82,16 @@ const ACTIVE_TEAM_CORE_KEY = 'echo-panel-active-team-core';
 const VIEW_KEY = 'echo-panel-view';
 const SESSION_KEY = 'echo-panel-session';
 
-type View = 'chat' | 'settings' | 'shell';
+/**
+ * 主区视图。
+ *
+ * 内置三种 + **扩展视图**（`ext:<extensionId>:<viewId>`，见
+ * `extensions/registry.ts` 的 `PanelMainView`）。扩展视图的 id 带命名空间，
+ * 所以持久化在 `view` 偏好里的值可以直接回读——但回读时仍要**校验它现在还在**
+ * （扩展可能被卸载），见 `resolvedView`。
+ */
+type BuiltinView = 'chat' | 'settings' | 'shell';
+type View = BuiltinView | `ext:${string}`;
 
 const view = ref<View>(loadView());
 /** Shell 详情视图的目标会话（右侧边栏「详情」按钮设置；null = 无目标） */
@@ -142,6 +157,12 @@ function loadView(): View {
     // 聊天入口行的「任务」弹层（按当前 agent 的当前会话过滤）。
     if (saved === 'caps' || saved === 'logs') return 'settings';
     if (saved === 'tasks') return 'chat';
+    if (typeof saved === 'string' && saved.startsWith('ext:')) {
+      // 这里只校验**形状**：扩展是否还注册着要等注册完成（`virtual:panel-extensions`
+      // 的 import 在 setup 之前执行，但门控依赖 team/module 状态，那一刻还没拉到）。
+      // 真正的兜底在 `resolvedView`。
+      return saved as View;
+    }
     return (['chat', 'settings', 'shell'] as View[]).includes(saved as View) ? (saved as View) : 'chat';
   } catch {
     return 'chat';
@@ -258,6 +279,52 @@ setupPanelExtensions({
   syncTeamCore: applyActiveTeam,
 });
 startConnection();
+
+/**
+ * 扩展主区视图的槽位上下文（`when` 门控用）。
+ *
+ * 与 `setupPanelExtensions` 传的是同一组值，但那里是一次性快照，这里必须是
+ * computed——门控依赖 `team.enabled_modules`，而团队能力是连接后异步到达的。
+ */
+const slotContext = computed<PanelSlotContext>(() => ({
+  teamId: activeTeamId.value,
+  sessionId: activeSessionId.value,
+  core: activeRegion.value,
+}));
+
+/** 当前可见的扩展视图（按注册顺序）。 */
+const extensionViews = computed(() => panelMainViews(slotContext.value));
+
+/**
+ * 实际渲染的视图。
+ *
+ * 持久化里可能是 `ext:xxx:yyy`，但那个扩展现在被禁用/卸载了——此时**回落聊天**
+ * 而不是渲染空白：用户看到空白只会以为面板坏了，而"视图没了"这件事在界面上
+ * 已经体现为顶栏少了一个按钮。
+ */
+const resolvedView = computed<View>(() => {
+  const current = view.value;
+  if (!current.startsWith('ext:')) return current;
+  return extensionViews.value.some((item) => item.viewId === current) ? current : 'chat';
+});
+
+/** 当前渲染的扩展视图（无则 null）。 */
+const activeExtensionView = computed(() =>
+  resolvedView.value.startsWith('ext:')
+    ? findMainView(slotContext.value, resolvedView.value)
+    : null,
+);
+
+// 上面那个回落要**写回** `view`：否则顶栏没有任何按钮是选中态，而
+// `setView` 之外的路径（刷新恢复）会一直停在失效值上。
+watch(resolvedView, (next) => {
+  if (next !== view.value) setView(next);
+});
+
+/** 切到某个扩展视图（顶栏按钮 / 移动端菜单共用）。 */
+function selectExtensionView(viewId: string): void {
+  setView(viewId as View);
+}
 
 
 
@@ -608,6 +675,21 @@ watch(
             >
               设置
             </NeumorphismButton>
+            <!-- 扩展主区视图（2026-11）：与内置视图同级。**按注册顺序追加在
+                 末尾**——不插到聊天/设置之间，否则装个扩展就把用户的肌肉记忆
+                 打乱了。 -->
+            <NeumorphismButton
+              v-for="item in extensionViews"
+              :key="item.viewId"
+              size="small"
+              variant="glass"
+              :pressed="view === item.viewId"
+              :title="item.view.hint ?? item.view.label"
+              :data-extension-view="item.viewId"
+              @click="selectExtensionView(item.viewId)"
+            >
+              {{ item.view.label }}
+            </NeumorphismButton>
           </template>
           <!-- 全屏（移动端 2026-10 改为图标按钮，且在「卡片」左侧——用户要求）：
                放这里而不是「卡片」之后，DOM 顺序即视觉顺序；桌面端卡片按钮
@@ -661,6 +743,21 @@ watch(
           :core="shellViewCore"
           @back="setView('chat')"
         />
+        <!-- 扩展主区视图（2026-11）：宿主只提供**容器**，padding / 滚动 /
+             布局全归视图自己——画布类视图要的是"零 padding + 自己控滚动"，
+             宿主定死 padding 会让它们要么浪费边框、要么被迫负 margin。 -->
+        <div
+          v-if="activeExtensionView"
+          class="extension-view"
+          :data-extension-view="activeExtensionView.viewId"
+        >
+          <component
+            :is="activeExtensionView.view.component"
+            :team-id="activeTeamId"
+            :session-id="activeSessionId"
+            :core="activeRegion"
+          />
+        </div>
         <!-- Shell 视图空态（v2）：用户还没开过任何 Shell 会话。此前这种情况是
              一片空白（Shell 视图只从侧栏卡的「详情」进入，永远有目标会话）；
              收进视图菜单后必须显式说明，否则像页面坏了。 -->
@@ -702,7 +799,11 @@ watch(
     <!-- 全局确认对话框（2026-10 审计修复）：window.confirm 的统一替代 -->
     <!-- 移动端视图切换菜单（<768px）：`☰` 打开，含聊天/设置/Shell 三项。
          桌面不渲染（桌面顶栏已有常驻按钮）。 -->
-    <MobileViewSheet v-if="isMobile" :view="view" @select="setView" />
+    <MobileViewSheet v-if="isMobile"
+      :view="resolvedView"
+      :extensions="extensionViews.map((item) => ({ viewId: item.viewId, label: item.view.label, hint: item.view.hint }))"
+      @select="setView"
+    />
 
     <ConfirmDialog />
   </ThemeProvider>
