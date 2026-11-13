@@ -334,7 +334,14 @@ export interface ModuleInfo {
   version: string;
   kind: string;
   description: string;
-  entry: string;
+  /**
+   * 分类标签：`inner` = 随二进制发布，`outside` = 运行期装入（子进程模块 /
+   * 平台实例壳）。面板据此**分组展示**。
+   *
+   * 与 `kind` 正交——`kind` 说"哪类能力"，`tag` 说"从哪来"。旧 Core 缺失
+   * 该字段 = 空串，归入「未标注」。
+   */
+  tag?: string;
   author: string;
   /** true = Core 编译内置；false = 外部模块。旧 Core 缺失时按 true 兼容。 */
   builtin?: boolean;

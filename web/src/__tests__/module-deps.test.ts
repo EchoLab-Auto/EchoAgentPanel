@@ -9,7 +9,7 @@ function module(partial: Partial<ModuleInfo>): ModuleInfo {
     version: '1',
     kind: 'other',
     description: '',
-    entry: '',
+    tag: 'inner',
     author: '',
     ...partial,
   };

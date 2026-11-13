@@ -215,12 +215,12 @@ const toolbarSubtitle = computed(() => {
     const catalog = moduleCatalog.value;
     const gated = catalog.filter((p) => moduleSemantic(p) === 'gated').length;
     const modes = catalog.filter((p) => moduleSemantic(p) === 'mode').length;
-    const external = catalog.filter((p) => moduleSource(p) === 'external').length;
+    const outside = catalog.filter((p) => moduleTag(p) === 'outside').length;
     const parts = [`共 ${c.all} 项`];
-    // 当前分组维度决定哪个维度更值得说：按来源分组时先说内部/外部。
-    if (moduleGroupBy.value === 'source') {
-      if (external) parts.push(`${external} 外部模块`);
-      if (c.all - external) parts.push(`${c.all - external} 内部模块`);
+    // 当前分组维度决定哪个维度更值得说：按 tag 分组时先说内部/外部。
+    if (moduleGroupBy.value === 'tag') {
+      if (outside) parts.push(`${outside} 外部模块`);
+      if (c.all - outside) parts.push(`${c.all - outside} 内部模块`);
     } else {
       if (gated) parts.push(`${gated} 包维度门控`);
       if (modes) parts.push(`${modes} 模式模块`);
@@ -741,7 +741,7 @@ async function copyToolParams() {
 type ModuleFilter = 'all' | 'enabled' | 'disabled';
 const moduleSearch = ref('');
 const moduleFilter = ref<ModuleFilter>('all');
-const moduleGroupBy = ref<'source' | 'semantic' | 'kind' | 'flat'>('source');
+const moduleGroupBy = ref<'tag' | 'semantic' | 'kind' | 'flat'>('tag');
 const moduleCore = ref<string | null>(state.activeRegion);
 // 跟随运行区域（2026-10 多 Core）：选择器初值在挂载时快照，设置页开着期间
 // activeRegion 被 TeamsList 校正 / 上游增删改变时不跟随 → 模块面板停在旧 core，
@@ -833,7 +833,7 @@ const MODULE_FILTERS: { key: ModuleFilter; label: string }[] = [
 ];
 
 const MODULE_GROUP_OPTIONS = [
-  { label: '内部 / 外部', value: 'source' },
+  { label: '按 tag（内部 / 外部）', value: 'tag' },
   { label: '按门控语义', value: 'semantic' },
   { label: '按 kind', value: 'kind' },
   { label: '平铺', value: 'flat' },
@@ -870,18 +870,39 @@ function moduleSemantic(p: ModuleInfo): 'gated' | 'channel' | 'mode' | 'other' {
  * - 旧 Core 无 `runtime` 字段 → 回退按 `builtin` 推断（外部 manifest 一律是
  *   stdio 子进程）。
  */
-function moduleSource(p: ModuleInfo): 'builtin' | 'external' {
-  if (p.runtime) return p.runtime === 'subprocess' ? 'external' : 'builtin';
-  return p.builtin === false ? 'external' : 'builtin';
+/**
+ * 模块的分类标签（`inner` / `outside`），**由 Core 计算下发**，Panel 不自己推。
+ *
+ * 为什么不按 `runtime` / `builtin` 推：那两个是**另外的维度**（实现在哪跑 /
+ * 是不是编译进来的），重合度高但不是同一件事——外部仓编译进来的 workspace /
+ * prodoc / subagent 三者都是"编译进二进制 + 进程内"，若按 runtime 推会落到
+ * 内部组，若按 builtin 推也会落到内部组，恰好一致；但平台实例是"编译进来的
+ * 门控壳 + 独立进程实现"，两个维度就打架了。分组语义只该有一处定义，而
+ * Core 是唯一知道"从哪来"的地方。
+ *
+ * 旧 Core 没有该字段 → `unknown`，面板单独归一组而不是猜一个。
+ */
+function moduleTag(p: ModuleInfo): 'inner' | 'outside' | 'unknown' {
+  if (p.tag === 'inner' || p.tag === 'outside') return p.tag;
+  return 'unknown';
 }
-const MODULE_SOURCE_LABELS = { builtin: '内部模块', external: '外部模块' } as const;
+const MODULE_TAG_LABELS = {
+  inner: '内部模块',
+  outside: '外部模块',
+  unknown: '未标注',
+} as const;
+const MODULE_TAG_HINTS: Record<string, string | undefined> = {
+  inner: '随二进制发布（编译进 Core；含外部仓以 git 依赖编译进来的模块）',
+  outside: '运行期装入：实现在独立进程，配置在 modules.toml',
+  unknown: '旧版 Core 未下发 tag 字段（升级 Core 后归位）',
+};
 
 /**
- * 模块的**来源**（manifest 从哪来），与 [`moduleSource`]（实现在哪跑）正交。
+ * 模块的**来源**（manifest 从哪来），详情页技术信息区展示。
  *
- * 分组仍按运行位置（用户对「外部模块」的预期是「不在 Core 进程内」），
- * 但来源也要能看到——否则 `builtin = false` + `in_process` 的**数据模块**
- * （模块目录发现的 `module.toml`）会被分组吞掉，看不出它其实不随二进制发布。
+ * 分组看 `tag`（见 [`moduleTag`]），这里保留一个更细的二值：`builtin = false`
+ * 的**数据模块**（模块目录里发现的 `module.toml`）可能是进程内的，分组会把它
+ * 与随二进制发布的那批混在一起——详情页要能看出它其实不随二进制发布。
  */
 function moduleOrigin(p: ModuleInfo): 'shipped' | 'configured' {
   return p.builtin === false ? 'configured' : 'shipped';
@@ -892,8 +913,8 @@ function moduleOriginBadge(p: ModuleInfo): string {
   return moduleOrigin(p) === 'configured' ? MODULE_ORIGIN_LABELS.configured : '';
 }
 
-/** 实现是否跑在独立子进程（=`外部模块`；判定见 [`moduleSource`]）。 */
-function moduleIsSubprocess(p: ModuleInfo): boolean { return moduleSource(p) === 'external'; }
+/** 实现是否跑在独立子进程（**与分组无关的独立维度**）。 */
+function moduleIsSubprocess(p: ModuleInfo): boolean { return p.runtime === 'subprocess'; }
 const MODULE_RUNTIME_LABELS = { subprocess: '独立进程', in_process: '进程内' } as const;
 /** 运行形态的人读标签（旧 Core 缺字段 → 进程内）。 */
 function moduleRuntimeLabel(p: ModuleInfo): string {
@@ -954,18 +975,9 @@ const moduleWorkbenchGroups = computed(() => {
   for (const p of filteredModules.value) {
     if (moduleGroupBy.value === 'flat') {
       push('__all__', '全部模块', undefined, p);
-    } else if (moduleGroupBy.value === 'source') {
-      const source = moduleSource(p);
-      // 外部组的 hint 要讲清「独立进程」而非「第三方」：QQ 实例随 Core
-      // 发布，但实现在独立进程里（2026-10-18 报障的正是这一点）。
-      push(
-        `source:${source}`,
-        MODULE_SOURCE_LABELS[source],
-        source === 'external'
-          ? '实现在独立进程（独立 PID / 生命周期）；随 Core 发布或来自模块目录'
-          : '实现编译在 Core 进程内；随 Core 发布',
-        p,
-      );
+    } else if (moduleGroupBy.value === 'tag') {
+      const tag = moduleTag(p);
+      push(`tag:${tag}`, MODULE_TAG_LABELS[tag], MODULE_TAG_HINTS[tag], p);
     } else if (moduleGroupBy.value === 'semantic') {
       const sem = moduleSemantic(p);
       push(`sem:${sem}`, MODULE_SEMANTIC_LABELS[sem], SEMANTIC_HINT[sem], p);
@@ -3313,8 +3325,8 @@ watch(
                   <code>{{ selectedModule.kind }} · v{{ selectedModule.version || '—' }}</code>
                 </div>
                 <div class="skill-source__row">
-                  <span class="muted">Entry</span>
-                  <code>{{ selectedModule.entry || '—' }}</code>
+                  <span class="muted">Tag</span>
+                  <code>{{ MODULE_TAG_LABELS[moduleTag(selectedModule)] }}</code>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">运行形态</span>

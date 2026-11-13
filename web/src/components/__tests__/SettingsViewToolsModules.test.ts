@@ -81,7 +81,7 @@ function seed() {
       version: '1',
       kind: 'tool',
       description: '内置工具',
-      entry: '',
+      tag: 'inner',
       author: '',
             builtin: true,
       package: 'echo-agent.tools.builtin',
@@ -93,7 +93,7 @@ function seed() {
       version: '1',
       kind: 'instance',
       description: 'QQ 平台',
-      entry: '',
+      tag: 'inner',
       author: '',
             builtin: true,
       package: 'echo-agent.adapter.qq',
@@ -105,7 +105,7 @@ function seed() {
       version: '1',
       kind: 'management',
       description: 'Panel 通道',
-      entry: '',
+      tag: 'inner',
       author: '',
             builtin: true,
       package: 'echo-agent.management.panel',
@@ -117,7 +117,7 @@ function seed() {
       version: '1',
       kind: 'loop',
       description: '单会话',
-      entry: '',
+      tag: 'inner',
       author: '',
             builtin: true,
       package: 'echo-agent.loop.single',
@@ -129,7 +129,7 @@ function seed() {
       version: '1',
       kind: 'provider',
       description: 'provider',
-      entry: '',
+      tag: 'inner',
       author: '',
             builtin: true,
       package: 'echo-agent.provider.llm',
@@ -234,18 +234,19 @@ describe('SettingsView 模块工作台', () => {
     vi.mocked(sendCommand).mockClear();
   });
 
-  it('默认按来源分组（内部 / 外部）+ 副标题统计跟随分组维度', async () => {
+  it('默认按 tag 分组（内部 / 外部）+ 副标题统计跟随分组维度', async () => {
     const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    // seed 里 5 个模块都是 builtin=true（旧 Core 缺省也按 true 兼容）
+    // seed 里 5 个模块都带 tag='inner'
     expect(groups).toEqual(['内部模块']);
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
     expect(subtitle).toContain('共 5 项');
     expect(subtitle).toContain('5 内部模块');
-    // 按来源分组：内部模块一组，附来源提示（"随 Core 发布…"）
+    // 分组头附提示：讲清 inner 的边界（含外部仓以 git 依赖编译进来的模块）
     const hints = wrapper.findAll('.caps-list-group__hint').map((h) => h.text());
     expect(hints).toHaveLength(1);
-    expect(hints[0]).toContain('随 Core 发布');
+    expect(hints[0]).toContain('随二进制发布');
+    expect(hints[0]).toContain('git 依赖');
   });
 
   it('行首显示短 id：剥掉 echo-agent. 前缀，name 紧随其后', async () => {
@@ -274,7 +275,7 @@ describe('SettingsView 模块工作台', () => {
         version: '1',
         kind: 'tool',
         description: '',
-        entry: '',
+        tag: 'inner',
         author: '',
         builtin: false,
         package: 'vendor.custom.module',
@@ -286,7 +287,7 @@ describe('SettingsView 模块工作台', () => {
     expect(texts).toContain('vendor.custom.module');
   });
 
-  it('外部模块分组：builtin=false 归到「外部模块」', async () => {
+  it('tag=outside 归到「外部模块」——分组只看 tag', async () => {
     state.modules = [
       ...state.modules,
       {
@@ -295,9 +296,9 @@ describe('SettingsView 模块工作台', () => {
         version: '1',
         kind: 'tool',
         description: '运行期挂载',
-        entry: '',
+        tag: 'outside',
         author: '',
-                builtin: false,
+        builtin: false,
         package: 'example.external',
         gating: 'process',
       },
@@ -311,59 +312,83 @@ describe('SettingsView 模块工作台', () => {
     expect(subtitle).toContain('5 内部模块');
   });
 
+  it('tag 与 builtin / runtime 正交：builtin=false 但 tag=inner 仍归内部组', async () => {
+    // 数据模块（从模块目录发现的 module.toml）可能是进程内实现：
+    // 它不是"随二进制发布"，但也不是"运行期装入的独立进程"。
+    // 分组语义由 Core 的 tag 定义，两者不必一致。
+    state.modules = [
+      ...state.modules,
+      {
+        id: 'example.data',
+        name: '数据模块',
+        version: '1',
+        kind: 'tool',
+        description: '目录发现',
+        tag: 'inner',
+        author: '',
+        builtin: false,
+        runtime: 'in_process',
+        package: 'example.data',
+        gating: 'process',
+      },
+    ];
+    const wrapper = await openCategory('模块');
+    const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
+    expect(groups).toEqual(['内部模块']);
+    // 但详情页的来源字段仍如实显示"外部来源"
+    expect(wrapper.find('.caps-toolbar-title .muted').text()).toContain('6 内部模块');
+  });
+
+  it('旧 Core 缺 tag 字段：单独归「未标注」组（不猜）', async () => {
+    state.modules = state.modules.map((p) => {
+      const { tag: _drop, ...rest } = p;
+      return rest as typeof p;
+    });
+    const wrapper = await openCategory('模块');
+    const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
+    expect(groups).toEqual(['未标注']);
+    const hint = wrapper.find('.caps-list-group__hint').text();
+    expect(hint).toContain('旧版 Core');
+  });
+
   /**
-   * 2026-10-18 报障（二次修正）：QQ 实例描述写着「独立进程」，Panel 却把它
-   * 归到「内部模块」——用户据此质疑分类错了。
+   * 分组与"实现在哪跑"**正交**（2026-11 改）：分组只读 Core 下发的 `tag`。
    *
-   * 第一版修法保留了 `builtin` 判定（把它留在「内部模块」组，只加徽标），
-   * 用户仍然不接受：对使用者而言「外部模块」= 不在 Core 进程内（独立 PID、
-   * 独立生命周期、崩了不带走 Core）。现在 `moduleSource()` 按 `runtime`
-   * 判定，QQ 实例直接落到「外部模块」组。
+   * 2026-10-18 曾有一轮报障：QQ 实例描述写着「独立进程」却被归到「内部模块」，
+   * 当时的修法是让 Panel 按 `runtime` 自己推。那样有两个毛病：一是同一件事
+   * 在 Core 和 Panel 各定义一次（必然漂移），二是 `builtin` / `runtime` 两个
+   * 维度撞车时（编译进来的门控壳 + 独立进程实现）无论按哪个推都会有模块被
+   * 归错。现在 Core 算 `tag` 下发，Panel 只读。
    */
-  it('运行位置决定分组：runtime=subprocess → 外部模块（即使 builtin=true）', async () => {
-    // QQ 实例：门控 manifest 编译在 Core 里（builtin=true），
-    // 但实例实现由独立进程 echo-instance-qq 提供（runtime=subprocess）。
+  it('分组只看 tag：runtime=subprocess 但 tag=inner 仍留在内部组（两个维度正交）', async () => {
+    // 平台实例：门控壳编译在 Core 里，实现在独立进程。真实 Core 会给它
+    // tag=outside；这里故意留 inner，验证 Panel**不**再自己按 runtime 纠正。
     state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, runtime: 'subprocess' } : p,
     );
     const wrapper = await openCategory('模块');
 
-    // 分组：外部模块组里出现 QQ 实例
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['内部模块', '外部模块']);
-    const externalGroup = wrapper
-      .findAll('.caps-list-group')
-      .find((g) => g.find('.caps-list-group__name').text() === '外部模块')!;
-    expect(externalGroup.text()).toContain('QQ 实例');
-    expect(externalGroup.text()).not.toContain('单会话循环');
+    // tag 是 inner 就归内部组，runtime 不参与分组
+    expect(groups).toEqual(['内部模块']);
 
-    // 副标题按运行位置统计
-    const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
-    expect(subtitle).toContain('共 5 项');
-    expect(subtitle).toContain('1 外部模块');
-    expect(subtitle).toContain('4 内部模块');
-
-    // 外部组 hint 说明「独立进程」语义（而非「第三方」）
-    expect(externalGroup.find('.caps-list-group__hint').text()).toContain('独立进程');
-
-    // 行内徽标：外部组内标「独立进程」，内部组不标
+    // 但「独立进程」徽标照旧——它读的是 runtime，与分组无关。
     const qqRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     expect(qqRow.text()).toContain('独立进程');
     const innerRow = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('单会话循环'))!;
     expect(innerRow.text()).not.toContain('独立进程');
   });
 
-  it('runtime=in_process 明确声明时留在「内部模块」组（不受 builtin 影响）', async () => {
-    // 显式 in_process 覆盖任何来源推断
+  it('tag=outside + runtime=in_process：归外部组（tag 说了算）', async () => {
     state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq'
-        ? { ...p, builtin: false, runtime: 'in_process' }
+        ? { ...p, tag: 'outside', runtime: 'in_process' }
         : p,
     );
     const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['内部模块']);
-    expect(wrapper.find('.caps-toolbar-title .muted').text()).toContain('5 内部模块');
+    expect(groups).toEqual(['内部模块', '外部模块']);
+    expect(wrapper.find('.caps-toolbar-title .muted').text()).toContain('1 外部模块');
   });
 
   it('旧 Core 缺 runtime 字段：一律按进程内渲染（零变化）', async () => {
@@ -536,7 +561,7 @@ describe('SettingsView 模块工作台', () => {
         version: '1',
         kind: 'tool',
         description: '从 module.toml 发现',
-        entry: '',
+        tag: 'inner',
         author: '',
                 builtin: false,
         runtime: 'in_process',
@@ -619,7 +644,7 @@ describe('SettingsView 模块工作台', () => {
         version: '1',
         kind: 'tool',
         description: 'modules.toml 的 stdio 条目',
-        entry: 'example-ext',
+        tag: 'inner',
         author: '',
                 builtin: false,
         runtime: 'subprocess',
@@ -645,7 +670,7 @@ describe('SettingsView 模块工作台', () => {
         version: '1',
         kind: 'tool',
         description: 'modules.toml 的 stdio 条目',
-        entry: 'example-ext',
+        tag: 'inner',
         author: '',
                 builtin: false,
         runtime: 'subprocess',
@@ -771,7 +796,7 @@ describe('多 Core 模块归档（modulesByCore）', () => {
           version: '1',
           kind: 'tool',
           description: '',
-          entry: '',
+          tag: 'inner',
           author: '',
                     builtin: true,
           package: 'node-b.module',

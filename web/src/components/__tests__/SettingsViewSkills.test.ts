@@ -86,7 +86,7 @@ function seed() {
       version: '1',
       kind: 'instance',
       description: '',
-      entry: '',
+      tag: 'inner',
       author: '',
       state: 'failed',
       builtin: true,
