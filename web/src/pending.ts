@@ -51,9 +51,12 @@ export const REQUEST_RESPONSES: Record<string, string> = {
   RequestModulesList: 'ModulesList',
   RequestTeamsList: 'TeamsList',
   RequestShellSessions: 'ShellSessionsList',
-  RequestWorkspaceSessions: 'WorkspaceSessions',
-  RequestWorkspaceFiles: 'WorkspaceFiles',
-  RequestWorkspaceGitStatus: 'WorkspaceGitStatus',
+  // 工作区三条命令（RequestWorkspaceSessions / Files / GitStatus）此前也在这里，
+  // 2026-11 删除：文件浏览器卡移除后**全仓已无发送方**（`state.ts` 仍消费这三个
+  // 事件——那是 Core 主动推的状态，不是对本面板请求的应答）。留着只会让人以为
+  // "面板会请求工作区状态"，从而在别处复制一份发送逻辑。
+  //
+  // 要恢复工作区 UI 时：先有发送方，再把 (请求 → 应答) 这张表补回来。
   RequestSystemPrompt: 'SystemPrompt',
   TestApi: 'ApiTestResult',
   QueryApiBalance: 'ApiBalanceResult',
