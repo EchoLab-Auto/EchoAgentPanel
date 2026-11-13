@@ -302,9 +302,6 @@ export interface TeamInfo {
   system_skills?: string[];
 }
 
-/** 循环模块 id（唯一模式：每会话 turn 串行排队）。 */
-export const LOOP_SINGLE_MODULE_ID = 'echo-agent.loop.single';
-
 /** 后台 shell 会话摘要（Shell 面板终端可视化） */
 export interface ShellSessionInfo {
   session_id: string;

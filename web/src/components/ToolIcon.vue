@@ -3,6 +3,7 @@
 //! loading 时播放该工具专属的图标动画（复用图标本体路径，无额外轨道元素）。
 
 import { computed } from 'vue';
+import { SUBAGENT_TOOL } from '../tool-kinds';
 
 const props = withDefaults(defineProps<{ name: string; loading?: boolean }>(), {
   loading: false,
@@ -43,7 +44,7 @@ const kind = computed<IconKind>(() => {
       return 'calc';
     case 'web_search':
       return 'search';
-    case 'spawn_subagent':
+    case SUBAGENT_TOOL:
       return 'subagent';
     case 'send_private_msg':
     case 'send_group_msg':
@@ -53,17 +54,9 @@ const kind = computed<IconKind>(() => {
     case 'instance_stop':
     case 'instance_restart':
     case 'instance_status':
-    // 旧工具名（2026-10 去适配器化前；旧 Core 仍发这些名字）。
-    case 'instance_start':
-    case 'instance_stop':
-    case 'instance_restart':
-    case 'instance_status':
       return 'settings';
     case 'workspace':
       return 'workspace';
-    case 'spawn_background_task':
-    case 'spawn_parallel_task':
-      return 'orchestration';
     default:
       return 'tool';
   }

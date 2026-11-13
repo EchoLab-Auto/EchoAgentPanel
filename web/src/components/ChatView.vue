@@ -11,6 +11,7 @@
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { lazy, preloadLazy } from '../lazy';
+import { isSubagentTool } from '../tool-kinds';
 import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
@@ -1592,7 +1593,7 @@ const buildWorkRow = (m: ChatMessageWithImages): WorkRunItem | null => {
     input: tool.input,
     output: tool.output,
     status: tool.status,
-    label: tool.name === 'spawn_subagent' ? subagentTaskLabel(tool.input ?? '') : undefined,
+    label: isSubagentTool(tool.name) ? subagentTaskLabel(tool.input ?? '') : undefined,
     time: m.time ? formatTime(m.time) : undefined,
     startedAtMs: tool.startedAtMs,
     elapsedMs: tool.elapsedMs,

@@ -7,6 +7,7 @@ import {
 } from './state_domains/orchestration';
 import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessageAt, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
+import { isSubagentTool } from './tool-kinds';
 import { instanceOpKey, settleInstanceOp } from './instanceOps';
 import { settleInstanceOpsOfCore } from './pending';
 
@@ -1640,7 +1641,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     case 'ToolCall': {
       const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }).ToolCall;
       const startedAtMs = typeof e.started_at_ms === 'number' ? e.started_at_ms : Date.now();
-      setPhase(state, sessionKey(evtCore(e), e.session_id), e.tool_name === 'run_subagent' ? 'subagent' : 'tool', e.tool_name);
+      setPhase(state, sessionKey(evtCore(e), e.session_id), isSubagentTool(e.tool_name) ? 'subagent' : 'tool', e.tool_name);
       // 流式分步切分：工具开始 = 该步内容为中间叙述（此后不再有终值到达）
       // ——冻结当前正文流式行（保留已显示文本）；下一步的增量将新建一行。
       freezeStreams(state, e.session_id, {
@@ -1686,7 +1687,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out, e.elapsed_ms, entry);
       }
       const act = activity(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id));
-      if (e.tool_name !== 'run_subagent') act.toolsCompleted += 1;
+      if (!isSubagentTool(e.tool_name)) act.toolsCompleted += 1;
       setPhase(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id), 'thinking', null);
       return state;
     }
