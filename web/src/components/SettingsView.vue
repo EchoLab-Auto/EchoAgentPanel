@@ -803,6 +803,23 @@ const moduleCatalog = computed(() => {
   return [];
 });
 
+/**
+ * 列表行里的**短 id**：剥掉公共前缀 `echo-agent.`。
+ *
+ * 为什么剥：列表宽 250px，`echo-agent.management.panel`（27 字符）单独一行
+ * 就吃满，name 会被挤成省略号。而前缀对所有内置模块都一样——留着它只是让
+ * 每个行首都重复一遍同样的十一个字符，区分度全在后半段。
+ *
+ * 只对**恰好以 `echo-agent.` 开头**的 id 生效：外部模块（子进程）的 id 是
+ * 装它的人定的，不该被本仓的命名习惯截断。
+ *
+ * 完整 id 进 `title` 与详情页的技术信息区（那里本来就有）。
+ */
+function moduleShortId(id: string): string {
+  const prefix = 'echo-agent.';
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+}
+
 /** 模块工作区的展示形态：列表（默认）/ 依赖树。 */
 const moduleViewMode = ref<'list' | 'deps'>('list');
 
@@ -2404,6 +2421,7 @@ watch(
                       :class="{ 'caps-skill-item__dot--on': true }"
                       title="已挂载"
                     />
+                    <span class="caps-list-item__id" :title="p.id">{{ moduleShortId(p.id) }}</span>
                     <span class="caps-list-item__name">{{ p.name }}</span>
                     <span class="caps-skill-item__marks">
                       <span
@@ -3686,6 +3704,25 @@ watch(
 .caps-list-item--active {
   border-left-color: var(--panel-accent);
   background: var(--panel-accent-soft);
+}
+/**
+ * 行内 id：name 之前的等宽小字。
+ *
+ * 排版取舍：id 最多占 45% 宽度（超了省略），name 拿剩下的——两者都溢出时
+ * 优先保住 name（它是人给的标题，id 只是技术标识）。id 用等宽字体，因为
+ * 它的价值在于「一眼比对是否相同」，比例字形会让 `l` / `1` / `I` 混淆。
+ */
+.caps-list-item__id {
+  flex: 0 1 auto;
+  max-width: 45%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--nm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--nm-text-secondary, #8a8f98);
+  letter-spacing: -0.2px;
 }
 .caps-list-item__name {
   flex: 1;

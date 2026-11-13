@@ -248,6 +248,44 @@ describe('SettingsView 模块工作台', () => {
     expect(hints[0]).toContain('随 Core 发布');
   });
 
+  it('行首显示短 id：剥掉 echo-agent. 前缀，name 紧随其后', async () => {
+    const wrapper = await openCategory('模块');
+    const rows = wrapper.findAll('.caps-list-item__id');
+    expect(rows.length).toBeGreaterThan(0);
+
+    // 前缀剥掉：列表宽 250px，全 id 会把 name 挤成省略号；而后半段才是
+    // 区分度所在（`tools.builtin` / `management.panel` / `loop.single`）。
+    const texts = rows.map((r) => r.text());
+    expect(texts).toContain('tools.builtin');
+    expect(texts).toContain('management.panel');
+    expect(texts.some((t) => t.startsWith('echo-agent.'))).toBe(false);
+
+    // 完整 id 进 title：想确认全名时 hover 得到，不必点进详情页。
+    expect(rows[0].attributes('title')).toMatch(/^echo-agent\./);
+  });
+
+  it('非本仓命名的模块 id 原样显示（不按 echo-agent. 截断）', async () => {
+    // 外部模块的 id 是装它的人定的——我们无权按自己的命名习惯截断。
+    state.modules = [
+      ...state.modules,
+      {
+        id: 'vendor.custom.module',
+        name: '第三方',
+        version: '1',
+        kind: 'tool',
+        description: '',
+        entry: '',
+        author: '',
+        builtin: false,
+        package: 'vendor.custom.module',
+        gating: 'persona',
+      },
+    ];
+    const wrapper = await openCategory('模块');
+    const texts = wrapper.findAll('.caps-list-item__id').map((r) => r.text());
+    expect(texts).toContain('vendor.custom.module');
+  });
+
   it('外部模块分组：builtin=false 归到「外部模块」', async () => {
     state.modules = [
       ...state.modules,
