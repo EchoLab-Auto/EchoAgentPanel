@@ -722,8 +722,8 @@ dependencies = [
 
 [[package]]
 name = "echo-context"
-version = "0.16.0"
-source = "git+https://github.com/EchoLab-Auto/echo-fabric-arch?tag=v0.16.0#bbad7361618fda04d7becc915e11278b4a7a12aa"
+version = "0.17.0"
+source = "git+https://github.com/EchoLab-Auto/echo-fabric-arch?tag=v0.17.0#9cc97e4692bd8d7bd4692a3410133e9b4c9aa45f"
 dependencies = [
  "dashmap",
  "thiserror 2.0.20",
@@ -732,8 +732,8 @@ dependencies = [
 
 [[package]]
 name = "echo-module"
-version = "0.16.0"
-source = "git+https://github.com/EchoLab-Auto/echo-fabric-arch?tag=v0.16.0#bbad7361618fda04d7becc915e11278b4a7a12aa"
+version = "0.17.0"
+source = "git+https://github.com/EchoLab-Auto/echo-fabric-arch?tag=v0.17.0#9cc97e4692bd8d7bd4692a3410133e9b4c9aa45f"
 dependencies = [
  "echo-context",
  "serde",
@@ -837,7 +837,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1918,7 +1918,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
