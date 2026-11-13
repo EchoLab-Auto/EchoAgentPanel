@@ -36,6 +36,8 @@ function team(partial: Partial<TeamInfo> & { id: string }): TeamInfo {
     memory_limit_tokens: null,
     context_window_tokens: null,
     api_profile: null,
+    available_modules: [],
+    available_tools: [],
     ...partial,
   };
 }

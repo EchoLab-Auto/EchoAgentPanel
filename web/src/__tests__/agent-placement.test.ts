@@ -28,6 +28,8 @@ const agent: TeamInfo & { core?: string | null } = {
   memory_limit_tokens: null,
   context_window_tokens: null,
   api_profile: null,
+  available_modules: [],
+  available_tools: [],
 };
 
 describe('agent 运行区域迁移', () => {

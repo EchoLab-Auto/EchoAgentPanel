@@ -339,6 +339,9 @@ describe('ChatView 布局契约', () => {
         enabled: true,
         sessions: 0,
         enabled_modules: ['echo-agent.tools.builtin'],
+        // 新判据读 Core 下发的结论名单（旧字段仍是配置输入，留着不影响）。
+        available_modules: ['echo-agent.tools.builtin'],
+        available_tools: [],
       } as never,
     ];
     state.tasks = [];

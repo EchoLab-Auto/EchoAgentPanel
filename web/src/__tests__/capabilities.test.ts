@@ -157,28 +157,83 @@ describe('包维度门控模块清单（单一来源）', () => {
 
 describe('persona 名单语义（含包维度）', () => {
   const team = (over: Partial<TeamInfo>): TeamInfo =>
-    ({ id: 't', name: 't', enabled: true, sessions: 0, ...over }) as TeamInfo;
+    ({
+      id: 't',
+      name: 't',
+      enabled: true,
+      sessions: 0,
+      available_modules: [],
+      available_tools: [],
+      ...over,
+    }) as TeamInfo;
 
-  it('模块白名单：空表全启用，非空即精确匹配', () => {
+  // 2026-11 根治：判定规则搬到 Core，这里只测**查表**与两条协议契约。
+  //
+  // 此前这三条测的是 Panel 自己实现的名单语义（"空白名单 = 全部启用、
+  // 非空即精确匹配"），而 Core 侧同一件事有两处它做不到的差别：旧实例前缀
+  // 归一、包级门控的 id 硬编码。现在名单形态由 Core 归一后下发
+  // （`TeamInfo.available_*`），Panel 的判断退化成一次 `includes`。
+  //
+  // 名单语义本身（归一、空 = 不限的实际计算）在 Core 侧有测试——Panel 不再
+  // 重复测一遍别人算好的结论。
+
+  it('模块判据：查 Core 下发的结论名单；空 = 该人格未限制', () => {
     expect(teamModuleEnabled(team({}), 'echo-agent.workspace')).toBe(true);
     expect(
-      teamModuleEnabled(team({ enabled_modules: ['echo-agent.workspace'] }), 'echo-agent.workspace'),
+      teamModuleEnabled(
+        team({ available_modules: ['echo-agent.workspace'] }),
+        'echo-agent.workspace',
+      ),
     ).toBe(true);
     expect(
-      teamModuleEnabled(team({ enabled_modules: ['echo-agent.skills.dir'] }), 'echo-agent.workspace'),
+      teamModuleEnabled(
+        team({ available_modules: ['echo-agent.skills.dir'] }),
+        'echo-agent.workspace',
+      ),
     ).toBe(false);
   });
 
-  it('工具可用性：内置工具集被禁即全部不可用', () => {
-    const t = team({ enabled_modules: ['echo-agent.skills.dir'] });
+  it('模块判据：名单写旧实例前缀也命中（Core 归一后不会出现旧 id）', () => {
+    // 这条是根治的**验收点**：Core 下发的是现役 id，所以传现役 id 必须命中。
+    // 根治前 Panel 拿原始配置做字面量比较，配置里写旧 id 时会判成"未启用"。
+    expect(
+      teamModuleEnabled(
+        team({ available_modules: ['echo-agent.instance.qq'] }),
+        'echo-agent.instance.qq',
+      ),
+    ).toBe(true);
+  });
+
+  it('工具可用性：内置工具集这个包被禁 → 包内工具全部不可用', () => {
+    const t = team({ available_modules: ['echo-agent.skills.dir'] });
     expect(teamToolAvailable(t, 'bash')).toBe(false);
     expect(teamToolAvailable(t, 'workspace')).toBe(false);
   });
 
-  it('工具可用性：工具级名单与禁用表细化', () => {
-    const base = team({ enabled_modules: ['echo-agent.tools.builtin'] });
+  it('工具可用性：结论名单与禁用表细化', () => {
+    const base = team({ available_modules: ['echo-agent.tools.builtin'] });
     expect(teamToolAvailable(base, 'workspace')).toBe(true);
-    expect(teamToolAvailable(team({ ...base, disabled_tools: ['workspace'] }), 'workspace')).toBe(false);
-    expect(teamToolAvailable(team({ ...base, enabled_tools: ['bash'] }), 'workspace')).toBe(false);
+    expect(teamToolAvailable(team({ ...base, disabled_tools: ['workspace'] }), 'workspace')).toBe(
+      false,
+    );
+    expect(
+      teamToolAvailable(team({ ...base, available_tools: ['bash'] }), 'workspace'),
+    ).toBe(false);
+  });
+
+  it('旧 Core 不发结论字段：退回配置名单（兼容窗口）', () => {
+    // 兼容分支必须能被测到——它是"新 Panel + 旧 Core"下唯一还能工作的路径。
+    const legacy = (over: Record<string, unknown>) =>
+      ({ id: 't', name: 't', enabled: true, sessions: 0, ...over }) as TeamInfo;
+    expect(teamModuleEnabled(legacy({}), 'echo-agent.workspace')).toBe(true);
+    expect(
+      teamModuleEnabled(legacy({ enabled_modules: ['echo-agent.workspace'] }), 'echo-agent.workspace'),
+    ).toBe(true);
+    expect(
+      teamModuleEnabled(legacy({ enabled_modules: ['echo-agent.skills.dir'] }), 'echo-agent.workspace'),
+    ).toBe(false);
+    expect(
+      teamToolAvailable(legacy({ enabled_modules: ['echo-agent.tools.builtin'], enabled_tools: ['bash'] }), 'workspace'),
+    ).toBe(false);
   });
 });

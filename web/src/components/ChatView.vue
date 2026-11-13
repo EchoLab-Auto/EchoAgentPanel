@@ -941,8 +941,8 @@ function onSelectionChange() {
 }
 
 // 实例按钮显隐：仅当当前 Agent（team）启用了 instance 类模块时显示。
-// 依据 TeamInfo 的 enabled_modules 白名单判断（模块黑名单已移除），
-// 与 Core apply_capabilities 的过滤语义一致。
+// 判据是 Core 下发的结论名单（`TeamInfo.available_modules`，已归一去重），
+// 不是用户配置——名单语义（旧前缀归一、空 = 不限）只有 Core 一处实现。
 const ADAPTER_MODULE_FALLBACK = ['echo-agent.instance.qq'];
 
 const currentTeam = computed(() => {

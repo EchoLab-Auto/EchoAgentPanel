@@ -177,33 +177,75 @@ export const MODULE_KIND_LABELS: Record<string, string> = {
    *  `enabled = false` 会让启动失败并点名。 */
   kernel: '运行地基',
 };
-/** 工具是否被包级模块禁用（内置工具集关闭时全部工具不可用） */
-function toolPackageDisabled(team: TeamInfo | null | undefined): boolean {
-  if (!team) return false;
-  if (team.enabled_modules && team.enabled_modules.length > 0) {
-    return !team.enabled_modules.includes('echo-agent.tools.builtin');
-  }
-  return false;
-}
+/**
+ * 内置工具集模块的 id（包级门控的判据源）。
+ *
+ * 工具按"所属包"聚合门控：包对应的模块被禁 → 包内工具全部不可用。包 id 由
+ * 工具提供方声明（`ToolInfo.package`），内置工具集的包 id 就是这个模块 id。
+ */
+export const TOOLS_BUILTIN_MODULE_ID = 'echo-agent.tools.builtin';
 
-/** 某工具对当前 agent 是否可见/可用 */
+/**
+ * 某工具对当前 agent 是否可用（决定工具行折叠箭头、清单面板等处显隐）。
+ *
+ * ## 判据全部来自 Core 的**结论字段**
+ *
+ * 此前这里自己解释 `enabled_tools` / `disabled_tools` 的白黑名单语义，并且
+ * 硬编码包 id 判包级禁用。两处都出过问题：
+ *
+ * | 问题 | 后果 |
+ * |---|---|
+ * | 名单写旧实例前缀（`echo-agent.adapter.<p>`） | Core 归一后认，这里字面量比较不认——同一模块两边判断相反，都不报错 |
+ * | 包 id 硬编码在**两个**文件里（此处 + SettingsView） | 包改名时两处同时错，也都不报错 |
+ *
+ * 现在：名单形态由 Core 归一（`TeamInfo.available_tools`），包级门控走
+ * [`teamModuleEnabled`]（同一个判据源），本函数只做查表。
+ *
+ * 保留的语义只有两条，都是**协议契约**而不是 Core 内部规则：
+ * - 空名单 = 未限制（字段文档里写明）；
+ * - `disabled_tools` 命中即拒绝（字段名自解释）。
+ */
 export function teamToolAvailable(team: TeamInfo | null | undefined, toolName: string): boolean {
-  if (toolPackageDisabled(team)) return false;
   if (!team) return true;
+  // 包级门控优先：内置工具集这个包被禁 → 包内工具全部不可用。
+  if (!teamModuleEnabled(team, TOOLS_BUILTIN_MODULE_ID)) return false;
   if (team.disabled_tools?.includes(toolName)) return false;
-  if (team.enabled_tools && team.enabled_tools.length > 0) {
-    return team.enabled_tools.includes(toolName);
+  const tools = team.available_tools;
+  if (tools === undefined) {
+    // 旧 Core 不发结论字段：退回配置名单。**这是兼容窗口，不是第二套判据**
+    // ——字段缺失时两者语义等价（旧 Core 同样没有归一逻辑）。
+    return allowedByLegacyList(team.enabled_tools, toolName);
   }
-  return true;
+  return tools.length === 0 || tools.includes(toolName);
 }
 
-/** 某模块对当前 agent 是否启用（空白名单 = 全部启用；模块黑名单已移除） */
+/**
+ * 旧 Core 的名单语义：空 = 未限制，否则精确匹配。
+ *
+ * 只在结论字段缺失时使用（见调用点）。删掉它的时机：`TeamInfo.available_*`
+ * 的引入版本足够老、没有在跑的旧 Core 时——那时这两个分支会一起消失。
+ */
+function allowedByLegacyList(list: string[] | undefined, name: string): boolean {
+  return !list || list.length === 0 || list.includes(name);
+}
+
+/**
+ * 某模块对当前 agent 是否启用（决定实例面板、管理面入口、subagent 入口的显隐）。
+ *
+ * 判据是 Core 下发的 [`TeamInfo.available_modules`]——**已归一的结论**，不是
+ * 用户配置。空 = 该人格未限制模块（协议契约）。
+ *
+ * 传参要用**现役** id（`echo-agent.instance.qq`，不是 `echo-agent.adapter.qq`）：
+ * 归一的结果里只有现役形态。
+ */
 export function teamModuleEnabled(team: TeamInfo | null | undefined, moduleId: string): boolean {
   if (!team) return true;
-  if (team.enabled_modules && team.enabled_modules.length > 0) {
-    return team.enabled_modules.includes(moduleId);
+  const modules = team.available_modules;
+  if (modules === undefined) {
+    // 旧 Core：退回配置名单（见 `allowedByLegacyList` 的说明）。
+    return allowedByLegacyList(team.enabled_modules, moduleId);
   }
-  return true;
+  return modules.length === 0 || modules.includes(moduleId);
 }
 
 /** 当前 agent 的 team（去主智能体：无 id 时回退列表首个；(core, id) 精确匹配）。 */
