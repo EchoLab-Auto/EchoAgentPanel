@@ -1,0 +1,12 @@
+# Web Panel（内嵌形态）—— 模块声明（**单一真值**：身份）
+#
+# 代码用 `include_str!` 读这个文件构造 manifest（见 `src/lib.rs` 的
+# `module_with_defaults()`）。独立外壳（`echo-agent-panel` 进程）不走这里。
+
+id = "echo-agent.panel.web"
+name = "Web Panel"
+kind = "panel"
+description = "可选的进程内 Web Panel：HTTP/WS、前端、多上游；独立 Panel 外壳继续可用"
+builtin = true
+# 随 Panel 仓以 git 依赖参与 Core 构建 → 与 Core 同发版，算内部。
+tag = "inner"

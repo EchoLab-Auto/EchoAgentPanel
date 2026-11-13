@@ -53,6 +53,9 @@ use std::sync::Arc;
 use echo_module::{BuiltinModule, Module, ModuleManifest};
 use echo_web_server::runtime::{PanelRuntime, PanelRuntimeConfig};
 
+/// 模块声明文件——身份写在 TOML 里（单一真值）。
+pub const MANIFEST_TOML: &str = include_str!("../module.toml");
+
 pub const MODULE_ID: &str = "echo-agent.panel.web";
 
 /// 内嵌形态的**宿主默认值**：由组合根注入（它才知道自己的管理面地址与令牌）。
@@ -366,14 +369,8 @@ pub fn module(version: &str) -> Arc<dyn Module> {
 /// 组合根知道自己管理面的地址与令牌，而模块配置面不能放凭证——这两个事实
 /// 决定了必须有这个入口。
 pub fn module_with_defaults(version: &str, defaults: Option<PanelDefaults>) -> Arc<dyn Module> {
-    let manifest = ModuleManifest::builtin(
-        MODULE_ID,
-        "Web Panel",
-        version,
-        "panel",
-        "panel",
-        "可选的进程内 Web Panel：HTTP/WS、前端、多上游；独立 Panel 外壳继续可用",
-    );
+    let manifest = ModuleManifest::from_toml(MANIFEST_TOML, version)
+        .expect("agent-module-panel 的 module.toml 解析失败");
     let defaults = defaults.unwrap_or_default();
     Arc::new(BuiltinModule::new(manifest, move |ctx| {
         let config = runtime_config(ctx, &defaults)
