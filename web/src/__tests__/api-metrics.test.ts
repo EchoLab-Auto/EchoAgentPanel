@@ -37,6 +37,8 @@ function makeEntry(
       model,
       prompt_tokens: prompt,
       completion_tokens: completion,
+      // 缓存命中 tokens 是 prompt 的子集（DeepSeek 口径）；本文件不测它，取 0。
+      cache_hit_tokens: 0,
       calls: 1,
     })),
     cost_currency: costCurrency,

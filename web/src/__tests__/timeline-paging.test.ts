@@ -23,7 +23,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
 import { teamKey } from '../keys';
-import type { TimelineMessage } from '../protocol';
+import type { BackendEvent, TimelineMessage } from '../protocol';
 
 const TEAM = 'Alice';
 const SID = 'local:tui::local_user';
@@ -36,6 +36,7 @@ function timelineMessage(i: number): TimelineMessage {
     session_id: SID,
     time: 1700000000 + i,
     seq: 100 + i,
+    ord: 100 + i,
   };
 }
 
@@ -49,6 +50,7 @@ function seedFullSnapshot(count: number, hasMore: boolean, startSeq = 100) {
       session_id: SID,
       time: 1700000000 + i,
       seq: startSeq + i,
+      ord: startSeq + i,
     });
   }
   dispatch(
@@ -83,17 +85,17 @@ describe('首屏限窗（TrunkTimeline.has_more）', () => {
   });
 
   it('缺 has_more 字段（旧版 Core）= 不需要翻页', () => {
-    dispatch(
-      {
-        TrunkTimeline: {
-          messages: [timelineMessage(0)],
-          seq: 100,
-          team_id: TEAM,
-          full: true,
-        },
+    // 旧版 Core 的载荷里**没有** `has_more`（生成类型把它标成必填，所以这里
+    // 刻意绕开类型系统构造这份"旧版载荷"）——本用例要锁的正是缺字段时的行为。
+    const legacyPayload = {
+      TrunkTimeline: {
+        messages: [timelineMessage(0)],
+        seq: 100,
+        team_id: TEAM,
+        full: true,
       },
-      null,
-    );
+    } as unknown as BackendEvent;
+    dispatch(legacyPayload, null);
     expect(state.timelineHasMore[KEY]).toBe(false);
   });
 });
@@ -107,7 +109,14 @@ describe('向上翻页（TimelineEarlier）', () => {
     // 请求更早的一页：seq 190..199（都在已加载最老条目 200 之前）
     const page: TimelineMessage[] = [];
     for (let i = 0; i < 10; i++) {
-      page.push({ kind: 'backend', content: `old${i}`, session_id: SID, time: 1700000000, seq: 190 + i });
+      page.push({
+        kind: 'backend',
+        content: `old${i}`,
+        session_id: SID,
+        time: 1700000000,
+        seq: 190 + i,
+        ord: 90 + i,
+      });
     }
     dispatch({ TimelineEarlier: { team_id: TEAM, messages: page, has_more: true } }, null);
 

@@ -38,10 +38,13 @@ function historyEvent(sessionId: string, count = 2) {
         session_id: sessionId,
         time: 1000 + i,
         seq: i + 1,
+        ord: i + 1,
       })),
       total: count,
       truncated: false,
       max_seq: count,
+      has_older: false,
+      older_unavailable: false,
     },
   };
 }

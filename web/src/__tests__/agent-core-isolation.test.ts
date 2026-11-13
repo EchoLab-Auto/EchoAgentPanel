@@ -6,8 +6,30 @@ import { state, dispatch } from '../store';
 import { belongsToActiveTeam, coreForTeam, currentRegion } from '../state';
 import type { BackendEvent, TeamInfo } from '../protocol';
 
+/** TeamInfo 工厂：只写用例关心的字段，其余取 Core 的缺省值。 */
 function team(id: string, core: string | null, over: Partial<TeamInfo> = {}): TeamInfo {
-  return { id, name: id, description: '', enabled: true, sessions: 0, core, ...over };
+  return {
+    id,
+    node_id: null,
+    region_name: null,
+    name: id,
+    description: '',
+    enabled: true,
+    running: true,
+    system_skills: [],
+    sessions: 0,
+    system_prompt: '',
+    disabled_tools: [],
+    disabled_skills: [],
+    enabled_modules: [],
+    enabled_tools: [],
+    enabled_skills: [],
+    memory_limit_tokens: null,
+    context_window_tokens: null,
+    api_profile: null,
+    core,
+    ...over,
+  };
 }
 
 const teamsEvent = (teams: TeamInfo[]): BackendEvent =>
@@ -122,7 +144,7 @@ describe('sendCommand 人格归属路由守卫', () => {
     s.teams = [team('default', 'core-a'), team('alix', 'core-b')];
     s.activeRegion = 'core-a';
     // 调度选到了 core-b，但命令带 core-a 的人格 → 必须改发 core-a。
-    sendCommand({ RequestTrunkTimeline: { team_id: 'default' } }, 'core-b');
+    sendCommand({ RequestTrunkTimeline: { team_id: 'default', since_seq: 0 } }, 'core-b');
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-a');
   });
@@ -133,7 +155,7 @@ describe('sendCommand 人格归属路由守卫', () => {
     const ws = await connect();
     s.teams = [team('alix', 'core-a'), team('alix', 'core-b')];
     s.activeRegion = 'core-a';
-    sendCommand({ RequestTrunkTimeline: { team_id: 'alix' } }, 'core-b');
+    sendCommand({ RequestTrunkTimeline: { team_id: 'alix', since_seq: 0 } }, 'core-b');
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-b');
   });
@@ -143,7 +165,9 @@ describe('sendCommand 人格归属路由守卫', () => {
     const { state: s } = await import('../store');
     const ws = await connect();
     s.teams = [team('default', 'core-a')];
-    sendCommand({ SendMessage: { session_id: 'new', content: 'hi', team_id: 'default' } });
+    sendCommand({
+      SendMessage: { session_id: 'new', content: 'hi', images: [], team_id: 'default' },
+    });
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-a');
   });

@@ -1360,6 +1360,14 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       upsertInstance(state, {
         name: e.instance_name,
         display_name: e.instance_name,
+        // `InstanceStateChanged` 只带连接态；其余字段沿用现有条目（由
+        // `AdapterList` / `instance_info` 填充）。生成的 `InstanceStatus`
+        // 是**完整**形状，所以缺的部分显式给空值，而不是靠可选性蒙混。
+        persona: null,
+        metadata: [],
+        platform: null,
+        ui: null,
+        session_labels: null,
         connected: e.connected,
         // `InstanceStateChanged` only fires while the instance is running; a
         // disconnected client still means the instance process is up.

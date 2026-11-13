@@ -354,7 +354,7 @@ const filteredSkills = computed(() => {
 
 /** 包 → 显示名（已知门控包用中文名；自定义包名原样显示）。
  *  `standalone` = 无包归属时的兜底文案（技能「独立技能」/ 工具「独立工具」）。 */
-function skillPackageLabel(pkg: string | undefined, standalone = '独立技能'): string {
+function skillPackageLabel(pkg: string | null | undefined, standalone = '独立技能'): string {
   if (!pkg) return standalone;
   return PACKAGE_DISPLAY_NAMES[pkg] ?? pkg;
 }

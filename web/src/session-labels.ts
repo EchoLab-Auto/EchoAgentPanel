@@ -29,8 +29,11 @@ export function sessionLabelsFor(platform: string): SessionLabels {
   const matches = state.instances.filter((a) => a.platform === platform);
   const ref = matches.find((a) => a.session_labels) ?? matches[0] ?? null;
   const name = ref ? displayNameOf(ref) : '';
+  // `session_labels` 在 Core 侧是 `serde_json::Value`（平台模块自己定形状，
+  // Core 不约束）——生成的类型因此是 `JsonValue`，取字段前必须窄化。
+  const labels = (ref?.session_labels ?? null) as Partial<SessionLabels> | null;
   return {
-    dm: ref?.session_labels?.dm || (name ? `${name} 私聊` : '私聊'),
-    group: ref?.session_labels?.group || (name ? `${name} 群聊` : '群聊'),
+    dm: labels?.dm || (name ? `${name} 私聊` : '私聊'),
+    group: labels?.group || (name ? `${name} 群聊` : '群聊'),
   };
 }

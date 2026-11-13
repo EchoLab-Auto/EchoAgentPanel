@@ -71,6 +71,21 @@ cargo run -p echo-web-server -- --config config/echo-agent-panel.toml --static-d
 # 3. 打开 http://<你的服务器IP>:8080（本机可用 http://localhost:8080）
 ```
 
+### 管理面协议类型（由 Core 生成）
+
+`web/src/protocol.generated.ts` 不是手写的——它是 Core 的 Rust 类型
+（`agent-module-management/src/protocol/`）经 `ts-rs` 导出的结果。改协议要改
+**Core 的 Rust**，然后重跑同步：
+
+```bash
+npm run sync-protocol            # 从 ~/.local/share/echo-agent-core/source 生成
+CORE_SOURCE=/path npm run sync-protocol   # 显式指定 Core 源码
+npm run check-protocol           # 只校验（build 前置；不一致拒绝构建）
+```
+
+细节与坑（`bigint` vs `number`、`JsonValue`、必填字段）见
+[docs/protocol-sync.md](docs/protocol-sync.md)。
+
 ### ui-frame 组件库引用方式（本地快照 ⇄ npm 包）
 
 前端默认以**仓库内提交的本地快照**引用 `@echolab-auto/ui-frame`

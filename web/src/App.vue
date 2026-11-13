@@ -351,7 +351,7 @@ function send(content: string, images: string[] = []) {
         content,
         images,
         // 去主智能体：team_id 必填（core 无"默认人格"兜底）。
-        team_id: activeTeamId.value ?? undefined,
+        team_id: activeTeamId.value ?? null,
       },
     },
     scheduled ?? undefined,
@@ -368,7 +368,7 @@ function cancelWork() {
     CancelRequestedWork: {
       session_id: activeSessionId.value,
       all: false,
-      team_id: activeTeamId.value ?? undefined,
+      team_id: activeTeamId.value ?? null,
     },
   });
 }

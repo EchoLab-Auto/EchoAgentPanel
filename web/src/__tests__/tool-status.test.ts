@@ -24,8 +24,28 @@ import type { DisplayMessage } from '../state';
 const SID = 'local:tui::local_user';
 const BRANCH = 'branch-uuid-1';
 
+/** TeamInfo 工厂：只写用例关心的字段，其余取 Core 的缺省值。 */
 function team(id: string): TeamInfo {
-  return { id, name: id, description: '', enabled: true, sessions: 0 };
+  return {
+    id,
+    node_id: null,
+    region_name: null,
+    name: id,
+    description: '',
+    enabled: true,
+    running: true,
+    system_skills: [],
+    sessions: 0,
+    system_prompt: '',
+    disabled_tools: [],
+    disabled_skills: [],
+    enabled_modules: [],
+    enabled_tools: [],
+    enabled_skills: [],
+    memory_limit_tokens: null,
+    context_window_tokens: null,
+    api_profile: null,
+  };
 }
 
 function toolCall(opts: { id?: string; name?: string; session?: string } = {}) {

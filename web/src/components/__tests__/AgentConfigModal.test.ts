@@ -16,32 +16,93 @@ import { fileURLToPath } from 'node:url';
 import { mount } from '@vue/test-utils';
 import AgentConfigModal from '../AgentConfigModal.vue';
 import { state } from '../../store';
-import type { TeamInfo } from '../../protocol';
+import type { ModuleInfo, SkillInfo, TeamInfo } from '../../protocol';
 
-const team: TeamInfo = {
+/** TeamInfo 工厂：用例只写差异字段，其余取 Core 的缺省值。 */
+function makeTeam(partial: Partial<TeamInfo> & { id: string }): TeamInfo {
+  return {
+    name: partial.id,
+    node_id: null,
+    region_name: null,
+    description: '',
+    enabled: true,
+    running: true,
+    system_skills: [],
+    sessions: 0,
+    system_prompt: '',
+    disabled_tools: [],
+    disabled_skills: [],
+    enabled_modules: [],
+    enabled_tools: [],
+    enabled_skills: [],
+    memory_limit_tokens: null,
+    context_window_tokens: null,
+    api_profile: null,
+    ...partial,
+  };
+}
+
+/** SkillInfo 工厂：用例只写差异字段，其余取 Core 的缺省值。 */
+function skill(partial: Partial<SkillInfo> & { name: string }): SkillInfo {
+  return {
+    description: '',
+    keywords: [],
+    always: false,
+    enabled: true,
+    category: '',
+    content: '',
+    system: false,
+    ...partial,
+  };
+}
+
+/** ModuleInfo 工厂：用例只写差异字段，其余取 Core 的缺省值。 */
+function mod(partial: Partial<ModuleInfo> & { id: string }): ModuleInfo {
+  return {
+    name: partial.id,
+    version: '1',
+    kind: 'tool',
+    description: '',
+    tag: 'inner',
+    author: '',
+    builtin: true,
+    runtime: 'in_process',
+    package: partial.id,
+    gating: 'persona',
+    config_origin: '',
+    state: '',
+    restarts: 0,
+    generation: 0,
+    source_path: '',
+    command: '',
+    args: [],
+    env_keys: [],
+    required_services: [],
+    provides_services: [],
+    optional_services: [],
+    pending_services: [],
+    subscribed_events: [],
+    ...partial,
+  };
+}
+
+const team: TeamInfo = makeTeam({
   id: 'alix',
   name: 'Alix',
   description: '主 agent',
-  enabled: true,
-  sessions: 0,
-  enabled_tools: [],
-  enabled_skills: [],
-  enabled_modules: [],
-};
+});
 
 function seed() {
-  state.skills = [
-    { name: 'coding', description: 'd', keywords: [], always: false, enabled: true, category: '', content: '' },
-  ] as typeof state.skills;
+  state.skills = [skill({ name: 'coding', description: 'd' })];
   state.tools = [
     { name: 'bash', description: 'd', parameters: null, category: 'builtin', enabled: true, package: 'echo-agent.tools.builtin' },
   ] as typeof state.tools;
   state.modules = [
-    { id: 'echo-agent.tools.builtin', name: '内置工具集', version: '1', kind: 'tool', description: '', tag: 'inner', author: '', builtin: true, package: 'echo-agent.tools.builtin', gating: 'persona' },
-    { id: 'echo-agent.workspace', name: '工作区会话', version: '1', kind: 'tool', description: '', tag: 'inner', author: '', builtin: true, package: 'echo-agent.workspace', gating: 'persona' },
-    { id: 'echo-agent.future-interaction', name: '交互示例', version: '1', kind: 'interaction', description: '', tag: 'inner', author: '', builtin: true, package: 'echo-agent.future-interaction', gating: 'process' },
-    { id: 'echo-agent.management.panel', name: '管理面', version: '1', kind: 'management', description: '', tag: 'inner', author: '', builtin: true, package: 'echo-agent.management.panel', gating: 'process' },
-  ] as typeof state.modules;
+    mod({ id: 'echo-agent.tools.builtin', name: '内置工具集' }),
+    mod({ id: 'echo-agent.workspace', name: '工作区会话' }),
+    mod({ id: 'echo-agent.future-interaction', name: '交互示例', kind: 'interaction', gating: 'process' }),
+    mod({ id: 'echo-agent.management.panel', name: '管理面', kind: 'management', gating: 'process' }),
+  ];
 }
 
 function mountModal() {

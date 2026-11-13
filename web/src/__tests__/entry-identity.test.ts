@@ -93,6 +93,7 @@ describe('工具行的条目身份（entry 精确配对）', () => {
           tool_name: 'bash',
           arguments: '{"cmd":"ls"}',
           tool_call_id: 'c1',
+          branch_id: '',
           started_at_ms: 1000,
         },
       },
@@ -102,7 +103,17 @@ describe('工具行的条目身份（entry 精确配对）', () => {
     expect(state.trunk).toHaveLength(1);
     expect(state.trunk[0].entry).toBe('tool:s:c1');
     dispatch(
-      { ToolResult: { session_id: SID, tool_name: 'bash', result: 'ok', tool_call_id: 'c1', elapsed_ms: 12 } },
+      {
+        ToolResult: {
+          session_id: SID,
+          tool_name: 'bash',
+          result: 'ok',
+          tool_call_id: 'c1',
+          timed_out: false,
+          branch_id: '',
+          elapsed_ms: 12,
+        },
+      },
       null,
       'tool:s:c1',
     );
@@ -115,19 +126,44 @@ describe('工具行的条目身份（entry 精确配对）', () => {
   it('同名工具并发：靠 entry 区分，不会配错（旧逻辑可能配错）', () => {
     // 两条同名 bash，不同 call id / 不同 entry
     dispatch(
-      { ToolCall: { session_id: SID, tool_name: 'bash', arguments: '{"cmd":"a"}', tool_call_id: 'cA' } },
+      {
+        ToolCall: {
+          session_id: SID,
+          tool_name: 'bash',
+          arguments: '{"cmd":"a"}',
+          tool_call_id: 'cA',
+          branch_id: '',
+        },
+      },
       null,
       'tool:s:cA',
     );
     dispatch(
-      { ToolCall: { session_id: SID, tool_name: 'bash', arguments: '{"cmd":"b"}', tool_call_id: 'cB' } },
+      {
+        ToolCall: {
+          session_id: SID,
+          tool_name: 'bash',
+          arguments: '{"cmd":"b"}',
+          tool_call_id: 'cB',
+          branch_id: '',
+        },
+      },
       null,
       'tool:s:cB',
     );
     expect(state.trunk).toHaveLength(2);
     // cB 先完成：entry 精确指向第二行
     dispatch(
-      { ToolResult: { session_id: SID, tool_name: 'bash', result: 'B done', tool_call_id: 'cB' } },
+      {
+        ToolResult: {
+          session_id: SID,
+          tool_name: 'bash',
+          result: 'B done',
+          tool_call_id: 'cB',
+          timed_out: false,
+          branch_id: '',
+        },
+      },
       null,
       'tool:s:cB',
     );
@@ -137,7 +173,7 @@ describe('工具行的条目身份（entry 精确配对）', () => {
 
   it('无 tool_call_id 的旧式事件：靠 entry 仍能精确配对', () => {
     dispatch(
-      { ToolCall: { session_id: SID, tool_name: 'bash', arguments: '{}' } },
+      { ToolCall: { session_id: SID, tool_name: 'bash', arguments: '{}', tool_call_id: '', branch_id: '' } },
       null,
       'tool:s:x1',
     );
@@ -173,8 +209,25 @@ describe('无 entry 时回退旧行为（灰度双读）', () => {
   });
 
   it('工具仍按 tool_call_id 配对', () => {
-    dispatch({ ToolCall: { session_id: SID, tool_name: 'bash', arguments: '{}', tool_call_id: 'c1' } });
-    dispatch({ ToolResult: { session_id: SID, tool_name: 'bash', result: 'ok', tool_call_id: 'c1' } });
+    dispatch({
+      ToolCall: {
+        session_id: SID,
+        tool_name: 'bash',
+        arguments: '{}',
+        tool_call_id: 'c1',
+        branch_id: '',
+      },
+    });
+    dispatch({
+      ToolResult: {
+        session_id: SID,
+        tool_name: 'bash',
+        result: 'ok',
+        tool_call_id: 'c1',
+        timed_out: false,
+        branch_id: '',
+      },
+    });
     expect(state.trunk).toHaveLength(1);
     expect(state.trunk[0].tool?.output).toBe('ok');
     expect(state.trunk[0].entry).toBeUndefined();

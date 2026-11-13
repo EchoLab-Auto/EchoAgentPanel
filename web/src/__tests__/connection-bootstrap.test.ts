@@ -143,7 +143,14 @@ describe('重连引导命令（去主智能体）', () => {
     // 入队时：activeRegion 是 core-a，teams 表里还没有任何人格。
     state.activeRegion = 'core-a';
     state.teams = [];
-    sendCommand({ SendMessage: { session_id: 'local:tui::local_user', team_id: 'bot', content: 'hi' } });
+    sendCommand({
+      SendMessage: {
+        session_id: 'local:tui::local_user',
+        team_id: 'bot',
+        content: 'hi',
+        images: [],
+      },
+    });
     expect(ws.sent.some((c) => c.includes('SendMessage'))).toBe(false);
     // onopen 前 TeamsList 到达：人格 bot 实际归属 core-b。
     dispatch(
@@ -162,7 +169,7 @@ describe('重连引导命令（去主智能体）', () => {
     const { sendCommand } = await import('../connection');
     const { state } = await import('../store');
     // 02a S3：返回值 = false（拒发）。
-    expect(sendCommand({ RequestShellSessions: {} })).toBe(false);
+    expect(sendCommand({ RequestShellSessions: { team_id: null } })).toBe(false);
     expect(state.toasts.length).toBe(1);
     expect(state.toasts[0].text).toContain('未连接到 Core');
   });
@@ -171,7 +178,7 @@ describe('重连引导命令（去主智能体）', () => {
     const { startConnection, sendCommand } = await import('../connection');
     startConnection();
     const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
-    expect(sendCommand({ RequestShellSessions: {} })).toBe(true); // 握手期已排队
+    expect(sendCommand({ RequestShellSessions: { team_id: null } })).toBe(true); // 握手期已排队
     ws.triggerOpen();
     expect(sendCommand('RequestState')).toBe(true); // 已连接已发送
   });

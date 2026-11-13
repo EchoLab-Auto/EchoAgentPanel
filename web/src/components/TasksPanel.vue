@@ -105,7 +105,7 @@ function cancel(sessionId: string) {
     CancelRequestedWork: {
       session_id: sessionId,
       all: false,
-      team_id: state.activeTeamId || undefined,
+      team_id: state.activeTeamId || null,
     },
   });
 }

@@ -15,6 +15,7 @@ import {
   normalizeUrl,
   upstreamNodeId,
 } from '../federation-directory';
+import type { FederatedNodeInfo } from '../state';
 import type { FederationDirectory } from '../state';
 
 function upstream(name: string, url: string) {
@@ -33,15 +34,35 @@ function upstream(name: string, url: string) {
   };
 }
 
-function directory(nodes: FederationDirectory['nodes']): FederationDirectory {
+/** 目录里的邻居条目：用例只关心少数几个字段，其余按 Core 的缺省值补齐。 */
+type NodeFixture = Partial<FederatedNodeInfo> & { name: string };
+
+function nodeInfo({
+  name,
+  node_id = '',
+  node_name = null,
+  url = '',
+  advertise = null,
+  online = true,
+  panel_ready = true,
+}: NodeFixture): FederatedNodeInfo {
+  return { name, node_id, node_name, url, advertise, online, panel_ready };
+}
+
+function directory(nodes: NodeFixture[]): FederationDirectory {
   return {
     node_id: 'node-local',
     node_name: 'local',
     listen: '0.0.0.0:3132',
     panel_ready: true,
     panel_access: 'operate',
-    nodes,
+    nodes: nodes.map(nodeInfo),
   };
+}
+
+/** 构造一份目录：覆盖应答节点自己的 `node_id` 与邻居条目。 */
+function dirOf(node_id: string, nodes: NodeFixture[] = []): FederationDirectory {
+  return { ...directory(nodes), node_id };
 }
 
 describe('联邦自动发现（目录 → 派生接入点）', () => {
@@ -54,16 +75,18 @@ describe('联邦自动发现（目录 → 派生接入点）', () => {
 
   it('地址优先取对端宣告值，其次取本机视角的拨号地址', () => {
     expect(
-      candidateUrl({
-        name: 'gpu',
-        url: 'ws://10.0.0.9:3132',
-        advertise: 'ws://223.109.239.30:17176',
-      }),
+      candidateUrl(
+        nodeInfo({
+          name: 'gpu',
+          url: 'ws://10.0.0.9:3132',
+          advertise: 'ws://223.109.239.30:17176',
+        }),
+      ),
     ).toBe('ws://223.109.239.30:17176');
-    expect(candidateUrl({ name: 'gpu', url: 'ws://10.0.0.9:3132/' })).toBe(
+    expect(candidateUrl(nodeInfo({ name: 'gpu', url: 'ws://10.0.0.9:3132/' }))).toBe(
       'ws://10.0.0.9:3132',
     );
-    expect(candidateUrl({ name: 'inbound-only', url: '' })).toBe('');
+    expect(candidateUrl(nodeInfo({ name: 'inbound-only', url: '' }))).toBe('');
   });
 
   it('规范化地址只去掉尾部斜杠，不改写协议与端口', () => {
@@ -137,7 +160,7 @@ describe('按 node_id 去重（同机不同地址）', () => {
   it('应答节点自己的 node_id 就是它的身份（不依赖会话/人格是否先到）', () => {
     state.upstreams = [upstream('core', 'ws://127.0.0.1:3132')];
     state.federationDirectories = {
-      core: { ...directory([]), node_id: 'node-aaa' },
+      core: dirOf('node-aaa'),
     };
     expect(upstreamNodeId('core')).toBe('node-aaa');
   });
@@ -151,16 +174,12 @@ describe('按 node_id 去重（同机不同地址）', () => {
   it('已在连的机器换个地址出现：不派生第二条（VPN / 多网卡）', () => {
     state.upstreams = [upstream('core', 'ws://127.0.0.1:3132')];
     state.federationDirectories = {
-      core: { ...directory([]), node_id: 'node-aaa' },
+      core: dirOf('node-aaa'),
       // cloud2 的目录把「本机的 VPN 地址」当成一个邻居报了上来——
       // 它的 node_id 与 core 的完全相同。
-      'cloud-server-2': {
-        ...directory([]),
-        node_id: 'node-cloud',
-        nodes: [
-          { name: 'node-01m3yevt', node_id: 'node-aaa', advertise: 'ws://10.10.10.100:3132' },
-        ],
-      },
+      'cloud-server-2': dirOf('node-cloud', [
+        { name: 'node-01m3yevt', node_id: 'node-aaa', advertise: 'ws://10.10.10.100:3132' },
+      ]),
     };
     expect(discoveryCandidates()).toEqual([]);
   });
@@ -168,30 +187,24 @@ describe('按 node_id 去重（同机不同地址）', () => {
   it('已在连的机器换个端口出现：同样不派生（NAT 端口映射）', () => {
     state.upstreams = [upstream('A100-40g', 'ws://223.109.239.30:17176')];
     state.federationDirectories = {
-      'A100-40g': { ...directory([]), node_id: 'node-a100' },
-      core: {
-        ...directory([]),
-        node_id: 'node-aaa',
-        nodes: [
-          {
-            name: 'A100-40g',
-            node_id: 'node-a100',
-            url: 'ws://223.109.239.30:17176',
-            advertise: 'ws://223.109.239.30:8800',
-          },
-        ],
-      },
+      'A100-40g': dirOf('node-a100'),
+      core: dirOf('node-aaa', [
+        {
+          name: 'A100-40g',
+          node_id: 'node-a100',
+          url: 'ws://223.109.239.30:17176',
+          advertise: 'ws://223.109.239.30:8800',
+        },
+      ]),
     };
     expect(discoveryCandidates()).toEqual([]);
   });
 
   it('自我引用（把自己列成邻居）不派生', () => {
     state.federationDirectories = {
-      core: {
-        ...directory([]),
-        node_id: 'node-aaa',
-        nodes: [{ name: 'self', node_id: 'node-aaa', advertise: 'ws://10.0.0.1:3132' }],
-      },
+      core: dirOf('node-aaa', [
+        { name: 'self', node_id: 'node-aaa', advertise: 'ws://10.0.0.1:3132' },
+      ]),
     };
     expect(discoveryCandidates()).toEqual([]);
   });
@@ -199,15 +212,11 @@ describe('按 node_id 去重（同机不同地址）', () => {
   it('真正的新节点照常派生，且同批里身份只占一次', () => {
     state.upstreams = [upstream('core', 'ws://127.0.0.1:3132')];
     state.federationDirectories = {
-      core: {
-        ...directory([]),
-        node_id: 'node-aaa',
-        nodes: [
-          { name: 'gpu', node_id: 'node-gpu', advertise: 'ws://gpu-a:3132' },
-          // 同一台 gpu 的另一个地址（多网卡）：身份已占，跳过。
-          { name: 'gpu', node_id: 'node-gpu', advertise: 'ws://gpu-b:3132' },
-        ],
-      },
+      core: dirOf('node-aaa', [
+        { name: 'gpu', node_id: 'node-gpu', advertise: 'ws://gpu-a:3132' },
+        // 同一台 gpu 的另一个地址（多网卡）：身份已占，跳过。
+        { name: 'gpu', node_id: 'node-gpu', advertise: 'ws://gpu-b:3132' },
+      ]),
     };
     const candidates = discoveryCandidates();
     expect(candidates).toHaveLength(1);
@@ -220,9 +229,9 @@ describe('按 node_id 去重（同机不同地址）', () => {
       discovered('node-01m3yevt', 'ws://10.10.10.100:3132'),
     ];
     state.federationDirectories = {
-      core: { ...directory([]), node_id: 'node-aaa' },
+      core: dirOf('node-aaa'),
       // 重复条目自己在线：它回的目录带着自己的 node_id = core 的 node_id。
-      'node-01m3yevt': { ...directory([]), node_id: 'node-aaa' },
+      'node-01m3yevt': dirOf('node-aaa'),
     };
     expect(duplicateDiscoveredNames()).toEqual(['node-01m3yevt']);
   });
@@ -233,18 +242,14 @@ describe('按 node_id 去重（同机不同地址）', () => {
       discovered('A100-40g-2', 'ws://223.109.239.30:8800'),
     ];
     state.federationDirectories = {
-      'A100-40g': { ...directory([]), node_id: 'node-a100' },
-      core: {
-        ...directory([]),
-        node_id: 'node-aaa',
-        nodes: [
-          {
-            name: 'A100-40g',
-            node_id: 'node-a100',
-            advertise: 'ws://223.109.239.30:8800',
-          },
-        ],
-      },
+      'A100-40g': dirOf('node-a100'),
+      core: dirOf('node-aaa', [
+        {
+          name: 'A100-40g',
+          node_id: 'node-a100',
+          advertise: 'ws://223.109.239.30:8800',
+        },
+      ]),
     };
     expect(duplicateDiscoveredNames()).toEqual(['A100-40g-2']);
   });
@@ -256,14 +261,10 @@ describe('按 node_id 去重（同机不同地址）', () => {
       discovered('A100-40g-2', 'ws://223.109.239.30:17176'),
     ];
     state.federationDirectories = {
-      core: {
-        ...directory([]),
-        node_id: 'node-aaa',
-        // 目录里仍挂着那个旧地址（对端一直在宣告它）——正是"连不上还清不掉"
-        // 的成因：地址能保住它，身份才能认出它。
-        nodes: [{ name: 'A100-40g', node_id: 'node-a100', advertise: 'ws://223.109.239.30:8800' }],
-      },
-      'A100-40g-2': { ...directory([]), node_id: 'node-a100' },
+      core: dirOf('node-aaa', [
+        { name: 'A100-40g', node_id: 'node-a100', advertise: 'ws://223.109.239.30:8800' },
+      ]),
+      'A100-40g-2': dirOf('node-a100'),
     };
     // 在线的那条是正主；离线那条身份另有正主，一并清掉。
     expect(duplicateDiscoveredNames()).toEqual(['A100-40g-old']);
@@ -276,11 +277,9 @@ describe('按 node_id 去重（同机不同地址）', () => {
     ];
     // 旧派生条目的身份未知（离线、目录里也没有它的新地址），新地址照常派生。
     state.federationDirectories = {
-      core: {
-        ...directory([]),
-        node_id: 'node-aaa',
-        nodes: [{ name: 'gpu', node_id: 'node-gpu', advertise: 'ws://gpu-new:3132' }],
-      },
+      core: dirOf('node-aaa', [
+        { name: 'gpu', node_id: 'node-gpu', advertise: 'ws://gpu-new:3132' },
+      ]),
     };
     expect(discoveryCandidates().map(c => c.url)).toEqual(['ws://gpu-new:3132']);
   });
@@ -289,15 +288,11 @@ describe('按 node_id 去重（同机不同地址）', () => {
     // 形状：某台 Core 的配置里还留着 [federation.peers.node-01m3yevt] 指向
     // 一个早已不存在的地址；对端从没连上过，于是 node_id/advertise 都空。
     state.federationDirectories = {
-      core: {
-        ...directory([]),
-        node_id: 'node-aaa',
-        nodes: [
-          { name: 'node-01m3yevt', url: 'ws://10.10.10.100:3133', online: false },
-          // 对照组：同样是地址未知，但上报方说它在线 → 照常派生。
-          { name: 'live', url: 'ws://live:3132', online: true },
-        ],
-      },
+      core: dirOf('node-aaa', [
+        { name: 'node-01m3yevt', url: 'ws://10.10.10.100:3133', online: false },
+        // 对照组：同样是地址未知，但上报方说它在线 → 照常派生。
+        { name: 'live', url: 'ws://live:3132', online: true },
+      ]),
     };
     expect(discoveryCandidates().map(c => c.url)).toEqual(['ws://live:3132']);
   });

@@ -1,11 +1,13 @@
 //! 协议镜像一致性守护（2026-10 巡检）：state.ts 的 reduce 处理的每个
-//! 事件名，必须在 protocol.ts 的 `BackendEvent` 联合类型中有定义。
+//! 事件名，必须在 `BackendEvent` 联合类型中有定义。
 //!
-//! 背景：protocol.ts 是 Core `echo-protocol` 线格式的**手工镜像**（Panel
-//! 与 Core 跨仓库，无法编译期共享类型）。历史上出现过 reduce 处理了某
-//! 事件（`as unknown as` 强转绕过类型系统），但 union 里没定义的情况
-//! （ActiveTurnsSnapshot / FederationStatus / FederationInvite /
-//! SelfUpdateStatus 四个曾缺失）——Core 改字段、Panel 零编译期报错。
+//! 2026-11 起联合类型由 Core 生成（`protocol.generated.ts`，`protocol.ts`
+//! 只做 re-export + Panel 侧增强）——本文件据此改为读**生成物**。
+//!
+//! 历史：此前的联合类型是**手写镜像**（Panel 与 Core 跨仓库，无法编译期共享
+//! 类型），出现过 reduce 处理了某事件（`as unknown as` 强转绕过类型系统）但
+//! union 里没定义的情况（ActiveTurnsSnapshot / FederationStatus /
+//! FederationInvite / SelfUpdateStatus 四个曾缺失）。
 //!
 //! 本测试把「reduce case ⊆ BackendEvent 变体」变成显式不变量：新增事件
 //! 处理时若忘同步 protocol.ts，测试立刻失败并指明缺失的名字。
@@ -27,13 +29,13 @@ import { dirname, join } from 'node:path';
 import { serializeCommand } from '../protocol';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const protocolSrc = readFileSync(join(here, '..', 'protocol.ts'), 'utf-8');
+const protocolSrc = readFileSync(join(here, '..', 'protocol.generated.ts'), 'utf-8');
 const stateSrc = readFileSync(join(here, '..', 'state.ts'), 'utf-8');
 
 /** 提取 `export type BackendEvent = ...` 段。 */
 function backendEventSegment(): string {
   const start = protocolSrc.indexOf('export type BackendEvent =');
-  expect(start, 'protocol.ts must declare BackendEvent').toBeGreaterThanOrEqual(0);
+  expect(start, 'protocol.generated.ts must declare BackendEvent').toBeGreaterThanOrEqual(0);
   const end = protocolSrc.indexOf('export type ', start + 10);
   return protocolSrc.slice(start, end > 0 ? end : undefined);
 }
@@ -41,8 +43,8 @@ function backendEventSegment(): string {
 /** BackendEvent 联合类型的变体名集合。 */
 function eventVariantNames(): Set<string> {
   const seg = backendEventSegment();
-  // 匹配 `| { Name: ...` / `| {\n  Name: ...` / `| { Name { ...`
-  const names = [...seg.matchAll(/\|\s*\{\s*(\w+)\s*[:{]/g)].map((m) => m[1]);
+  // 生成物的变体键是带引号的：`| { "Name": ...`（第一个变体没有前导 `|`）。
+  const names = [...seg.matchAll(/\{\s*"(\w+)"\s*:/g)].map((m) => m[1]);
   return new Set(names);
 }
 
@@ -51,7 +53,7 @@ function reduceCaseNames(): Set<string> {
   return new Set([...stateSrc.matchAll(/case '(\w+)':/g)].map((m) => m[1]));
 }
 
-describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', () => {
+describe('协议一致性（BackendEvent 由 Core 生成）', () => {
   it('reduce 的每个 case 都在 BackendEvent 联合类型中定义', () => {
     const variants = eventVariantNames();
     const cases = reduceCaseNames();
@@ -60,66 +62,43 @@ describe('协议镜像一致性（protocol.ts 手工镜像 echo-protocol）', ()
     const missing = [...cases].filter((name) => !variants.has(name));
     expect(
       missing,
-      `以下事件被 reduce 处理但未在 protocol.ts 的 BackendEvent 中定义：` +
-        `${missing.join(', ')}——请补齐联合类型（参考 Core 的 echo-protocol/src/event.rs）`,
+      `以下事件被 reduce 处理但未在 BackendEvent 联合（protocol.generated.ts）中定义：` +
+        `${missing.join(', ')}——请先改 Core 的 echo-protocol/src/event.rs，再跑 npm run sync-protocol 重新生成`,
     ).toEqual([]);
   });
 
-  it('union 变体数量为基线快照（新增事件时必须同步更新此数字）', () => {
-    // 此断言是"提醒器"：Core 加事件/自己补定义后，这里失败提醒你确认
-    // 变体集合是有意变更，而不是漏同步。数字随协议演进更新。
-    // 54 → 56（2026-10 流式输出：+AgentContentDelta / AgentReasoningDelta）
-    // → 58（2026-10 实例泛化 02a：+InstanceOpResult / InstanceState）
-    // → 51（2026-10 泛化阶段 2：Panel 删除 7 个迁移期 QQ 变体——GroupList /
-    //   QqFilterConfig / QqGateMode / QqOwner / QqLoginStatus / QqQrcode /
-    //   FriendList；Core 侧同批直接删除，两端镜像一致）。
-    // → 52（2026-10 会话历史通道：+SessionHistory——共享显示窗口 FIFO 淘汰
-    //   后按会话派生完整历史，`RequestSessionHistory` → `SessionHistory`）。
-    // → 53（2026-10 时间线分页：+TimelineEarlier——`RequestTimelineEarlier`
-    //   向上翻页，把更早的一页**前插**到已加载列表头部；与 `TrunkTimeline`
-    //   分开是因为后者 `full` 的语义是"替换缓存"）。
-    // → 54（2026-10 模块操作回执：+ModuleOpResult——`ToggleModule` /
-    //   `RestartModule` 的成功与失败此前都走 `Error`，面板只能靠文案猜；
-    //   现在 `ok` 是字段，toast 按它分流）。
-    // → 56（2026-11 模块事件通道：+ModuleEvent——echo-fabric-arch v0.7 的
-    //   `MountContext::emit` 出口 + 注册表自己的 `module.mounted` /
-    //   `module.unmounted`；前端只做活动日志，不解释词汇）。
-    // → 57（2026-11 联邦自动发现 P2：+FederationDirectory——应答节点报出
-    //   自己的直接邻居（node_id/名称/两套地址/在线/panel_ready）；Panel 汇总
-    //   各节点目录得到全网拓扑，并用 Panel 身份密钥逐个补接入点）。
-    // → 58（2026-10 压缩进度：+CompactionProgress——此前压缩只在开始/结束各
-    //   发一句话（还借用 `Error`），中间几分钟面板零反馈；现在带阶段与
-    //   done/total，面板画进度条）。
-    // → 59（2026-10 作用域普查：+Notice——会话级操作回执从 `Error` 独立出来，
-    //   带 session_id/ok，面板只在本窗口展示，且不再误冻结流式行）。
-    // → 56（2026-11 压缩前历史：不是加两个新事件，而是给 `SessionHistory`
-    //   加 has_older / older_unavailable——压缩把事件日志前缀换成摘要、原件
-    //   写进 `archives/`，那段历史在时间线里永久消失。展开走同一份历史
-    //   （`RequestSessionHistory.expand_depth`），所以面板不需要第二条通路：
-    //   早先的 SessionArchives / SessionArchiveHistory 两条已删。
-    const variants = eventVariantNames();
-    expect(variants.size).toBe(56);
-  });
+  // 「变体数量基线快照」已删除（2026-11 根治）：那条断言的存在理由是
+  // 「手写镜像不知道 Core 加了什么，所以用总数当提醒器」。现在联合类型由
+  // Core 生成（`protocol.generated.ts`），总数就是 Core 的总数——再钉一个
+  // 数字只会变成"Core 每加一个事件就要改 Panel 的一个常量"，纯噪声。
+  //
+  // 真正的漂移守护换成了两条机制：
+  // 1. `npm run check-protocol`（`build` 的前置）：生成物与 Core 的 Rust 类型
+  //    逐字比对，不一致直接拒绝构建；
+  // 2. 本文件第一条用例：`reduce` 处理的每个事件必须存在于联合类型里
+  //    （Panel 侧**消费**的滞后，是这里唯一还可能出问题的方向）。
+
 
   it('实例泛化事件的名字与 Core 逐字一致（去适配器化后）', () => {
     // 双端契约：变体名与字段名必须与 `echo-protocol/src/event.rs` 逐字一致。
     // 2026-10 的教训：Core 把 `Adapter*` 改成 `Instance*` 时只给了**字段级** alias，
     // 变体名没有 alias —— Panel 还发旧名时 Core 整帧静默丢弃（无日志、无 toast）。
     const seg = backendEventSegment();
+    // 生成物的变体键带引号（`"InstanceState":`）。
     for (const name of ['InstanceList', 'InstanceState', 'InstanceOpResult', 'InstanceStateChanged']) {
-      expect(seg, `事件联合类型缺 ${name}`).toContain(`${name}:`);
+      expect(seg, `事件联合类型缺 ${name}`).toContain(`"${name}":`);
     }
-    for (const stale of ['AdapterList:', 'AdapterState:', 'AdapterOpResult:', 'AdapterStateChanged:']) {
-      expect(seg, `事件联合类型仍含旧名 ${stale}`).not.toContain(stale);
+    for (const stale of ['AdapterList', 'AdapterState', 'AdapterOpResult', 'AdapterStateChanged']) {
+      expect(seg, `事件联合类型仍含旧名 ${stale}`).not.toContain(`"${stale}":`);
     }
-    const m = seg.match(/InstanceStateChanged:\s*\{([^}]*)\}/);
+    const m = seg.match(/InstanceStateChanged":\s*\{([^}]*)\}/);
     expect(m, 'InstanceStateChanged 定义缺失').toBeTruthy();
     expect(m![1]).toContain('instance_name');
   });
 
   it('ChecklistUpdated 携带 team_id（同一 core 多 persona 隔离，2026-10）', () => {
     const seg = backendEventSegment();
-    const m = seg.match(/ChecklistUpdated:\s*\{([^}]*)\}/);
+    const m = seg.match(/ChecklistUpdated"?\s*:\s*\{([^}]*)\}/);
     expect(m, 'ChecklistUpdated 定义缺失').toBeTruthy();
     expect(m![1]).toContain('team_id');
   });
@@ -133,7 +112,7 @@ describe('命令侧镜像与归零棘轮（2026-10）', () => {
   /** 提取 `export type BackendCommand = ...;` 段。 */
   function commandSegment(): string {
     const start = protocolSrc.indexOf('export type BackendCommand =');
-    expect(start, 'protocol.ts must declare BackendCommand').toBeGreaterThanOrEqual(0);
+    expect(start, 'protocol.generated.ts must declare BackendCommand').toBeGreaterThanOrEqual(0);
     const end = protocolSrc.indexOf('export type ', start + 10);
     return protocolSrc.slice(start, end > 0 ? end : undefined);
   }
@@ -201,7 +180,7 @@ describe('命令侧镜像与归零棘轮（2026-10）', () => {
   });
 
   it('生产代码无双重断言绕过 BackendCommand（归零棘轮）', () => {
-    // 只降不升：新增绕过必须先把命令类型补进 protocol.ts；确无可能时
+    // 只降不升：新增绕过必须先把命令类型补进 Core（再 sync-protocol）；确无可能时
     // 在此登记命令名与理由（目前为空——4 条联邦命令已全部转正）。
     const ALLOWED_BYPASS: Record<string, string> = {};
     const PATTERN = 'as unknown as BackendCommand';
@@ -223,7 +202,7 @@ describe('命令侧镜像与归零棘轮（2026-10）', () => {
     expect(
       unexpected,
       `以下文件以双重断言绕过 BackendCommand 类型系统（禁止）：${unexpected.join(', ')}——` +
-        '请先为所用命令在 protocol.ts 联合中补类型；确需绕过请登记 ALLOWED_BYPASS 并写明理由',
+        '请先为所用命令在 Core 的命令枚举中补类型并 sync-protocol；确需绕过请登记 ALLOWED_BYPASS 并写明理由',
     ).toEqual([]);
   });
 });

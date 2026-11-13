@@ -24,6 +24,51 @@ vi.mock('../../connection', () => {
 import SettingsView from '../SettingsView.vue';
 import { state } from '../../store';
 import { sendCommand, sendPending } from '../../connection';
+import type { ModuleInfo, SkillInfo } from '../../protocol';
+
+/** ModuleInfo 工厂：用例只写差异字段，其余取 Core 的缺省值。 */
+function mod(partial: Partial<ModuleInfo> & { id: string }): ModuleInfo {
+  return {
+    name: partial.id,
+    version: '1',
+    kind: 'tool',
+    description: '',
+    tag: 'inner',
+    author: '',
+    builtin: true,
+    runtime: 'in_process',
+    package: partial.id,
+    gating: 'persona',
+    config_origin: '',
+    state: '',
+    restarts: 0,
+    generation: 0,
+    source_path: '',
+    command: '',
+    args: [],
+    env_keys: [],
+    required_services: [],
+    provides_services: [],
+    optional_services: [],
+    pending_services: [],
+    subscribed_events: [],
+    ...partial,
+  };
+}
+
+/** SkillInfo 工厂：用例只写差异字段，其余取 Core 的缺省值。 */
+function skill(partial: Partial<SkillInfo> & { name: string }): SkillInfo {
+  return {
+    description: '',
+    keywords: [],
+    always: false,
+    enabled: true,
+    category: '',
+    content: '',
+    system: false,
+    ...partial,
+  };
+}
 
 function seed() {
   state.tools = [
@@ -63,79 +108,33 @@ function seed() {
     },
   ] as typeof state.tools;
   state.skills = [
-    {
-      name: 'qq-transport',
-      description: 'd',
-      keywords: [],
-      always: false,
-      enabled: true,
-      category: '',
-      package: 'echo-agent.adapter.qq',
-      content: '',
-    },
-  ] as typeof state.skills;
+    skill({ name: 'qq-transport', description: 'd', package: 'echo-agent.adapter.qq' }),
+  ];
   state.modules = [
-    {
-      id: 'echo-agent.tools.builtin',
-      name: '内置工具集',
-      version: '1',
-      kind: 'tool',
-      description: '内置工具',
-      tag: 'inner',
-      author: '',
-            builtin: true,
-      package: 'echo-agent.tools.builtin',
-      gating: 'persona',
-    },
-    {
-      id: 'echo-agent.adapter.qq',
-      name: 'QQ 实例',
-      version: '1',
-      kind: 'instance',
-      description: 'QQ 平台',
-      tag: 'inner',
-      author: '',
-            builtin: true,
-      package: 'echo-agent.adapter.qq',
-      gating: 'persona',
-    },
-    {
+    mod({ id: 'echo-agent.tools.builtin', name: '内置工具集', description: '内置工具' }),
+    mod({ id: 'echo-agent.adapter.qq', name: 'QQ 实例', kind: 'instance', description: 'QQ 平台' }),
+    mod({
       id: 'echo-agent.management.panel',
       name: '管理面',
-      version: '1',
       kind: 'management',
       description: 'Panel 通道',
-      tag: 'inner',
-      author: '',
-            builtin: true,
-      package: 'echo-agent.management.panel',
       gating: 'process',
-    },
-    {
+    }),
+    mod({
       id: 'echo-agent.loop.single',
       name: '单会话循环',
-      version: '1',
       kind: 'loop',
       description: '单会话',
-      tag: 'inner',
-      author: '',
-            builtin: true,
-      package: 'echo-agent.loop.single',
       gating: 'process',
-    },
-    {
+    }),
+    mod({
       id: 'echo-agent.provider.llm',
       name: 'LLM Provider',
-      version: '1',
       kind: 'provider',
       description: 'provider',
-      tag: 'inner',
-      author: '',
-            builtin: true,
-      package: 'echo-agent.provider.llm',
       gating: 'process',
-    },
-  ] as typeof state.modules;
+    }),
+  ];
   state.teams = [
     { id: 'alix', name: 'Alix', enabled: true, sessions: 0, enabled_modules: ['echo-agent.adapter.qq'] },
   ] as typeof state.teams;
@@ -269,18 +268,11 @@ describe('SettingsView 模块工作台', () => {
     // 外部模块的 id 是装它的人定的——我们无权按自己的命名习惯截断。
     state.modules = [
       ...state.modules,
-      {
+      mod({
         id: 'vendor.custom.module',
         name: '第三方',
-        version: '1',
-        kind: 'tool',
-        description: '',
-        tag: 'inner',
-        author: '',
         builtin: false,
-        package: 'vendor.custom.module',
-        gating: 'persona',
-      },
+      }),
     ];
     const wrapper = await openCategory('模块');
     const texts = wrapper.findAll('.caps-list-item__id').map((r) => r.text());
@@ -290,18 +282,14 @@ describe('SettingsView 模块工作台', () => {
   it('tag=outside 归到「外部模块」——分组只看 tag', async () => {
     state.modules = [
       ...state.modules,
-      {
+      mod({
         id: 'example.external',
         name: '外部模块',
-        version: '1',
-        kind: 'tool',
         description: '运行期挂载',
         tag: 'outside',
-        author: '',
         builtin: false,
-        package: 'example.external',
         gating: 'process',
-      },
+      }),
     ];
     const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
@@ -318,19 +306,15 @@ describe('SettingsView 模块工作台', () => {
     // 分组语义由 Core 的 tag 定义，两者不必一致。
     state.modules = [
       ...state.modules,
-      {
+      mod({
         id: 'example.data',
         name: '数据模块',
-        version: '1',
-        kind: 'tool',
         description: '目录发现',
         tag: 'inner',
-        author: '',
         builtin: false,
         runtime: 'in_process',
-        package: 'example.data',
         gating: 'process',
-      },
+      }),
     ];
     const wrapper = await openCategory('模块');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
@@ -789,20 +773,8 @@ describe('多 Core 模块归档（modulesByCore）', () => {
   it('按 core 归档取数：选定节点后列表只显示该节点的模块', async () => {
     state.modulesByCore = {
       core: [...state.modules],
-      'node-b': [
-        {
-          id: 'node-b.module',
-          name: 'B 节点模块',
-          version: '1',
-          kind: 'tool',
-          description: '',
-          tag: 'inner',
-          author: '',
-                    builtin: true,
-          package: 'node-b.module',
-          core: 'node-b',
-        },
-      ],
+      // 归属由 `modulesByCore` 的键表达（生成的 `ModuleInfo` 没有 `core` 字段）。
+      'node-b': [mod({ id: 'node-b.module', name: 'B 节点模块' })],
     };
     state.upstreams = [
       { name: 'core', url: 'ws://a', connectivity: 'online' },

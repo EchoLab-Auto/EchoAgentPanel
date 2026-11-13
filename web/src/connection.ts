@@ -175,7 +175,7 @@ export function startConnection(): void {
       // （含这两条），重发纯属重复请求（2026-10 审计修复）。
       if (currentRegion(state)) {
         sendCommand('RequestInstanceStatus');
-        sendCommand({ RequestShellSessions: {} });
+        sendCommand({ RequestShellSessions: { team_id: null } });
       }
       // 上次使用的 Agent 的 timeline：经 sendCommand 走统一路由（多上游下
       // core 已从 localStorage 还原/teams 已知时定向；未知则裸广播，
@@ -452,7 +452,7 @@ export function requestActiveRegionManagement(options?: { includeCatalogs?: bool
     sendCommand('RequestToolsList');
   }
   sendCommand('RequestModulesList');
-  sendCommand({ RequestShellSessions: {} });
+  sendCommand({ RequestShellSessions: { team_id: null } });
   sendCommand('RequestFederationStatus');
 }
 

@@ -61,8 +61,9 @@ describe('ShellPanel · 多 Core 定位与命令定向', () => {
 
     // `team_id` = 请求者人格（2026-10 作用域普查）：Core 据此做归属校验，
     // 不允许跨人格操作别人的 shell。测试环境无激活人格 → null。
+    // `timeout_secs` = 可用 30s 超时上限（生成类型必填，null = Core 缺省）。
     expect(sendCommand).toHaveBeenCalledWith(
-      { ShellExec: { session_id: 'sh-1', command: 'ls -l', team_id: null } },
+      { ShellExec: { session_id: 'sh-1', command: 'ls -l', timeout_secs: null, team_id: null } },
       'core-a',
     );
   });

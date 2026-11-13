@@ -6,8 +6,29 @@ import { state, dispatch } from '../store';
 import { sessionKey, sessionScopedKey, teamKey } from '../keys';
 import type { BackendEvent, TeamInfo } from '../protocol';
 
+/** TeamInfo 工厂：只写用例关心的字段，其余取 Core 的缺省值。 */
 function team(id: string, core: string | null): TeamInfo {
-  return { id, name: id, description: '', enabled: true, sessions: 0, core };
+  return {
+    id,
+    node_id: null,
+    region_name: null,
+    name: id,
+    description: '',
+    enabled: true,
+    running: true,
+    system_skills: [],
+    sessions: 0,
+    system_prompt: '',
+    disabled_tools: [],
+    disabled_skills: [],
+    enabled_modules: [],
+    enabled_tools: [],
+    enabled_skills: [],
+    memory_limit_tokens: null,
+    context_window_tokens: null,
+    api_profile: null,
+    core,
+  };
 }
 
 const SID = 'local:tui::local_user';
@@ -128,7 +149,9 @@ describe('Phase 0：同名会话路由优先 activeRegion', () => {
     s.teams = [team('default', 'core-a'), team('default', 'core-b')];
     s.activeRegion = 'core-b';
     s.activeRegion = 'core-b';
-    sendCommand({ SendMessage: { session_id: SID, content: 'hi', team_id: 'default' } });
+    sendCommand({
+      SendMessage: { session_id: SID, content: 'hi', images: [], team_id: 'default' },
+    });
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-b');
   });

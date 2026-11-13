@@ -1,7 +1,7 @@
 //! 02a §7.3 门禁自检（固化三条 grep）：「Panel 阶段 1：协议与状态层」的
 //! G1 判定——03b 组件重接线的前置依赖。三条门禁：
 //!   1. `grep -n "case 'InstanceState'" web/src/state.ts` 非空；
-//!   2. `grep -n "InvokeInstanceOp" web/src/protocol.ts` 非空；
+//!   2. `grep -n "InvokeInstanceOp" web/src/protocol.generated.ts` 非空；
 //!   3. `grep -rn "instanceUiByKey" web/src/state.ts web/src/instanceOps.ts` 命中。
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -12,7 +12,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (name: string) => readFileSync(join(here, '..', name), 'utf-8');
 
 const stateSrc = read('state.ts');
-const protocolSrc = read('protocol.ts');
+// 协议类型自 2026-11 起由 Core 生成（`protocol.generated.ts`），门禁 2 查生成物。
+const protocolSrc = read('protocol.generated.ts');
 const instanceOpsSrc = read('instanceOps.ts');
 
 describe('02a §7.3 门禁（Panel 阶段 1）', () => {
@@ -22,7 +23,7 @@ describe('02a §7.3 门禁（Panel 阶段 1）', () => {
     expect(stateSrc).toContain("case 'InstanceOpResult'");
   });
 
-  it('门禁 2：protocol.ts 定义 InvokeInstanceOp / InstanceOpResult / InstanceState', () => {
+  it('门禁 2：protocol.generated.ts 定义 InvokeInstanceOp / InstanceOpResult / InstanceState', () => {
     expect(protocolSrc).toContain('InvokeInstanceOp');
     expect(protocolSrc).toContain('InstanceOpResult');
     expect(protocolSrc).toContain('InstanceState');

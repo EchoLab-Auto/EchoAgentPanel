@@ -391,6 +391,9 @@ async function attemptPair(
         allow_subagent: true,
         require_confirm: [],
         allow_queries: ['*'],
+        // 运行期统计（Core 侧维护，新建 peer 从 0 起）
+        consecutive_failures: 0,
+        active_turns: 0,
         link: 'Offline',
       },
     },
@@ -547,6 +550,9 @@ function savePeer() {
         require_confirm: parseList(formRequireConfirm.value),
         // 全选（覆盖全部四种）→ 等价 "*"（对端可新增查询种类时自动覆盖）。
         allow_queries: queries.length === QUERY_KINDS.length ? ['*'] : queries,
+        // 运行期统计（Core 侧维护，新建 peer 从 0 起）
+        consecutive_failures: 0,
+        active_turns: 0,
         link: 'Offline',
       },
     },
@@ -608,6 +614,9 @@ function applyAdvertisedUrl(core: string, p: FederationPeerInfo) {
         allow_subagent: p.allow_subagent,
         require_confirm: p.require_confirm ?? [],
         allow_queries: p.allow_queries ?? [],
+        // 运行期统计（Core 侧维护，新建 peer 从 0 起）
+        consecutive_failures: 0,
+        active_turns: 0,
         link: 'Offline',
       },
     },

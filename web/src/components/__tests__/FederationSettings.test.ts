@@ -452,6 +452,9 @@ describe('FederationSettings 连出诊断（地址漂移）', () => {
           allow_subagent: true,
           require_confirm: [],
           allow_queries: [],
+          // 运行期统计（生成类型必填，新建 peer 从 0 起）
+          consecutive_failures: 0,
+          active_turns: 0,
           link: 'Offline',
         },
       },

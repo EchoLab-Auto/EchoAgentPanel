@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && node scripts/typecheck-extensions.mjs && vite build",
+    "build": "node scripts/sync-protocol.mjs --check && vue-tsc -b && node scripts/typecheck-extensions.mjs && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,7 +15,9 @@
     "ui-frame:local": "node scripts/use-ui-frame.mjs local",
     "ui-frame:npm": "node scripts/use-ui-frame.mjs npm",
     "ui-frame:sync": "node scripts/use-ui-frame.mjs sync",
-    "ui-frame:diff": "node scripts/use-ui-frame.mjs diff"
+    "ui-frame:diff": "node scripts/use-ui-frame.mjs diff",
+    "sync-protocol": "node scripts/sync-protocol.mjs",
+    "check-protocol": "node scripts/sync-protocol.mjs --check"
   },
   "dependencies": {
     "@echolab-auto/ui-frame": "file:./vendor/ui-frame",

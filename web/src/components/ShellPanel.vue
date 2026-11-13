@@ -43,7 +43,7 @@ const terminalEls = ref<Record<string, HTMLElement | null>>({});
 // 会话才是真"不存在"。断连时不登记（重连后由重试/挂载补拉）。
 const { phase: panelPhase } = usePending('shell:panel:sessions');
 function loadSessions() {
-  sendPending({ RequestShellSessions: {} }, 'shell:panel:sessions');
+  sendPending({ RequestShellSessions: { team_id: null } }, 'shell:panel:sessions');
 }
 onMounted(() => {
   if (state.connected) loadSessions();
@@ -65,7 +65,7 @@ function execCommand(sessionId: string) {
   const cmd = (inputBySession.value[sessionId] ?? '').trim();
   if (!cmd) return;
   sendCommand(
-    { ShellExec: { session_id: sessionId, command: cmd, team_id: state.activeTeamId ?? null } },
+    { ShellExec: { session_id: sessionId, command: cmd, timeout_secs: null, team_id: state.activeTeamId ?? null } },
     targetCore.value ?? undefined,
   );
   inputBySession.value[sessionId] = '';

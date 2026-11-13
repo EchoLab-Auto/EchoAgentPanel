@@ -292,6 +292,9 @@ function save() {
         // 启停不在本弹层编辑（2026-11：运行控制挪到智能体列表的行操作里）——
         // 原样透传，避免整对象覆盖把用户的启停状态清成默认值。
         enabled: props.team.enabled,
+        // 整对象覆盖：本弹层不编辑它，必须原样透传（否则会被清成"用
+        // system_prompt 字段"，人格的技能组合丢失）。
+        system_skills: props.team.system_skills ?? [],
         disabled_tools: disabledTools.value,
         disabled_skills: disabledSkills.value,
         enabled_modules: enabledModules.value,

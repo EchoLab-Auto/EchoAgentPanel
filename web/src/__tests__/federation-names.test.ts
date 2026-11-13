@@ -8,8 +8,17 @@ const NODE = 'node-01m436f84jtxye5ga61dmnz94p';
 
 function peer(name: string, nodeId?: string): FederationPeerInfo {
   return {
-    name, node_id: nodeId, url: '', token_set: true, allow_tools: ['*'],
-    allow_subagent: true, require_confirm: [], allow_queries: ['*'], link: 'Online',
+    name,
+    node_id: nodeId ?? null,
+    url: '',
+    token_set: true,
+    allow_tools: ['*'],
+    allow_subagent: true,
+    require_confirm: [],
+    allow_queries: ['*'],
+    link: 'Online',
+    consecutive_failures: 0,
+    active_turns: 0,
   };
 }
 

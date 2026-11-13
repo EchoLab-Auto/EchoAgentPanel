@@ -10,13 +10,24 @@ import type { TeamInfo } from '../protocol';
 
 const agent: TeamInfo & { core?: string | null } = {
   id: 'alix',
+  node_id: null,
+  region_name: null,
   name: 'Alix',
   description: '助手',
   enabled: true,
+  running: true,
+  system_skills: [],
   sessions: 0,
   core: 'core-a',
   system_prompt: '你是 Alix',
+  disabled_tools: [],
+  disabled_skills: [],
   enabled_modules: ['echo-agent.tools.builtin'],
+  enabled_tools: [],
+  enabled_skills: [],
+  memory_limit_tokens: null,
+  context_window_tokens: null,
+  api_profile: null,
 };
 
 describe('agent 运行区域迁移', () => {

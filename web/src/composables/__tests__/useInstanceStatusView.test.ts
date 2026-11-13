@@ -14,6 +14,7 @@ function instance(over: Partial<InstanceStatus> = {}): InstanceStatus {
     self_id: null,
     bind_address: '0.0.0.0:3131',
     started_at: null,
+    persona: null,
     ...over,
   };
 }

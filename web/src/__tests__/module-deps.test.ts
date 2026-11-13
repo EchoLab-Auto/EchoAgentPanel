@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildModuleDependencyGraph, buildModuleDependencyModel } from '../module-deps';
 import type { ModuleInfo } from '../protocol';
 
+/** ModuleInfo 工厂：只写用例关心的字段，其余取 Core 的缺省值。 */
 function module(partial: Partial<ModuleInfo>): ModuleInfo {
   return {
     id: 'x',
@@ -11,6 +12,23 @@ function module(partial: Partial<ModuleInfo>): ModuleInfo {
     description: '',
     tag: 'inner',
     author: '',
+    builtin: false,
+    runtime: 'in_process',
+    package: 'x',
+    gating: 'persona',
+    config_origin: '',
+    state: '',
+    restarts: 0,
+    generation: 0,
+    source_path: '',
+    command: '',
+    args: [],
+    env_keys: [],
+    required_services: [],
+    provides_services: [],
+    optional_services: [],
+    pending_services: [],
+    subscribed_events: [],
     ...partial,
   };
 }
