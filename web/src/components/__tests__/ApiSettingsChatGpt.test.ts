@@ -26,7 +26,7 @@ import { reduce } from '../../state';
 import type { BackendEvent } from '../../protocol';
 
 function resetState() {
-  state.profiles = [];
+  // `profiles` 挂在 `state.api` 上（`ApiConfig.profiles`），不是顶层字段。
   state.api = null;
   state.teams = [];
   state.toasts = [];
