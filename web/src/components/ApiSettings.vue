@@ -15,6 +15,7 @@ import NeumorphismSelect from '@echolab-auto/ui-frame/components/NeumorphismSele
 import NeumorphismTag from '@echolab-auto/ui-frame/components/NeumorphismTag';
 import { ChatCopyButton } from '@echolab-auto/ui-frame/chat';
 import { state } from '../store';
+import { pushToast } from '../state';
 import PanelIcon from './PanelIcon.vue';
 import {
   alignBalanceSeries,
@@ -422,6 +423,58 @@ function applyProviderPreset(value: string | number | (string | number)[] | unde
   // third-party：保留手动输入的 base_url / model，仅切换 provider 名。
 }
 
+// ── ChatGPT 订阅登录（2026-11）──────────────────────────────────────
+//
+// 登录由 Core 发起（它必须自己绑 1455 收回调），面板只负责：拉状态、显示
+// URL、在用户点「登录」时发一条命令。**不在浏览器侧做 OAuth**——那会拿到
+// 一份只在这台浏览器里有效的令牌，而真正要用的进程在 Core 那边。
+
+const chatgptLogin = computed(() => state.chatgptLogin);
+const chatgptStatus = computed(() => state.chatgptLogin.status);
+/** 当前表单在编辑 ChatGPT 订阅类供应商。 */
+const isChatGptProvider = computed(() => provider.value === 'openai-chatgpt');
+
+function startChatGptLogin() {
+  // 命令无载荷：线格式是裸字符串。写成 `{ StartChatGptLogin: {} }` 会让
+  // Core 反序列化失败并**静默丢帧**（ProDocRoots 踩过同一个坑）。
+  sendCommand('StartChatGptLogin');
+}
+
+function cancelChatGptLogin() {
+  sendCommand('CancelChatGptLogin');
+}
+
+function requestChatGptStatus() {
+  sendCommand('RequestChatGptStatus');
+}
+
+/** 打开授权 URL（新标签页）。 */
+function openChatGptAuthUrl() {
+  const url = chatgptLogin.value.url;
+  if (!url) return;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/** 复制授权 URL：远程部署时用户要把链接拷到自己的浏览器。 */
+async function copyChatGptAuthUrl() {
+  const url = chatgptLogin.value.url;
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    pushToast(state, '授权链接已复制', 'success');
+  } catch {
+    pushToast(state, '复制失败，请手动选中链接', 'error');
+  }
+}
+
+// 进入设置页拉一次状态；切到该 provider 时再拉一次（用户可能刚在别处登录）。
+onMounted(() => {
+  requestChatGptStatus();
+});
+watch(isChatGptProvider, (chatgpt) => {
+  if (chatgpt) requestChatGptStatus();
+});
+
 // 当前 provider 不在下拉选项中时（如旧配置 anthropic/ollama），保留为额外选项。
 const providerSelectOptions = computed(() => {
   const options = [
@@ -818,6 +871,71 @@ watch(
         :options="providerSelectOptions"
         @change="applyProviderPreset"
       />
+      <!-- ChatGPT 订阅：登录入口就在选 provider 的地方（2026-11）。
+           用户的诉求原话是"登录要在设置里创建供应商时触发"——所以它出现在
+           provider 选择的紧下方，而不是另开一个设置页。 -->
+      <div v-if="isChatGptProvider" class="chatgpt-login">
+        <div class="chatgpt-login__head">
+          <PanelIcon name="lock" size="xs" tone="muted" />
+          <span class="chatgpt-login__title">ChatGPT 订阅登录</span>
+          <NeumorphismTag v-if="chatgptStatus?.logged_in" size="small" variant="success">
+            已登录
+          </NeumorphismTag>
+          <NeumorphismTag v-else size="small" variant="default">未登录</NeumorphismTag>
+        </div>
+
+        <div v-if="chatgptStatus?.logged_in" class="chatgpt-login__body">
+          <div class="chatgpt-login__email">{{ chatgptStatus.email || '（未回报邮箱）' }}</div>
+          <div class="muted field-hint">
+            用 Plus/Pro 订阅额度，不单独计 API 费。Key 留空即可——凭据是登录态。
+            <span v-if="!chatgptStatus.refreshable">（无 refresh_token：过期后需重新登录）</span>
+          </div>
+          <NeumorphismButton size="small" variant="glass" @click="startChatGptLogin">
+            重新登录
+          </NeumorphismButton>
+        </div>
+
+        <div v-else class="chatgpt-login__body">
+          <div class="muted field-hint">
+            点「登录」后 Core 会生成授权链接；在**任意**浏览器打开它即可，
+            回调会打到 Core 那台的 1455 端口。
+          </div>
+          <NeumorphismButton
+            size="small"
+            variant="raised"
+            :loading="chatgptLogin.pending"
+            @click="startChatGptLogin"
+          >
+            {{ chatgptLogin.pending ? '等待授权…' : '登录 ChatGPT' }}
+          </NeumorphismButton>
+        </div>
+
+        <!-- 授权链接：Core 回推后显示。用户可能需要在另一台机器的浏览器打开
+             （远程 Core 场景），所以给复制按钮而不是只做「打开」。 -->
+        <div v-if="chatgptLogin.url" class="chatgpt-login__url">
+          <div class="chatgpt-login__url-head">
+            <span>在浏览器打开这个链接完成授权</span>
+            <span class="muted">{{ chatgptLogin.redirectUri }}</span>
+          </div>
+          <div class="chatgpt-login__url-row">
+            <code class="chatgpt-login__url-text">{{ chatgptLogin.url }}</code>
+            <NeumorphismButton size="small" variant="glass" @click="copyChatGptAuthUrl">
+              复制
+            </NeumorphismButton>
+            <NeumorphismButton size="small" variant="glass" @click="openChatGptAuthUrl">
+              打开
+            </NeumorphismButton>
+          </div>
+          <NeumorphismButton size="small" variant="glass" @click="cancelChatGptLogin">
+            取消登录
+          </NeumorphismButton>
+        </div>
+
+        <div v-if="chatgptLogin.error" class="chatgpt-login__error">
+          {{ chatgptLogin.error }}
+        </div>
+      </div>
+
       <label>Model</label>
       <NeumorphismInput
         v-model="model"
@@ -1206,6 +1324,76 @@ watch(
 }
 /* 等高卡片（2026-10）：grid-auto-rows: 1fr 只保证同行等高，卡内需 flex 撑满，
    否则内容少的卡（无余额查询）下方留白不均。 */
+/* ChatGPT 订阅登录块（2026-11）：出现在 provider 选择正下方 */
+.chatgpt-login {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--nm-surface-color);
+  border: 1px solid var(--nm-border-subtle);
+}
+.chatgpt-login__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chatgpt-login__title {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1 1 auto;
+}
+.chatgpt-login__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.chatgpt-login__email {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+.chatgpt-login__url {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--nm-border-subtle);
+}
+.chatgpt-login__url-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  justify-content: space-between;
+}
+.chatgpt-login__url-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+/* URL 很长（含 PKCE challenge）：等宽 + 允许断行，不然会把卡片撑破 */
+.chatgpt-login__url-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+  max-height: 84px;
+  overflow-y: auto;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--nm-surface-raised);
+}
+.chatgpt-login__error {
+  font-size: 12px;
+  color: var(--panel-err);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .profile-card {
   display: flex;
   flex-direction: column;

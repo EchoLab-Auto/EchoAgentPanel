@@ -16,6 +16,19 @@ vi.mock('../../connection', () => {
   };
 });
 
+/**
+ * 命令名。
+ *
+ * `sendCommand` 同时接受两种形态：对象命令（`{ UpdateApiConfig: {...} }`）
+ * 与**裸字符串**（无载荷变体，如 `'RequestState'`）。所以断言"发过某条命令"
+ * 不能直接用 `'X' in cmd`——字符串上做 `in` 会抛 TypeError。
+ */
+function commandName(command: unknown): string {
+  if (typeof command === 'string') return command;
+  if (command && typeof command === 'object') return Object.keys(command)[0] ?? '';
+  return '';
+}
+
 import ApiSettings from '../ApiSettings.vue';
 import { state } from '../../store';
 import { sendCommand } from '../../connection';
@@ -276,8 +289,8 @@ describe('ApiSettings 改名（两步提交）', () => {
     await saveButton(wrapper).trigger('click');
 
     const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
-    expect(calls.some((c) => 'RenameApi' in (c as object))).toBe(false);
-    const upd = calls.find((c) => 'UpdateApiConfig' in (c as object)) as {
+    expect(calls.some((c) => commandName(c) === 'RenameApi')).toBe(false);
+    const upd = calls.find((c) => commandName(c) === 'UpdateApiConfig') as {
       UpdateApiConfig: { name: string };
     };
     expect(upd.UpdateApiConfig.name).toBe('deepseek');
@@ -291,12 +304,12 @@ describe('ApiSettings 改名（两步提交）', () => {
     await saveButton(wrapper).trigger('click');
 
     let calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
-    const rename = calls.find((c) => 'RenameApi' in (c as object)) as {
+    const rename = calls.find((c) => commandName(c) === 'RenameApi') as {
       RenameApi: { from: string; to: string };
     };
     expect(rename.RenameApi).toEqual({ from: 'deepseek', to: 'k3' });
     expect(
-      calls.some((c) => 'UpdateApiConfig' in (c as object)),
+      calls.some((c) => commandName(c) === 'UpdateApiConfig'),
       'must not upsert under the new name before rename confirmation',
     ).toBe(false);
     expect(saveButton(wrapper).attributes('disabled')).toBeDefined();
@@ -322,7 +335,7 @@ describe('ApiSettings 改名（两步提交）', () => {
     expect(wrapper.find('.api-form-section').exists()).toBe(false);
     const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
     expect(
-      calls.some((c) => 'UpdateApiConfig' in (c as object)),
+      calls.some((c) => commandName(c) === 'UpdateApiConfig'),
       'pure rename must not re-save (would re-activate the profile)',
     ).toBe(false);
     wrapper.unmount();
@@ -345,7 +358,7 @@ describe('ApiSettings 改名（两步提交）', () => {
     await nextTick();
 
     const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
-    const upd = calls.find((c) => 'UpdateApiConfig' in (c as object)) as {
+    const upd = calls.find((c) => commandName(c) === 'UpdateApiConfig') as {
       UpdateApiConfig: { name: string; model: string };
     };
     expect(upd, 'post-rename field save must be sent').toBeTruthy();
@@ -368,7 +381,7 @@ describe('ApiSettings 改名（两步提交）', () => {
       expect(wrapper.text()).toContain('改名未确认');
       expect(wrapper.find('.api-form-section').exists()).toBe(true);
       const calls = vi.mocked(sendCommand).mock.calls.map((c) => c[0] as unknown);
-      expect(calls.some((c) => 'UpdateApiConfig' in (c as object))).toBe(false);
+      expect(calls.some((c) => commandName(c) === 'UpdateApiConfig')).toBe(false);
       wrapper.unmount();
     } finally {
       vi.useRealTimers();

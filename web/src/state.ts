@@ -1129,6 +1129,31 @@ export interface AppState {
   tasks: OrchActivity[];
   instances: InstanceStatus[];
   api: ApiConfig | null;
+  /**
+   * ChatGPT 订阅登录的界面态（2026-11）。
+   *
+   * 为什么放在 state 而不是组件本地：登录是**跨组件、跨事件**的过程
+   * （URL 一条事件、结果另一条，中间可能隔几分钟）。放组件里，用户切到别的
+   * 页面再回来就丢了 URL，只能重新发起——而重新发起会撞上自己上一次占着
+   * 的 1455 端口。
+   */
+  chatgptLogin: {
+    /** 授权 URL（收到 `ChatGptLoginPending` 才有）。 */
+    url: string | null;
+    /** 回调地址（展示用）。 */
+    redirectUri: string;
+    /** 正在等回调。 */
+    pending: boolean;
+    /** 最近一次失败原因（成功后清空）。 */
+    error: string | null;
+    /** 登录态快照（`RequestChatGptStatus` 的回执）。 */
+    status: {
+      logged_in: boolean;
+      email: string;
+      expires_at_ms: number;
+      refreshable: boolean;
+    } | null;
+  };
   // model / systemPrompt 字段已删除（2026-10 巡检：死状态——事件写入后
   // 零读取方；LlmRequest 的模型名可由 api/会话归属推导，SystemPrompt 的
   // 回推文本仅面向调试，无消费方）。
@@ -1320,6 +1345,13 @@ export function initialState(): AppState {
     tasks: [],
     instances: [],
     api: null,
+    chatgptLogin: {
+      url: null,
+      redirectUri: '',
+      pending: false,
+      error: null,
+      status: null,
+    },
     instanceUiByKey: {},
     checklists: {},
     sessionHistory: {},
@@ -2018,6 +2050,51 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         system_prompt: e.system_prompt,
         active_api: e.active_api,
         profiles: e.profiles,
+      };
+      return state;
+    }
+    // ── ChatGPT 订阅登录（2026-11）──────────────────────────────────
+    case 'ChatGptLoginPending': {
+      const e = (event as Extract<BackendEvent, { ChatGptLoginPending: unknown }>)
+        .ChatGptLoginPending;
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
+      state.chatgptLogin.url = e.url;
+      state.chatgptLogin.redirectUri = e.redirect_uri;
+      state.chatgptLogin.pending = true;
+      state.chatgptLogin.error = null;
+      return state;
+    }
+    case 'ChatGptLoginResult': {
+      const e = (event as Extract<BackendEvent, { ChatGptLoginResult: unknown }>)
+        .ChatGptLoginResult;
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
+      state.chatgptLogin.pending = false;
+      // URL 用完即弃：留着会让用户对着一份已经作废的授权链接点来点去
+      // （state 已经换过，回调必然被判"不匹配"）。
+      state.chatgptLogin.url = null;
+      state.chatgptLogin.error = e.ok ? null : (e.error ?? '登录失败');
+      if (e.ok) {
+        state.chatgptLogin.status = {
+          logged_in: true,
+          email: e.email,
+          // 成功时不知道精确到期时刻，交给随后的 RequestChatGptStatus 补。
+          expires_at_ms: state.chatgptLogin.status?.expires_at_ms ?? 0,
+          refreshable: true,
+        };
+        pushToast(state, e.email ? `ChatGPT 登录成功：${e.email}` : 'ChatGPT 登录成功', 'success');
+      } else {
+        pushToast(state, `ChatGPT 登录失败：${e.error ?? '未知原因'}`, 'error');
+      }
+      return state;
+    }
+    case 'ChatGptStatus': {
+      const e = (event as Extract<BackendEvent, { ChatGptStatus: unknown }>).ChatGptStatus;
+      if (!managementCoreCurrent(state, payloadCore(event))) return state;
+      state.chatgptLogin.status = {
+        logged_in: e.logged_in,
+        email: e.email,
+        expires_at_ms: e.expires_at_ms,
+        refreshable: e.refreshable,
       };
       return state;
     }

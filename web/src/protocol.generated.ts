@@ -34,7 +34,7 @@ export type BackendCommand = { "SendMessage": { session_id: string, content: str
 /**
  * 面板随消息拖入的文件（字节内嵌，Core 负责落盘并告知 agent 路径）。
  */
-files: Array<PendingFile>, team_id?: string | null, } } | { "SwitchModel": { model: string, } } | { "SwitchProvider": { provider: string, } } | { "SetSystemPrompt": { prompt: string, } } | "RequestSystemPrompt" | { "UpdateApiConfig": { name: string, provider: string, model: string, base_url: string, api_key: string, thinking?: ThinkingMode | null, reasoning_effort?: ReasoningEffort | null, } } | { "SwitchApi": { name: string, } } | { "SetSessionApi": { team_id: string | null, session_id: string, profile: string, } } | { "ClearSessionApi": { team_id: string | null, session_id: string, } } | { "RequestRemoteApiProfiles": { peer: string, } } | { "TestApi": { name: string, } } | { "QueryApiBalance": { name: string, } } | { "QueryApiMetrics": { name: string, } } | { "DeleteApi": { name: string, } } | { "RenameApi": { from: string, to: string, } } | "RequestState" | { "ToggleSkill": { name: string, enabled: boolean, } } | { "ToggleTool": { name: string, enabled: boolean, } } | { "SaveSkill": { name: string, description: string, keywords: Array<string>, always: boolean, category: string, content: string, 
+files: Array<PendingFile>, team_id?: string | null, } } | { "SwitchModel": { model: string, } } | { "SwitchProvider": { provider: string, } } | { "SetSystemPrompt": { prompt: string, } } | "RequestSystemPrompt" | { "UpdateApiConfig": { name: string, provider: string, model: string, base_url: string, api_key: string, thinking?: ThinkingMode | null, reasoning_effort?: ReasoningEffort | null, } } | { "SwitchApi": { name: string, } } | { "SetSessionApi": { team_id: string | null, session_id: string, profile: string, } } | { "ClearSessionApi": { team_id: string | null, session_id: string, } } | { "RequestRemoteApiProfiles": { peer: string, } } | { "TestApi": { name: string, } } | { "QueryApiBalance": { name: string, } } | { "QueryApiMetrics": { name: string, } } | { "DeleteApi": { name: string, } } | { "RenameApi": { from: string, to: string, } } | "StartChatGptLogin" | "CancelChatGptLogin" | "RequestChatGptStatus" | "RequestState" | { "ToggleSkill": { name: string, enabled: boolean, } } | { "ToggleTool": { name: string, enabled: boolean, } } | { "SaveSkill": { name: string, description: string, keywords: Array<string>, always: boolean, category: string, content: string, 
 /**
  * 系统提示词 skill（system: true）：内容注入 base 区。
  */
@@ -413,7 +413,31 @@ payload: JsonValue,
 /**
  * 服务端时间戳（毫秒；面板排序用，不信任客户端时钟）。
  */
-at_ms: number, } } | { "TeamsList": { teams: Array<TeamInfo>, } } | { "ApiTestResult": { 
+at_ms: number, } } | { "TeamsList": { teams: Array<TeamInfo>, } } | { "ChatGptLoginPending": { 
+/**
+ * 完整的授权 URL（含 PKCE challenge 与一次性 state）。
+ */
+url: string, 
+/**
+ * 回调地址（展示用：让用户知道浏览器要跳回哪里）。
+ */
+redirect_uri: string, } } | { "ChatGptLoginResult": { ok: boolean, 
+/**
+ * 成功时的账户邮箱（Core 侧解析自 id_token）。
+ */
+email: string, 
+/**
+ * 失败原因；`ok == true` 时为空。
+ */
+error?: string | null, } } | { "ChatGptStatus": { logged_in: boolean, email: string, 
+/**
+ * access token 到期时刻（Unix 毫秒；0 = 未知）。
+ */
+expires_at_ms: number, 
+/**
+ * 是否有可用的 refresh_token（false = 过期后必须重新登录）。
+ */
+refreshable: boolean, } } | { "ApiTestResult": { 
 /**
  * Tested config name (empty = top-level default).
  */
