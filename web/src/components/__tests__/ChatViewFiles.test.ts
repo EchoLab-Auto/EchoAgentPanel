@@ -167,6 +167,38 @@ describe('ChatView 拖入文件', () => {
   });
 });
 
+describe('ChatView 附件入口（可见性）', () => {
+  beforeEach(() => {
+    state.trunk = [];
+    state.tasks = [];
+    state.activities = {};
+    state.shellSessions = [];
+    state.teams = [];
+    state.activeTeamId = null;
+    state.connected = true;
+    state.toasts = [];
+  });
+
+  // 本轮真实事故：拖拽与粘贴都实现了，但**可见入口**的那个按钮仍带
+  // `accept="image/*"`——用户点开只能选图片，结论是"面板没有文件入口"。
+  // 功能存在但看不见 = 等于不存在。
+  it('附件按钮不再限制 image/*（否则用户选不到 PDF）', () => {
+    const wrapper = mountChat();
+    const input = wrapper.find('input[type="file"]');
+    expect(input.exists()).toBe(true);
+    expect(input.attributes('accept')).toBeUndefined();
+    expect(input.attributes('multiple')).toBeDefined();
+  });
+
+  it('按钮提示写明可加文件，不只是图片', () => {
+    const wrapper = mountChat();
+    const btn = wrapper.find('.chat-view__attach-btn');
+    expect(btn.exists()).toBe(true);
+    expect(btn.attributes('title')).toContain('文件');
+    expect(btn.attributes('aria-label')).toBe('添加附件');
+  });
+});
+
 describe('ChatView 已发送文件回显', () => {
   beforeEach(() => {
     state.toasts = [];

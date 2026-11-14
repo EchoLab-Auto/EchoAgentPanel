@@ -2551,12 +2551,16 @@ function mediaSrc(img: string): string {
               >
                 取消任务
               </NeumorphismButton>
+              <!-- 附件入口（2026-11）：**不再**限定 `accept="image/*"`。
+                   只收图片的那版对用户是"没有文件入口"——看不到按钮能选 PDF，
+                   就只能靠拖拽，而拖拽没有任何视觉提示。选中的文件由
+                   `addFiles` 按 MIME 分流：图片进多模态，其余落盘成路径。 -->
               <NeumorphismButton
                 class="chat-view__attach-btn"
                 size="small"
                 variant="glass"
-                title="添加图片（或直接粘贴截图）"
-                aria-label="添加图片"
+                title="添加附件：文件或图片（也可直接拖入、或粘贴截图）"
+                aria-label="添加附件"
                 @click="fileInput?.click()"
               >
                 <svg
@@ -2569,15 +2573,14 @@ function mediaSrc(img: string): string {
                   stroke-linejoin="round"
                   aria-hidden="true"
                 >
-                  <rect x="3" y="3" width="18" height="18" rx="3" />
-                  <circle cx="9" cy="9" r="2" />
-                  <path d="m21 15-4.5-4.5a2 2 0 0 0-2.83 0L5 19" />
+                  <path
+                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                  />
                 </svg>
               </NeumorphismButton>
               <input
                 ref="fileInput"
                 type="file"
-                accept="image/*"
                 multiple
                 class="chat-view__file-input"
                 @change="
