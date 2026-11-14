@@ -10,7 +10,6 @@
 
 import { onUnmounted, reactive } from 'vue';
 import { invokeInstanceOp, type InstanceOpOutcome } from '../../instanceOps';
-import type { InstanceOpMethod } from '../../protocol';
 
 export interface OpEmitPayload {
   method: string;
@@ -84,7 +83,7 @@ export function useInstanceOp(
     try {
       const outcome = await enqueueMethod(chainKey, () =>
         // 渲染器不维护 method 白名单（03a §3.3-1）：任意合法形状照发。
-        invokeInstanceOp(core, instance, method as InstanceOpMethod, payload),
+        invokeInstanceOp(core, instance, method, payload),
       );
       if (alive) errorMap[nodeKey] = outcome.error; // 成功清错，失败记录
       emit?.opResult?.({

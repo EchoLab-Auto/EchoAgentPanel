@@ -44,7 +44,7 @@ import { state } from '../store';
 import { coreDisplay, type ModuleEventEntry } from '../state';
 import { moveAgentToRegion } from '../agent-placement';
 import {
-  PACKAGE_DISPLAY_NAMES,
+  packageLabel,
   MODULE_KIND_LABELS,
   isModuleCheckboxVisible,
   isInstanceModuleKind,
@@ -356,7 +356,7 @@ const filteredSkills = computed(() => {
  *  `standalone` = 无包归属时的兜底文案（技能「独立技能」/ 工具「独立工具」）。 */
 function skillPackageLabel(pkg: string | null | undefined, standalone = '独立技能'): string {
   if (!pkg) return standalone;
-  return PACKAGE_DISPLAY_NAMES[pkg] ?? pkg;
+  return packageLabel(pkg, state.modules, standalone);
 }
 
 /** 清单只含当前挂载模块；已卸载的模块不在清单里，不会产生包禁用标记。 */
@@ -1366,7 +1366,7 @@ const capabilityModuleWritableKeys = computed(() =>
   capabilityModuleOptions.value.filter((o) => !o.readonly).map((o) => o.key),
 );
 // ── 包（package）机制：同 package 的工具+技能可视作一个整体勾选/取消 ──
-// 包显示名单一来源 = capabilities.ts::PACKAGE_DISPLAY_NAMES。
+// 包显示名来源 = capabilities.ts::packageLabel（= 模块 manifest 的 name）。
 
 const capabilityPackages = computed(() => {
   const map = new Map<string, { tools: string[]; skills: string[] }>();
@@ -1382,7 +1382,7 @@ const capabilityPackages = computed(() => {
   }
   return [...map.entries()].map(([id, v]) => ({
     id,
-    name: PACKAGE_DISPLAY_NAMES[id] ?? id,
+    name: packageLabel(id, state.modules),
     tools: v.tools,
     skills: v.skills,
   }));

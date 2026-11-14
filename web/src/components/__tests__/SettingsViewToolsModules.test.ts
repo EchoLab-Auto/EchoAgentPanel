@@ -161,7 +161,8 @@ describe('SettingsView 工具工作台', () => {
   it('默认按包分组 + 副标题统计 + 状态 chips', async () => {
     const wrapper = await openCategory('工具');
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['QQ 实例包', '内置工具集', '独立工具']);
+    // 包显示名 = 模块 manifest 的 name（见 capabilities.ts::packageLabel）。
+    expect(groups).toEqual(['QQ 实例', '内置工具集', '独立工具']);
     // 独立工具排最后
     expect(groups[groups.length - 1]).toBe('独立工具');
     const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
@@ -221,7 +222,7 @@ describe('SettingsView 工具工作台', () => {
     const wrapper = await openCategory('工具');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('send_group_msg'))!;
     await row.trigger('click');
-    expect(wrapper.find('.skill-banner--warn').text()).toContain('QQ 实例包');
+    expect(wrapper.find('.skill-banner--warn').text()).toContain('QQ 实例');
     // 列表行标记「包已禁用」
     expect(wrapper.findAll('.caps-mark--warn').length).toBeGreaterThan(0);
   });

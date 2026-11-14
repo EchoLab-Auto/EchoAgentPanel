@@ -17,7 +17,7 @@ import {
   trackRequest,
 } from './pending';
 import { scopedKey } from './keys';
-import type { InstanceOpMethod, BackendCommand } from './protocol';
+import type { BackendCommand } from './protocol';
 
 /** 一次操作的结算结果（业务失败也 resolve；error=null 表示成功）。 */
 export interface InstanceOpOutcome {
@@ -29,7 +29,7 @@ export interface InstanceOpOutcome {
 export function instanceOpKey(
   core: string | null,
   instance: string,
-  method: InstanceOpMethod,
+  method: string,
 ): string {
   return `instance-op:${scopedKey(core, instance)}:${method}`;
 }
@@ -38,7 +38,7 @@ interface OpHandle {
   key: string;
   core: string | null;
   instance: string;
-  method: InstanceOpMethod;
+  method: string;
   payload: Record<string, unknown>;
   resolve: (outcome: InstanceOpOutcome) => void;
   reject: (error: Error) => void;
@@ -154,7 +154,7 @@ function rejectHandle(h: OpHandle, error: Error): void {
 export function invokeInstanceOp(
   core: string | null,
   instance: string,
-  method: InstanceOpMethod,
+  method: string,
   payload: Record<string, unknown> = {},
 ): Promise<InstanceOpOutcome> {
   const key = instanceOpKey(core, instance, method);

@@ -21,7 +21,7 @@ import SessionOverlay from './SessionOverlay.vue';
 import type { TableColumn } from '@echolab-auto/ui-frame';
 import { state } from '../store';
 import {
-  PACKAGE_DISPLAY_NAMES,
+  packageLabel,
   isModuleCheckboxVisible,
   moduleCheckboxState,
 } from '../capabilities';
@@ -106,7 +106,7 @@ watch(
 );
 
 // ── 包（pkg）名称映射：同 pkg 的工具/技能视作一个整体分组
-//（单一来源在 capabilities.ts::PACKAGE_DISPLAY_NAMES）──
+//（单一来源在 capabilities.ts::packageLabel，包名来自模块自己的 manifest）──
 
 interface GroupedItem {
   key: string;
@@ -124,7 +124,7 @@ const toolItems = computed<GroupedItem[]>(() =>
     key: t.name,
     name: t.name,
     description: t.description || '（无描述）',
-    group: t.package ? (PACKAGE_DISPLAY_NAMES[t.package] ?? t.package) : t.category || undefined,
+    group: t.package ? packageLabel(t.package, state.modules) : t.category || undefined,
   })),
 );
 /** 技能：按 package 分组（无 package 按 category） */
@@ -133,7 +133,7 @@ const skillItems = computed<GroupedItem[]>(() =>
     key: sk.name,
     name: sk.name,
     description: sk.description || '（无描述）',
-    group: sk.package ? (PACKAGE_DISPLAY_NAMES[sk.package] ?? sk.package) : sk.category || undefined,
+    group: sk.package ? packageLabel(sk.package, state.modules) : sk.category || undefined,
   })),
 );
 /** 勾选区分组名（按 kind 显示；仅实例/交互为独立组，

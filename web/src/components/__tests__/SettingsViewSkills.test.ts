@@ -140,7 +140,9 @@ describe('SettingsView 技能工作台', () => {
   it('默认按「包」分组：已知门控包用中文名，无包技能归「独立技能」', async () => {
     const wrapper = await openSkills();
     const groups = wrapper.findAll('.caps-list-group__name').map((g) => g.text());
-    expect(groups).toEqual(['QQ 实例包', '独立技能']);
+    // 包显示名 = 模块 manifest 的 name（QQ 模块声明的是「QQ 实例」）。
+    // 此前这里是 Panel 自己表里的「QQ 实例包」——那张表已经删掉。
+    expect(groups).toEqual(['QQ 实例', '独立技能']);
     // 包内 2 个，独立 2 个
     const counts = wrapper.findAll('.caps-count--soft').map((c) => c.text());
     expect(counts).toEqual(['2', '2']);
@@ -228,7 +230,7 @@ describe('SettingsView 技能工作台', () => {
     expect(usage[1]).toContain('Writer');
     expect(usage[1]).toContain('可用');
     // 包禁用横幅
-    expect(wrapper.find('.skill-banner--warn').text()).toContain('QQ 实例包');
+    expect(wrapper.find('.skill-banner--warn').text()).toContain('QQ 实例');
     // 内容预览（MarkdownRenderer 渲染）
     expect(wrapper.find('.skill-content-preview').exists()).toBe(true);
   });

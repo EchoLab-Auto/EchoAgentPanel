@@ -14,7 +14,6 @@
 //! | `ChecklistState` / `RemoteApiProfileEntry` | Core 侧是 `serde_json::Value`（不定形），Panel 需要具体形状才能渲染 |
 //! | `FederationStatus` / `FederationDirectory` | Core 侧是事件变体内的内联字段，提取成命名类型便于复用 |
 //! | `ShellTerminalEntry` | 纯 Panel UI 状态（终端行），Core 不发 |
-//! | `InstanceOpMethod` | 平台方法名的拼写便利（**待迁移**：应改由模块描述符声明） |
 //! | `CompactionPhase` | Core 在 `echo-session`，跨 crate 未纳入生成；两端靠注释对齐 |
 //! | `WorkspaceDirectoryEntry` | 生成的 `WorkspaceDirectory` 的历史别名（Panel 内延用旧名） |
 //!
@@ -85,23 +84,6 @@ export interface FederationDirectory {
   nodes: FederatedNodeInfo[];
 }
 
-
-/** 实例管理方法名（02a §4.1；Panel 侧防拼写便利类型，不要求 core 同步）。
- *  与 00 §四 的 12 个 custom method + `get_state`（D2 首屏路径）对齐。 */
-export type InstanceOpMethod =
-  | 'set_gate_mode'
-  | 'get_gate_mode'
-  | 'update_allowlist'
-  | 'update_denylist'
-  | 'get_filter_config'
-  | 'set_owner'
-  | 'get_owner'
-  | 'login_status'
-  | 'login_qrcode'
-  | 'get_groups'
-  | 'get_friends'
-  | 'instance_info'
-  | 'get_state';
 
 
 /** 工作区目录条目（线格式 untagged，2026-10）：

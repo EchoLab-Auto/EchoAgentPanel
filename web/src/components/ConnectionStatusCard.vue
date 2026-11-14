@@ -40,6 +40,8 @@ type DotStatus = InstanceDotStatus;
 interface InstanceRow {
   key: string;
   label: string;
+  /** 实例自己上报的显示名（模块声明；用于分组标题，Panel 不猜平台名）。 */
+  platformLabel: string;
   selfId: string | null;
   stateText: string;
   dot: DotStatus;
@@ -88,6 +90,21 @@ const coreRows = computed<CoreRow[]>(() =>
     };
   }),
 );
+/**
+ * 实例分组标题。
+ *
+ * 此前这里写死「QQ 实例」——非 QQ 部署上整个连接卡都在谎报平台名。现在取
+ * 实例自己上报的 `display_name`（Core 的 `InstanceStatus.display_name`，由模块
+ * 声明）。多个平台共存时用"平台实例"这个中性说法，单平台时用它的名字。
+ *
+ * `self_id` 不需要在这里特判：它是 Core 的**平台中立**字段
+ * （`InstanceInfo.self_id` = "Self ID on the platform"），任何平台都可能填。
+ */
+const instanceGroupTitle = computed(() => {
+  const names = [...new Set(instances.value.map((row) => row.platformLabel).filter(Boolean))];
+  return names.length === 1 ? names[0] : '平台实例';
+});
+
 // 状态文案 / 状态点：与通用 InstancePanel 共用计算（03b S1）。
 const instances = computed<InstanceRow[]>(() =>
   state.instances.map((a) => {
@@ -95,6 +112,7 @@ const instances = computed<InstanceRow[]>(() =>
     return {
       key: a.name,
       label: a.display_name || a.name,
+      platformLabel: a.display_name || a.platform || '',
       selfId: a.self_id,
       stateText: view.stateText,
       dot: view.dot,
@@ -141,10 +159,10 @@ const instances = computed<InstanceRow[]>(() =>
     </div>
 
 
-    <!-- QQ 实例 -->
+    <!-- 平台实例（名称/字段都来自 Core 与模块描述符，不认识具体平台） -->
     <div v-if="instances.length" class="conn-group">
       <div class="conn-group__title">
-        QQ 实例（{{ state.activeRegion ?? '本机' }}）
+        {{ instanceGroupTitle }}（{{ state.activeRegion ?? '本机' }}）
       </div>
       <div v-for="row in instances" :key="row.key" class="conn-row">
         <NeumorphismStatusDot :status="row.dot" size="small" />

@@ -943,18 +943,22 @@ function onSelectionChange() {
 // 实例按钮显隐：仅当当前 Agent（team）启用了 instance 类模块时显示。
 // 判据是 Core 下发的结论名单（`TeamInfo.available_modules`，已归一去重），
 // 不是用户配置——名单语义（旧前缀归一、空 = 不限）只有 Core 一处实现。
-const ADAPTER_MODULE_FALLBACK = ['echo-agent.instance.qq'];
 
 const currentTeam = computed(() => {
   if (!props.activeTeamId) return null;
   return state.teams.find((t) => t.id === props.activeTeamId) ?? null;
 });
 
-/** 当前团队视角下的实例模块 id 列表（无 modules 数据时回退到内置 id） */
-const instanceModuleIds = computed<string[]>(() => {
-  const fromState = state.modules.filter((p) => isInstanceModuleKind(p.kind)).map((p) => p.id);
-  return fromState.length ? fromState : ADAPTER_MODULE_FALLBACK;
-});
+/**
+ * 当前视角下的实例模块 id 列表。
+ *
+ * **没有 modules 数据 = 没有实例模块**（不回退到任何具体平台）。
+ * 此前这里回退成 `['echo-agent.instance.qq']`——那等于在"Core 还没发模块列表"
+ * 的窗口里假定"平台就是 QQ"，非 QQ 部署上会显示一个点不动的实例入口。
+ */
+const instanceModuleIds = computed<string[]>(() =>
+  state.modules.filter((p) => isInstanceModuleKind(p.kind)).map((p) => p.id),
+);
 
 /** 当前 Agent 是否启用了至少一个实例模块（决定输入框上是否显示"实例"按钮） */
 const instanceAvailable = computed(() =>

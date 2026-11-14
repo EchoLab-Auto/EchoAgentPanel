@@ -172,8 +172,8 @@ describe('SettingsView 智能体编辑器', () => {
     expect(subs).toContain('包（Package）');
     expect(subs).toContain('工具');
     expect(subs).toContain('技能');
-    // 包聚合显示 QQ 包成员
-    expect(capsPanel.text()).toContain('QQ 实例包');
+    // 包聚合显示 QQ 包成员（包名 = 模块 manifest 的 name，Panel 不再自带一张表）
+    expect(capsPanel.text()).toContain('QQ 实例');
     expect(capsPanel.text()).toContain('send_private_msg');
   });
 

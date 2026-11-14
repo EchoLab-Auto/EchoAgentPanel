@@ -56,27 +56,53 @@ import { activeTeam, type AppState } from './state';
  */
 
 /**
- * 包/模块的中文显示名（工具·技能按包分组、模块勾选区、模块列表共用）。
+ * 包 id 的显示名。
  *
- * 只影响**显示**，不参与可见性判定——因此这里可以出现具体平台名
- * （`instance.qq` 是 QQ 模块自己声明的工具包 id，见
- * `AdapterToolSpec.package`），框架逻辑本身不枚举平台。
+ * ## 数据来源是 Core，不是这张表
+ *
+ * 包 id 通常就是某个模块的 id（工具/技能用 `package:` 声明归属，见
+ * `ToolInfo.package`）。显示名应该来自那个模块自己的 `ModuleInfo.name`——
+ * 模块已经声明了人读名（"QQ 实例包"之类不该由 Panel 再抄一遍）。
+ *
+ * 此前这里是一张 12 项的手写表：新增模块必须改 Panel 才显示得好看，模块改名
+ * 时 Panel 会继续显示旧名，两个方向都不报错。
+ *
+ * 现在的判据：
+ * 1. `modules` 里有同 id 的模块 → 用 `ModuleInfo.name`；
+ * 2. 没有（包 id 不是模块 id，或 modules 还没到）→ 原样显示 id。
+ *
+ * 保留 `moduleName` 可选参数而不是直接读全局 state：调用点已持有模块列表时
+ * 不必再取一次，测试也能直接传。
  */
-export const PACKAGE_DISPLAY_NAMES: Record<string, string> = {
-  'echo-agent.instance.qq': 'QQ 实例包',
-  // 旧 id（2026-10 去适配器化前）。保留是为了「新 Panel + 旧 Core」以及
-  // 尚未迁移 `package:` 的 SKILL.md 仍显示可读名；新 id 优先。
-  'echo-agent.adapter.qq': 'QQ 实例包',
-  'echo-agent.orchestration': '编排工具包',
-  'echo-agent.tools.builtin': '内置工具集',
-  'echo-agent.skills.dir': '技能目录',
-  'echo-agent.workspace': '工作区会话',
-  'echo-agent.subagent': 'Subagent 委派',
-  'echo-agent.session': '会话',
-  'echo-agent.transcript': '显示层',
-  'echo-agent.shell': 'Shell 会话',
-  'echo-agent.panel.web': '内嵌 Web Panel',
-};
+export function packageLabel(
+  pkg: string | null | undefined,
+  modules: readonly { id: string; name: string }[],
+  standalone = '独立技能',
+): string {
+  if (!pkg) return standalone;
+  const wanted = canonicalModuleId(pkg);
+  const module = modules.find((item) => canonicalModuleId(item.id) === wanted);
+  return module?.name || pkg;
+}
+
+/**
+ * 旧实例前缀归一（`echo-agent.adapter.<p>` → `echo-agent.instance.<p>`）。
+ *
+ * ## 为什么 Panel 也要有这条规则
+ *
+ * 包 id 与模块 id 都可能是**旧形态**：旧 Core 发 `echo-agent.adapter.qq`，而
+ * 新模块的 `package:` 写的是 `echo-agent.instance.qq`。不归一就会出现"包能
+ * 匹配上模块、显示名匹配不上"（或反之），表现是界面上冒出一个原始 id。
+ *
+ * Core 侧有同一套规则（`echo_defs::module_id::canonical_module_id`），这里是
+ * 它的**线格式镜像**——归一的对象是协议里的字符串，不是 Core 的内部决策。
+ * 旧 Core 淘汰后可以连同它一起删。
+ */
+function canonicalModuleId(id: string): string {
+  const LEGACY = 'echo-agent.adapter.';
+  const CURRENT = 'echo-agent.instance.';
+  return id.startsWith(LEGACY) ? CURRENT + id.slice(LEGACY.length) : id;
+}
 
 /**
  * 实例类模块的 kind 取值（新 `instance` + 旧 `adapter` 双认）。

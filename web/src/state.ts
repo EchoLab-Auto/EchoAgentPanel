@@ -15,7 +15,6 @@ import { settleInstanceOpsOfCore } from './pending';
 //! 事件流从 `/ws` 进来，reducer 把它映射成 React 可渲染的状态。
 
 import type {
-  InstanceOpMethod,
   InstanceStatus,
   ApiMetricsEntry,
   ApiProfileInfo,
@@ -2280,7 +2279,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       }).InstanceOpResult;
       // 键配对（无线协议无请求 id，02a §1-D1）：resolve 在途 Promise 并放行
       // 同键 FIFO 的下一个；无命中的迟到结果由服务层静默丢弃。
-      settleInstanceOp(instanceOpKey(evtCore(e), e.instance, e.method as InstanceOpMethod), {
+      settleInstanceOp(instanceOpKey(evtCore(e), e.instance, e.method), {
         result: e.result ?? null,
         error: e.error ?? null,
       });

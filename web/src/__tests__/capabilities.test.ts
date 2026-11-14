@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  PACKAGE_DISPLAY_NAMES,
+  packageLabel,
   MODULE_KIND_LABELS,
   moduleCheckboxState,
   isInstanceModuleKind,
@@ -104,19 +104,20 @@ describe('包维度门控模块清单（单一来源）', () => {
     }
   });
 
-  it('能力型模块都有中文显示名（工具/包分组可读性）', () => {
-    // 清单删了，改为按 Core 的 kind 作用域枚举（persona 级的三类 kind）。
-    // 新增 persona 级模块而忘了加显示名时，这里红。
-    const personaScoped = [
-      'echo-agent.tools.builtin',
-      'echo-agent.shell',
-      'echo-agent.workspace',
-      'echo-agent.subagent',
-      'echo-agent.skills.dir',
-    ];
-    for (const id of personaScoped) {
-      expect(PACKAGE_DISPLAY_NAMES[id], `缺少显示名: ${id}`).toBeTruthy();
-    }
+  it('包显示名来自模块自己的 manifest，不是 Panel 的一张表', () => {
+    // 曾经这里断言「每个 persona 级模块都在 PACKAGE_DISPLAY_NAMES 里有中文名」。
+    // 那张 12 项的表是 Panel 侧的第二份真相：新增模块必须改 Panel 才好看，
+    // 模块改名时 Panel 继续显示旧名——两个方向都不报错。
+    //
+    // 现在显示名 = 模块 manifest 的 `name`（`ModuleInfo.name`）。有模块就用它，
+    // 没有就原样显示 id——Panel 不再持有任何模块名知识。
+    const modules = [{ id: 'echo-agent.workspace', name: '工作区会话' }];
+    expect(packageLabel('echo-agent.workspace', modules)).toBe('工作区会话');
+    // 未知包（不是模块 id，或 modules 还没到）：原样显示 id，不猜。
+    expect(packageLabel('echo-agent.unknown.pkg', modules)).toBe('echo-agent.unknown.pkg');
+    // 无包归属：用调用方给的兜底文案。
+    expect(packageLabel(undefined, modules)).toBe('独立技能');
+    expect(packageLabel(null, modules, '独立工具')).toBe('独立工具');
   });
 
   it('勾选可见性完全由 Core 的 gating 决定', () => {

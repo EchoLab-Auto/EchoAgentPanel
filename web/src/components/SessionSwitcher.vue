@@ -121,9 +121,9 @@ const groups = computed(() => {
   return [...buckets.values()]
     .sort((a, b) => {
       if (groupRank(a) !== groupRank(b)) return groupRank(a) - groupRank(b);
+      // 不再给任何平台排前：平台名由模块声明，Panel 认识具体名字就等于把
+      // "哪个平台更重要"写死在这里。按名称字典序，稳定且对所有平台一致。
       if (a.platform !== b.platform) {
-        if (a.platform === 'qq') return -1;
-        if (b.platform === 'qq') return 1;
         return (a.platform ?? '').localeCompare(b.platform ?? '');
       }
       return (a.kind === 'group' ? 1 : 0) - (b.kind === 'group' ? 1 : 0);
