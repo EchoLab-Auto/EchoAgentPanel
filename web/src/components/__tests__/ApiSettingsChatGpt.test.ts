@@ -146,6 +146,34 @@ describe('ApiSettings · ChatGPT 订阅登录', () => {
     expect(sendCommand).toHaveBeenCalledWith('StartChatGptLogin');
   });
 
+  // 用户的真实卡点：在局域网另一台机器上登录，浏览器跳回它自己的
+  // localhost:1455 —— 页面打不开，但地址栏是完整的。粘回来必须能完成登录。
+  it('粘回地址栏链接即可提交授权码（局域网主通路）', async () => {
+    const wrapper = await mountWithChatGpt();
+    feed({ ChatGptLoginPending: { url: 'https://auth.openai.com/x', redirect_uri: '' } });
+    await wrapper.vm.$nextTick();
+
+    const input = wrapper.find('.chatgpt-login__manual input');
+    expect(input.exists(), 'pending 时应出现粘贴框').toBe(true);
+
+    const url = 'http://localhost:1455/auth/callback?code=abc&state=xyz';
+    await input.setValue(url);
+    sendCommand.mockClear();
+    await wrapper.find('.chatgpt-login__manual button').trigger('click');
+
+    expect(sendCommand).toHaveBeenCalledWith({
+      SubmitChatGptLoginCode: { input: url },
+    });
+  });
+
+  it('粘贴框为空时提交按钮禁用', async () => {
+    const wrapper = await mountWithChatGpt();
+    feed({ ChatGptLoginPending: { url: 'https://auth.openai.com/x', redirect_uri: '' } });
+    await wrapper.vm.$nextTick();
+    const button = wrapper.find('.chatgpt-login__manual button');
+    expect(button.attributes('disabled')).toBeDefined();
+  });
+
   // 局域网访问是**真实发生过的失败**：用户在另一台机器上打开面板，点登录、
   // 打开授权链接，浏览器跳回 `localhost:1455`——那是他自己的机器，Core 收不到。
   // 界面必须常显这条提醒，否则用户只会看到浏览器的"无法访问此网站"。

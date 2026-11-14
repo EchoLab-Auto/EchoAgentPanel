@@ -431,6 +431,17 @@ function applyProviderPreset(value: string | number | (string | number)[] | unde
 
 const chatgptLogin = computed(() => state.chatgptLogin);
 const chatgptStatus = computed(() => state.chatgptLogin.status);
+
+// 登录结束后清空手工输入：留着会让用户以为还得再点一次。
+watch(
+  () => state.chatgptLogin.pending,
+  (pending, was) => {
+    if (was && !pending) {
+      manualCode.value = '';
+      manualSubmitted.value = false;
+    }
+  },
+);
 /** 当前表单在编辑 ChatGPT 订阅类供应商。 */
 const isChatGptProvider = computed(() => provider.value === 'openai-chatgpt');
 
@@ -461,6 +472,25 @@ const lanTunnelHint = computed(() => {
       : '<core-host>';
   return `ssh -N -L 1455:127.0.0.1:1455 ${host}`;
 });
+
+/**
+ * 手工提交授权码（局域网 / 远程部署的主要路径）。
+ *
+ * 回调固定打 `localhost:1455`，而 `localhost` 是**浏览器那台机器**。用户从
+ * 另一台机器登录时，页面会显示「无法访问此页面」——但地址栏里已经带着
+ * `code` 与 `state`。把整条 URL 粘回来就能完成登录，不需要隧道、不需要改
+ * 监听地址（`gh auth login` 这类 CLI 也是这个做法）。
+ */
+const manualCode = ref('');
+/** 提交过之后保持输入框可见（失败时用户要重贴，不能让内容消失）。 */
+const manualSubmitted = ref(false);
+
+function submitManualCode() {
+  const input = manualCode.value.trim();
+  if (!input) return;
+  manualSubmitted.value = true;
+  sendCommand({ SubmitChatGptLoginCode: { input } });
+}
 
 /** 打开授权 URL（新标签页）。 */
 function openChatGptAuthUrl() {
@@ -940,6 +970,29 @@ watch(
               打开
             </NeumorphismButton>
           </div>
+          <!-- 手工提交授权码：局域网 / 远程部署的**主要**通路。
+               浏览器跳回它自己的 localhost:1455 会失败，但地址栏是完整的。 -->
+          <div class="chatgpt-login__manual">
+            <div class="chatgpt-login__manual-head">
+              浏览器显示「无法访问此页面」？把地址栏里的**完整链接**粘到这里：
+            </div>
+            <div class="chatgpt-login__manual-row">
+              <NeumorphismInput
+                v-model="manualCode"
+                placeholder="http://localhost:1455/auth/callback?code=…&state=…"
+                @keyup.enter="submitManualCode"
+              />
+              <NeumorphismButton
+                size="small"
+                variant="raised"
+                :disabled="!manualCode.trim()"
+                @click="submitManualCode"
+              >
+                完成登录
+              </NeumorphismButton>
+            </div>
+          </div>
+
           <!-- 局域网访问的关键提醒（2026-11）：
                `redirect_uri` 固定是 http://localhost:1455，而 **localhost 指
                浏览器所在的那台机器**。从别的机器打开面板时，跳转会打到那台
@@ -1412,6 +1465,29 @@ watch(
   border-radius: 6px;
   background: var(--nm-surface-raised);
 }
+/* 手工提交授权码（局域网主通路） */
+.chatgpt-login__manual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 0;
+  border-top: 1px dashed var(--nm-border-subtle);
+}
+.chatgpt-login__manual-head {
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+  line-height: 1.6;
+}
+.chatgpt-login__manual-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.chatgpt-login__manual-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* 局域网访问提醒：小一号、灰一点，但必须常显——这条提示缺失时用户只会
    看到浏览器的"无法访问此网站"，完全无法联想到回调落点问题。 */
 .chatgpt-login__lan {
