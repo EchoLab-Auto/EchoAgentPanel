@@ -34,11 +34,11 @@ export type BackendCommand = { "SendMessage": { session_id: string, content: str
 /**
  * 面板随消息拖入的文件（字节内嵌，Core 负责落盘并告知 agent 路径）。
  */
-files: Array<PendingFile>, team_id: string | null, } } | { "SwitchModel": { model: string, } } | { "SwitchProvider": { provider: string, } } | { "SetSystemPrompt": { prompt: string, } } | "RequestSystemPrompt" | { "UpdateApiConfig": { name: string, provider: string, model: string, base_url: string, api_key: string, thinking: ThinkingMode | null, reasoning_effort: ReasoningEffort | null, } } | { "SwitchApi": { name: string, } } | { "SetSessionApi": { team_id: string | null, session_id: string, profile: string, } } | { "ClearSessionApi": { team_id: string | null, session_id: string, } } | { "RequestRemoteApiProfiles": { peer: string, } } | { "TestApi": { name: string, } } | { "QueryApiBalance": { name: string, } } | { "QueryApiMetrics": { name: string, } } | { "DeleteApi": { name: string, } } | { "RenameApi": { from: string, to: string, } } | "RequestState" | { "ToggleSkill": { name: string, enabled: boolean, } } | { "ToggleTool": { name: string, enabled: boolean, } } | { "SaveSkill": { name: string, description: string, keywords: Array<string>, always: boolean, category: string, content: string, 
+files: Array<PendingFile>, team_id?: string | null, } } | { "SwitchModel": { model: string, } } | { "SwitchProvider": { provider: string, } } | { "SetSystemPrompt": { prompt: string, } } | "RequestSystemPrompt" | { "UpdateApiConfig": { name: string, provider: string, model: string, base_url: string, api_key: string, thinking?: ThinkingMode | null, reasoning_effort?: ReasoningEffort | null, } } | { "SwitchApi": { name: string, } } | { "SetSessionApi": { team_id: string | null, session_id: string, profile: string, } } | { "ClearSessionApi": { team_id: string | null, session_id: string, } } | { "RequestRemoteApiProfiles": { peer: string, } } | { "TestApi": { name: string, } } | { "QueryApiBalance": { name: string, } } | { "QueryApiMetrics": { name: string, } } | { "DeleteApi": { name: string, } } | { "RenameApi": { from: string, to: string, } } | "RequestState" | { "ToggleSkill": { name: string, enabled: boolean, } } | { "ToggleTool": { name: string, enabled: boolean, } } | { "SaveSkill": { name: string, description: string, keywords: Array<string>, always: boolean, category: string, content: string, 
 /**
  * 系统提示词 skill（system: true）：内容注入 base 区。
  */
-system: boolean, } } | { "DeleteSkill": { name: string, } } | { "ArchiveHistory": { team_id: string | null, session_id: string | null, } } | { "CompactHistory": { team_id: string | null, session_id: string | null, keep_recent: number | null, } } | "RequestModulesList" | "RequestTeamsList" | { "ToggleTeam": { id: string, enabled: boolean, } } | { "SaveTeam": { id: string, name: string, description: string, system_prompt: string, enabled: boolean, 
+system: boolean, } } | { "DeleteSkill": { name: string, } } | { "ArchiveHistory": { team_id?: string | null, session_id?: string | null, } } | { "CompactHistory": { team_id?: string | null, session_id?: string | null, keep_recent?: number | null, } } | "RequestModulesList" | "RequestTeamsList" | { "ToggleTeam": { id: string, enabled: boolean, } } | { "SaveTeam": { id: string, name: string, description: string, system_prompt: string, enabled: boolean, 
 /**
  * 该 agent 系统提示词由哪些 skill 组成（空 = 用 system_prompt 字段）。
  */
@@ -46,23 +46,23 @@ system_skills: Array<string>, disabled_tools: Array<string>, disabled_skills: Ar
 /**
  * Per-agent trunk token budget (None = 继承全局 [agent].memory_limit_tokens)。
  */
-memory_limit_tokens: number | null, 
+memory_limit_tokens?: number | null, 
 /**
  * Per-agent context window cap (None = 继承全局 [agent].context_window_tokens)。
  */
-context_window_tokens: number | null, 
+context_window_tokens?: number | null, 
 /**
  * Persona 级 API 供应商引用（None = 跟随全局默认配置；
  * Some(name) = 使用全局供应商池 `[agent].api_profiles` 中的该 profile）。
  * 保存在 `[agent.teams.{id}].api_profile`，运行期即时重建该 persona 的 provider。
  */
-api_profile: string | null, } } | { "DeleteTeam": { id: string, } } | { "RestartModule": { id: string, } } | { "RequestContext": { team_id: string | null, session_id: string | null, } } | { "CancelRequestedWork": { session_id: string, all: boolean, 
+api_profile?: string | null, } } | { "DeleteTeam": { id: string, } } | { "RestartModule": { id: string, } } | { "RequestContext": { team_id?: string | null, session_id?: string | null, } } | { "CancelRequestedWork": { session_id: string, all: boolean, 
 /**
  * 目标 agent（None/未指定 = 默认 agent）。
  * 取消必须路由到 turn 实际所在的 agent：self-coding 的 turn 在
  * self-coding 的 Agent 中，默认 agent 取消永远为 0。
  */
-team_id: string | null, } } | { "InstallSkillFromGit": { 
+team_id?: string | null, } } | { "InstallSkillFromGit": { 
 /**
  * git 仓库 URL（支持 https/ssh/本地路径）
  */
@@ -70,11 +70,11 @@ url: string,
 /**
  * 安装目录名（缺省取仓库名）
  */
-name: string | null, 
+name?: string | null, 
 /**
  * 分支/标签（缺省 = 仓库默认分支）
  */
-branch: string | null, } } | { "UpdateSkillFromGit": { name: string, } } | { "RemoveSkillSource": { name: string, } } | { "RequestTrunkTimeline": { team_id: string | null, 
+branch?: string | null, } } | { "UpdateSkillFromGit": { name: string, } } | { "RemoveSkillSource": { name: string, } } | { "RequestTrunkTimeline": { team_id?: string | null, 
 /**
  * 增量拉取：仅返回 seq > since_seq 的 timeline 条目并携带最新 seq。
  * None / 0 = 全量（默认）。前端首次加载全量，此后切换/回放只拉增量。
@@ -92,7 +92,7 @@ since_seq: number,
  * 只影响 `since_seq == 0`（全量）路径：增量路径本来就是缺口补齐，
  * 截断会让前端游标与实际内容不一致。
  */
-limit?: number | null, } } | { "RequestTimelineEarlier": { team_id: string | null, 
+limit?: number | null, } } | { "RequestTimelineEarlier": { team_id?: string | null, 
 /**
  * **已加载的最老条目的位置序号**（`TimelineMessage.ord`）。
  *
@@ -111,7 +111,7 @@ before_ord: number,
 /**
  * 本页最多返回条数（服务端 clamp [1, 500]）。
  */
-limit: number | null, } } | { "RequestSessionHistory": { team_id: string | null, session_id: string, limit: number | null, expand_depth: number | null, } } | { "RequestShellSessions": { team_id: string | null, } } | { "ShellStart": { team_id: string | null, workdir: string | null, } } | { "ShellExec": { session_id: string, command: string, timeout_secs: number | null, team_id: string | null, } } | { "ShellStop": { session_id: string, team_id: string | null, } } | { "ClearHistory": { team_id: string | null, session_id: string | null, } } | { "StartInstance": { name: string, } } | { "StopInstance": { name: string, } } | { "RestartInstance": { name: string, } } | "RequestInstanceStatus" | { "InvokeInstanceOp": { 
+limit?: number | null, } } | { "RequestSessionHistory": { team_id?: string | null, session_id: string, limit?: number | null, expand_depth?: number | null, } } | { "RequestShellSessions": { team_id?: string | null, } } | { "ShellStart": { team_id?: string | null, workdir?: string | null, } } | { "ShellExec": { session_id: string, command: string, timeout_secs?: number | null, team_id?: string | null, } } | { "ShellStop": { session_id: string, team_id?: string | null, } } | { "ClearHistory": { team_id?: string | null, session_id?: string | null, } } | { "StartInstance": { name: string, } } | { "StopInstance": { name: string, } } | { "RestartInstance": { name: string, } } | "RequestInstanceStatus" | { "InvokeInstanceOp": { 
 /**
  * 模块实例名（旧线协议字段名 `adapter` 仍接受——2026-10 去模块实例化）。
  */
@@ -123,16 +123,16 @@ method: string,
 /**
  * 方法参数（JSON；缺省空对象）。
  */
-payload: JsonValue, } } | { "RequestWorkspaceSessions": { team_id: string | null, } } | { "SaveWorkspaceSession": { team_id: string | null, session: WorkspaceSessionInfo, } } | { "DeleteWorkspaceSession": { team_id: string | null, id: string, } } | { "ActivateWorkspaceSession": { team_id: string | null, id: string | null, 
+payload: JsonValue, } } | { "RequestWorkspaceSessions": { team_id?: string | null, } } | { "SaveWorkspaceSession": { team_id?: string | null, session: WorkspaceSessionInfo, } } | { "DeleteWorkspaceSession": { team_id?: string | null, id: string, } } | { "ActivateWorkspaceSession": { team_id?: string | null, id?: string | null, 
 /**
  * 工作区内的对话 id（2026-10 多对话；None = 进入该工作区的
  * `last_conversation` / 首条对话）。`id = None`（取消激活）时忽略。
  */
-conversation: string | null, } } | { "RequestWorkspaceGitStatus": { team_id: string | null, session_id: string, } } | { "RequestWorkspaceFiles": { team_id: string | null, session_id: string, path: string, } } | { "RequestBrowseDirectories": { path: string | null, } } | { "RequestProDocBundle": { team_id: string | null, root: string, } } | { "BrowseProDocDirs": { path: string | null, } } | "ProDocRoots" | { "ReadProDocFile": { team_id: string | null, root: string, path: string, 
+conversation?: string | null, } } | { "RequestWorkspaceGitStatus": { team_id?: string | null, session_id: string, } } | { "RequestWorkspaceFiles": { team_id?: string | null, session_id: string, path: string, } } | { "RequestBrowseDirectories": { path?: string | null, } } | { "RequestProDocBundle": { team_id?: string | null, root: string, } } | { "BrowseProDocDirs": { path?: string | null, } } | "ProDocRoots" | { "ReadProDocFile": { team_id?: string | null, root: string, path: string, 
 /**
  * 面板生成的回执关联 id（模块原样带回）。
  */
-request_id: string | null, } } | { "SaveProDocFile": { team_id: string | null, root: string, path: string, content: string, base: string | null, request_id: string | null, } } | { "DeleteProDocFile": { team_id: string | null, root: string, path: string, base: string | null, request_id: string | null, } } | { "ProDocCheck": { team_id: string | null, root: string, } } | "StartAllInstances" | "StopAllInstances" | "RequestSkillsList" | "ReloadSkills" | "RequestToolsList" | "RequestSelfUpdate" | "RequestSelfUpdateStatus" | "RequestFederationStatus" | "RequestFederationDirectory" | { "SaveFederationPeer": { peer: FederationPeerInfo, } } | { "DeleteFederationPeer": { name: string, } } | "RequestFederationInvite" | { "MigrateSession": { session_id: string, team_id: string | null, target_peer: string, } };
+request_id?: string | null, } } | { "SaveProDocFile": { team_id?: string | null, root: string, path: string, content: string, base?: string | null, request_id?: string | null, } } | { "DeleteProDocFile": { team_id?: string | null, root: string, path: string, base?: string | null, request_id?: string | null, } } | { "ProDocCheck": { team_id?: string | null, root: string, } } | "StartAllInstances" | "StopAllInstances" | "RequestSkillsList" | "ReloadSkills" | "RequestToolsList" | "RequestSelfUpdate" | "RequestSelfUpdateStatus" | "RequestFederationStatus" | "RequestFederationDirectory" | { "SaveFederationPeer": { peer: FederationPeerInfo, } } | { "DeleteFederationPeer": { name: string, } } | "RequestFederationInvite" | { "MigrateSession": { session_id: string, team_id?: string | null, target_peer: string, } };
 export type BackendEvent = { "InstanceStateChanged": { instance_name: string, connected: boolean, self_id: string | null, } } | { "MessageReceived": { session_id: string, instance_name: string, platform: string, user_id: string, user_name: string, 
 /**
  * Channel descriptor: "direct" or "group:{group_id}"
@@ -215,7 +215,7 @@ delta: string, } } | { "AgentReasoningDelta": { session_id: string, team_id?: st
  * 的 `local:tui::local_user`）此前在消费端（core+session_id）键
  * 冲突——补 team 维度供消费端消歧。
  */
-team_id: string | null, } } | { "AgentOutput": { session_id: string, team_id?: string | null, content: string, branch_id: string | null, } } | { "AgentCompleted": { session_id: string, } } | { "SessionUpdated": { session: SessionInfo, } } | { "ActiveTurnsSnapshot": { 
+team_id?: string | null, } } | { "AgentOutput": { session_id: string, team_id?: string | null, content: string, branch_id?: string | null, } } | { "AgentCompleted": { session_id: string, } } | { "SessionUpdated": { session: SessionInfo, } } | { "ActiveTurnsSnapshot": { 
 /**
  * 当前正在执行 turn 的会话 id 列表。
  */
@@ -228,15 +228,15 @@ state: string,
  * 当前阶段（update-status 的 phase：initializing/building/
  * installing/restarting/verifying；细粒度进度反馈）。
  */
-phase: string | null, 
+phase?: string | null, 
 /**
  * 目标版本/说明（update-status 的 revision/message，原样透传）。
  */
-revision: string | null, message: string | null, 
+revision?: string | null, message?: string | null, 
 /**
  * 时间戳（update-status 的 updated_at，原样透传）。
  */
-updated_at: string | null, } } | { "FederationInvite": { invite: string, } } | { "FederationStatus": { enabled: boolean, node_id: string, node_name: string | null, listen: string, peers: Array<FederationPeerInfo>, panel_ready: boolean, panel_access: string, } } | { "FederationDirectory": { node_id: string, node_name: string | null, listen: string, panel_ready: boolean, panel_access: string, nodes: Array<FederatedNodeInfo>, } } | { "SessionMigrated": { session_id: string, target_peer: string, new_session_id: string | null, message: string, success: boolean, } } | { "CompactionProgress": { 
+updated_at?: string | null, } } | { "FederationInvite": { invite: string, } } | { "FederationStatus": { enabled: boolean, node_id: string, node_name?: string | null, listen: string, peers: Array<FederationPeerInfo>, panel_ready: boolean, panel_access: string, } } | { "FederationDirectory": { node_id: string, node_name?: string | null, listen: string, panel_ready: boolean, panel_access: string, nodes: Array<FederatedNodeInfo>, } } | { "SessionMigrated": { session_id: string, target_peer: string, new_session_id?: string | null, message: string, success: boolean, } } | { "CompactionProgress": { 
 /**
  * 归属 team（persona）。多上游面板据此把进度归到对应 agent。
  */
@@ -276,7 +276,7 @@ team_id?: string | null,
 /**
  * 快照归属的会话 id（多会话，2026-09；None = 未指定会话的回退口径）。
  */
-session_id: string | null, 
+session_id?: string | null, 
 /**
  * Every message currently in the context (oldest first).
  */
@@ -308,7 +308,7 @@ seq: number,
  * 前端必须按此路由缓存——绝不能拿当前 activeTeamId 猜测，
  * 否则其他 agent 的兜底请求会污染当前视图（串显 alix 会话）。
  */
-team_id: string | null, 
+team_id?: string | null, 
 /**
  * true = 完整快照（替换缓存）；false = 相对 since_seq 的增量
  * （追加/就地修补）。前端不再凭 seq 大小猜测，避免把全量快照
@@ -325,7 +325,7 @@ has_more: boolean, } } | { "TimelineEarlier": {
 /**
  * 响应归属：= 请求的 team_id（None = 主/默认 agent）。
  */
-team_id: string | null, 
+team_id?: string | null, 
 /**
  * 时间升序的更早条目（`seq` 均小于请求的 `before_seq`）。
  */
@@ -337,7 +337,7 @@ has_more: boolean, } } | { "SessionHistory": {
 /**
  * 响应归属：= 请求的 team_id（None = 主/默认 agent）。
  */
-team_id: string | null, 
+team_id?: string | null, 
 /**
  * = 请求的 session_id（回显）。
  */
@@ -381,7 +381,7 @@ team_id?: string | null,
 /**
  * 当前全部覆盖（只含有覆盖的会话；空 = 没有任何会话被覆盖）。
  */
-overrides: Array<SessionApiOverrideEntry>, } } | { "RemoteApiProfiles": { peer: string, active: JsonValue | null, profiles: Array<JsonValue>, error: string | null, } } | { "ApiProfilesUpdated": { active_api: string, profiles: Array<ApiProfileInfo>, } } | { "SkillsList": { skills: Array<SkillInfo>, } } | { "ToolsList": { tools: Array<ToolInfo>, } } | { "ModulesList": { modules: Array<ModuleInfo>, } } | { "ModuleOpResult": { 
+overrides: Array<SessionApiOverrideEntry>, } } | { "RemoteApiProfiles": { peer: string, active?: JsonValue | null, profiles: Array<JsonValue>, error?: string | null, } } | { "ApiProfilesUpdated": { active_api: string, profiles: Array<ApiProfileInfo>, } } | { "SkillsList": { skills: Array<SkillInfo>, } } | { "ToolsList": { tools: Array<ToolInfo>, } } | { "ModulesList": { modules: Array<ModuleInfo>, } } | { "ModuleOpResult": { 
 /**
  * 目标模块 id。
  */
@@ -497,15 +497,15 @@ instance: string,
 /**
  * 状态文档（平台自定义；约定键见 `InstanceManagement::cached_state`）。
  */
-state: JsonValue, } } | { "WorkspaceSessions": { team_id: string | null, sessions: Array<WorkspaceSessionInfo>, 
+state: JsonValue, } } | { "WorkspaceSessions": { team_id?: string | null, sessions: Array<WorkspaceSessionInfo>, 
 /**
  * 当前激活会话 id（None = 未激活）。
  */
-active: string | null, 
+active?: string | null, 
 /**
  * 当前激活对话 id（2026-10 多对话；`active` 仍为工作区 id）。
  */
-active_conversation: string | null, } } | { "WorkspaceGitStatus": { team_id: string | null, session_id: string, directories: Array<WorkspaceGitInfo>, } } | { "WorkspaceFiles": { team_id: string | null, session_id: string, 
+active_conversation?: string | null, } } | { "WorkspaceGitStatus": { team_id?: string | null, session_id: string, directories: Array<WorkspaceGitInfo>, } } | { "WorkspaceFiles": { team_id?: string | null, session_id: string, 
 /**
  * 被列出的目录绝对路径（回显请求值）。
  */
@@ -513,11 +513,11 @@ path: string, entries: Array<WorkspaceFileEntry>,
 /**
  * 列目录失败的原因（路径越界 / 不存在等；成功时为 None）。
  */
-error: string | null, } } | { "BrowseDirectories": { 
+error?: string | null, } } | { "BrowseDirectories": { 
 /**
  * 被浏览的位置（回显请求值；None = 根列表）。
  */
-path: string | null, 
+path?: string | null, 
 /**
  * 浏览根（path=None 时列出）：label（展示名，如「家目录 (~)」）+
  * path。远程节点浏览时 roots 来自对端。
@@ -530,13 +530,13 @@ entries: Array<WorkspaceFileEntry>,
 /**
  * 失败原因（越界 / 不存在 / 对端离线等；成功为 None）。
  */
-error: string | null, } };
-export type SkillSourceInfo = { url: string, rev: string, branch: string | null, installed_at: string | null, };
+error?: string | null, } };
+export type SkillSourceInfo = { url: string, rev: string, branch?: string | null, installed_at?: string | null, };
 export type InstanceStatus = { name: string, display_name: string, connected: boolean, running: boolean, self_id: string | null, bind_address: string, started_at: number | null, 
 /**
  * 归属人格 id（概念中立；2026-09 多实例）。
  */
-persona: string | null, 
+persona?: string | null, 
 /**
  * 平台自有展示型字段的通用 KV 承载。
  *
@@ -761,7 +761,7 @@ name: string,
  * Absolute path of the saved file; `None` when saving failed (see
  * `error`) or was skipped (e.g. over the size limit).
  */
-path?: string, 
+path?: string | null, 
 /**
  * File size in bytes (0 = unknown).
  */
@@ -769,7 +769,7 @@ size: number,
 /**
  * Failure/skip reason when `path` is `None`.
  */
-error?: string, };
+error?: string | null, };
 export type PendingFile = { 
 /**
  * 用户看到的文件名（`report.pdf`）。Core 落盘前消毒，不可信。
@@ -919,17 +919,17 @@ available_tools: Array<string>,
 /**
  * Per-agent trunk token budget (None = 继承全局 [agent].memory_limit_tokens)。
  */
-memory_limit_tokens: number | null, 
+memory_limit_tokens?: number | null, 
 /**
  * Per-agent context window cap (None = 继承全局 [agent].context_window_tokens)。
  */
-context_window_tokens: number | null, 
+context_window_tokens?: number | null, 
 /**
  * Persona 级 API 供应商引用（None = 跟随全局默认配置；
  * Some(name) = 使用全局供应商池中该名字的 profile）。
  * 与 Profile 池、全局默认的展示组合见 API 设置页。
  */
-api_profile: string | null, };
+api_profile?: string | null, };
 export type ModuleInfo = { id: string, name: string, version: string, kind: string, description: string, 
 /**
  * 分类标签（`inner` / `outside`）：面板据此**分组展示**。
@@ -1105,7 +1105,7 @@ is_repo: boolean,
 /**
  * 当前分支（detached 时为 `HEAD`）。
  */
-branch: string | null, 
+branch?: string | null, 
 /**
  * 相对上游的领先/落后提交数（无上游时为 0）。
  */
@@ -1144,11 +1144,11 @@ changed_entries: Array<WorkspaceChangedEntry>,
 /**
  * 最近一次提交的摘要（`<short-hash> <subject>`）。
  */
-last_commit: string | null, 
+last_commit?: string | null, 
 /**
  * 采集失败原因（目录不存在 / git 不可用等；非仓库时为 None）。
  */
-error: string | null, };
+error?: string | null, };
 export type WorkspaceChangedEntry = { 
 /**
  * 仓库相对路径：porcelain 原样，重命名/复制形态是 `旧 -> 新`。
