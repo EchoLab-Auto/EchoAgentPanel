@@ -1421,22 +1421,12 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       state.workspaceTeamId = e.team_id ?? null;
       state.workspaceCore = e.core ?? null;
       state.workspaceGeneration += 1;
-      // 推导 sessionApiOverrides（session_id → profile 名）。
-      // 只替换 `local:workspace:` 键：非工作区会话（QQ 等）的乐观覆盖值不在
-      // 本事件的权威范围内，保留不动（此前整体替换会误清它们）。
-      const overrides: Record<string, string> = {};
-      for (const [key, value] of Object.entries(state.sessionApiOverrides)) {
-        if (!key.startsWith('local:workspace:')) overrides[key] = value;
-      }
-      for (const ws of state.workspaceSessions) {
-        for (const conv of ws.conversations ?? []) {
-          if (conv.api_profile) {
-            const scope = conv.legacy ? ws.id : `${ws.id}/${conv.id}`;
-            overrides[`local:workspace:${scope}:local_user`] = conv.api_profile;
-          }
-        }
-      }
-      state.sessionApiOverrides = overrides;
+      // `sessionApiOverrides` **不再**从这里推导。
+      //
+      // 本事件描述的是工作区对话文档里的 `api_profile`（模块的领域数据），
+      // 而"当前哪些会话有覆盖"是 Core 的路由状态——后者由 `SessionApiOverrides`
+      // 事件整体下发（含非工作区通道）。两处都写会让同一个键有两个作者：
+      // 用户在工作区对话里清除覆盖时，这里仍从陈旧文档推导出旧值。
       return state;
     }
     case 'WorkspaceGitStatus': {
@@ -2020,6 +2010,33 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         active_api: e.active_api,
         profiles: e.profiles,
       };
+      return state;
+    }
+    case 'SessionApiOverrides': {
+      const e = (
+        event as {
+          SessionApiOverrides: {
+            team_id?: string | null;
+            overrides: { session_id: string; profile: string }[];
+            core?: string | null;
+          };
+        }
+      ).SessionApiOverrides;
+      // 归属过滤：与其它 per-persona 事件同一条规矩（跨 agent 不串显）。
+      // `team_id` 缺省 = 旧 Core 帧，放行。
+      if (e.team_id != null && state.activeTeamId != null && e.team_id !== state.activeTeamId) {
+        return state;
+      }
+      // **整体替换**，不是合并：这是 Core 的路由状态快照，"某个会话不再出现"
+      // 就是"它已经没有覆盖了"。合并会让已清除的条目永远留在前端。
+      //
+      // 与乐观更新的关系：用户点选后本地先改（见 SessionApiPicker），Core
+      // 回推的这份快照是权威值——它到达时覆盖乐观值，正是我们要的收敛方向。
+      const next: Record<string, string> = {};
+      for (const item of e.overrides ?? []) {
+        if (item.session_id && item.profile) next[item.session_id] = item.profile;
+      }
+      state.sessionApiOverrides = next;
       return state;
     }
     case 'ApiProfilesUpdated': {

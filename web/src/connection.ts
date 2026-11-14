@@ -9,7 +9,6 @@
 //!   显示 OPEN 也可能半死（设备休眠期间对端已消失而本端未察觉），发探测帧，
 //!   5s 内无任何下行帧则判死、走标准重连。
 
-import { resetReplayGuard } from './session-api';
 import { state, dispatch } from './store';
 import { coreForTeam, currentRegion, pushToast } from './state';
 import { teamKey } from './keys';
@@ -138,9 +137,6 @@ export function startConnection(): void {
       // 由下面的 since_seq 补拉负责，不该在重连后第一帧被误判成"跳号"
       // （见 event-seq.ts）。
       resetEventSeq();
-      // 会话级 API 覆盖的重放标记也要清：Core 若重启过，内存里的会话覆盖
-      // 全没了，重连后必须再把 Panel 记住的那些装回去（见 `session-api.ts`）。
-      resetReplayGuard();
       // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
       // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。
       state.tasks = [];

@@ -23,7 +23,6 @@ vi.mock('../connection', () => ({
 import SessionApiPicker from '../components/SessionApiPicker.vue';
 import SessionSwitcher from '../components/SessionSwitcher.vue';
 import { state } from '../store';
-import { cachedSessionApiOverrides } from '../session-api';
 import type { SessionInfo } from '../protocol';
 
 const WORKSPACE = 'local:workspace:echo-agent/v:local_user';
@@ -126,43 +125,36 @@ describe('会话级 API：入口在「当前会话」侧栏卡片', () => {
     wrapper.unmount();
   });
 
-  it('d) 持久化边界如实标注：工作区通道 vs 其它会话', async () => {
-    const workspace = mountPicker();
-    await openPicker(workspace);
-    expect(document.querySelector('.api-picker__hint')?.textContent).toContain('重启后仍生效');
-    workspace.unmount();
-    document.body.innerHTML = '';
-
-    const tui = mountPicker({ sessionId: TUI });
-    await openPicker(tui);
-    const hint = document.querySelector('.api-picker__hint')?.textContent ?? '';
-    // 非工作区会话的真相（2026-11）：Core 只存内存，持久化落在 Panel 侧
-    // （localStorage + 重连重放）。说"仅在本次运行有效"已不成立，但也不能
-    // 承诺"重启后仍生效"——Core 重启后要靠 Panel 连上来才能装回去。
-    expect(hint).toContain('重放');
-    expect(hint).toContain('Core 重启后');
-    expect(hint).not.toContain('重启后仍生效');
-    tui.unmount();
+  it('d) 两条路径都承诺"重启后仍生效"（都由 Core 持久化）', async () => {
+    // 2026-11 之前这里断言过"非工作区会话：Panel 记住并在重连时重放"。
+    // 那套 localStorage 补偿已删除——Core 现在持久化全部通道的覆盖
+    // （`echo-session-api-{persona}.json` + `SessionApiOverrides` 事件），
+    // 所以对用户来说两条路径不再有区别。
+    for (const sessionId of [WORKSPACE, TUI]) {
+      const wrapper = mountPicker({ sessionId });
+      await openPicker(wrapper);
+      const hint = document.querySelector('.api-picker__hint')?.textContent ?? '';
+      expect(hint, sessionId).toContain('重启后仍生效');
+      expect(hint, sessionId).not.toContain('重放');
+      wrapper.unmount();
+      document.body.innerHTML = '';
+    }
   });
 
-  it('d2) 非工作区会话选择后写进 Panel 缓存（刷新后能重放）；工作区不写', async () => {
+  it('d2) 选择后只发命令，不写任何本地存储（Core 是唯一作者）', async () => {
     localStorage.clear();
     const tui = mountPicker({ sessionId: TUI });
     const options = await openPicker(tui);
     // 索引 0 = 「跟随 persona」，1 = kimi，2 = deepseek
     options[2]!.click();
     await nextTick();
-    expect(cachedSessionApiOverrides('core-a', 'alice')).toEqual({ [TUI]: 'deepseek' });
+    expect(sendCommand).toHaveBeenCalledWith(
+      { SetSessionApi: { team_id: 'alice', session_id: TUI, profile: 'deepseek' } },
+      'core-a',
+    );
+    // localStorage 里不该出现覆盖缓存：多浏览器场景下它会互相覆盖
+    expect(JSON.stringify(localStorage)).not.toContain('deepseek');
     tui.unmount();
-    document.body.innerHTML = '';
-
-    const workspace = mountPicker();
-    const woptions = await openPicker(workspace);
-    woptions[2]!.click();
-    await nextTick();
-    // 工作区对话的真值在对话 JSON（Core 写），Panel 记第二份会让"别处清除"复活
-    expect(cachedSessionApiOverrides('core-a', 'alice')).toEqual({ [TUI]: 'deepseek' });
-    workspace.unmount();
   });
 
   // 2026-11 用户报「点开弹出的框超出边界，按不到」。

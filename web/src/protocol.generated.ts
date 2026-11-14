@@ -365,7 +365,15 @@ active_api: string,
 /**
  * All saved API profiles.
  */
-profiles: Array<ApiProfileInfo>, } } | { "RemoteApiProfiles": { peer: string, active: JsonValue | null, profiles: Array<JsonValue>, error: string | null, } } | { "ApiProfilesUpdated": { active_api: string, profiles: Array<ApiProfileInfo>, } } | { "SkillsList": { skills: Array<SkillInfo>, } } | { "ToolsList": { tools: Array<ToolInfo>, } } | { "ModulesList": { modules: Array<ModuleInfo>, } } | { "ModuleOpResult": { 
+profiles: Array<ApiProfileInfo>, } } | { "SessionApiOverrides": { 
+/**
+ * 归属人格（会话 id 已含通道前缀，这里只用于 Panel 过滤）。
+ */
+team_id?: string | null, 
+/**
+ * 当前全部覆盖（只含有覆盖的会话；空 = 没有任何会话被覆盖）。
+ */
+overrides: Array<SessionApiOverrideEntry>, } } | { "RemoteApiProfiles": { peer: string, active: JsonValue | null, profiles: Array<JsonValue>, error: string | null, } } | { "ApiProfilesUpdated": { active_api: string, profiles: Array<ApiProfileInfo>, } } | { "SkillsList": { skills: Array<SkillInfo>, } } | { "ToolsList": { tools: Array<ToolInfo>, } } | { "ModulesList": { modules: Array<ModuleInfo>, } } | { "ModuleOpResult": { 
 /**
  * 目标模块 id。
  */
@@ -1121,6 +1129,15 @@ path: string, is_dir: boolean,
  */
 size: number, };
 export type ApiProfileInfo = { name: string, provider: string, model: string, base_url: string, api_key_set: boolean, thinking: ThinkingMode, reasoning_effort: ReasoningEffort, };
+export type SessionApiOverrideEntry = { 
+/**
+ * 会话 id（含通道前缀，如 `local:tui::local_user`）。
+ */
+session_id: string, 
+/**
+ * profile 名（非空；空覆盖不出现——空 = 无覆盖）。
+ */
+profile: string, };
 export type ApiMetricsEntry = { 
 /**
  * 配置名（空 = 顶层默认配置）。

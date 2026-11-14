@@ -28,7 +28,6 @@ import { state } from '../store';
 import {
   effectiveSessionApi,
   profileMissing,
-  rememberSessionApiOverride,
   sessionApiPersistent,
 } from '../session-api';
 
@@ -120,11 +119,9 @@ function choose(value: string) {
       target,
     );
   }
-  // 非工作区通道的覆盖 Core 只存内存（`persist_session_api_profile` 直接跳过
-  // 非 `local:workspace:`），刷新页面后没有任何事件能读回来。Panel 自己记一份
-  // 并在重连时重放（见 `session-api.ts` 的"为什么必须由 Panel 记"）。
-  // 工作区对话不记：那边的真值在对话 JSON 里，记第二份会让"别处清除"失效。
-  rememberSessionApiOverride(props.core, props.teamId, props.sessionId, value || null);
+  // 不写任何本地存储：覆盖由 Core 持久化（`session_api_store`），随
+  // `SessionApiOverrides` 事件回推。Panel 记第二份会在多浏览器场景下互相覆盖
+  // ——A 设 deepseek、B 拿旧缓存回放 kimi，而 Core 的路由只可能是其中一个。
   close();
 }
 
@@ -139,9 +136,12 @@ const triggerTitle = computed(() => {
   const profile = name ? ` · profile「${name}」` : '';
   const missing = profileMissing(state, name) ? '（供应商池中无此 profile，实际回落顶层默认）' : '';
   const head = `当前会话 API：${label || '未知'}\n来源：${scope}${profile}${missing}`;
+  // 两条路径现在都是"Core 持久化"——差别只在存哪：工作区对话写进对话文档
+  // （模块的领域数据，Panel 的 ProDoc/工作区视图要读），其余通道写进
+  // `echo-session-api-{persona}.json`。对用户是同一件事：重启后仍生效。
   return persistent.value
     ? `${head}\n点开可改为其它供应商（会写入该工作区对话）`
-    : `${head}\n点开可改为其它供应商（非工作区会话：Panel 记住并在重连时重放，Core 重启后失效）`;
+    : `${head}\n点开可改为其它供应商（由 Core 持久化，重启后仍生效）`;
 });
 </script>
 
@@ -202,7 +202,7 @@ const triggerTitle = computed(() => {
           {{
             persistent
               ? '写入该工作区对话，重启后仍生效。'
-              : '非工作区会话：Panel 记住并在重连时重放（Core 重启后回到 persona 配置）。'
+              : '由 Core 持久化（`echo-session-api`），重启后仍生效。'
           }}
         </div>
       </div>
