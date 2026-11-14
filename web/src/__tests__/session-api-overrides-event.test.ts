@@ -71,6 +71,26 @@ describe('SessionApiOverrides 事件', () => {
     expect(state.sessionApiOverrides[TUI]).toBe('deepseek');
   });
 
+  // 这条钉住 Core 侧「进程级快照」的契约：`team_id` 缺省 = 这份载荷是**全进程**
+  // 的，不是某个 agent 的切片。Core 过去按团队发局部表，而 Panel 这里是整体
+  // 替换——于是刷新（RequestState）时那个没有任何覆盖的 agent 一回消息，整张
+  // 表就被替成空的，表现为「换完会话模型一刷新就变回去」（2026-11 用户报障）。
+  it('team_id 缺省 = 进程级快照，无论当前激活哪个 agent 都整份采纳', () => {
+    state.activeTeamId = 'echocode';
+    state = reduce(
+      state,
+      overridesEvent(
+        [
+          { session_id: TUI, profile: 'deepseek' },
+          { session_id: WORKSPACE, profile: 'opencode' },
+        ],
+        null,
+      ),
+    );
+    expect(state.sessionApiOverrides[TUI]).toBe('deepseek');
+    expect(state.sessionApiOverrides[WORKSPACE]).toBe('opencode');
+  });
+
   it('其他 agent 的覆盖不串显', () => {
     state = reduce(
       state,
