@@ -11,7 +11,9 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::Instant;
-use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
+use tokio_tungstenite::{
+    connect_async_with_config, tungstenite::client::IntoClientRequest,
+};
 use tracing::{debug, info, warn};
 
 /// 心跳间隔：每 30s 向两侧各发一次 Ping。
@@ -226,6 +228,24 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for PeerAddr {
     }
 }
 
+/// Panel↔浏览器 与 Panel↔Core 两侧 websocket 的帧/消息上限。
+///
+/// **必须与 Core 的 `WS_FRAME_MAX_BYTES` 同值或更大**：这条链路上有两跳
+/// （浏览器 → Panel → Core），任何一跳的上限更小都会把带附件的命令截断，
+/// 而截断的表现是连接断开 + 消息静默丢失，前端拿不到任何错误。
+///
+/// 32 MiB 的依据：单附件上限 20 MB（`echo_defs::attachment_store`）+ base64
+/// 的 33% 膨胀 + JSON 信封余量。
+const WS_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+        max_message_size: Some(WS_MAX_BYTES),
+        max_frame_size: Some(WS_MAX_BYTES),
+        ..Default::default()
+    }
+}
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -236,7 +256,9 @@ pub async fn ws_handler(
     if !state.authorized(&headers, params.get("token").map(String::as_str)) {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
     }
-    ws.on_upgrade(move |socket| bridge(socket, state, peer.0))
+    ws.max_message_size(WS_MAX_BYTES)
+        .max_frame_size(WS_MAX_BYTES)
+        .on_upgrade(move |socket| bridge(socket, state, peer.0))
         .into_response()
 }
 
@@ -421,7 +443,8 @@ async fn connect_upstream_raw(
     // 循环，健康表永远"连接中"）。
     match tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        connect_async(core_request),
+        // 第三个参数 disable_nagle：保持与 `connect_async` 一致（false）。
+        connect_async_with_config(core_request, Some(ws_config()), false),
     )
     .await
     {

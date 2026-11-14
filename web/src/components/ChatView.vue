@@ -25,8 +25,9 @@ import ChatTabs from './ChatTabs.vue';
 import { chatTabs, ensureChatTabsLoaded, syncActiveTab, type ChatTab } from '../chat-tabs';
 
 import { state } from '../store';
+import type { IncomingFile, PendingFile } from '../protocol';
 import { effectiveSessionApi, profileMissing } from '../session-api';
-import { checklistsForSession, sessionMessagesFor } from '../state';
+import { checklistsForSession, pushToast, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
@@ -263,7 +264,7 @@ async function focusArchiveBoundary(prefer: 'first' | 'last'): Promise<void> {
 }
 
 const emit = defineEmits<{
-  send: [content: string, images: string[]];
+  send: [content: string, images: string[], files: PendingFile[]];
   cancel: [];
   selectTeam: [id: string | null, core: string | null];
   selectSession: [id: string];
@@ -297,6 +298,38 @@ function onTabSelect(tab: ChatTab): void {
 const input = ref('');
 /** 待发送图片（data URL 形式） */
 const attachments = ref<string[]>([]);
+
+/**
+ * 待发送文件（非图片）。
+ *
+ * 与 `attachments` 分开的理由是**下游完全不同**：图片进 `images` 作为多模态
+ * 载荷发给模型（Core 落盘为 `/media/<id>`），文件进 `files` 只落盘成绝对路径，
+ * 由 agent 用 `read_file` 去读。混在一个数组里，Core 只能靠嗅探猜类型。
+ *
+ * `data` 是 base64（不含 `data:` 前缀）：浏览器 FileReader 给的是 data URI，
+ * 这里剥掉前缀——协议层两种都接受，但省下的 20 字节/文件是白省的。
+ */
+interface PendingAttachmentFile {
+  name: string;
+  size: number;
+  data: string;
+}
+const pendingFiles = ref<PendingAttachmentFile[]>([]);
+
+/**
+ * 单文件上限：20 MB。
+ *
+ * 与 Core 的 `attachment_store::MAX_ATTACHMENT_BYTES` 同值——前端先拦是为了
+ * 给出**立刻的**反馈（读 20 MB → base64 → 等 ws 往返才被拒，用户会以为卡死），
+ * 而 Core 侧仍要独立校验：前端校验不是安全边界。
+ */
+const MAX_PENDING_FILE_BYTES = 20 * 1024 * 1024;
+
+/** 拖拽悬停状态（只在输入区高亮，不接管全局 drop）。 */
+const fileDragActive = ref(false);
+/** 拖拽深度计数：dragenter/dragleave 在子元素间移动时会成对触发，直接
+ * 用布尔量会在光标划过子元素时闪断。 */
+let fileDragDepth = 0;
 
 // ── 输入条毛玻璃性能策略（2026-09-18）──
 // 跨行拖选文字每帧触发输入条（大面积 backdrop-filter）全量重栅格化，
@@ -1838,19 +1871,108 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+/** 读成 base64（去掉 `data:...;base64,` 前缀）。 */
+function readFileBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.onload = () => {
+      const result = String(reader.result ?? '');
+      const marker = ';base64,';
+      const at = result.indexOf(marker);
+      resolve(at === -1 ? result : result.slice(at + marker.length));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * 接收拖入 / 粘贴的文件：图片走预览，其余走文件附件。
+ *
+ * 超限的文件**逐个报告**而不是静默跳过：用户拖了 5 个文件、其中 1 个是
+ * 100 MB 的视频时，"4 个成功"和"5 个成功但有一个永远是空的"是两种体验。
+ */
 async function addFiles(files: FileList | File[]) {
-  const list = Array.from(files).filter((f) => f.type.startsWith('image/'));
+  const list = Array.from(files);
+  const rejected: string[] = [];
   for (const file of list) {
-    try {
-      attachments.value.push(await fileToDataUrl(file));
-    } catch {
-      // 跳过无法解码的文件
+    if (file.type.startsWith('image/')) {
+      try {
+        attachments.value.push(await fileToDataUrl(file));
+      } catch {
+        // 跳过无法解码的图片
+      }
+      continue;
     }
+    if (file.size > MAX_PENDING_FILE_BYTES) {
+      rejected.push(file.name);
+      continue;
+    }
+    try {
+      pendingFiles.value.push({
+        name: file.name || 'file',
+        size: file.size,
+        data: await readFileBase64(file),
+      });
+    } catch {
+      rejected.push(file.name);
+    }
+  }
+  if (rejected.length) {
+    pushToast(
+      state,
+      `文件过大或读取失败（上限 ${MAX_PENDING_FILE_BYTES / 1024 / 1024} MB）：${rejected.join('、')}`,
+      'error',
+    );
   }
 }
 
 function removeAttachment(index: number) {
   attachments.value.splice(index, 1);
+}
+
+function removePendingFile(index: number) {
+  pendingFiles.value.splice(index, 1);
+}
+
+/** 人类可读体积（附件条展示用）。 */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * 拖拽进入输入区。
+ *
+ * 只认 `Files`（外部文件拖入）：面板内部有 rail 卡片拖拽（`rail-drag`），
+ * 不拦的话内部拖拽会被当成文件投放；反之亦然，所以两侧都判 `types`。
+ */
+function onFileDragEnter(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  fileDragDepth += 1;
+  fileDragActive.value = true;
+}
+
+function onFileDragOver(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  // 必须 preventDefault：否则浏览器会用默认行为（导航到该文件）替换整页。
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+}
+
+function onFileDragLeave() {
+  fileDragDepth = Math.max(0, fileDragDepth - 1);
+  if (fileDragDepth === 0) fileDragActive.value = false;
+}
+
+function onFileDrop(event: DragEvent) {
+  const dropped = event.dataTransfer?.files;
+  if (!dropped || dropped.length === 0) return;
+  event.preventDefault();
+  fileDragDepth = 0;
+  fileDragActive.value = false;
+  void addFiles(dropped);
 }
 
 function onPaste(event: ClipboardEvent) {
@@ -1861,10 +1983,11 @@ function onPaste(event: ClipboardEvent) {
   }
 }
 
-// 发送：文本 + 图片一起发出；发送后清空附件。
+// 发送：文本 + 图片 + 文件一起发出；发送后清空。
 function onSend(content: string) {
-  emit('send', content, attachments.value.slice());
+  emit('send', content, attachments.value.slice(), pendingFiles.value.slice());
   attachments.value = [];
+  pendingFiles.value = [];
 }
 
 // 消息是否带图（ChatMessage 类型无 images，扩展字段来自 chat-adapter）
@@ -1872,6 +1995,17 @@ function onSend(content: string) {
 // data URI），要么是空串（Core 侧"图片已省略"占位，保留数组长度以便计数）。
 function imagesOf(message: ChatMessage): string[] {
   return (message as ChatMessageWithImages).images ?? [];
+}
+
+/**
+ * 消息里已落盘的文件附件。
+ *
+ * 展示用：用户发过的文件在气泡里要看得见（否则刷新后只剩 agent 那边的路径，
+ * 用户没法确认自己到底发了什么）。`error` 非空 = Core 没存下，照样显示，
+ * 但标出来——静默消失比显示一个失败项糟糕得多。
+ */
+function filesOf(message: ChatMessage): IncomingFile[] {
+  return (message as ChatMessageWithImages).files ?? [];
 }
 
 // 媒体引用地址：`/media/<id>` 附当前运行区域的 `?core=` 提示——Panel 后端
@@ -2186,6 +2320,21 @@ function mediaSrc(img: string): string {
                 </span>
               </template>
             </div>
+            <div v-if="filesOf(row.message).length" class="chat-view__sent-files">
+              <div
+                v-for="(f, i) in filesOf(row.message)"
+                :key="`${f.name}-${i}`"
+                class="chat-view__sent-file"
+                :class="{ 'chat-view__sent-file--failed': !f.path }"
+                :title="f.path ?? f.error ?? ''"
+              >
+                <PanelIcon name="file" size="xs" />
+                <span class="chat-view__sent-file-name">{{ f.name }}</span>
+                <span class="chat-view__sent-file-size">
+                  {{ f.path ? formatBytes(f.size) : (f.error ?? '未保存') }}
+                </span>
+              </div>
+            </div>
             <MessageItem
               :message="row.message"
               :format-time="formatTime"
@@ -2310,10 +2459,16 @@ function mediaSrc(img: string): string {
         'chat-composer-float--clipped': composerClip !== 'none',
         // 键盘抬起 = 屏幕下角让位给键盘，底部留白随之归零（见 --composer-bottom-gap）
         'chat-composer-float--keyboard': keyboardVisible,
+        // 拖入文件时高亮（见下方 --drop 样式）
+        'chat-composer-float--drop': fileDragActive,
       }"
       :style="composerStyle"
       @focusin="onComposerFocus"
       @focusout="onComposerBlur"
+      @dragenter.prevent="onFileDragEnter"
+      @dragover="onFileDragOver"
+      @dragleave="onFileDragLeave"
+      @drop="onFileDrop"
     >
       <!-- 投影补层（只在移动端 clip 生效时显示）：见下方 __halo 的样式注释 ——
            `clip-path` 会把卡片**自身**的外阴影一起裁掉，手机上的悬浮观感只能
@@ -2347,6 +2502,23 @@ function mediaSrc(img: string): string {
                 title="移除"
                 aria-label="移除图片"
                 @click="removeAttachment(i)"
+              >
+                <PanelIcon name="close" size="xs" />
+              </button>
+            </div>
+          </div>
+          <!-- 待发送文件：只显示名字与体积（不预览内容——可能是 PDF/zip/源码）。
+               文件名来自浏览器，Core 落盘前会再消毒一次。 -->
+          <div v-if="pendingFiles.length" class="chat-view__files">
+            <div v-for="(f, i) in pendingFiles" :key="`${f.name}-${i}`" class="chat-view__file">
+              <PanelIcon name="file" size="xs" />
+              <span class="chat-view__file-name" :title="f.name">{{ f.name }}</span>
+              <span class="chat-view__file-size">{{ formatBytes(f.size) }}</span>
+              <button
+                class="chat-view__file-remove"
+                title="移除"
+                aria-label="移除文件"
+                @click="removePendingFile(i)"
               >
                 <PanelIcon name="close" size="xs" />
               </button>
@@ -2987,6 +3159,125 @@ function mediaSrc(img: string): string {
   color: var(--nm-text-primary);
   background: var(--nm-surface-raised);
 }
+/* 待发送文件条：一行一个文件（名字可能很长，超出省略、hover 看全名）。 */
+.chat-view__files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  /* 与图片区同宽策略：跟着输入框走，不撑破卡片 */
+  min-width: 0;
+}
+.chat-view__file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px 3px 8px;
+  border-radius: 9px;
+  background: var(--nm-surface-color);
+  border: 1px solid var(--nm-border-subtle);
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+  max-width: 320px;
+}
+.chat-view__file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--nm-text-primary);
+}
+.chat-view__file-size {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+.chat-view__file-remove {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--nm-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.chat-view__file-remove:hover {
+  color: var(--nm-text-primary);
+  background: var(--nm-surface-raised);
+}
+
+/* 已发送的文件（用户气泡上方，与待发送的 `.chat-view__file` 同形但不可移除） */
+.chat-view__sent-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  align-items: flex-end;
+}
+.chat-view__sent-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 320px;
+  padding: 3px 8px;
+  border-radius: 9px;
+  background: var(--nm-surface-color);
+  border: 1px solid var(--nm-border-subtle);
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+}
+/* 未落盘（超过上限 / 写盘失败）：整行降饱和 + 错误色文字，肉眼可辨。 */
+.chat-view__sent-file--failed {
+  opacity: 0.7;
+  border-style: dashed;
+  border-color: var(--panel-err);
+}
+.chat-view__sent-file--failed .chat-view__sent-file-size {
+  color: var(--panel-err);
+}
+.chat-view__sent-file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--nm-text-primary);
+}
+.chat-view__sent-file-size {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* 拖入文件时输入区高亮：只用描边与底色，不加 blur/阴影——
+   拖拽期间每次 dragover 都可能触发重绘，这条路径上不能再叠滤镜。 */
+.chat-composer-float--drop :deep(.chat-composer-float__card) {
+  outline: 2px dashed var(--panel-accent);
+  outline-offset: -6px;
+}
+.chat-composer-float--drop .chat-composer-float__body::after {
+  content: '松手即可添加文件';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--panel-accent) 8%, transparent);
+  color: var(--panel-accent);
+  font-size: 13px;
+  pointer-events: none;
+}
+
 .chat-view__attach-btn {
   border: none;
   background: transparent;

@@ -30,7 +30,11 @@ seq: number,
  */
 entry: string | null, event: BackendEvent, };
 export type Emit = { event: BackendEvent, entry: string | null, };
-export type BackendCommand = { "SendMessage": { session_id: string, content: string, images: Array<string>, team_id: string | null, } } | { "SwitchModel": { model: string, } } | { "SwitchProvider": { provider: string, } } | { "SetSystemPrompt": { prompt: string, } } | "RequestSystemPrompt" | { "UpdateApiConfig": { name: string, provider: string, model: string, base_url: string, api_key: string, thinking: ThinkingMode | null, reasoning_effort: ReasoningEffort | null, } } | { "SwitchApi": { name: string, } } | { "SetSessionApi": { team_id: string | null, session_id: string, profile: string, } } | { "ClearSessionApi": { team_id: string | null, session_id: string, } } | { "RequestRemoteApiProfiles": { peer: string, } } | { "TestApi": { name: string, } } | { "QueryApiBalance": { name: string, } } | { "QueryApiMetrics": { name: string, } } | { "DeleteApi": { name: string, } } | { "RenameApi": { from: string, to: string, } } | "RequestState" | { "ToggleSkill": { name: string, enabled: boolean, } } | { "ToggleTool": { name: string, enabled: boolean, } } | { "SaveSkill": { name: string, description: string, keywords: Array<string>, always: boolean, category: string, content: string, 
+export type BackendCommand = { "SendMessage": { session_id: string, content: string, images: Array<string>, 
+/**
+ * 面板随消息拖入的文件（字节内嵌，Core 负责落盘并告知 agent 路径）。
+ */
+files: Array<PendingFile>, team_id: string | null, } } | { "SwitchModel": { model: string, } } | { "SwitchProvider": { provider: string, } } | { "SetSystemPrompt": { prompt: string, } } | "RequestSystemPrompt" | { "UpdateApiConfig": { name: string, provider: string, model: string, base_url: string, api_key: string, thinking: ThinkingMode | null, reasoning_effort: ReasoningEffort | null, } } | { "SwitchApi": { name: string, } } | { "SetSessionApi": { team_id: string | null, session_id: string, profile: string, } } | { "ClearSessionApi": { team_id: string | null, session_id: string, } } | { "RequestRemoteApiProfiles": { peer: string, } } | { "TestApi": { name: string, } } | { "QueryApiBalance": { name: string, } } | { "QueryApiMetrics": { name: string, } } | { "DeleteApi": { name: string, } } | { "RenameApi": { from: string, to: string, } } | "RequestState" | { "ToggleSkill": { name: string, enabled: boolean, } } | { "ToggleTool": { name: string, enabled: boolean, } } | { "SaveSkill": { name: string, description: string, keywords: Array<string>, always: boolean, category: string, content: string, 
 /**
  * 系统提示词 skill（system: true）：内容注入 base 区。
  */
@@ -138,6 +142,10 @@ channel: string, group_name: string | null, content: string,
  * Multimodal media attached to the message (URLs / data URIs).
  */
 images?: Array<string>, 
+/**
+ * 已落盘的文件附件（面板拖入 / 平台上传）。
+ */
+files?: Array<IncomingFile>, 
 /**
  * Source/platform timestamp in Unix seconds.
  */
@@ -713,6 +721,13 @@ time: number, source?: TimelineSource | null, reasoning?: Array<string> | null, 
  */
 images?: Array<string> | null, 
 /**
+ * 随消息落盘的文件附件（面板拖入 / 平台上传）。
+ *
+ * 面板据此在用户气泡下方显示「📎 报告.pdf · 1.2 MB」——没有它，刷新后
+ * 附件只剩 agent 上下文里的路径，用户看不到自己发过什么。
+ */
+files?: Array<IncomingFile> | null, 
+/**
  * 本条目对应的**压缩前归档**文件名（只有压缩提示行会带）。
  *
  * 面板据此在"上下文已压缩"那一行给出「查看压缩前的历史」入口——
@@ -737,6 +752,34 @@ seq: number,
  * 才是稳定锚点。
  */
 ord: number, };
+export type IncomingFile = { 
+/**
+ * File name as shown to the user (e.g. `report.pdf`).
+ */
+name: string, 
+/**
+ * Absolute path of the saved file; `None` when saving failed (see
+ * `error`) or was skipped (e.g. over the size limit).
+ */
+path?: string, 
+/**
+ * File size in bytes (0 = unknown).
+ */
+size: number, 
+/**
+ * Failure/skip reason when `path` is `None`.
+ */
+error?: string, };
+export type PendingFile = { 
+/**
+ * 用户看到的文件名（`report.pdf`）。Core 落盘前消毒，不可信。
+ */
+name: string, 
+/**
+ * base64 字节。也接受 `data:<mime>;base64,` 前缀（浏览器 FileReader 的
+ * 原生输出就是那种形状，前端不必先剥）。
+ */
+data: string, };
 export type BrowseRoot = { 
 /**
  * 展示名（Panel 主标签），如「家目录」「<工作区名>」。

@@ -14,6 +14,7 @@ import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
 import { teamKey } from './keys';
 import { requestActiveRegionManagement, requestTimeline, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
+import type { PendingFile } from './protocol';
 import { currentTeam } from './capabilities';
 import {
   beforeSessionPick,
@@ -327,7 +328,13 @@ function selectExtensionView(viewId: string): void {
 
 
 
-function send(content: string, images: string[] = []) {
+/**
+ * 发送一条用户消息。
+ *
+ * `files` 是随消息拖入的文件（字节 base64）：它们**不是**图片——图片走
+ * `images` 作为多模态载荷发给模型，文件只落盘并把路径交给 agent。
+ */
+function send(content: string, images: string[] = [], files: PendingFile[] = []) {
   const target =
     activeSessionId.value === 'global' ? 'local:tui::local_user' : activeSessionId.value;
   // 深度融合 P2 调度：目标会话无 core 归属（新会话/默认本地会话）时，
@@ -349,6 +356,7 @@ function send(content: string, images: string[] = []) {
         session_id: target,
         content,
         images,
+        files,
         // 去主智能体：team_id 必填（core 无"默认人格"兜底）。
         team_id: activeTeamId.value ?? null,
       },

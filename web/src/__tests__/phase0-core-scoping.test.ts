@@ -152,7 +152,7 @@ describe('Phase 0：同名会话路由优先 activeRegion', () => {
     s.activeRegion = 'core-b';
     s.activeRegion = 'core-b';
     sendCommand({
-      SendMessage: { session_id: SID, content: 'hi', images: [], team_id: 'default' },
+      SendMessage: { session_id: SID, content: 'hi', images: [], files: [], team_id: 'default' },
     });
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-b');

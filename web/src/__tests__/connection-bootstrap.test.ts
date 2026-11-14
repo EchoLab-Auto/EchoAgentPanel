@@ -149,7 +149,7 @@ describe('重连引导命令（去主智能体）', () => {
         team_id: 'bot',
         content: 'hi',
         images: [],
-      },
+      files: [], },
     });
     expect(ws.sent.some((c) => c.includes('SendMessage'))).toBe(false);
     // onopen 前 TeamsList 到达：人格 bot 实际归属 core-b。

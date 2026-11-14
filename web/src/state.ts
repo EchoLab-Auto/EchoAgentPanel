@@ -22,6 +22,7 @@ import type {
   CompactionPhase,
   ContextBlockInfo,
   ContextMessageInfo,
+  IncomingFile,
   SessionInfo,
   SkillInfo,
   ThinkingMode,
@@ -275,6 +276,14 @@ export interface DisplayMessage {
   tool?: ToolMsg;
   /** 多模态附件（图片 URL / data URI） */
   images?: string[];
+  /**
+   * 随消息落盘的文件附件（面板拖入 / 平台上传）。
+   *
+   * 与 `images` 分开：图片会作为多模态载荷发给模型，文件只是一个路径
+   * （agent 用 read_file 去读）。混在一起就会让 Core 试着把 PDF 当图片
+   * 塞进 content block。
+   */
+  files?: IncomingFile[];
   /** 临时回复分支的合并块（分支结束后插入主会话） */
   branch?: {
     branchId: string;
@@ -2397,6 +2406,7 @@ function reduceMessage(
     group_name: string | null;
     content: string;
     images?: string[];
+    files?: IncomingFile[];
     timestamp: number;
     received_at_ms: number;
     message_sequence: number;
@@ -2433,6 +2443,7 @@ function reduceMessage(
         group_name: e.group_name,
       },
       images: e.images && e.images.length ? e.images : undefined,
+      files: e.files && e.files.length ? e.files : undefined,
     });
   }
   return state;

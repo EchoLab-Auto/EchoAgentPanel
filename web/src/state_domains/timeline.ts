@@ -445,6 +445,7 @@ export function mergeTimelineEntry(list: DisplayMessage[], incoming: DisplayMess
     live.tool = incoming.tool;
     live.reasoning = incoming.reasoning;
     live.images = incoming.images;
+    live.files = incoming.files;
     live.branch = incoming.branch;
     live.subagent = incoming.subagent;
     live.source = incoming.source;
@@ -483,6 +484,7 @@ export function toDisplayMessage(message: TimelineMessage): DisplayMessage {
       content: displayContentOf(message.content),
       source: message.source ?? null,
       images: message.images && message.images.length ? message.images : undefined,
+      files: message.files && message.files.length ? message.files : undefined,
     };
   }
   if (message.kind === 'backend') {

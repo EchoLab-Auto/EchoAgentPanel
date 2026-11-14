@@ -4,6 +4,7 @@
 import type { ChatBranchEntry, ChatMessage, ChatToolCall } from '@echolab-auto/ui-frame/chat';
 import type { BranchMsg, DisplayMessage } from './state';
 import type { SubagentEventInfo } from './state_domains/timeline';
+import type { IncomingFile } from './protocol';
 
 /** 与库默认一致，但显式锁定 zh-CN（库默认用浏览器 locale）。
  *
@@ -76,6 +77,13 @@ const asVendorToolStatus = (status: LocalToolStatus): NonNullable<ChatToolCall['
 
 export interface ChatMessageWithImages extends ChatMessage {
   images?: string[];
+  /**
+   * 已落盘的文件附件（面板拖入 / 平台上传）。
+   *
+   * 与 `images` 并列而非合并：图片渲染成缩略图，文件渲染成"名字 + 体积"行，
+   * 两者的可交互性也不同（图片可放大、文件不可预览）。
+   */
+  files?: IncomingFile[];
   /** 实时消息标记（渲染层据此播放场动画/打字机；历史回放不播放） */
   animate?: boolean;
   /** 真流式（2026-10）：内容随增量增长中（推理块自动展开并钉底，不播打字机）。 */
@@ -107,6 +115,7 @@ export function compactForDisplay(content: string, images?: string[]): string {
 
 export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
   return {
+    files: m.files,
     id: m.key, // 'm{N}' → id
     // backend → agent（库的角色命名）；reasoning 为面板扩展角色，由
     // ChatView 的自渲染行循环拦截渲染（2026-09-19 起列表自渲染；

@@ -168,7 +168,7 @@ describe('sendCommand 人格归属路由守卫', () => {
     const ws = await connect();
     s.teams = [team('default', 'core-a')];
     sendCommand({
-      SendMessage: { session_id: 'new', content: 'hi', images: [], team_id: 'default' },
+      SendMessage: { session_id: 'new', content: 'hi', images: [], files: [], team_id: 'default' },
     });
     const last = JSON.parse(ws.sent[ws.sent.length - 1]) as { core: string };
     expect(last.core).toBe('core-a');
