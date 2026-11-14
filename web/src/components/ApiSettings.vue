@@ -448,6 +448,20 @@ function requestChatGptStatus() {
   sendCommand('RequestChatGptStatus');
 }
 
+/**
+ * 局域网访问时该在本机跑的那条 SSH 隧道命令。
+ *
+ * 用 `location.hostname` 而不是写死 localhost：用户从局域网访问面板时，
+ * 那个 hostname 就是他实际能连到 Core 机器的地址，直接填进示例最不容易出错。
+ */
+const lanTunnelHint = computed(() => {
+  const host =
+    typeof window !== 'undefined' && window.location.hostname
+      ? window.location.hostname
+      : '<core-host>';
+  return `ssh -N -L 1455:127.0.0.1:1455 ${host}`;
+});
+
 /** 打开授权 URL（新标签页）。 */
 function openChatGptAuthUrl() {
   const url = chatgptLogin.value.url;
@@ -926,6 +940,17 @@ watch(
               打开
             </NeumorphismButton>
           </div>
+          <!-- 局域网访问的关键提醒（2026-11）：
+               `redirect_uri` 固定是 http://localhost:1455，而 **localhost 指
+               浏览器所在的那台机器**。从别的机器打开面板时，跳转会打到那台
+               机器自己的 1455，Core 收不到——用户看到"无法访问此网站"却完全
+               看不出为什么。这段提示是唯一能在界面上说清这件事的地方。 -->
+          <div class="chatgpt-login__lan muted">
+            登录由 Core 接收回调（固定 <code>localhost:1455</code>）。
+            如果在**另一台机器**上打开这个链接，跳转会打到那台机器自己的
+            1455、Core 收不到。在浏览器那台机器上先开隧道：
+            <code>{{ lanTunnelHint }}</code>
+          </div>
           <NeumorphismButton size="small" variant="glass" @click="cancelChatGptLogin">
             取消登录
           </NeumorphismButton>
@@ -1387,6 +1412,20 @@ watch(
   border-radius: 6px;
   background: var(--nm-surface-raised);
 }
+/* 局域网访问提醒：小一号、灰一点，但必须常显——这条提示缺失时用户只会
+   看到浏览器的"无法访问此网站"，完全无法联想到回调落点问题。 */
+.chatgpt-login__lan {
+  font-size: 11px;
+  line-height: 1.6;
+}
+.chatgpt-login__lan code {
+  font-size: 11px;
+  word-break: break-all;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--nm-surface-raised);
+}
+
 .chatgpt-login__error {
   font-size: 12px;
   color: var(--panel-err);

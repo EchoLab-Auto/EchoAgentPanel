@@ -146,6 +146,22 @@ describe('ApiSettings · ChatGPT 订阅登录', () => {
     expect(sendCommand).toHaveBeenCalledWith('StartChatGptLogin');
   });
 
+  // 局域网访问是**真实发生过的失败**：用户在另一台机器上打开面板，点登录、
+  // 打开授权链接，浏览器跳回 `localhost:1455`——那是他自己的机器，Core 收不到。
+  // 界面必须常显这条提醒，否则用户只会看到浏览器的"无法访问此网站"。
+  it('授权链接旁给出局域网访问的提醒与隧道命令', async () => {
+    const wrapper = await mountWithChatGpt();
+    feed({ ChatGptLoginPending: { url: 'https://auth.openai.com/x', redirect_uri: '' } });
+    await wrapper.vm.$nextTick();
+
+    const hint = wrapper.find('.chatgpt-login__lan');
+    expect(hint.exists()).toBe(true);
+    expect(hint.text()).toContain('localhost:1455');
+    expect(hint.text()).toContain('另一台机器');
+    // 隧道命令要带端口转发，且用当前访问的 host（jsdom 里是 localhost）。
+    expect(hint.text()).toContain('-L 1455:127.0.0.1:1455');
+  });
+
   it('「取消登录」发 CancelChatGptLogin', async () => {
     const wrapper = await mountWithChatGpt();
     feed({ ChatGptLoginPending: { url: 'https://auth.openai.com/x', redirect_uri: '' } });
