@@ -68,7 +68,7 @@ describe('ApiSettings 快捷模板', () => {
     await wrapper.find('.profile-add-row button').trigger('click');
 
     const items = wrapper.findAll('.template-item');
-    expect(items.length).toBe(8);
+    expect(items.length).toBe(9);
     const labels = items.map((i) => i.find('.template-name').text());
     expect(labels).toEqual([
       'DeepSeek',
@@ -76,6 +76,8 @@ describe('ApiSettings 快捷模板', () => {
       '中转站（OpenAI 兼容）',
       'OpenCode Go（订阅）',
       'OpenCode Zen（按量）',
+      // ChatGPT 订阅（2026-11）：凭据是 OAuth 登录态，不是 api_key。
+      'ChatGPT 订阅',
       'OpenAI',
       'Anthropic',
       'Ollama（本地）',

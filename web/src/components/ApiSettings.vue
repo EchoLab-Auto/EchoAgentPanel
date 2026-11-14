@@ -105,6 +105,18 @@ const TEMPLATES: ApiTemplate[] = [
     hint: 'Zen 按量付费（$20 起充）；与 Go 共用同一个 Console Key，端点少一层 /go 前缀',
   },
   {
+    key: 'openai-chatgpt',
+    label: 'ChatGPT 订阅',
+    provider: 'openai-chatgpt',
+    // base_url 会被 Core 忽略（这条通道只有 chatgpt.com/backend-api/codex 一个入口）
+    base_url: '',
+    // api_key 故意留空：凭据是 OAuth 登录态
+    model: 'gpt-5-codex',
+    thinking: 'enabled',
+    reasoning: 'max',
+    hint: '用 Plus/Pro 订阅额度，不消耗 API 计费。先在 Core 上运行 `echo-agent-core login-chatgpt` 完成登录；Key 留空（凭据是登录态）。地区受限时需给 Core 配 HTTPS_PROXY',
+  },
+  {
     key: 'openai',
     label: 'OpenAI',
     provider: 'openai',
@@ -399,6 +411,13 @@ function applyProviderPreset(value: string | number | (string | number)[] | unde
     model.value = 'kimi-k3';
     thinking.value = 'enabled';
     reasoning.value = 'max';
+  } else if (v === 'openai-chatgpt') {
+    // base_url 清空（Core 忽略它）；key 也清空——这条通道不用 api_key，
+    // 留着上一家 provider 的 key 只会让人以为它生效了。
+    baseUrl.value = '';
+    model.value = 'gpt-5-codex';
+    thinking.value = 'enabled';
+    reasoning.value = 'max';
   }
   // third-party：保留手动输入的 base_url / model，仅切换 provider 名。
 }
@@ -411,9 +430,18 @@ const providerSelectOptions = computed(() => {
     { label: 'Kimi For Coding', value: 'kimi' },
     { label: 'OpenCode Go（订阅）', value: 'opencode-go' },
     { label: 'OpenCode Zen（按量）', value: 'opencode' },
+    { label: 'ChatGPT 订阅（Plus/Pro）', value: 'openai-chatgpt' },
     { label: '第三方（OpenAI 兼容）', value: 'third-party' },
   ];
-  const known = ['deepseek', 'openai', 'kimi', 'opencode-go', 'opencode', 'third-party'];
+  const known = [
+    'deepseek',
+    'openai',
+    'kimi',
+    'opencode-go',
+    'opencode',
+    'openai-chatgpt',
+    'third-party',
+  ];
   const current = provider.value;
   if (current && !known.includes(current)) {
     options.push({ label: `${current}（现有配置）`, value: current });
