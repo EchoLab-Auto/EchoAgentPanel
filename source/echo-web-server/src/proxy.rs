@@ -2,18 +2,20 @@
 //!
 //! 每个浏览器 WS 连接对应一条到 Core 的专用连接。帧按原文转发，**不解析、
 //! 不记录负载**——因此与日志、命令队列完全隔离，只在中继管道里经过。
+//!
+//! 部署门控（`crate::deployment`）翻转 `maintenance` 或配置失效时，**已经
+//! 建立**的连接也由这里主动关闭（[`ws_guard`]：Close 1001 + 拆除中继）；
+//! 新握手仍由 deployment middleware 在路由层拒绝。帧路径本身不变。
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::ws::{Message as BrowserMessage, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message as BrowserMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::Instant;
-use tokio_tungstenite::{
-    connect_async_with_config, tungstenite::client::IntoClientRequest,
-};
+use tokio_tungstenite::{connect_async_with_config, tungstenite::client::IntoClientRequest};
 use tracing::{debug, info, warn};
 
 /// 心跳间隔：每 30s 向两侧各发一次 Ping。
@@ -246,19 +248,72 @@ fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
     }
 }
 
+/// 已建立的 WS 连接检查部署门控的周期：部署器翻转 `maintenance` 后，旧
+/// 连接最迟约一个周期被服务端主动关闭（新握手由 deployment middleware 在
+/// 路由层拒绝）。
+pub const WS_GATE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// 维护断开时等待写泵把 Close 帧送出的上限；超时直接 abort 写泵。
+const GATE_CLOSE_FLUSH: Duration = Duration::from_secs(1);
+
+/// 看护一条**已经升级**的 WebSocket 中继：每 [`WS_GATE_POLL_INTERVAL`]
+/// 重新读取部署门控文件，返回必须断开的原因（维护中或门控配置 fail
+/// closed）。
+///
+/// 门控未配置时该 future 永不就绪（`pending`），旧行为零变化。gate 句柄由
+/// [`crate::deployment::DeploymentGate::from_env`] 在**握手时每个连接读一次**
+/// 环境变量得到；此后每次判定只读文件，不再碰进程环境。
+///
+/// 调用方必须把这条 future 放进中继自己的 `select!` 并**协作式**收尾
+/// （向浏览器发 Close、abort 转发任务）。不能用一个外层 `select!` 直接
+/// drop 整个中继 future：中继里的转发任务是 `tokio::spawn` 出来的，drop
+/// 外层 future 不会停止它们，会留下仍连着 Core 的孤儿链路。
+///
+/// 集成测试可直接用 [`crate::deployment::DeploymentGate::at`] 构造 gate
+/// 调用本函数，无需设置进程环境变量。
+pub async fn ws_guard(gate: crate::deployment::DeploymentGate) -> &'static str {
+    if !gate.configured() {
+        return std::future::pending().await;
+    }
+    let mut ticker = tokio::time::interval(WS_GATE_POLL_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        let assessment = gate.assess();
+        if assessment.maintenance() {
+            return "panel deployment maintenance: closing existing websocket";
+        }
+        if assessment.is_fail_closed() {
+            return "panel deployment gate unavailable: closing existing websocket";
+        }
+    }
+}
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
     peer: PeerAddr,
+    // 测试/嵌入方可通过 Extension 注入 gate；生产 router 不注入，这里每个
+    // 连接只读一次 ECHO_DEPLOY_GATE_FILE（文件内容之后每次判定重读）。
+    gate: Option<axum::Extension<crate::deployment::DeploymentGate>>,
 ) -> impl IntoResponse {
-    if !state.authorized(&headers, params.get("token").map(String::as_str)) {
+    // 握手校验与代次快照必须来自同一次原子判定：bridge 在 upgrade 之后才
+    // 启动，若在那里再读 epoch，轮换恰好落在两者之间时旧凭据连接会拿到
+    // 新代次，永远不会触发"代次变化 → 断开"。
+    let Some(auth_epoch) = state
+        .auth
+        .authorize_handshake(&headers, params.get("token").map(String::as_str))
+    else {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
-    }
+    };
+    let gate = gate
+        .map(|axum::Extension(gate)| gate)
+        .unwrap_or_else(crate::deployment::DeploymentGate::from_env);
     ws.max_message_size(WS_MAX_BYTES)
         .max_frame_size(WS_MAX_BYTES)
-        .on_upgrade(move |socket| bridge(socket, state, peer.0))
+        .on_upgrade(move |socket| bridge(socket, state, peer.0, auth_epoch, gate))
         .into_response()
 }
 
@@ -769,7 +824,13 @@ impl BroadcastReplay {
     }
 }
 
-async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::SocketAddr>) {
+async fn bridge(
+    browser: WebSocket,
+    state: AppState,
+    peer: Option<std::net::SocketAddr>,
+    auth_epoch: u64,
+    gate: crate::deployment::DeploymentGate,
+) {
     // 浏览器侧的连接与断开此前**都没有日志**：上游那条 "upstream link closed"
     // 是被动结果（浏览器走了 → 连带拆除），却成了唯一可见的线索，于是每次
     // 排查都得从 Core 的 accept 数反推。这里补齐两端，并统一成
@@ -1451,11 +1512,12 @@ async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::Sock
     let peer_for_read = peer_desc.clone();
     // 凭据轮换 → 主动断开本连接（2026-11，见 `security` 模块文档）。
     //
-    // 不同步检查的话，用旧令牌建立的连接会一直活着——而那正是轮换想要解决的
-    // 问题。2s 轮询一个原子读，成本可忽略；断开后前端自动重连（它在收到轮换
-    // 响应时已把新令牌写进 localStorage）。
+    // 不同步检查的话，用旧令牌建立的连接会一直活着——而那正是轮换/收紧
+    // 想要解决的问题。`auth_epoch` 来自**握手**（不是 bridge 启动时），
+    // 避免轮换发生在握手与 upgrade 之间时连接"出生即免疫"。
+    // 2s 轮询一个原子读，成本可忽略；断开后前端自动重连（它在收到轮换
+    // 响应时已把新令牌写进 localStorage；收紧时则必须重新登录）。
     let auth_probe = state.auth.clone();
-    let auth_epoch = auth_probe.epoch();
     let mut epoch_tick = tokio::time::interval(std::time::Duration::from_secs(2));
     let browser_read = tokio::spawn(async move {
         let mut last_frame = Instant::now();
@@ -1519,7 +1581,7 @@ async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::Sock
                     if auth_probe.epoch() != auth_epoch {
                         info!(
                             peer = %peer_for_read,
-                            "auth token rotated — closing relay so the browser reconnects with the new token"
+                            "auth credentials rotated/tightened — closing relay so the browser reconnects with valid credentials"
                         );
                         reason = "auth token rotated";
                         break;
@@ -1545,11 +1607,31 @@ async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::Sock
     });
 
     // 事件出口：event_rx + 心跳 Ping → 浏览器（带写超时）。
+    //
+    // 维护门控的停止信号也在这里收口：写泵是唯一持有 `browser_tx` 的任务，
+    // 只有它能给浏览器发 Close 帧。`biased` 让停止信号优先于正常事件，
+    // 保证事件流繁忙时也能及时断开。
+    let (gate_stop_tx, gate_stop_rx) = tokio::sync::oneshot::channel::<&'static str>();
     let browser_write = tokio::spawn(async move {
+        let mut gate_stop_rx = gate_stop_rx;
         let mut sent: u64 = 0;
         let mut close_reason: &'static str = "browser closed";
         loop {
             tokio::select! {
+                biased;
+                reason = &mut gate_stop_rx => {
+                    let reason = reason
+                        .unwrap_or("panel deployment gate closed existing websocket");
+                    let close = BrowserMessage::Close(Some(CloseFrame {
+                        code: axum::extract::ws::close_code::AWAY,
+                        reason: reason.into(),
+                    }));
+                    // 尽力送达 Close：浏览器若已断/写阻塞，按 SEND_TIMEOUT
+                    // 放弃；外层会 abort 本任务并拆除整条链路。
+                    let _ = tokio::time::timeout(SEND_TIMEOUT, browser_tx.send(close)).await;
+                    close_reason = "deployment gate closed existing websocket";
+                    break;
+                }
                 frame = event_rx.recv() => {
                     let Some(frame) = frame else { break };
                     match tokio::time::timeout(SEND_TIMEOUT, browser_tx.send(frame)).await {
@@ -1599,25 +1681,52 @@ async fn bridge(browser: WebSocket, state: AppState, peer: Option<std::net::Sock
     // 谁先退出 = 断链的**主动方**。这是区分「浏览器关的 / 中继判死的 /
     // 路由泵结束」的唯一可靠依据，以前只留在 debug 日志里，info 级别下
     // 完全不可见（于是上游那条被动 close 成了唯一线索）。
+    //
+    // 维护门控是第四个「主动方」：`ws_guard` 与整条泵一起 select，触发后
+    // **协作式**收尾——先让写泵给浏览器发 Close（它持有 browser_tx），再
+    // abort 读/路由任务。不能在外层用一个 select 直接 drop 整个 bridge
+    // future：转发任务是 tokio::spawn 出来的，drop 外层 future 不会停止
+    // 它们，会留下仍连着 Core 的孤儿链路。
+    let mut route_pump = route_pump;
+    let mut browser_read = browser_read;
+    let mut browser_write = browser_write;
     let (ended_by, reason, frames_sent) = tokio::select! {
-        _ = route_pump => {
+        _ = &mut route_pump => {
             read_abort.abort();
             write_abort.abort();
             ("route pump", "command routing ended".to_string(), 0u64)
         }
-        r = browser_read => {
+        r = &mut browser_read => {
             route_abort.abort();
             write_abort.abort();
             let reason = r.unwrap_or("browser read task panicked").to_string();
             ("browser read", reason, 0u64)
         }
-        w = browser_write => {
+        w = &mut browser_write => {
             route_abort.abort();
             read_abort.abort();
             match w {
                 Ok((sent, reason)) => ("browser write", reason.to_string(), sent),
                 Err(_) => ("browser write", "browser write task panicked".to_string(), 0),
             }
+        }
+        guard_reason = ws_guard(gate) => {
+            // 先把停止原因交给写泵（biased：优先于事件队列），再拆读/路由
+            // 任务；否则事件出口先关闭，写泵可能以 "browser closed" 退出，
+            // Close 帧就发不出去。
+            let _ = gate_stop_tx.send(guard_reason);
+            route_abort.abort();
+            read_abort.abort();
+            let sent = match tokio::time::timeout(GATE_CLOSE_FLUSH, &mut browser_write).await {
+                Ok(Ok((sent, _))) => sent,
+                _ => {
+                    // Close 没能在时限内送出（浏览器写阻塞等）：直接 abort，
+                    // 连接随 browser_tx 一起释放。
+                    write_abort.abort();
+                    0
+                }
+            };
+            ("deployment gate", guard_reason.to_string(), sent)
         }
     };
     info!(

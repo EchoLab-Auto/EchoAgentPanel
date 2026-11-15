@@ -108,6 +108,55 @@ impl Drop for RunningPanel {
     }
 }
 
+/// 组装 Panel 的完整 HTTP 路由（独立外壳与内嵌形态共用）。
+///
+/// 注意：`route_layer(require_auth)` 只覆盖显式注册的 API/WS/媒体路由；
+/// **静态 fallback 是公开的**（登录页/SPA shell 必须无凭据可加载）。
+/// 它的越界防护由 `static_files` 自身完成，不能依赖认证中间件。
+///
+/// 部署门控的路径来自**本函数被调用时**读取一次的 `ECHO_DEPLOY_GATE_FILE`
+/// （不是每个请求读进程环境）；文件内容则由 middleware 每次请求重读，部署器
+/// 翻转 `maintenance` 无需重启。没有该环境变量时 `DeploymentGate::disabled()`，
+/// 行为与旧版本一致。
+pub fn router(state: crate::proxy::AppState) -> Router {
+    router_with_gate(state, crate::deployment::DeploymentGate::from_env())
+}
+
+/// 与 [`router`] 相同，但由调用方显式提供门控句柄（测试/嵌入方使用）。
+///
+/// 门控 middleware 挂在整个 Router 的**最外层**（含静态 fallback），因此
+/// 维护/配置损坏时静态 GET 也会得到 `503 no-store` 维护页，而不是继续提供
+/// 缓存中的旧 UI。`/api/deployment` 的 GET/HEAD 被门控放行、由端点按状态回
+/// `200/503`，认证仍走同一个 `route_layer(require_auth)`。
+pub fn router_with_gate(
+    state: crate::proxy::AppState,
+    gate: crate::deployment::DeploymentGate,
+) -> Router {
+    Router::new()
+        .route("/ws", get(crate::proxy::ws_handler))
+        .route("/media/{name}", get(crate::media::media_handler))
+        .route("/api/logs/panel", get(crate::log::panel_logs))
+        .route("/api/logs/core", get(crate::log::core_logs))
+        .route(
+            "/api/diag",
+            get(crate::diag::get_diag)
+                .post(crate::diag::post_diag)
+                .delete(crate::diag::clear_diag),
+        )
+        .route("/api/deployment", get(crate::deployment::deployment_status))
+        .merge(crate::upstreams_api::routes())
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::upstreams_api::require_auth,
+        ))
+        .fallback(crate::static_files::static_handler)
+        .layer(axum::middleware::from_fn_with_state(
+            gate,
+            crate::deployment::guard,
+        ))
+        .with_state(state)
+}
+
 pub struct PanelRuntime;
 
 impl PanelRuntime {
@@ -172,8 +221,8 @@ impl PanelRuntime {
         let upstream_list: Vec<_> = upstream_list
             .into_iter()
             .filter_map(|u| {
-                if u.name.is_empty() || u.name.chars().any(|c| c.is_whitespace() || c == ':') {
-                    warn!(name = %u.name, "invalid upstream name in config, skipped");
+                if let Err(reason) = crate::upstreams::validate_upstream_name(&u.name) {
+                    warn!(name = %u.name, %reason, "invalid upstream name in config, skipped");
                     return None;
                 }
                 if !seen.insert(u.name.clone()) {
@@ -218,10 +267,8 @@ impl PanelRuntime {
         //
         // `config_file` 是**唯一**可写回的落点：内嵌形态没配它时，改动只在本
         // 进程内生效，`POST /api/security` 会如实回 `persisted: false`。
-        let auth = crate::security::PanelAuth::new(
-            config.access_token.clone(),
-            config.require_token,
-        );
+        let auth =
+            crate::security::PanelAuth::new(config.access_token.clone(), config.require_token);
         auth.attach_config(config.config_file.clone());
         let state = crate::proxy::AppState::new(
             registry,
@@ -243,24 +290,7 @@ impl PanelRuntime {
             warn!("no access token configured and not bound to localhost — panel is OPEN to the network; set access_token");
         }
         let probe = tokio::spawn(crate::proxy::probe_pump(state.clone()));
-        let app = Router::new()
-            .route("/ws", get(crate::proxy::ws_handler))
-            .route("/media/{name}", get(crate::media::media_handler))
-            .route("/api/logs/panel", get(crate::log::panel_logs))
-            .route("/api/logs/core", get(crate::log::core_logs))
-            .route(
-                "/api/diag",
-                get(crate::diag::get_diag)
-                    .post(crate::diag::post_diag)
-                    .delete(crate::diag::clear_diag),
-            )
-            .merge(crate::upstreams_api::routes())
-            .route_layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                crate::upstreams_api::require_auth,
-            ))
-            .fallback(crate::static_files::static_handler)
-            .with_state(state.clone());
+        let app = router(state.clone());
         let listener = tokio::net::TcpListener::bind(&config.bind)
             .await
             .map_err(|e| anyhow::anyhow!("cannot bind {}: {e}", config.bind))?;

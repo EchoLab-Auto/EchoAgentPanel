@@ -655,3 +655,93 @@ async fn silent_handshake_close_reports_actionable_hint() {
     }
     keepalive.abort();
 }
+
+/// 带运行期安全状态的 Panel（`/ws` + `/api/security`，与 runtime 同一挂法）。
+async fn spawn_panel_with_auth(
+    core_url: String,
+    auth: std::sync::Arc<echo_web_server::security::PanelAuth>,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let state = AppState::new(
+        echo_web_server::upstreams::UpstreamRegistry::new(
+            vec![echo_web_server::upstreams::UpstreamConfig::direct(
+                "core", core_url, "",
+            )],
+            None,
+        ),
+        "/nonexistent".into(),
+        "/nonexistent-media".into(),
+        "".into(),
+        echo_web_server::ssh::SshTunnels::new(std::env::temp_dir().join("echo-panel-test-tunnels")),
+    )
+    .with_auth(auth, "127.0.0.1:8080".into());
+    let app = Router::new()
+        .route("/ws", get(ws_handler))
+        .merge(echo_web_server::upstreams_api::routes())
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            echo_web_server::upstreams_api::require_auth,
+        ))
+        .with_state(state);
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://127.0.0.1:{}", address.port())
+}
+
+/// 收紧认证（require_token false → true）必须踢掉已经建立的 WS：
+/// 旧连接建立时不需要凭据，若只对"令牌变化"推进代次，它会一直活到
+/// 浏览器自己关闭——"开启认证"就没有真正生效。
+#[tokio::test]
+async fn tightening_require_token_closes_existing_websocket() {
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    let core_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let core_url = format!(
+        "ws://127.0.0.1:{}",
+        core_listener.local_addr().unwrap().port()
+    );
+    tokio::spawn(fake_core(core_listener));
+
+    let auth = echo_web_server::security::PanelAuth::new(TOKEN, false);
+    let base = spawn_panel_with_auth(core_url, auth).await;
+    let ws_url = base.replace("http://", "ws://") + "/ws";
+    let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
+
+    // 先确认未收紧前连接是活的（无 token 也能连）；只容忍控制帧，
+    // 任何 Close/错误都说明连接没建立起来。
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let early = tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await;
+    match &early {
+        Ok(Some(Ok(WsMessage::Close(frame)))) => panic!("未收紧前连接已被关闭: {frame:?}"),
+        Ok(Some(Err(error))) => panic!("未收紧前读连接出错: {error}"),
+        Ok(None) => panic!("未收紧前连接已结束"),
+        _ => {}
+    }
+
+    // 运行期打开 require_token（令牌不变）。
+    let response = reqwest::Client::new()
+        .post(format!("{base}/api/security"))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "require_token": true }).to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    // 旧连接必须在下一个 2s 轮询周期内被吊销。
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(4), async {
+        loop {
+            match ws.next().await {
+                Some(Ok(WsMessage::Close(_))) | None | Some(Err(_)) => break true,
+                Some(Ok(_)) => continue,
+            }
+        }
+    })
+    .await;
+    assert_eq!(
+        closed,
+        Ok(true),
+        "require_token 收紧后旧 WS 未被吊销（旧实现只比较 epoch，而收紧不改 epoch）"
+    );
+}

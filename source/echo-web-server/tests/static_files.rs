@@ -271,3 +271,136 @@ async fn missing_assets_are_404_not_spa_shell() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 原始 TCP 请求：reqwest/URL 解析会把 `/../` 规范化掉，必须自己发字节
+/// 才能把「路径穿越」送到 Panel 的路由层。
+async fn raw_get(base: &str, path: &str) -> (u16, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let addr = base.strip_prefix("http://").unwrap();
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await.unwrap();
+    let split = buf
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("HTTP response headers");
+    let head = String::from_utf8_lossy(&buf[..split]);
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .expect("HTTP status");
+    (status, buf[split + 4..].to_vec())
+}
+
+/// `..` 必须在解析阶段被拒绝：旧实现的 `root.join(path).starts_with(root)`
+/// 是**词法**比较，`/tmp/root/../secret` 仍以 `/tmp/root` 开头，于是
+/// 静态根之外的文件被当作普通资源返回。
+#[tokio::test]
+async fn dot_dot_traversal_never_served() {
+    let dir = temp_static_dir("dotdot");
+    std::fs::write(dir.join("index.html"), "<html>shell</html>").unwrap();
+    let secret_name = format!("echo-panel-static-secret-{}.txt", std::process::id());
+    let secret = dir.parent().unwrap().join(&secret_name);
+    std::fs::write(&secret, "TOP-SECRET-TRAVERSAL").unwrap();
+    let base = spawn_panel(dir.to_string_lossy().into_owned()).await;
+
+    for path in [
+        format!("/../{secret_name}"),
+        format!("/assets/../../{secret_name}"),
+    ] {
+        let (status, body) = raw_get(&base, &path).await;
+        assert_eq!(status, 404, "{path} 必须 404，得到 {status}");
+        assert!(
+            !String::from_utf8_lossy(&body).contains("TOP-SECRET-TRAVERSAL"),
+            "{path} 泄漏了静态根之外的内容"
+        );
+    }
+
+    let _ = std::fs::remove_file(&secret);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 静态根内的符号链接指向外部时同样不能读取（词法 `starts_with` 看不见
+/// 符号链接的真实目标）。
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinks_cannot_escape_the_static_root() {
+    let dir = temp_static_dir("symlink");
+    std::fs::write(dir.join("index.html"), "<html>shell</html>").unwrap();
+    let secret = dir.parent().unwrap().join(format!(
+        "echo-panel-static-symlink-secret-{}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&secret, "TOP-SECRET-SYMLINK").unwrap();
+    std::os::unix::fs::symlink(&secret, dir.join("leak.txt")).unwrap();
+    let base = spawn_panel(dir.to_string_lossy().into_owned()).await;
+
+    let resp = reqwest::get(format!("{base}/leak.txt")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND, "符号链接越界必须 404");
+    assert!(!resp.text().await.unwrap().contains("TOP-SECRET-SYMLINK"));
+
+    let _ = std::fs::remove_file(&secret);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// runtime 的真实路由：`route_layer(require_auth)` 只护 API，静态 fallback
+/// 是公开的（登录页必须能加载）。公开不等于可越界——认证开启时静态根之外
+/// 的文件依然不能被匿名读取，SPA 兜底保持可用。
+#[tokio::test]
+async fn runtime_public_fallback_keeps_spa_but_blocks_traversal() {
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    let dir = temp_static_dir("runtime-fallback");
+    std::fs::write(dir.join("index.html"), "<html>runtime-shell</html>").unwrap();
+    let secret_name = format!("echo-panel-runtime-secret-{}.txt", std::process::id());
+    let secret = dir.parent().unwrap().join(&secret_name);
+    std::fs::write(&secret, "TOP-SECRET-RUNTIME").unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let state = AppState::new(
+        echo_web_server::upstreams::UpstreamRegistry::new(
+            vec![echo_web_server::upstreams::UpstreamConfig::direct(
+                "core",
+                "ws://127.0.0.1:1",
+                "",
+            )],
+            None,
+        ),
+        dir.to_string_lossy().into_owned().into(),
+        "/nonexistent-media".into(),
+        TOKEN.into(),
+        echo_web_server::ssh::SshTunnels::new(
+            std::env::temp_dir().join("echo-panel-runtime-test-tunnels"),
+        ),
+    );
+    let app = echo_web_server::runtime::router(state);
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let base = format!("http://127.0.0.1:{}", address.port());
+    let client = reqwest::Client::new();
+
+    // 公开 SPA：无凭据也能拿到 shell（登录页/客户端路由）。
+    let resp = client.get(format!("{base}/settings")).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "公开 SPA 兜底被误伤");
+    assert!(resp.text().await.unwrap().contains("runtime-shell"));
+
+    // 但 API 仍受认证保护（证明 require_auth 确实生效）。
+    let resp = client
+        .get(format!("{base}/api/security"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    // 匿名路径穿越：必须在静态 handler 内被拒绝。
+    let (status, body) = raw_get(&base, &format!("/../{secret_name}")).await;
+    assert_eq!(status, 404, "公开 fallback 不得成为越界读取入口");
+    assert!(!String::from_utf8_lossy(&body).contains("TOP-SECRET-RUNTIME"));
+
+    let _ = std::fs::remove_file(&secret);
+    let _ = std::fs::remove_dir_all(&dir);
+}

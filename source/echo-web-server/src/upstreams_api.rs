@@ -344,8 +344,7 @@ pub fn routes() -> axum::Router<AppState> {
         // 凭据——否则任何能碰到端口的人都能读到令牌摘要。
         .route(
             "/api/security",
-            axum::routing::get(crate::security::get_security)
-                .post(crate::security::post_security),
+            axum::routing::get(crate::security::get_security).post(crate::security::post_security),
         )
         .route("/api/upstreams/prune", axum::routing::post(prune_upstreams))
 }

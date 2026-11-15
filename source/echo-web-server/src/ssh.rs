@@ -124,6 +124,21 @@ pub struct ExecOutput {
     pub stderr: Vec<u8>,
 }
 
+/// 上游媒体缓存目录名：FNV-1a 128 位十六进制。
+///
+/// 不能拿展示名直接拼路径：上游名来自配置/管理 API，可能是 `/abs` 或
+/// `../../x`。哈希后恒为单一路径分量，并且跨进程稳定（重启后缓存仍可复用）。
+fn stable_cache_key(name: &str) -> String {
+    const OFFSET_BASIS: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const FNV_PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+    let mut hash = OFFSET_BASIS;
+    for byte in name.as_bytes() {
+        hash ^= u128::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{hash:032x}")
+}
+
 // ── 隧道表 ────────────────────────────────────────────────────────────────
 
 /// 隧道管理器（AppState 持有；按上游名索引）。
@@ -267,7 +282,8 @@ impl SshTunnels {
             .get(name)
             .cloned()
             .ok_or_else(|| format!("上游 {name} 未配置 SSH 接入"))?;
-        let dir = tunnel.cache_dir.join(&tunnel.name);
+        // 受控稳定目录名（哈希）：name 是管理输入，绝不能直接 join。
+        let dir = tunnel.cache_dir.join(stable_cache_key(&tunnel.name));
         let path = dir.join(id);
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             return Ok(path);
@@ -870,6 +886,25 @@ mod tests {
         cfg.remote_media_dir = "~/my media".into();
         let cmd = build_cat_command(&cfg, Some("/home/echo"), "x.webp");
         assert_eq!(cmd, "cat -- '/home/echo/my media/x.webp'");
+    }
+
+    #[test]
+    fn cache_key_is_stable_path_safe_and_distinct() {
+        let root = Path::new("/tmp/panel-media-cache");
+        for name in ["../../etc", "/absolute", "节点一", "a..b", ""] {
+            let dir = root.join(stable_cache_key(name));
+            assert!(dir.starts_with(root), "{name:?} 逃出缓存根: {dir:?}");
+            assert_eq!(dir.parent(), Some(root), "必须是单一路径分量");
+            assert_eq!(stable_cache_key(name), stable_cache_key(name), "必须稳定");
+            assert_eq!(dir.file_name().unwrap().to_string_lossy().len(), 32);
+            assert!(dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .chars()
+                .all(|c| c.is_ascii_hexdigit()));
+        }
+        assert_ne!(stable_cache_key("core-a"), stable_cache_key("core-b"));
     }
 
     #[test]

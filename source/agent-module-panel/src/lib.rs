@@ -125,9 +125,7 @@ fn secret(path: Option<&Path>) -> anyhow::Result<String> {
 }
 
 fn is_loopback(bind: &str) -> bool {
-    bind.starts_with("127.0.0.1:")
-        || bind.starts_with("localhost:")
-        || bind.starts_with("[::1]:")
+    bind.starts_with("127.0.0.1:") || bind.starts_with("localhost:") || bind.starts_with("[::1]:")
 }
 
 /// 前端目录的候选顺序（**第一个含 `index.html` 的胜出**）。
@@ -375,7 +373,8 @@ pub fn module_with_defaults(version: &str, defaults: Option<PanelDefaults>) -> A
     Arc::new(BuiltinModule::new(manifest, move |ctx| {
         let config = runtime_config(ctx, &defaults)
             .map_err(|e| echo_module::ModuleMountError::Mount(e.to_string()))?;
-        preflight_bind(&config.bind).map_err(|e| echo_module::ModuleMountError::Mount(e.to_string()))?;
+        preflight_bind(&config.bind)
+            .map_err(|e| echo_module::ModuleMountError::Mount(e.to_string()))?;
         let running = PanelRuntime::start(config).map_err(|e| {
             echo_module::ModuleMountError::Mount(format!("start embedded Panel: {e}"))
         })?;
@@ -404,9 +403,7 @@ mod tests {
     /// 哪儿都找不到前端目录 → 错误里必须点名"怎么给"，而不是只报缺字段。
     #[test]
     fn missing_static_dir_names_the_ways_to_fix_it() {
-        let error = discover_static_dir_with(None, &[])
-            .unwrap_err()
-            .to_string();
+        let error = discover_static_dir_with(None, &[]).unwrap_err().to_string();
         assert!(error.contains("static_dir"), "{error}");
         assert!(error.contains("ECHO_PANEL_STATIC_DIR"), "{error}");
     }
@@ -547,17 +544,19 @@ mod lifecycle_tests {
         // 内嵌标识：前端据此把"Panel 自更新"这类动作标成"由 Core 负责"。
         // 用 text + serde_json 解析而不是 `Response::json()`——reqwest 在这个
         // 工作区是 `default-features = false`，`json` feature 没开。
-        let identity_text = reqwest::get(format!(
-            "http://127.0.0.1:{port}/api/panel-identity"
-        ))
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+        let identity_text = reqwest::get(format!("http://127.0.0.1:{port}/api/panel-identity"))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
         let identity: serde_json::Value =
             serde_json::from_str(&identity_text).expect("panel-identity is JSON");
-        assert_eq!(identity.get("embedded"), Some(&serde_json::Value::Bool(true)), "{identity}");
+        assert_eq!(
+            identity.get("embedded"),
+            Some(&serde_json::Value::Bool(true)),
+            "{identity}"
+        );
 
         for disposer in disposers {
             disposer.dispose();

@@ -71,7 +71,10 @@ async fn http_get(base: &str, token: Option<&str>) -> (StatusCode, serde_json::V
     let response = request.send().await.unwrap();
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
-    (status, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+    (
+        status,
+        serde_json::from_str(&text).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 async fn http_post(
@@ -90,7 +93,10 @@ async fn http_post(
     let response = request.send().await.unwrap();
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
-    (status, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+    (
+        status,
+        serde_json::from_str(&text).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 /// 认证开启时读接口要凭据，且**只回摘要**。
@@ -163,10 +169,7 @@ async fn generate_returns_the_token_once_and_enables_auth() {
     // 之后读接口不再回明文
     let (status, view) = http_get(&base, Some(&issued)).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        view.get("token_once").is_none(),
-        "读接口不该带明文：{view}"
-    );
+    assert!(view.get("token_once").is_none(), "读接口不该带明文：{view}");
 }
 
 /// 过短的令牌被拒（面板端口常映射公网，4 位数字是分钟级可枚举）。
@@ -190,7 +193,12 @@ async fn short_token_is_rejected_with_an_actionable_message() {
 async fn disabling_enforcement_keeps_the_token_for_later() {
     let auth = PanelAuth::new(TOKEN, true);
     let base = spawn(auth.clone(), "127.0.0.1:8080").await;
-    let (status, body) = http_post(&base, Some(TOKEN), serde_json::json!({ "require_token": false })).await;
+    let (status, body) = http_post(
+        &base,
+        Some(TOKEN),
+        serde_json::json!({ "require_token": false }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["token_set"], true, "令牌应当保留");
     assert_eq!(body["enforced"], false);

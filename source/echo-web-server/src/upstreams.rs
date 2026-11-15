@@ -73,6 +73,27 @@ impl UpstreamConfig {
     }
 }
 
+/// 上游名校验（管理 API 与启动配置物化共用）。
+///
+/// 名称是 UI 展示字段，也用于帧打标键与运行期查表；**允许中文等 Unicode
+/// 显示名**，但必须拒绝会改变路径语义的字符：路径分隔符、`.`/`..`、
+/// 控制字符。空白与冒号沿用既有约束（帧打标键卫生）。
+pub fn validate_upstream_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("上游名称不能为空".into());
+    }
+    if name.chars().any(|c| c.is_whitespace() || c == ':') {
+        return Err("上游名称不能含空白或冒号".into());
+    }
+    if name.chars().any(char::is_control) {
+        return Err("上游名称不能含控制字符".into());
+    }
+    if name == "." || name == ".." || name.contains('/') || name.contains('\\') {
+        return Err("上游名称不能含路径分隔符，也不能是 . 或 ..".into());
+    }
+    Ok(())
+}
+
 /// 上游变更事件（中继编排层订阅）。
 ///
 /// `Upsert` 装箱：`UpstreamConfig` 含 SSH 段后体积 ~200B+，直接内联会让
@@ -162,12 +183,7 @@ impl UpstreamRegistry {
     /// 据此建 SSH 隧道，保证隧道拿到的是最终凭据。
     pub async fn upsert(&self, config: UpstreamConfig) -> Result<UpstreamConfig, String> {
         let name = config.name.trim().to_string();
-        if name.is_empty() {
-            return Err("上游名称不能为空".into());
-        }
-        if name.chars().any(|c| c.is_whitespace() || c == ':') {
-            return Err("上游名称不能含空白或冒号".into());
-        }
+        validate_upstream_name(&name)?;
         let url = config.url.trim().to_string();
         if !url.is_empty() && !url.starts_with("ws://") && !url.starts_with("wss://") {
             return Err("地址需为 ws:// 或 wss:// 形式".into());
@@ -883,5 +899,39 @@ mod tests {
         assert_eq!(removed, vec!["node-self".to_string()]);
         let names: Vec<String> = reg.list().await.into_iter().map(|u| u.name).collect();
         assert_eq!(names, vec!["core".to_string(), "unique".to_string()]);
+    }
+
+    /// 名称会进入帧打标键与媒体缓存路径：路径分隔符 / `..` / 绝对路径
+    /// 必须拒绝；中文等正常显示名不能被误伤（不能一刀切只允许 ASCII）。
+    #[tokio::test]
+    async fn upstream_names_reject_path_components_but_keep_unicode() {
+        let reg = UpstreamRegistry::new(vec![], None);
+        for bad in [
+            "../escape",
+            "/absolute",
+            "a/b",
+            "a\\b",
+            "..",
+            ".",
+            "bad\u{7}name",
+        ] {
+            assert!(
+                reg.upsert(UpstreamConfig::direct(bad, "ws://x:1", ""))
+                    .await
+                    .is_err(),
+                "危险名称必须拒绝: {bad:?}"
+            );
+        }
+        let ok = reg
+            .upsert(UpstreamConfig::direct("节点一", "ws://x:1", ""))
+            .await
+            .expect("中文显示名必须保留");
+        assert_eq!(ok.name, "节点一");
+        // 文件名里合法的 `..`（非独立组件）不误伤。
+        let ok = reg
+            .upsert(UpstreamConfig::direct("a..b", "ws://x:2", ""))
+            .await
+            .expect("a..b 是普通名称");
+        assert_eq!(ok.name, "a..b");
     }
 }

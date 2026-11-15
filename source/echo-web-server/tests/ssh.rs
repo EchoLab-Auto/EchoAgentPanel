@@ -384,3 +384,44 @@ async fn ensure_is_idempotent_and_rebuilds_on_change() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// 上游名是管理输入（配置/API），SSH 媒体缓存不能拿它直接拼路径：
+/// `../../...` 或绝对路径必须仍落在 `media_cache_dir` 内。旧实现用
+/// `cache_dir.join(&tunnel.name)`，恶意名称会把缓存写到缓存根之外。
+#[tokio::test]
+async fn media_cache_stays_inside_root_for_hostile_upstream_name() {
+    let sshd_port = start_fake_sshd(None).await;
+    let dir = temp_dir("media-escape");
+    let remote_media = dir.join("remote-media");
+    std::fs::create_dir_all(&remote_media).unwrap();
+    std::fs::write(remote_media.join("abc.png"), b"PNGDATA-ESCAPE-TEST").unwrap();
+    let key = write_test_key(&dir);
+    let cache = dir.join("cache");
+    let tunnels = SshTunnels::new(cache.clone());
+    let mut cfg = base_cfg(&dir, sshd_port, &key);
+    cfg.remote_media_dir = remote_media.to_string_lossy().into_owned();
+
+    let hostile = format!("../../echo-panel-escaped-{}", std::process::id());
+    tunnels.ensure(&hostile, &cfg).await.unwrap();
+    wait_phase(&tunnels, &hostile, "online", Duration::from_secs(20)).await;
+
+    let fetched = tunnels.fetch_media(&hostile, "abc.png").await.unwrap();
+    assert_eq!(
+        std::fs::read(&fetched).unwrap(),
+        b"PNGDATA-ESCAPE-TEST",
+        "媒体内容应正常拉取"
+    );
+
+    let escaped_dir =
+        std::env::temp_dir().join(format!("echo-panel-escaped-{}", std::process::id()));
+    let leaked = escaped_dir.join("abc.png").exists();
+    let _ = std::fs::remove_dir_all(&escaped_dir);
+
+    assert!(
+        fetched.starts_with(&cache),
+        "缓存路径逃出缓存根: {fetched:?}（cache={cache:?}）"
+    );
+    assert!(!leaked, "旧路径写法把缓存写到了缓存根之外: {escaped_dir:?}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

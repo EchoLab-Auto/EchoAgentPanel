@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -57,28 +57,64 @@ pub async fn static_handler(
     } else {
         requested
     };
-    let file = root.join(relative);
-    // Guard against path traversal outside the static root.
-    if !file.starts_with(&root) || file.is_dir() {
+    // 词法解析阶段就拒绝绝对路径与 `..`：`root.join("../x")` 再
+    // `starts_with(root)` 仍为真（组件前缀相同），旧检查形同虚设。
+    let Some(file) = resolve_static_path(&root, relative) else {
         return not_found();
-    }
+    };
     // 读不到（不存在）→ SPA 兜底：未知**路由**给 app shell；但看起来是
     // 静态资源的路径（`assets/` 前缀或带非 html 扩展名）必须 404——
     // 否则部署后旧标签页请求旧哈希 chunk 会拿到 200 text/html，动态
     // import 失败、异步组件永久空白（2026-10 弹层空白故障根因）。
-    let served = if tokio::fs::metadata(&file).await.is_ok() {
-        file
-    } else {
-        if looks_like_asset(relative) {
-            return missing_asset();
+    //
+    // 存在的文件 / SPA shell 都要 canonicalize：符号链接可以指向根外，
+    // 词法前缀检查看不见真实目标。
+    let (served_root, served) = match tokio::fs::metadata(&file).await {
+        Ok(_) => match real_path_within(&root, &file).await {
+            Some((root, real)) if !real.is_dir() => (root, real),
+            _ => return not_found(),
+        },
+        Err(_) => {
+            if looks_like_asset(relative) {
+                return missing_asset();
+            }
+            match real_path_within(&root, &root.join("index.html")).await {
+                Some((root, real)) if !real.is_dir() => (root, real),
+                _ => return not_found(),
+            }
         }
-        let shell = root.join("index.html");
-        if !shell.starts_with(&root) {
-            return not_found();
-        }
-        shell
     };
-    serve_file(&root, served, &headers).await
+    serve_file(&served_root, served, &headers).await
+}
+
+/// 把请求路径安全地拼到静态根下；任何可能越界的形态返回 `None`。
+///
+/// URL 里的 `.` 组件无意义但无害；`..` 一律拒绝——静态资源没有合法理由
+/// 使用它，而放开后靠 canonicalize 兜底会把语义交给符号链接解析顺序。
+fn resolve_static_path(root: &Path, relative: &str) -> Option<PathBuf> {
+    let relative = Path::new(relative);
+    if relative.is_absolute() {
+        return None;
+    }
+    for component in relative.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    let joined = root.join(relative);
+    // 保留词法检查作为第二道闸（Windows 前缀等边界形态）。
+    joined.starts_with(root).then_some(joined)
+}
+
+/// canonicalize 候选路径并确认它仍在 canonicalize 后的静态根内。
+/// 返回 `(真实根, 真实文件)`；任一步失败或越界都返回 `None`。
+async fn real_path_within(root: &Path, candidate: &Path) -> Option<(PathBuf, PathBuf)> {
+    let real_root = tokio::fs::canonicalize(root).await.ok()?;
+    let real_candidate = tokio::fs::canonicalize(candidate).await.ok()?;
+    real_candidate
+        .starts_with(&real_root)
+        .then_some((real_root, real_candidate))
 }
 
 async fn serve_file(root: &Path, file: PathBuf, headers: &HeaderMap) -> Response {
@@ -315,6 +351,18 @@ mod tests {
         );
         assert!(compressible_ext(Path::new("assets/app.css")));
         assert!(!compressible_ext(Path::new("icons/icon-192.png")));
+    }
+
+    #[test]
+    fn static_path_components_cannot_escape_root() {
+        let root = Path::new("/srv/panel/web");
+        assert!(resolve_static_path(root, "assets/app.js").is_some());
+        assert!(resolve_static_path(root, "中文/页面.html").is_some());
+        assert!(resolve_static_path(root, ".").is_some());
+        assert!(resolve_static_path(root, "../secret.txt").is_none());
+        assert!(resolve_static_path(root, "assets/../../secret.txt").is_none());
+        assert!(resolve_static_path(root, "/etc/passwd").is_none());
+        assert!(resolve_static_path(root, "assets/..").is_none());
     }
 
     #[test]
