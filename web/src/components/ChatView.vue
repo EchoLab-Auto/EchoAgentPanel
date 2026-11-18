@@ -27,11 +27,17 @@ import { chatTabs, ensureChatTabsLoaded, syncActiveTab, type ChatTab } from '../
 import { state } from '../store';
 import type { IncomingFile, PendingFile } from '../protocol';
 import { effectiveSessionApi, profileMissing } from '../session-api';
-import { checklistsForSession, pushToast, sessionMessagesFor } from '../state';
+import { activeTeam, checklistsForRegion, checklistsForSession, pushToast, sessionMessagesFor } from '../state';
+import {
+  checklistCoreAuthoritative,
+  checklistRegionUnsynced,
+  checklistSessionSynced,
+} from '../state_domains/checklists';
+import { refreshChecklists } from '../checklist-requests';
 import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
-import { checklistKey, sessionKey, sessionScopedKey, teamKey } from '../keys';
+import { checklistKey, sessionScopedKey, teamKey } from '../keys';
 import { isInstanceModuleKind, teamModuleEnabled, teamToolAvailable } from '../capabilities';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
@@ -395,9 +401,14 @@ const connected = computed(() => state.connected);
  * 面板里按实例/会话按需拉）。要加新的一项时：这里加一行 + 面板侧的补拉也走
  * 同一个 `ensure*` 函数（它自带"已有数据/已在飞就不发"的去重）。
  */
-/** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。 */
+/** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。
+ *
+ * 清单面板额外做一次权威补拉（2026-11）：面板可能是长时间开着再点开/看，
+ * 中途 WS 重连、Core 重启都可能让本地投影落后；「打开」是最自然的对齐时机。 */
 function toggleOverlay(id: BuiltinOverlayId) {
-  entryOverlay.value = entryOverlay.value === id ? null : id;
+  const next = entryOverlay.value === id ? null : id;
+  entryOverlay.value = next;
+  if (next === 'checklist') refreshChecklistData();
 }
 
 /** 无条件关闭（点面板外 / Esc / 选择后）。 */
@@ -979,7 +990,9 @@ function onSelectionChange() {
 
 const currentTeam = computed(() => {
   if (!props.activeTeamId) return null;
-  return state.teams.find((t) => t.id === props.activeTeamId) ?? null;
+  // (core, id) 精确匹配（复用 activeTeam 的既有选模口径）：同名人格跨 core 时
+  // 不能只按 id 取列表里第一个，否则能力门控读到别 core 的权限画像（2026-11）。
+  return activeTeam(state, props.activeTeamId);
 });
 
 /**
@@ -1003,38 +1016,79 @@ const contextAvailable = computed(() =>
   teamModuleEnabled(currentTeam.value, 'echo-agent.management.panel'),
 );
 
-/** 清单按钮显隐：checklist 工具可用才显示（2026-09 起模块维度已移除，
- * 只受工具级白/黑名单与内置工具集包门控）。
- * 工具禁用后同步卸载对应 UI 入口与浮层，并清空本地清单状态。 */
-const checklistAvailable = computed(() =>
+/** 清单工具对当前 agent 是否可用（2026-09 起模块维度已移除，只受工具级
+ * 白/黑名单与内置工具集包门控）。 */
+const checklistToolAvailable = computed(() =>
   teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
-// 模块/Team 更新回推后，若清单工具变为不可用，关闭残留弹层并清空徽标数据。
-watch(checklistAvailable, (available) => {
-  if (!available) {
-    if (entryOverlay.value === 'checklist') closeOverlay();
-    // 清单已不可用：丢弃当前会话的本地快照（其他会话/core 的不动）。
-    // 键形态带 team 维度（2026-11 起只支持新 Core）。
-    delete state.checklists[checklistKey(state.activeRegion, state.activeTeamId, props.sessionId)];
-    delete state.checklists[sessionKey(state.activeRegion, props.sessionId)];
-  }
-});
-
-/** 当前会话的清单快照（复合键 (core, session_id)；global 视图聚合当前区域全部）。 */
+/** 当前会话的清单快照（复合键 (core, team, session)；global 视图聚合当前区域全部）。
+ * props 是渲染真源；未提供人格时显式使用 null，和 Sidebar/同步标记一致。 */
 const sessionChecklists = computed(() => {
   if (props.sessionId !== 'global') {
-    // team 维度隔离（2026-10）。
-    return checklistsForSession(state, props.sessionId);
+    return checklistsForSession(state, props.sessionId, props.activeTeamId ?? null);
   }
-  // global 视图：汇总当前运行区域下各会话的清单（跨 core 不串）。
-  const out = [];
-  for (const [key, lists] of Object.entries(state.checklists)) {
-    const core = key.includes('\u0000') ? key.slice(0, key.indexOf('\u0000')) : null;
-    if (state.activeRegion == null || core === state.activeRegion) out.push(...lists);
-  }
-  return out;
+  // global 视图：按写入侧标注的 source.core 过滤当前区域（不反解键前缀）。
+  return checklistsForRegion(state);
 });
+
+/** 清单入口显隐：工具可用，或当前作用域已有快照（工具禁用后仍可只读查看，
+ * 不卸载入口、不删除状态——删除会让"禁用工具"变成"丢历史清单"）。 */
+const checklistAvailable = computed(
+  () => checklistToolAvailable.value || sessionChecklists.value.length > 0,
+);
+
+/** 工具已禁用但本地仍有快照：入口保留，只读展示。 */
+const checklistReadOnly = computed(
+  () => !checklistToolAvailable.value && sessionChecklists.value.length > 0,
+);
+
+/** 当前作用域是否已有权威依据。
+ * 空清单也要区分"权威没有"与"尚未收到该人格/会话的快照"。 */
+const checklistUnsynced = computed(() => {
+  if (props.sessionId === 'global') {
+    return checklistRegionUnsynced(state, state.activeRegion, sessionChecklists.value);
+  }
+  return !checklistSessionSynced(
+    state,
+    state.activeRegion,
+    props.activeTeamId ?? null,
+    props.sessionId,
+  );
+});
+/** 清单入口的 title：工具只读 / 未同步都要说清楚（不叠加成一句长话）。 */
+const checklistTitle = computed(() => {
+  const parts = ['任务清单'];
+  if (checklistReadOnly.value) parts.push('工具已禁用，仅显示已有清单');
+  if (checklistUnsynced.value) parts.push('未同步（Core 未提供权威快照）');
+  return parts.join('；');
+});
+
+/** 按当前视图补拉权威清单：会话视图拉该会话，global 拉当前 core 全部运行人格。
+ * 能力未确认（旧 Core）时 `refreshChecklists` 是 no-op——不反复请求未知命令。 */
+function refreshChecklistData(): void {
+  if (!state.connected) return;
+  refreshChecklists({
+    teamId: props.activeTeamId ?? null,
+    sessionId: props.sessionId === 'global' ? null : props.sessionId,
+    core: state.activeRegion,
+  });
+}
+
+// 刷新 / WS 重连 / 切会话 / 切人格 / 切运行区域 / 能力刚被确认：都补拉一次。
+// 能力位参与依赖：bootstrap 的 RequestState 快照到达前请求会被拒发（旧 Core
+// 降级），到达后这里自动补上定向刷新，用户不必手动重开面板。
+watch(
+  [
+    () => props.sessionId,
+    () => props.activeTeamId,
+    () => state.connected,
+    () => state.activeRegion,
+    () => checklistCoreAuthoritative(state, state.activeRegion),
+  ],
+  () => refreshChecklistData(),
+  { immediate: true },
+);
 
 /** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 模块启用，
  * 或当前会话已有任务记录（即使模块后被禁用，历史任务仍可见）。 */
@@ -1619,6 +1673,8 @@ const buildWorkRow = (m: ChatMessageWithImages): WorkRunItem | null => {
       success: sub?.success ?? true,
       running: sub?.running === true,
       time: m.time ? formatTime(m.time) : undefined,
+      profile: sub?.profile,
+      model: sub?.model,
     };
   }
   const tool = m.tool;
@@ -2093,7 +2149,7 @@ function mediaSrc(img: string): string {
           variant="glass"
           shape="pill"
           size="small"
-          title="任务清单"
+          :title="checklistTitle"
           data-overlay="checklist"
           @click="toggleOverlay('checklist')"
         >
@@ -2225,6 +2281,8 @@ function mediaSrc(img: string): string {
         <ChecklistSidebar
           :session-id="sessionId === 'global' ? undefined : sessionId"
           :lists="sessionId === 'global' ? sessionChecklists : undefined"
+          :team-id="props.activeTeamId ?? null"
+          :unsynced="checklistUnsynced"
         />
       </div>
     </SessionOverlay>

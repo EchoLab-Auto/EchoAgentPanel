@@ -62,6 +62,10 @@ export interface SubagentWorkItem {
   /** 运行中：chip 呼吸 + 转圈点；详情提示「结果未到」 */
   running?: boolean;
   time?: string;
+  /** 委派的 API profile 名（`spawn_subagent.profile`；未指定 = 继承本 agent）。 */
+  profile?: string;
+  /** 实际生效的模型名（来自 provider.default_model()）。 */
+  model?: string;
 }
 
 export type WorkRunItem = ToolWorkItem | ReasoningWorkItem | SubagentWorkItem;
@@ -432,7 +436,7 @@ function ariaOf(item: WorkRunItem): string {
         </div>
       </template>
 
-      <!-- 子代理：任务 / 时间 / 状态 + 结论正文 -->
+      <!-- 子代理：任务 / 时间 / 运行配置 / 状态 + 结论正文 -->
       <template v-else-if="openSubagentItem">
         <div class="work-run-group__detail-head">
           <svg
@@ -449,10 +453,20 @@ function ariaOf(item: WorkRunItem): string {
             <circle cx="18" cy="18" r="2.5" />
             <path d="M8.5 6h5.5a4 4 0 0 1 4 4v5.5" />
           </svg>
-          <span class="work-run-group__detail-name work-run-group__detail-name--agent">
-            {{ subagentTaskLine(openSubagentItem) || subagentLabel(openSubagentItem) }}
-          </span>
+          <details class="work-run-group__detail-task">
+            <summary class="work-run-group__detail-name work-run-group__detail-name--agent">
+              {{ subagentTaskLine(openSubagentItem) || subagentLabel(openSubagentItem) }}
+            </summary>
+            <pre class="work-run-group__task-full">{{ openSubagentItem.task || '' }}</pre>
+          </details>
           <span v-if="openSubagentItem.time" class="work-run-group__detail-time">{{ openSubagentItem.time }}</span>
+          <span
+            v-if="openSubagentItem.profile || openSubagentItem.model"
+            class="work-run-group__detail-runtime"
+            :title="`API profile: ${openSubagentItem.profile || '(继承)'}；模型: ${openSubagentItem.model || '未知'}`"
+          >
+            {{ openSubagentItem.profile || '(继承)' }}<template v-if="openSubagentItem.model"> · {{ openSubagentItem.model }}</template>
+          </span>
           <span
             class="work-run-group__detail-status"
             :class="`work-run-group__detail-status--${subagentStatus(openSubagentItem).cls}`"
@@ -701,6 +715,49 @@ function ariaOf(item: WorkRunItem): string {
 .work-run-group__detail-time {
   font-size: 11px;
   color: var(--nm-text-secondary);
+}
+/* 子代理：任务摘要的原生折叠容器。summary 是既有单行样式（省略号），
+   展开时 pre 显示完整任务（多行、保留换行、不省略）。 */
+.work-run-group__detail-task {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.work-run-group__detail-task > summary {
+  cursor: pointer;
+  list-style: none;        /* 去掉浏览器默认三角；统一用我们既有样式 */
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-run-group__detail-task > summary::-webkit-details-marker { display: none; }
+.work-run-group__detail-task[open] > summary {
+  white-space: normal;     /* 展开时摘要也允许换行（与 pre 一致） */
+  overflow: visible;
+}
+.work-run-group__task-full {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: color-mix(in srgb, var(--nm-surface-color) 50%, transparent);
+  border-radius: 6px;
+  color: var(--nm-text-secondary);
+}
+/* 时间戳旁的「profile · model」胶囊：与时间同字号，弱一档视觉权重。 */
+.work-run-group__detail-runtime {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--panel-subagent, var(--nm-text-secondary));
+  background: color-mix(in srgb, var(--panel-subagent, var(--nm-surface-color)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-subagent, var(--nm-surface-color)) 30%, transparent);
+  white-space: nowrap;
 }
 .work-run-group__detail-status {
   margin-left: auto;

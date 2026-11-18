@@ -197,6 +197,10 @@ export interface SubagentEventInfo {
    * 完成钩子（`<subagent_event>`）到达时就地改写为结果行（保留派发位置）。
    */
   running?: boolean;
+  /** 委派的 API profile 名（`spawn_subagent.profile`；未指定 = 继承本 agent）。 */
+  profile?: string;
+  /** 实际生效的模型名。 */
+  model?: string;
 }
 
 /**
@@ -205,7 +209,13 @@ export interface SubagentEventInfo {
  * 该行是**派发位置的工作卡片**：完成钩子到达时由 [`finishSubagentRun`]
  * 就地改写（任务 → 结果），不在合并回合重复出行——一份委派始终一行。
  */
-export function startSubagentRun(state: AppState, sessionId: string, task: string): void {
+export function startSubagentRun(
+  state: AppState,
+  sessionId: string,
+  task: string,
+  profile?: string,
+  model?: string,
+): void {
   const line = task.replace(/\s+/g, ' ').trim();
   if (!line) return;
   pushTo(state, 'subagent', line, Math.floor(Date.now() / 1000), {
@@ -217,6 +227,8 @@ export function startSubagentRun(state: AppState, sessionId: string, task: strin
       result: '',
       completedAtMs: null,
       running: true,
+      profile,
+      model,
     },
   });
 }
@@ -265,6 +277,8 @@ export function parseSubagentEvent(content: string): SubagentEventInfo | null {
       result: typeof payload['result'] === 'string' ? payload['result'] : '',
       completedAtMs:
         typeof payload['completed_at_ms'] === 'number' ? payload['completed_at_ms'] : null,
+      profile: typeof payload['profile'] === 'string' ? payload['profile'] : undefined,
+      model: typeof payload['model'] === 'string' ? payload['model'] : undefined,
     };
   } catch {
     return null;
