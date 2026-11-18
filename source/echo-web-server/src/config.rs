@@ -76,6 +76,25 @@ pub struct ServerSection {
     /// 404/401。
     #[serde(default = "default_base_path")]
     pub base_path: String,
+    /// 子路径部署时，是否**同时**在根路径提供服务（缺省 true）。
+    ///
+    /// `base_path` 描述的是「这个进程被反向代理挂在哪个前缀下」，不是「这个
+    /// 进程只认这个前缀」。两者混作一谈会有个很别扭的副作用：直连监听端口
+    /// （`http://10.0.0.5:8080/`）也被要求带前缀，而那条链路上根本没有反向
+    /// 代理——本机调试、内网直连、健康检查都会莫名 404。
+    ///
+    /// 打开（默认）时两个入口都可用：
+    ///
+    /// - `/agent-panel/...`（规范地址，反代转发用）；
+    /// - `/...`（根坐标系，直连用）。
+    ///
+    /// 根入口**不是重定向**到前缀：重定向只是把「需要加前缀」变成「跳过去之后
+    /// 前缀自己出现」，直连的 URL 依旧不是用户想要的那个。
+    ///
+    /// 什么时候该关掉：把整个 host 都交给面板、又只想让它接管子路径时——
+    /// 关掉后前缀之外的请求一律 404，不会落进 SPA 兜底变成「什么都返回 200」。
+    #[serde(default = "default_true")]
+    pub serve_root: bool,
 }
 
 fn default_base_path() -> String {
@@ -96,6 +115,7 @@ impl Default for ServerSection {
             access_token: String::new(),
             require_token: true,
             base_path: default_base_path(),
+            serve_root: true,
         }
     }
 }
@@ -390,6 +410,32 @@ mod tests {
         let config = PanelConfig::default();
         assert_eq!(config.server.base_path, "/");
         assert_eq!(config.server.effective_base_path(), "/");
+    }
+
+    /// `serve_root` 缺省 true：子路径部署时**直连监听端口**也该能在根打开。
+    ///
+    /// 缺省 false 的后果很具体：本机 `http://10.0.0.5:8080/` 变成 404，而那条
+    /// 链路上根本没有反向代理，用户没有任何理由给它加前缀。
+    #[test]
+    fn serve_root_defaults_to_true_and_can_be_disabled() {
+        let config = PanelConfig::default();
+        assert!(config.server.serve_root);
+
+        // 不写该键、只写 base_path 时仍然是 true（serde default）。
+        let dir = std::env::temp_dir().join(format!("echo-cfg-serve-root-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("panel.toml");
+        std::fs::write(&path, "[server]\nbase_path = \"/agent-panel\"\n").unwrap();
+        let cfg = PanelConfig::load(&path).unwrap();
+        assert!(cfg.server.serve_root);
+        assert_eq!(cfg.server.effective_base_path(), "/agent-panel/");
+
+        // 显式关掉：整站交给面板时用严格模式。
+        std::fs::write(&path, "[server]\nbase_path = \"/agent-panel\"\nserve_root = false\n")
+            .unwrap();
+        let cfg = PanelConfig::load(&path).unwrap();
+        assert!(!cfg.server.serve_root);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

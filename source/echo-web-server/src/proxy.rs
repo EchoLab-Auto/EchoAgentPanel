@@ -119,6 +119,11 @@ pub struct AppState {
     /// 把 `OriginalUri` 剥回相对路径 —— 两处必须用同一个值，所以它住在 state
     /// 里而不是各取一次配置。
     pub base_path: Arc<str>,
+    /// 子路径部署时是否同时接受根路径入口（`[server] serve_root`）。
+    ///
+    /// 与 `base_path` 分开的理由见 `config::ServerSection::serve_root`：
+    /// 基址是「被反代挂在哪个前缀下」，不是「只认这个前缀」。
+    pub serve_root: bool,
 }
 
 impl AppState {
@@ -139,6 +144,7 @@ impl AppState {
             bind: String::new(),
             embedded: false,
             base_path: Arc::from("/"),
+            serve_root: true,
         }
     }
 
@@ -155,6 +161,12 @@ impl AppState {
         } else {
             Arc::from(crate::config::normalize_base_path(trimmed).as_str())
         };
+        self
+    }
+
+    /// 子路径部署时是否同时挂根路径入口。
+    pub fn with_serve_root(mut self, serve_root: bool) -> Self {
+        self.serve_root = serve_root;
         self
     }
 

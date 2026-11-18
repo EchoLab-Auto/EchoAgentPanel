@@ -333,7 +333,10 @@ fn runtime_config(
         require_token,
         // 内嵌形态的基址：恒为根。Core 把 Panel 挂在它自己的端口上，不存在
         // "前面还有一层反向代理加前缀"的情形；要挂到子路径下应该用独立外壳。
+        // 内嵌形态挂在 Core 的 host 根上；同时挂根入口是无害的同义反复
+        // （base_path 为 `/` 时根就是唯一入口）。
         base_path: "/".to_string(),
+        serve_root: true,
         // 内嵌形态的标识：前端据此显示"内嵌于 Core"，也说明为什么
         // 「Panel 自更新」这类动作在本形态下没有意义。
         embedded: true,

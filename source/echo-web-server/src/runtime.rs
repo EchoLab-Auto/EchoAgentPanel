@@ -42,6 +42,11 @@ pub struct PanelRuntimeConfig {
     /// 根部署是 `/`。子路径部署（反向代理挂在 `/agent-panel`）时所有路由与
     /// 静态资源都移到这里，**前端也必须用同一个值构建**（`PANEL_BASE`）。
     pub base_path: String,
+    /// 子路径部署时是否**同时**接受根路径入口（`[server] serve_root`）。
+    ///
+    /// 基址描述的是「被反代挂在哪个前缀下」，不是「这个进程只认这个前缀」：
+    /// 直连监听端口的请求不经过反代，那条链路上根路径才是本源地址。
+    pub serve_root: bool,
 }
 
 impl PanelRuntimeConfig {
@@ -51,6 +56,7 @@ impl PanelRuntimeConfig {
         let media_cache_dir = cfg.server.effective_media_cache_dir();
         // 基址在移动 `cfg.server.access_token` 之前取（String 不是 Copy）。
         let base_path = cfg.server.effective_base_path();
+        let serve_root = cfg.server.serve_root;
         Self {
             config_file: None,
             bind: cfg.server.bind_address,
@@ -65,6 +71,7 @@ impl PanelRuntimeConfig {
             // 重新推导：前端构建时用 PANEL_BASE，后端用 [server] base_path，
             // 两者不一致就是「HTML 拿到了、JS 全 404」。
             base_path,
+            serve_root,
             // 独立外壳（`echo-agent-panel`）走这条构造：不是内嵌。
             embedded: false,
         }
@@ -147,6 +154,7 @@ pub fn router_with_gate(
     // 尾斜杠），静态处理器用的是 state 里那份带尾斜杠的（浏览器解析相对引用
     // 需要它）。两者由同一个规范化结果派生。
     let base = state.base_path().trim_end_matches('/').to_string();
+    let serve_root = state.serve_root;
 
     let app = Router::new()
         .route("/ws", get(crate::proxy::ws_handler))
@@ -176,7 +184,7 @@ pub fn router_with_gate(
         // 根部署：与历史完全一致，不套前缀。
         return app;
     }
-    mount_under(app, base)
+    mount_under(app, base, serve_root)
 }
 
 /// 把 [app] 挂到 `prefix`（不带尾斜杠）之下。
@@ -194,11 +202,14 @@ pub fn router_with_gate(
 /// 真浏览器里才看得见。所以这里自己判定前缀：**按路径段**剥，剥完把 URI 改写成
 /// 内层那个坐标系（`/`、`/ws`、`/assets/…`），其余交给内层原样路由。
 ///
-/// 前缀之外一律 404：外层域名上的其它路径属于别的应用，面板不该接管。
+/// 前缀之外的处置由 `serve_root` 决定（`[server] serve_root`，缺省 true）：
+/// 打开时原样交给内层根坐标系 —— 直连监听端口的请求根本不经过反向代理，
+/// 那条链路上根路径才是本源地址；关掉时一律 404（外层域名上的其它路径属于
+/// 别的应用，面板不该接管）。
 ///
 /// `OriginalUri` 保持不变（完整路径）—— 静态处理器靠它 + 基址还原目录内路径，
 /// 见 `static_files::strip_base`。
-fn mount_under(app: Router, base: String) -> Router {
+fn mount_under(app: Router, base: String, serve_root: bool) -> Router {
     Router::new()
         .fallback_service(app)
         .layer(axum::middleware::from_fn(
@@ -210,7 +221,14 @@ fn mount_under(app: Router, base: String) -> Router {
                         // 整段匹配：`/agent-panel` 与 `/agent-panel/…` 命中，
                         // `/agent-panelx` 不命中。
                         Some(rest) if rest.is_empty() || rest.starts_with('/') => rest.to_string(),
-                        _ => return axum::response::IntoResponse::into_response(axum::http::StatusCode::NOT_FOUND),
+                        // 前缀之外：`serve_root` 打开时原样交给内层（根坐标系），
+                        // 关掉时一律 404。理由见 `config::ServerSection::serve_root`。
+                        _ if serve_root => return next.run(request).await,
+                        _ => {
+                            return axum::response::IntoResponse::into_response(
+                                axum::http::StatusCode::NOT_FOUND,
+                            )
+                        }
                     };
                     let inner_path = if rest.is_empty() { "/".to_string() } else { rest };
                     let path_and_query = match request.uri().query() {
@@ -354,7 +372,8 @@ impl PanelRuntime {
         )
         .with_auth(auth, config.bind.clone())
         .with_embedded(config.embedded)
-        .with_base_path(config.base_path.clone());
+        .with_base_path(config.base_path.clone())
+        .with_serve_root(config.serve_root);
         if config.require_token && !config.access_token.is_empty() {
             info!("access token auth enabled for WS/HTTP API");
         } else if config.require_token && config.access_token.is_empty() {
@@ -413,6 +432,7 @@ mod tests {
             require_token: true,
             embedded: false,
             base_path: "/".to_string(),
+            serve_root: true,
         }
     }
 

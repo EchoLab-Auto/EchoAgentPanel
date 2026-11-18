@@ -9,8 +9,11 @@
 //!   前者是手敲/反向代理可能发出的形态，后者是浏览器解析相对引用的形态（也是
 //!   PWA manifest 的 `start_url`）。
 //! - 静态资源与 SPA 兜底都在前缀下。
-//! - 前缀段之外一律不归这个进程管（`/`、`/assets/…` 必须是 404，否则外层代理
-//!   把整个域名指过来时会把别人的路径吃进静态目录）。
+//! - 直连监听端口时根路径**照样能用**（`[server] serve_root`，缺省 true）：
+//!   `base_path` 描述的是「被反代挂在哪个前缀下」，不是「只认这个前缀」——
+//!   否则本机 `http://10.0.0.5:8080/` 会莫名 404。
+//! - 关掉 `serve_root` 时恢复严格模式：前缀之外一律 404（整个域名都指过来时
+//!   不会把别人的路径吃进静态目录）。
 //! - 前缀不是「字符串前缀」而是「路径段前缀」：`/agent-panelx` 不算命中。
 
 use std::path::{Path, PathBuf};
@@ -64,7 +67,7 @@ impl Drop for TempDir {
 }
 
 /// 关闭认证与门控：这组测试只关心路径空间，不该被 401/503 干扰。
-fn open_state(static_dir: &Path, base_path: &str) -> AppState {
+fn open_state(static_dir: &Path, base_path: &str, serve_root: bool) -> AppState {
     let tunnels = SshTunnels::new(static_dir.parent().unwrap().join("tunnels"));
     AppState::new(
         UpstreamRegistry::new(
@@ -81,6 +84,7 @@ fn open_state(static_dir: &Path, base_path: &str) -> AppState {
         "127.0.0.1:0".to_owned(),
     )
     .with_base_path(base_path)
+    .with_serve_root(serve_root)
 }
 
 async fn spawn(app: Router) -> String {
@@ -100,7 +104,7 @@ async fn status(client: &reqwest::Client, url: &str) -> StatusCode {
 async fn subpath_base_serves_shell_and_assets_under_prefix() {
     let dir = TempDir::new("subpath");
     let app = router_with_gate(
-        open_state(&dir.static_dir(), "/agent-panel"),
+        open_state(&dir.static_dir(), "/agent-panel", true),
         DeploymentGate::disabled(),
     );
     let base = spawn(app).await;
@@ -141,23 +145,68 @@ async fn subpath_base_serves_shell_and_assets_under_prefix() {
 }
 
 #[tokio::test]
-async fn subpath_base_leaves_the_rest_of_the_site_alone() {
-    let dir = TempDir::new("outside");
+async fn subpath_base_also_serves_the_root_for_direct_access() {
+    let dir = TempDir::new("root-alias");
     let app = router_with_gate(
-        open_state(&dir.static_dir(), "/agent-panel"),
+        open_state(&dir.static_dir(), "/agent-panel", true),
         DeploymentGate::disabled(),
     );
     let base = spawn(app).await;
     let client = reqwest::Client::new();
 
-    // 前缀之外一律不接管：外层代理会把同一个域名的其它路径留给别的应用。
-    for path in ["/", "/assets/app.js", "/ws", "/api/deployment", "/settings"] {
+    // 直连监听端口时没有反向代理，根路径就是本源地址。
+    let response = client.get(format!("{base}/")).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.text().await.unwrap().contains("shell"));
+
+    for path in ["/index.html", "/assets/app.js", "/settings"] {
+        assert_eq!(
+            status(&client, &format!("{base}{path}")).await,
+            StatusCode::OK,
+            "{path} 应走根坐标系（直连场景）"
+        );
+    }
+
+    // 缺失的静态资源在根坐标系下同样是 404，不能回 shell。
+    assert_eq!(
+        status(&client, &format!("{base}/assets/missing-abc.js")).await,
+        StatusCode::NOT_FOUND
+    );
+
+    // 前缀入口不受影响：反代那条链路照旧。
+    for path in ["/agent-panel", "/agent-panel/", "/agent-panel/assets/app.js"] {
+        assert_eq!(
+            status(&client, &format!("{base}{path}")).await,
+            StatusCode::OK,
+            "{path} 是规范地址，必须一直可用"
+        );
+    }
+}
+
+#[tokio::test]
+async fn serve_root_disabled_serves_only_the_prefix() {
+    let dir = TempDir::new("strict");
+    let app = router_with_gate(
+        open_state(&dir.static_dir(), "/agent-panel", false),
+        DeploymentGate::disabled(),
+    );
+    let base = spawn(app).await;
+    let client = reqwest::Client::new();
+
+    // 关掉 serve_root 时恢复严格模式：外层代理会把同一个域名的其它路径留给
+    // 别的应用，面板不该接管。
+    for path in ["/", "/assets/app.js", "/index.html", "/settings"] {
         assert_eq!(
             status(&client, &format!("{base}{path}")).await,
             StatusCode::NOT_FOUND,
             "{path} 不该被面板接管"
         );
     }
+
+    assert_eq!(
+        status(&client, &format!("{base}/agent-panel/")).await,
+        StatusCode::OK
+    );
 
     // 前缀必须是**路径段**，不是字符串前缀。
     assert_eq!(
@@ -171,7 +220,7 @@ async fn subpath_base_leaves_the_rest_of_the_site_alone() {
 async fn root_base_keeps_the_historical_layout() {
     let dir = TempDir::new("root");
     let app = router_with_gate(
-        open_state(&dir.static_dir(), "/"),
+        open_state(&dir.static_dir(), "/", true),
         DeploymentGate::disabled(),
     );
     let base = spawn(app).await;
