@@ -331,6 +331,9 @@ fn runtime_config(
         media_dir,
         media_cache_dir,
         require_token,
+        // 内嵌形态的基址：恒为根。Core 把 Panel 挂在它自己的端口上，不存在
+        // "前面还有一层反向代理加前缀"的情形；要挂到子路径下应该用独立外壳。
+        base_path: "/".to_string(),
         // 内嵌形态的标识：前端据此显示"内嵌于 Core"，也说明为什么
         // 「Panel 自更新」这类动作在本形态下没有意义。
         embedded: true,

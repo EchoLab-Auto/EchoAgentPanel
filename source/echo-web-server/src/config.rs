@@ -67,6 +67,19 @@ pub struct ServerSection {
     /// 缺省 true：保持"配了令牌就生效"的旧行为。
     #[serde(default = "default_true")]
     pub require_token: bool,
+    /// 应用基址（2026-11）。默认 `/` = 独占一个 host 根。
+    ///
+    /// 被反向代理挂在子路径下时（`https://example.com/agent-panel`）填
+    /// `/agent-panel`：所有路由与静态资源都移到该前缀下，`/` 之外的请求由
+    /// 外层代理负责。**前端必须用同一个值构建**（`PANEL_BASE=/agent-panel/`），
+    /// 否则 HTML 里的资源引用仍指向站点根 —— 典型表现是页面白屏、JS 全部
+    /// 404/401。
+    #[serde(default = "default_base_path")]
+    pub base_path: String,
+}
+
+fn default_base_path() -> String {
+    "/".to_string()
 }
 
 fn default_true() -> bool {
@@ -82,6 +95,7 @@ impl Default for ServerSection {
             media_cache_dir: String::new(),
             access_token: String::new(),
             require_token: true,
+            base_path: default_base_path(),
         }
     }
 }
@@ -118,6 +132,32 @@ impl ServerSection {
             _ => std::path::PathBuf::from("media-cache"),
         }
     }
+
+    /// 规范化应用基址：恒以 `/` 结尾，根部署为 `/`。
+    ///
+    /// `agent-panel`、`/agent-panel`、`/agent-panel/` 都归一成 `/agent-panel/`。
+    /// 归一化的理由：router 的 `nest` 要求不带尾斜杠（`/agent-panel`），而
+    /// 浏览器解析相对引用要求带尾斜杠（否则 `/agent-panelx` 会被当成前缀）。
+    /// 两者都从这一个值派生，避免配置里写错一个斜杠就白屏。
+    ///
+    /// **末尾的 `/` 是有意义的**：`/agent-panel` 与 `/agent-panel/` 在 URL
+    /// 语义上是两个地址，浏览器对前者做相对解析会退到 `/`。
+    pub fn effective_base_path(&self) -> String {
+        normalize_base_path(&self.base_path)
+    }
+}
+
+/// 见 [`ServerSection::effective_base_path`]。
+pub fn normalize_base_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return "/".to_string();
+    }
+    let body = trimmed.trim_matches('/');
+    if body.is_empty() {
+        return "/".to_string();
+    }
+    format!("/{body}/")
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -327,6 +367,30 @@ url=\"ws://y:2\"
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 基址规范化：写三种写法都是同一个前缀，末尾的 `/` 一定要有。
+    ///
+    /// 末尾斜杠不是洁癖：`/agent-panel` 与 `/agent-panel/` 在 URL 上是两个地址，
+    /// 浏览器对前者做相对解析会退到 `/`，表现为「页面打开是别人的」。
+    #[test]
+    fn base_path_normalizes_to_one_trailing_slash() {
+        assert_eq!(normalize_base_path("/"), "/");
+        assert_eq!(normalize_base_path(""), "/");
+        assert_eq!(normalize_base_path("   "), "/");
+        assert_eq!(normalize_base_path("agent-panel"), "/agent-panel/");
+        assert_eq!(normalize_base_path("/agent-panel"), "/agent-panel/");
+        assert_eq!(normalize_base_path("/agent-panel/"), "/agent-panel/");
+        assert_eq!(normalize_base_path("//agent-panel//"), "/agent-panel/");
+        assert_eq!(normalize_base_path("a/b"), "/a/b/");
+    }
+
+    /// 缺省是根：不写 `base_path` 的部署必须与历史行为一致。
+    #[test]
+    fn base_path_defaults_to_root() {
+        let config = PanelConfig::default();
+        assert_eq!(config.server.base_path, "/");
+        assert_eq!(config.server.effective_base_path(), "/");
+    }
 
     #[test]
     fn panel_config_loads_defaults_and_overrides() {

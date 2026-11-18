@@ -1,27 +1,33 @@
 //! 公共 HTTP 辅助：带超时的 fetch，弱网/后端无响应时不无限等待。
 
+import { withBase } from './base';
+
 /** 默认请求超时（毫秒） */
 export const FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * `fetch` 包装：AbortController 超时控制。
  * 超时抛 `Error('请求超时')`；网络错误/非 2xx 由调用方按需处理。
+ *
+ * 与 [`panelFetch`](crate::connection::panelFetch) 一样，站内绝对路径在这里统一
+ * 加应用基址 —— 两处都是"HTTP 出站出口"，调用方只写 `/api/...`。
  */
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
   timeoutMs = FETCH_TIMEOUT_MS,
 ): Promise<Response> {
+  const target = withBase(url);
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const token = window.localStorage.getItem('echo-panel-token');
     const headers = new Headers(init.headers);
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    return await fetch(url, { ...init, headers, signal: controller.signal });
+    return await fetch(target, { ...init, headers, signal: controller.signal });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error(`请求超时（>${timeoutMs / 1000}s）：${url}`);
+      throw new Error(`请求超时（>${timeoutMs / 1000}s）：${target}`);
     }
     throw error;
   } finally {

@@ -37,6 +37,11 @@ pub struct PanelRuntimeConfig {
     /// 独立时才是这个二进制自己的事。运行期行为**不因它分叉**——两条形态共用
     /// 同一条中继代码路径（见模块文档）。
     pub embedded: bool,
+    /// 应用基址（`[server] base_path`，恒以 `/` 结尾）。
+    ///
+    /// 根部署是 `/`。子路径部署（反向代理挂在 `/agent-panel`）时所有路由与
+    /// 静态资源都移到这里，**前端也必须用同一个值构建**（`PANEL_BASE`）。
+    pub base_path: String,
 }
 
 impl PanelRuntimeConfig {
@@ -44,6 +49,8 @@ impl PanelRuntimeConfig {
     pub fn from_panel_config(cfg: PanelConfig) -> Self {
         let media_dir = cfg.server.effective_media_dir();
         let media_cache_dir = cfg.server.effective_media_cache_dir();
+        // 基址在移动 `cfg.server.access_token` 之前取（String 不是 Copy）。
+        let base_path = cfg.server.effective_base_path();
         Self {
             config_file: None,
             bind: cfg.server.bind_address,
@@ -54,6 +61,10 @@ impl PanelRuntimeConfig {
             media_dir,
             media_cache_dir,
             require_token: cfg.server.require_token,
+            // 面板前端与后端必须用同一个基址，所以这里取的是**配置值**而不是
+            // 重新推导：前端构建时用 PANEL_BASE，后端用 [server] base_path，
+            // 两者不一致就是「HTML 拿到了、JS 全 404」。
+            base_path,
             // 独立外壳（`echo-agent-panel`）走这条构造：不是内嵌。
             embedded: false,
         }
@@ -132,7 +143,12 @@ pub fn router_with_gate(
     state: crate::proxy::AppState,
     gate: crate::deployment::DeploymentGate,
 ) -> Router {
-    Router::new()
+    // 基址在这里只取一次：`nest` 用不带尾斜杠的形态（axum 的 nest 不接受
+    // 尾斜杠），静态处理器用的是 state 里那份带尾斜杠的（浏览器解析相对引用
+    // 需要它）。两者由同一个规范化结果派生。
+    let base = state.base_path().trim_end_matches('/').to_string();
+
+    let app = Router::new()
         .route("/ws", get(crate::proxy::ws_handler))
         .route("/media/{name}", get(crate::media::media_handler))
         .route("/api/logs/panel", get(crate::log::panel_logs))
@@ -154,7 +170,66 @@ pub fn router_with_gate(
             gate,
             crate::deployment::guard,
         ))
-        .with_state(state)
+        .with_state(state);
+
+    if base.is_empty() {
+        // 根部署：与历史完全一致，不套前缀。
+        return app;
+    }
+    mount_under(app, base)
+}
+
+/// 把 [app] 挂到 `prefix`（不带尾斜杠）之下。
+///
+/// # 为什么不用 `Router::nest`
+///
+/// axum 的 `nest("/agent-panel", …)` **不匹配** `/agent-panel/`（前缀加尾斜杠、
+/// 后面什么都没有）—— 实测返回 404。而那个形态恰恰是最常用的两个入口：
+///
+/// - 浏览器把 `/agent-panel` 里解析出来的相对引用变成 `/agent-panel/…`；
+/// - `manifest.webmanifest` 的 `start_url` 归一化后就带尾斜杠（装到桌面打开）；
+/// - 反向代理转发时通常原样带着尾斜杠。
+///
+/// 少了它，「手敲不带斜杠能开、带斜杠 404 / PWA 打开 404」，而且这类 404 只在
+/// 真浏览器里才看得见。所以这里自己判定前缀：**按路径段**剥，剥完把 URI 改写成
+/// 内层那个坐标系（`/`、`/ws`、`/assets/…`），其余交给内层原样路由。
+///
+/// 前缀之外一律 404：外层域名上的其它路径属于别的应用，面板不该接管。
+///
+/// `OriginalUri` 保持不变（完整路径）—— 静态处理器靠它 + 基址还原目录内路径，
+/// 见 `static_files::strip_base`。
+fn mount_under(app: Router, base: String) -> Router {
+    Router::new()
+        .fallback_service(app)
+        .layer(axum::middleware::from_fn(
+            move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+                let base = base.clone();
+                async move {
+                    let path = request.uri().path().to_string();
+                    let rest = match path.strip_prefix(base.as_str()) {
+                        // 整段匹配：`/agent-panel` 与 `/agent-panel/…` 命中，
+                        // `/agent-panelx` 不命中。
+                        Some(rest) if rest.is_empty() || rest.starts_with('/') => rest.to_string(),
+                        _ => return axum::response::IntoResponse::into_response(axum::http::StatusCode::NOT_FOUND),
+                    };
+                    let inner_path = if rest.is_empty() { "/".to_string() } else { rest };
+                    let path_and_query = match request.uri().query() {
+                        Some(query) => format!("{inner_path}?{query}"),
+                        None => inner_path,
+                    };
+                    let mut parts = request.uri().clone().into_parts();
+                    match path_and_query.parse() {
+                        Ok(value) => parts.path_and_query = Some(value),
+                        Err(_) => return axum::response::IntoResponse::into_response(axum::http::StatusCode::BAD_REQUEST),
+                    }
+                    match axum::http::Uri::from_parts(parts) {
+                        Ok(uri) => *request.uri_mut() = uri,
+                        Err(_) => return axum::response::IntoResponse::into_response(axum::http::StatusCode::BAD_REQUEST),
+                    }
+                    next.run(request).await
+                }
+            },
+        ))
 }
 
 pub struct PanelRuntime;
@@ -278,7 +353,8 @@ impl PanelRuntime {
             tunnels,
         )
         .with_auth(auth, config.bind.clone())
-        .with_embedded(config.embedded);
+        .with_embedded(config.embedded)
+        .with_base_path(config.base_path.clone());
         if config.require_token && !config.access_token.is_empty() {
             info!("access token auth enabled for WS/HTTP API");
         } else if config.require_token && config.access_token.is_empty() {
@@ -336,6 +412,7 @@ mod tests {
             media_cache_dir: std::env::temp_dir(),
             require_token: true,
             embedded: false,
+            base_path: "/".to_string(),
         }
     }
 

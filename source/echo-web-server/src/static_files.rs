@@ -45,13 +45,18 @@ fn gzip_cache() -> &'static Mutex<HashMap<PathBuf, GzipEntry>> {
 }
 
 /// `GET /<path>` —— 静态文件；找不到时回退 SPA shell（客户端路由）。
+///
+/// 用的是 [`OriginalUri`] 而不是 `Uri`：静态目录里的相对路径与**前端构建时的
+/// 基址**是同一个坐标系，`OriginalUri` 是浏览器实际请求的那条（含子路径前缀），
+/// 减掉基址正好是目录内路径。改用 `Uri` 的话，子路径部署下 nest 已经剥过前缀，
+/// 看着一样，但基址一改（前缀带不带尾斜杠）就会出现两套推导，不如只留一条。
 pub async fn static_handler(
     uri: OriginalUri,
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Response {
     let root = PathBuf::from(state.static_dir.as_ref());
-    let requested = uri.path().trim_start_matches('/');
+    let requested = strip_base(uri.path(), state.base_path()).trim_start_matches('/');
     let relative = if requested.is_empty() {
         "index.html"
     } else {
@@ -85,6 +90,22 @@ pub async fn static_handler(
         }
     };
     serve_file(&served_root, served, &headers).await
+}
+
+/// 去掉应用基址前缀（`/agent-panel/assets/x.js` → `/assets/x.js`）。
+///
+/// 只剥**整段**前缀：`/agent-panelx` 不会被当成 `/agent-panel` 的子路径。
+/// 根部署（`base == "/"`）原样返回。
+fn strip_base<'a>(path: &'a str, base: &str) -> &'a str {
+    if base.is_empty() || base == "/" {
+        return path;
+    }
+    let base = base.trim_end_matches('/');
+    match path.strip_prefix(base) {
+        Some("") => "/",
+        Some(rest) if rest.starts_with('/') => rest,
+        _ => path,
+    }
 }
 
 /// 把请求路径安全地拼到静态根下；任何可能越界的形态返回 `None`。
@@ -319,6 +340,21 @@ fn not_found() -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 剥基址只剥**整段**前缀：`/agent-panelx` 不是 `/agent-panel` 的子路径。
+    ///
+    /// 这条如果写成 `strip_prefix` 的直接用，`/agent-panelx/assets/a.js` 会被
+    /// 剥成 `x/assets/a.js`，等于把别的应用的资源映射进静态目录 —— 路径穿越
+    /// 检查拦不住它（仍在根内），但内容是错的。
+    #[test]
+    fn strip_base_only_removes_whole_segments() {
+        assert_eq!(strip_base("/assets/a.js", "/"), "/assets/a.js");
+        assert_eq!(strip_base("/agent-panel/assets/a.js", "/agent-panel/"), "/assets/a.js");
+        assert_eq!(strip_base("/agent-panel", "/agent-panel/"), "/");
+        assert_eq!(strip_base("/agent-panel/", "/agent-panel/"), "/");
+        assert_eq!(strip_base("/agent-panelx/assets/a.js", "/agent-panel/"), "/agent-panelx/assets/a.js");
+        assert_eq!(strip_base("/", "/agent-panel/"), "/");
+    }
 
     #[test]
     fn webmanifest_is_manifest_json_and_gzip_capable() {

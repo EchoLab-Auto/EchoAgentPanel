@@ -1,3 +1,5 @@
+import { withBase } from './base';
+
 //! 软键盘 / 视口诊断浮层（2026-11）
 //!
 //! 用途：手机上「键盘弹起后界面错位」类问题，靠猜浏览器行为是没用的 ——
@@ -114,7 +116,7 @@ function postSnapshot(): void {
   if (postBudget <= 0) return
   postBudget -= 1
   try {
-    void fetch('/api/diag', {
+    void fetch(withBase('/api/diag'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(snapshot()),

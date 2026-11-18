@@ -113,6 +113,12 @@ pub struct AppState {
     /// 只影响**展示**（`/api/panel-identity`）：两种形态的中继、鉴权、
     /// 静态资源路径完全一致，所以这里不是分支开���，只是身份标注。
     pub embedded: bool,
+    /// 应用基址，恒以 `/` 结尾（根部署为 `/`，子路径部署为 `/agent-panel/`）。
+    ///
+    /// 路由由 [`crate::runtime::router_with_gate`] 用它 `nest`，静态处理器用它
+    /// 把 `OriginalUri` 剥回相对路径 —— 两处必须用同一个值，所以它住在 state
+    /// 里而不是各取一次配置。
+    pub base_path: Arc<str>,
 }
 
 impl AppState {
@@ -132,7 +138,29 @@ impl AppState {
             auth: crate::security::PanelAuth::new(access_token.to_string(), true),
             bind: String::new(),
             embedded: false,
+            base_path: Arc::from("/"),
         }
+    }
+
+    /// 设置应用基址（运行库按 `[server] base_path` 调用）。
+    ///
+    /// 入参应当已规范化（`crate::config::normalize_base_path`）；这里只做
+    /// 兜底：不带前导 `/` 或为空时按根处理 —— 一个写错的前缀会让所有请求
+    /// 404，宁可退回"能跑"的根部署。
+    pub fn with_base_path(mut self, base_path: impl Into<Arc<str>>) -> Self {
+        let raw: Arc<str> = base_path.into();
+        let trimmed = raw.trim();
+        self.base_path = if trimmed.is_empty() || trimmed == "/" {
+            Arc::from("/")
+        } else {
+            Arc::from(crate::config::normalize_base_path(trimmed).as_str())
+        };
+        self
+    }
+
+    /// 应用基址（恒以 `/` 结尾）。
+    pub fn base_path(&self) -> &str {
+        &self.base_path
     }
 
     /// 换用运行期可变的凭据状态（运行库用；测试仍可走 [`Self::new`]）。

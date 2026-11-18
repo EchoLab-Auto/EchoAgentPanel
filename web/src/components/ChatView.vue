@@ -25,6 +25,7 @@ import ChatTabs from './ChatTabs.vue';
 import { chatTabs, ensureChatTabsLoaded, syncActiveTab, type ChatTab } from '../chat-tabs';
 
 import { state } from '../store';
+import { withBase } from '../base';
 import type { IncomingFile, PendingFile } from '../protocol';
 import { effectiveSessionApi, profileMissing } from '../session-api';
 import { activeTeam, checklistsForRegion, checklistsForSession, pushToast, sessionMessagesFor } from '../state';
@@ -820,7 +821,7 @@ function reportAnomaly(reason: string, detail: Record<string, unknown>): void {
   if (anomalyReported) return;
   anomalyReported = true;
   try {
-    void fetch('/api/diag', {
+    void fetch(withBase('/api/diag'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -2067,11 +2068,17 @@ function filesOf(message: ChatMessage): IncomingFile[] {
 // 媒体引用地址：`/media/<id>` 附当前运行区域的 `?core=` 提示——Panel 后端
 // 优先在该上游（SSH 隧道）拉取；本机媒体库命中路径不受影响（多一个查询
 // 参数而已）。data URI 等其它形式原样返回。
+//
+// 前缀化必须在这一层做：`/media/<id>` 是 Core 落盘时写进**消息数据**的绝对
+// 路径，历史记录里存的永远是 `/media/…`。子路径部署下浏览器要的是
+// `/agent-panel/media/…`，改数据不现实，所以在这里翻译——它是全仓唯一渲染
+// 媒体引用的出口。
 function mediaSrc(img: string): string {
   if (!img.startsWith('/media/')) return img;
+  const src = withBase(img);
   const core = state.activeRegion;
-  if (!core) return img;
-  return `${img}${img.includes('?') ? '&' : '?'}core=${encodeURIComponent(core)}`;
+  if (!core) return src;
+  return `${src}${src.includes('?') ? '&' : '?'}core=${encodeURIComponent(core)}`;
 }
 </script>
 

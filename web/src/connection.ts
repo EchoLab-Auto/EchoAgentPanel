@@ -10,6 +10,7 @@
 //!   5s 内无任何下行帧则判死、走标准重连。
 
 import { state, dispatch } from './store';
+import { withBase } from './base';
 import { coreForTeam, currentRegion, pushToast } from './state';
 import { teamKey } from './keys';
 import { trackRequest } from './pending';
@@ -111,7 +112,9 @@ export function startConnection(): void {
     // ?token=<token> 播种（随后从 URL 擦除防泄漏）。
     const token = ensurePanelToken();
     const qs = token ? `?token=${encodeURIComponent(token)}` : '';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws${qs}`);
+    // 子路径部署时必须是 `/agent-panel/ws`：手写 URL 不会被 vite 的 base 重写，
+    // 漏了这一步就是「页面能开、WS 永远连不上」。
+    const ws = new WebSocket(`${proto}//${window.location.host}${withBase('/ws')}${qs}`);
     socket = ws;
 
     ws.onopen = () => {
@@ -558,11 +561,16 @@ export function ensurePanelToken(): string {
   return window.localStorage.getItem('echo-panel-token') ?? '';
 }
 
-/** 带认证头的 fetch（token 非空时自动加 Bearer）。 */
+/** 带认证头的 fetch（token 非空时自动加 Bearer）。
+ *
+ * 站内绝对路径统一在这里加应用基址：这是本模块所有 HTTP 出站的**唯一**出口，
+ * 调用方（`/api/upstreams`、`/api/security`、`/api/panel-identity` …）照旧写
+ * `/api/...` 即可，不必各自关心部署在根还是子路径。 */
 export function panelFetch(input: string, init?: RequestInit): Promise<Response> {
+  const url = withBase(input);
   const token = window.localStorage.getItem('echo-panel-token');
-  if (!token) return fetch(input, init);
+  if (!token) return fetch(url, init);
   const headers = new Headers(init?.headers);
   headers.set('Authorization', `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  return fetch(url, { ...init, headers });
 }
