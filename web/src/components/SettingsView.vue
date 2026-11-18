@@ -1287,16 +1287,58 @@ const teamFormIsEdit = ref(false);
 // 此前 team 编辑无任何脏保护：点另一条、点「新建智能体」、切分类都会静默
 // 丢弃未保存的表单改动（技能工作台早有 skillFormDirty + 切换确认）。
 /**
- * 表单里**没有输入控件、但必须原样透传**的 persona 字段。
+ * 表单里没有输入控件、但必须原样透传的 persona 字段。
  *
  * `SaveTeam` 是整对象覆盖：Core 侧 `process_commands::save_team` 直接用命令
- * 字段构造 `AgentProfile`，缺省即 `None`。表单不含这三项时，每次在设置页
- * 保存都会把「配置 Agent」弹层里设好的 API 供应商清成"跟随全局"，并把
- * per-persona 的 token 预算清空（2026-10 多 Core 交互修复）。
+ * 字段构造 `AgentProfile`，漏发它会每次保存都清成“跟随全局默认配置”。
  */
 const teamFormApiProfile = ref<string | null>(null);
-const teamFormMemoryLimit = ref<number | null>(null);
-const teamFormContextWindow = ref<number | null>(null);
+// token 配置在输入期间保留字符串，非法文本不能被当成 0 或 null 静默保存。
+// 通过校验后才在 teamSaveCommand 中转为 number。
+const teamFormMemoryLimit = ref('');
+const teamFormContextWindow = ref('');
+// Core 为兼容旧面板，会把已有覆盖值收到 None 时解释成“保留旧值”而不是
+// “清除覆盖”。因此只有新建或原本就继承全局的字段才允许留空。
+const teamFormMemoryLimitCanInherit = computed(
+  () => !teamFormIsEdit.value || selectedTeam.value?.memory_limit_tokens == null,
+);
+const teamFormContextWindowCanInherit = computed(
+  () => !teamFormIsEdit.value || selectedTeam.value?.context_window_tokens == null,
+);
+
+function tokenInputError(raw: string, min: number, label: string, canInherit: boolean): string {
+  const text = raw.trim();
+  if (!text) {
+    return canInherit ? '' : `${label}已设置人格覆盖，暂不支持清空；请输入新值。`;
+  }
+  const value = Number(text);
+  if (!Number.isSafeInteger(value) || value < min) {
+    return `${label}必须是大于等于 ${min} 的安全整数${canInherit ? '，或留空继承全局' : ''}。`;
+  }
+  return '';
+}
+
+const teamFormMemoryLimitError = computed(() =>
+  tokenInputError(
+    teamFormMemoryLimit.value,
+    200,
+    '上下文容量',
+    teamFormMemoryLimitCanInherit.value,
+  ),
+);
+const teamFormContextWindowError = computed(() =>
+  tokenInputError(
+    teamFormContextWindow.value,
+    1,
+    '模型窗口',
+    teamFormContextWindowCanInherit.value,
+  ),
+);
+
+/** 已校验的输入才会进入保存命令；原本继承全局时，空串对应 Core 的 None。 */
+function optionalTokenNumber(raw: string): number | null {
+  return raw.trim() ? Number(raw) : null;
+}
 
 function teamSnapshotOf(): string {
   return [
@@ -1306,6 +1348,8 @@ function teamSnapshotOf(): string {
     teamFormDescription.value,
     teamFormPrompt.value,
     teamFormEnabled.value ? '1' : '0',
+    teamFormMemoryLimit.value,
+    teamFormContextWindow.value,
     JSON.stringify(teamFormDisabledTools.value),
     JSON.stringify(teamFormDisabledSkills.value),
     JSON.stringify(teamFormEnabledModules.value),
@@ -1336,6 +1380,8 @@ const teamFormModel = computed(() => ({
   description: teamFormDescription.value,
   system_prompt: teamFormPrompt.value,
   enabled: teamFormEnabled.value,
+  memory_limit_tokens: teamFormMemoryLimit.value,
+  context_window_tokens: teamFormContextWindow.value,
   disabled_tools: teamFormDisabledTools.value,
   disabled_skills: teamFormDisabledSkills.value,
   enabled_modules: teamFormEnabledModules.value,
@@ -1528,8 +1574,8 @@ async function startTeamCreate() {
   teamFormEnabledSkills.value = [];
   teamFormSystemSkills.value = [];
   teamFormApiProfile.value = null;
-  teamFormMemoryLimit.value = null;
-  teamFormContextWindow.value = null;
+  teamFormMemoryLimit.value = '';
+  teamFormContextWindow.value = '';
   selectedTeam.value = null;
   teamFormSnapshot.value = teamSnapshotOf();
 }
@@ -1552,8 +1598,8 @@ function startTeamEdit(agent: TeamInfo) {
   teamFormEnabledSkills.value = agent.enabled_skills ?? [];
   teamFormSystemSkills.value = agent.system_skills ?? [];
   teamFormApiProfile.value = agent.api_profile ?? null;
-  teamFormMemoryLimit.value = agent.memory_limit_tokens ?? null;
-  teamFormContextWindow.value = agent.context_window_tokens ?? null;
+  teamFormMemoryLimit.value = agent.memory_limit_tokens?.toString() ?? '';
+  teamFormContextWindow.value = agent.context_window_tokens?.toString() ?? '';
   teamFormSnapshot.value = teamSnapshotOf();
 }
 
@@ -1566,7 +1612,7 @@ function cancelTeamEdit() {
  * 表单 → `SaveTeam` 命令体（两个投递路径共用：就地保存 / 跨区域迁移）。
  *
  * 必须**带全字段**：Core 侧按命令字段整对象重建 `AgentProfile`，漏掉的字段
- * 会被当成"清空"（api_profile → 跟随全局、token 预算 → 继承全局）。
+ * 会被当成"清空"（api_profile → 跟随全局）；token 覆盖值的清空约束见上方校验。
  */
 function teamSaveCommand(id: string) {
   return {
@@ -1582,8 +1628,8 @@ function teamSaveCommand(id: string) {
       enabled_tools: teamFormEnabledTools.value,
       enabled_skills: teamFormEnabledSkills.value,
       system_skills: teamFormSystemSkills.value,
-      memory_limit_tokens: teamFormMemoryLimit.value,
-      context_window_tokens: teamFormContextWindow.value,
+      memory_limit_tokens: optionalTokenNumber(teamFormMemoryLimit.value),
+      context_window_tokens: optionalTokenNumber(teamFormContextWindow.value),
       api_profile: teamFormApiProfile.value,
     },
   };
@@ -1592,6 +1638,11 @@ function teamSaveCommand(id: string) {
 async function saveTeam() {
   const id = teamFormId.value.trim() || teamFormName.value.trim();
   if (!id || !teamFormName.value.trim()) return;
+  const tokenError = teamFormMemoryLimitError.value || teamFormContextWindowError.value;
+  if (tokenError) {
+    addToast({ message: tokenError, type: 'warning', duration: 5000 });
+    return;
+  }
   const target = teamFormCore.value;
   const from = selectedTeam.value?.core ?? null;
   // 编辑时改了运行区域 = 迁移（目标区域保存表单内容 + 源区域删除）。与详情页
@@ -3030,6 +3081,45 @@ watch(
                   </NeumorphismFormItem>
                   <NeumorphismFormItem label="描述" name="description">
                     <NeumorphismInput v-model="teamFormDescription" placeholder="专注文档写作" />
+                  </NeumorphismFormItem>
+                  <NeumorphismFormItem label="上下文容量（tokens）" name="memory_limit_tokens">
+                    <NeumorphismInput
+                      id="team-memory-limit"
+                      v-model="teamFormMemoryLimit"
+                      type="number"
+                      inputmode="numeric"
+                      min="200"
+                      step="1"
+                      :placeholder="teamFormMemoryLimitCanInherit ? '留空 = 继承全局' : '请输入新的容量'"
+                      :error="teamFormMemoryLimitError"
+                    />
+                    <p class="muted caps-hint">
+                      {{
+                        teamFormMemoryLimitCanInherit
+                          ? '该智能体会话历史的 token 预算，最低 200；留空继承全局。'
+                          : '该智能体已覆盖全局预算，请输入新值；暂不支持通过清空恢复继承。'
+                      }}
+                      保存后立即生效。
+                    </p>
+                  </NeumorphismFormItem>
+                  <NeumorphismFormItem label="模型窗口（tokens）" name="context_window_tokens">
+                    <NeumorphismInput
+                      id="team-context-window"
+                      v-model="teamFormContextWindow"
+                      type="number"
+                      inputmode="numeric"
+                      min="1"
+                      step="1"
+                      :placeholder="teamFormContextWindowCanInherit ? '留空 = 继承全局' : '请输入新的模型窗口'"
+                      :error="teamFormContextWindowError"
+                    />
+                    <p class="muted caps-hint">
+                      {{
+                        teamFormContextWindowCanInherit
+                          ? '可选。设置后有效容量按“模型窗口 × 80%”封顶，为提示词和输出预留空间；留空继承全局。'
+                          : '该智能体已覆盖全局模型窗口，请输入新值；暂不支持通过清空恢复继承。'
+                      }}
+                    </p>
                   </NeumorphismFormItem>
                 </template>
 

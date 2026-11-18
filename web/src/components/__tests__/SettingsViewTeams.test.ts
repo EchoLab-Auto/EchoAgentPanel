@@ -127,18 +127,66 @@ describe('SettingsView · 智能体 × 多 Core', () => {
     });
   });
 
-  it('编辑 A 机器上已配 API 的智能体：保存不会清空 api_profile / token 预算', async () => {
+  it('编辑 A 机器上已配 API 的智能体：token 预算正确回显，保存不会清空 API / 预算', async () => {
     const wrapper = await openTeam('Alix', 'core-a');
+    expect((wrapper.find('#team-memory-limit').element as HTMLInputElement).value).toBe('4096');
+    expect((wrapper.find('#team-context-window').element as HTMLInputElement).value).toBe('200000');
+
     await buttonByText(wrapper, '保存')!.trigger('click');
 
     const [cmd, core] = sendCommand.mock.calls[0];
     expect(core).toBe('core-a');
-    // 回归：表单没有这两项的输入控件，此前整个字段被漏发 → Core 视为 None
     expect((cmd as { SaveTeam: Record<string, unknown> }).SaveTeam).toMatchObject({
       api_profile: 'kimi',
       memory_limit_tokens: 4096,
       context_window_tokens: 200000,
     });
+  });
+
+  it('修改上下文容量与模型窗口：纳入脏检查，保存时发送整数', async () => {
+    const wrapper = await openTeam('Alix', 'core-a');
+    const footer = wrapper.find('.form-actions--corner');
+    expect(footer.text()).toContain('无更改');
+
+    await wrapper.find('#team-memory-limit').setValue('131072');
+    await wrapper.find('#team-context-window').setValue('262144');
+    expect(footer.text()).toContain('有未保存的更改');
+    await buttonByText(wrapper, '保存')!.trigger('click');
+
+    expect(sendCommand).toHaveBeenCalledTimes(1);
+    const [cmd, core] = sendCommand.mock.calls[0];
+    expect(core).toBe('core-a');
+    expect((cmd as { SaveTeam: Record<string, unknown> }).SaveTeam).toMatchObject({
+      memory_limit_tokens: 131072,
+      context_window_tokens: 262144,
+    });
+  });
+
+  it('已有人格覆盖：清空会明确报错，不会假装已恢复继承全局', async () => {
+    const wrapper = await openTeam('Alix', 'core-a');
+    await wrapper.find('#team-memory-limit').setValue('');
+
+    expect(wrapper.find('.team-editor').text()).toContain('上下文容量已设置人格覆盖，暂不支持清空');
+    await buttonByText(wrapper, '保存')!.trigger('click');
+
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(toastSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'warning', message: expect.stringContaining('暂不支持清空') }),
+    );
+    expect(wrapper.find('.team-editor').exists()).toBe(true);
+  });
+
+  it('非法 token 配置：显示错误并拒绝保存，不覆盖 Core 中的旧值', async () => {
+    const wrapper = await openTeam('Alix', 'core-a');
+    await wrapper.find('#team-memory-limit').setValue('199');
+    await buttonByText(wrapper, '保存')!.trigger('click');
+
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(wrapper.find('.team-editor').text()).toContain('上下文容量必须是大于等于 200');
+    expect(toastSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'warning', message: expect.stringContaining('上下文容量') }),
+    );
+    expect(wrapper.find('.team-editor').exists()).toBe(true);
   });
 
   // ── 启停（2026-11 单轨化之后的行为契约）────────────────────────────
