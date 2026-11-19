@@ -9,6 +9,7 @@ import { panelFetch, sendCommand } from './connection';
 import { dropCoreInstanceChannel } from './instanceOps';
 import { evaluateFailover } from './failover';
 import { pruneDiscovered, runDiscovery } from './federation-directory';
+import { resetChecklistSyncForCore } from './state_domains/checklists';
 import type { UpstreamStatus } from './state';
 
 /**
@@ -58,6 +59,16 @@ async function doRefreshUpstreams(): Promise<void> {
         const now = next.find((u) => u.name === name)?.connectivity;
         if (now === undefined || (connectivity === 'online' && now === 'offline')) {
           dropCoreInstanceChannel(name);
+        }
+      }
+      for (const upstream of next) {
+        // 多 Core 中上游进程独立重连，Panel 主 WS 并不会断开。恢复 online
+        // （含运行中新增上游）必须重定该 Core 的版本/能力基线，再定向补拉
+        // bootstrap；否则新库较低 revision 会一直被旧水位拒绝。
+        // 首次发现不重复补拉：connection.onopen 已广播 RequestState。
+        if (upstream.connectivity === 'online' && lastUpstreams.get(upstream.name) !== 'online') {
+          resetChecklistSyncForCore(state, upstream.name);
+          sendCommand('RequestState', upstream.name);
         }
       }
     }

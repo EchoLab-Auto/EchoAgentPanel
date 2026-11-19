@@ -132,7 +132,7 @@ conversation?: string | null, } } | { "RequestWorkspaceGitStatus": { team_id?: s
 /**
  * 面板生成的回执关联 id（模块原样带回）。
  */
-request_id?: string | null, } } | { "SaveProDocFile": { team_id?: string | null, root: string, path: string, content: string, base?: string | null, request_id?: string | null, } } | { "DeleteProDocFile": { team_id?: string | null, root: string, path: string, base?: string | null, request_id?: string | null, } } | { "ProDocCheck": { team_id?: string | null, root: string, } } | "StartAllInstances" | "StopAllInstances" | "RequestSkillsList" | "ReloadSkills" | "RequestToolsList" | "RequestSelfUpdate" | "RequestSelfUpdateStatus" | "RequestFederationStatus" | "RequestFederationDirectory" | { "SaveFederationPeer": { peer: FederationPeerInfo, } } | { "DeleteFederationPeer": { name: string, } } | "RequestFederationInvite" | { "MigrateSession": { session_id: string, team_id?: string | null, target_peer: string, } };
+request_id?: string | null, } } | { "SaveProDocFile": { team_id?: string | null, root: string, path: string, content: string, base?: string | null, request_id?: string | null, } } | { "DeleteProDocFile": { team_id?: string | null, root: string, path: string, base?: string | null, request_id?: string | null, } } | { "ProDocCheck": { team_id?: string | null, root: string, } } | "StartAllInstances" | "StopAllInstances" | "RequestSkillsList" | "ReloadSkills" | "RequestToolsList" | { "RequestChecklists": { team_id: string, session_id?: string | null, } } | "RequestSelfUpdate" | "RequestSelfUpdateStatus" | "RequestFederationStatus" | "RequestFederationDirectory" | { "SaveFederationPeer": { peer: FederationPeerInfo, } } | { "DeleteFederationPeer": { name: string, } } | "RequestFederationInvite" | { "MigrateSession": { session_id: string, team_id?: string | null, target_peer: string, } };
 export type BackendEvent = { "InstanceStateChanged": { instance_name: string, connected: boolean, self_id: string | null, } } | { "MessageReceived": { session_id: string, instance_name: string, platform: string, user_id: string, user_name: string, 
 /**
  * Channel descriptor: "direct" or "group:{group_id}"
@@ -171,7 +171,16 @@ team_id?: string | null,
 /**
  * Reply branch that owns this reasoning fragment.
  */
-branch_id: string, content: string, } } | { "SubagentStarted": { session_id: string, task: string, } } | { "SubagentCompleted": { session_id: string, success: boolean, } } | { "ToolCall": { session_id: string, team_id?: string | null, tool_name: string, arguments: string, 
+branch_id: string, content: string, } } | { "SubagentStarted": { session_id: string, task: string, 
+/**
+ * 委派的 API profile 名（`spawn_subagent.profile`；未指定 = 继承）。
+ * 用于面板详情头展示「运行 API · 模型」。serde(default) 保旧 Core 兼容。
+ */
+profile?: string | null, 
+/**
+ * 实际生效的模型名（解析后；继承场景也填，来自 `provider.default_model()`）。
+ */
+model?: string | null, } } | { "SubagentCompleted": { session_id: string, success: boolean, } } | { "ToolCall": { session_id: string, team_id?: string | null, tool_name: string, arguments: string, 
 /**
  * Provider-issued tool-call id; empty = legacy peer (pre-id protocol).
  * 前端据此精确配对 ToolResult（同名并行调用不再配错对）。
@@ -215,7 +224,15 @@ delta: string, } } | { "AgentReasoningDelta": { session_id: string, team_id?: st
  * 的 `local:tui::local_user`）此前在消费端（core+session_id）键
  * 冲突——补 team 维度供消费端消歧。
  */
-team_id?: string | null, } } | { "AgentOutput": { session_id: string, team_id?: string | null, content: string, branch_id?: string | null, } } | { "AgentCompleted": { session_id: string, } } | { "SessionUpdated": { session: SessionInfo, } } | { "ActiveTurnsSnapshot": { 
+team_id?: string | null, } } | { "ChecklistsSnapshot": { team_id: string, 
+/**
+ * 文件级 epoch（UUID）：`reset_session` 时推进；不与 revision 比大小。
+ */
+epoch: string, 
+/**
+ * 文件级 revision：每次成功修改 +1，跨 reset / 重新加载保持单调。
+ */
+revision: number, states: Array<ChecklistSnapshotEntry>, } } | { "AgentOutput": { session_id: string, team_id?: string | null, content: string, branch_id?: string | null, } } | { "AgentCompleted": { session_id: string, } } | { "SessionUpdated": { session: SessionInfo, } } | { "ActiveTurnsSnapshot": { 
 /**
  * 当前正在执行 turn 的会话 id 列表。
  */
@@ -847,6 +864,15 @@ enabled: boolean,
  * Owning package id (e.g. "echo-agent.instance.qq"); None = standalone.
  */
 package?: string | null, };
+export type ChecklistSnapshotEntry = { 
+/**
+ * 归属会话 id（含通道前缀，如 `local:tui::local_user`）。
+ */
+session_id: string, 
+/**
+ * 该会话的权威清单状态。
+ */
+state: JsonValue, };
 export type TeamInfo = { id: string, 
 /**
  * 来源节点身份（federation NodeId）。多节点聚合时人格身份 = (node_id, id)。

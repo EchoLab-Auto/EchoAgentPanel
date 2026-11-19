@@ -4,8 +4,10 @@
 //! 只有白名单（黑名单已移除）：包维度模块（tools.builtin/skills.dir/
 //! workspace/management.panel）不在白名单即其注册表整体不可见。这里复刻同一
 //! 语义供 UI 入口显隐。
-//! 2026-09：任务清单（checklist）降级为普通工具——模块维度移除，开关在
-//! 工具级白/黑名单（`已不再出现在「启用模块」勾选区`）。
+//! 2026-11：任务清单（checklist）在 Core 侧重新成为独立模块
+//! （`echo-agent.checklist`，kind = tool → persona 级门控）。Panel **不需要
+//! 任何清单改动**：勾选可见性读 Core 下发的 `ModuleInfo.gating`，包级门控读
+//! `ToolInfo.package`——两处都不是硬编码模块 id。
 
 import type { TeamInfo } from './protocol';
 import { activeTeam, type AppState } from './state';
@@ -23,8 +25,10 @@ import { activeTeam, type AppState } from './state';
  * 因此框架里没有任何平台名；本文件的对应实现就是 `isModuleCheckboxVisible`
  * 的 kind 判定。这样新增平台（`echo-agent.instance.<platform>`）两侧都自动
  * 生效、无需改清单（2026-10 实例解耦后 QQ 已从两侧清单移除，本清单与 Core
- * `GATED_MODULE_IDS` 的 5 项逐项镜像 + session/transcript 两项**待 Core 侧接线**）。任务清单（checklist）已降级为普通
- * 工具，不再有模块维度，其开关在工具白/黑名单里进行。
+ * `GATED_MODULE_IDS` 的 5 项逐项镜像 + session/transcript 两项**待 Core 侧接线**）。
+ * 任务清单（checklist）自 2026-11 起是独立模块 `echo-agent.checklist`
+ * （kind = tool），但**不进任何前端清单**——它和其他 tool 模块一样由
+ * Core 的 gating 字段决定是否出现在勾选区。
  *
  * 维护规则（对应 Core 端 `echo-agent/src/modules.rs::GATED_MODULE_IDS`）：
  * **新增包维度门控模块时，同步：

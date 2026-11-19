@@ -405,6 +405,26 @@ body {
 .checklist-head { display: flex; justify-content: space-between; }
 .checklist-name { font-weight: 700; }
 .checklist-progress { color: var(--nm-text-secondary); }
+/* global 聚合视图的来源标签（core · 人格 · 会话）：同名清单可辨归属。 */
+.checklist-source {
+  font-size: 11px;
+  color: var(--nm-text-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 未同步标记（旧 Core 无权威快照协议）：只声明、不伪装——数据仍展示。 */
+.checklist-unsynced {
+  align-self: flex-start;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--nm-text-secondary);
+  border: 1px dashed var(--nm-border-color);
+}
+.checklist-name.archived { color: var(--nm-text-secondary); }
+.checklist-archived-tag { font-size: 11px; font-weight: 400; }
 .checklist-bar { height: 6px; background: var(--panel-hover); border-radius: 3px; margin: 6px 0; }
 .checklist-bar-fill { height: 100%; background: var(--panel-ok); border-radius: 3px; }
 /* 清单行：图标列 + 文本（图标基线对齐，替代 ☑/☐ 字符） */

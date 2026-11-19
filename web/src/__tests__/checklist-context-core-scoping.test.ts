@@ -3,7 +3,14 @@
 // local:tui::local_user）的快照不得互相覆盖。
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
-import { checklistsForSession } from '../state';
+import {
+  activeTeam,
+  checklistEntryKey,
+  checklistSourceLabel,
+  checklistsForRegion,
+  checklistsForSession,
+  resetManagementState,
+} from '../state';
 import { checklistKey, sessionKey } from '../keys';
 import type { BackendEvent, TeamInfo } from '../protocol';
 
@@ -166,5 +173,79 @@ describe('清单 team 维度（同一 core 多 persona 同名会话）', () => {
     expect(checklistsForSession(state, SID)).toHaveLength(0);
     state.activeTeamId = 'alix';
     expect(checklistsForSession(state, SID)).toHaveLength(1);
+  });
+});
+
+describe('区域切换与 global 聚合（2026-11 作用域基础修复）', () => {
+  beforeEach(() => {
+    state.teams = [team('EchoCode', 'core-a'), team('alix', 'core-a'), team('EchoCode', 'core-b')];
+    state.activeTeamId = 'EchoCode';
+    state.activeRegion = 'core-a';
+    state.checklists = {};
+  });
+
+  function namedEvent(sessionId: string, teamId: string | null, name: string) {
+    return {
+      ChecklistUpdated: {
+        session_id: sessionId,
+        team_id: teamId,
+        state: { lists: [{ name, items: [{ text: 'x', done: false }] }] },
+      },
+    } as unknown as BackendEvent;
+  }
+
+  it('区域切换保留各 core 的清单快照（resetManagementState 不再清空 checklists）', () => {
+    dispatch(namedEvent(SID, 'EchoCode', 'a-list'), 'core-a');
+    dispatch(namedEvent(SID, 'EchoCode', 'b-list'), 'core-b');
+
+    resetManagementState(state);
+
+    expect(state.checklists[checklistKey('core-a', 'EchoCode', SID)]?.[0]?.name).toBe('a-list');
+    expect(state.checklists[checklistKey('core-b', 'EchoCode', SID)]?.[0]?.name).toBe('b-list');
+    // 切走再切回：读到的仍是本区域那一份，不是空也不是别 core 的。
+    state.activeRegion = 'core-b';
+    expect(checklistsForSession(state, SID)[0]?.name).toBe('b-list');
+    state.activeRegion = 'core-a';
+    expect(checklistsForSession(state, SID)[0]?.name).toBe('a-list');
+  });
+
+  it('global 聚合：只取当前区域；同名清单的来源/行键可辨（不解析复合键）', () => {
+    dispatch(namedEvent('local:tui::s1', 'EchoCode', 'todo'), 'core-a');
+    dispatch(namedEvent('local:tui::s2', 'EchoCode', 'todo'), 'core-a');
+    // 别 core 的同名会话不得混入。
+    dispatch(namedEvent('local:tui::s1', 'EchoCode', 'todo'), 'core-b');
+
+    const aggregated = checklistsForRegion(state);
+    expect(aggregated.map((list) => list.name)).toEqual(['todo', 'todo']);
+    expect(aggregated.map((list) => list.source?.sessionId)).toEqual([
+      'local:tui::s1',
+      'local:tui::s2',
+    ]);
+    expect(aggregated.every((list) => list.source?.core === 'core-a')).toBe(true);
+    // 行键用来源三元组而不是 list.name：两条同名清单不撞 key。
+    expect(new Set(aggregated.map((list, index) => checklistEntryKey(list, index))).size).toBe(2);
+    const labels = aggregated.map((list) => checklistSourceLabel(list.source));
+    expect(labels[0]).toContain('core-a');
+    expect(labels[0]).toContain('local:tui::s1');
+    expect(labels[1]).toContain('local:tui::s2');
+    expect(labels[0]).not.toBe(labels[1]);
+  });
+
+  it('同名清单跨 persona：读侧按显式 teamId 取，互不串显', () => {
+    dispatch(namedEvent(SID, 'EchoCode', 'ec-list'), 'core-a');
+    dispatch(namedEvent(SID, 'alix', 'alix-list'), 'core-a');
+
+    expect(checklistsForSession(state, SID)[0]?.name).toBe('ec-list');
+    expect(checklistsForSession(state, SID, 'alix')[0]?.name).toBe('alix-list');
+    expect(checklistsForSession(state, SID, 'EchoCode')[0]?.name).toBe('ec-list');
+  });
+  it('区域已指定时，同名人格不得跨 Core 回退权限画像', () => {
+    state.teams = [team('EchoCode', 'core-a')];
+    state.activeTeamId = 'EchoCode';
+    state.activeRegion = 'core-b';
+    expect(activeTeam(state)).toBeNull();
+    expect(activeTeam(state, 'EchoCode')).toBeNull();
+    state.activeRegion = 'core-a';
+    expect(activeTeam(state)?.core).toBe('core-a');
   });
 });

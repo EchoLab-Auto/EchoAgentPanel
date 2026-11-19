@@ -140,4 +140,37 @@ describe('事件流跳号 → 自动补拉 timeline', () => {
     deliverWrapped('B', 901);
     expect(resyncCount(ws)).toBe(0);
   });
+
+  it('旧连接的迟到帧在新连接建立后不得污染状态', async () => {
+    vi.useFakeTimers();
+    try {
+      const ws = await connect();
+      ws.deliver(thinking(), 1);
+      ws.onclose?.();
+      await vi.advanceTimersByTimeAsync(500);
+      const next = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+      expect(next).not.toBe(ws);
+      next.triggerOpen();
+
+      const { state } = await import('../store');
+      state.checklists = {};
+      state.checklistVersions = {};
+      state.checklistWatermarks = {};
+      state.checklistCapability = {};
+      ws.deliver({
+        ChecklistUpdated: {
+          session_id: 'stale-session', team_id: 'alix',
+          state: {
+            lists: [{ id: 'stale', name: 'stale', items: [] }],
+            epoch: '11111111-1111-4111-8111-111111111111', revision: 999,
+          },
+        },
+      }, 1000);
+      expect(state.checklists['stale-session']).toBeUndefined();
+      expect(state.checklistVersions).toEqual({});
+      expect(state.checklistWatermarks).toEqual({});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
