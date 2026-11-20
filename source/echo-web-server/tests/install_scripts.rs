@@ -424,7 +424,10 @@ fn updater_hands_over_to_the_merged_version_of_itself() {
         // 快路径必须连带核对静态目录：修订号一致但前端没装，等于跑旧界面。
         r#"[[ -f "$STATIC_DIR/index.html" ]]"#,
     ] {
-        assert!(update.contains(required), "update.sh 缺少交棒接线：{required}");
+        assert!(
+            update.contains(required),
+            "update.sh 缺少交棒接线：{required}"
+        );
     }
     assert!(
         update.contains(r#"if [[ "${ECHO_UPDATER_REEXEC:-0}" != 1 ]]"#),
@@ -436,7 +439,12 @@ fn updater_hands_over_to_the_merged_version_of_itself() {
     std::fs::create_dir_all(&tmp).expect("create temp dir");
     let git = |dir: &Path, args: &[&str]| {
         let output = Command::new("git")
-            .args(["-c", "user.name=guard", "-c", "user.email=guard@example.invalid"])
+            .args([
+                "-c",
+                "user.name=guard",
+                "-c",
+                "user.email=guard@example.invalid",
+            ])
             .args(args)
             .current_dir(dir)
             .output()
@@ -469,7 +477,15 @@ fn updater_hands_over_to_the_merged_version_of_itself() {
     git(&origin, &["commit", "-qm", "a newer updater"]);
 
     let work = tmp.join("src");
-    git(&tmp, &["clone", "-q", origin.to_str().expect("utf8"), work.to_str().expect("utf8")]);
+    git(
+        &tmp,
+        &[
+            "clone",
+            "-q",
+            origin.to_str().expect("utf8"),
+            work.to_str().expect("utf8"),
+        ],
+    );
     git(&work, &["checkout", "-q", "-B", "main", "HEAD~1"]);
 
     // 脚本要求 cargo / git / install / systemctl / npm / node 在 PATH 上；
@@ -488,7 +504,11 @@ fn updater_hands_over_to_the_merged_version_of_itself() {
 
     let marker = tmp.join("marker");
     let status = tmp.join("status");
-    let path_env = format!("{}:{}", stubs.display(), std::env::var("PATH").unwrap_or_default());
+    let path_env = format!(
+        "{}:{}",
+        stubs.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let output = Command::new("bash")
         .arg(work.join("scripts/update.sh"))
         .args(["--remote", "--source"])
@@ -513,7 +533,9 @@ fn updater_hands_over_to_the_merged_version_of_itself() {
         "合并到含新脚本的版本后没有交棒（标记文件未生成）；stderr:\n{stderr}"
     );
     assert_eq!(
-        std::fs::read_to_string(&marker).expect("read marker").trim(),
+        std::fs::read_to_string(&marker)
+            .expect("read marker")
+            .trim(),
         "handed-over"
     );
     assert!(
