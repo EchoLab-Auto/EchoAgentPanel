@@ -39,7 +39,7 @@ import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
 import { checklistKey, sessionScopedKey, teamKey } from '../keys';
-import { isInstanceModuleKind, teamModuleEnabled, teamToolAvailable } from '../capabilities';
+import { isInstanceModuleKind, moduleMounted, teamModuleEnabled, teamToolAvailable } from '../capabilities';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
 import ChecklistSidebar from './ChecklistSidebar.vue';
@@ -1017,10 +1017,22 @@ const contextAvailable = computed(() =>
   teamModuleEnabled(currentTeam.value, 'echo-agent.management.panel'),
 );
 
-/** 清单工具对当前 agent 是否可用（2026-09 起模块维度已移除，只受工具级
- * 白/黑名单与内置工具集包门控）。 */
-const checklistToolAvailable = computed(() =>
-  teamToolAvailable(currentTeam.value, 'checklist'),
+/** 清单模块 id（宿主不认识的独立产物；见 `capabilities.ts::moduleMounted`）。 */
+const CHECKLIST_MODULE_ID = 'echo-agent.checklist';
+
+/** 清单工具对当前 agent 是否可用：**模块真的挂载了** + 工具本身没被禁。
+ *
+ * 两个条件缺一不可，因为它们回答不同的问题（2026-11-21 起清单外置后分得更清）：
+ *
+ * - `moduleMounted`：这台部署装没装清单模块。它不在 Core 的依赖图里，
+ *   `modules.toml` 不写就真的没有这个工具——此时 `teamToolAvailable` 仍会
+ *   返回 true（配置白名单为空 = 不限制），只查它就会显示一个点不动的死入口。
+ * - `teamToolAvailable`：这个人格允许用吗（工具级黑白名单 + 工具集包门控）。
+ */
+const checklistToolAvailable = computed(
+  () =>
+    moduleMounted(state, CHECKLIST_MODULE_ID) &&
+    teamToolAvailable(currentTeam.value, 'checklist'),
 );
 
 /** 当前会话的清单快照（复合键 (core, team, session)；global 视图聚合当前区域全部）。

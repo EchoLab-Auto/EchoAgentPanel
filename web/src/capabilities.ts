@@ -278,6 +278,29 @@ export function teamModuleEnabled(team: TeamInfo | null | undefined, moduleId: s
   return modules.length === 0 || modules.includes(moduleId);
 }
 
+/**
+ * 某个模块**当前是否真的挂载**（Core 的 `ModulesList` 里有它）。
+ *
+ * 与 [`teamModuleEnabled`] 的分工，两者回答的是不同问题：
+ *
+ * | 函数 | 问题 | 数据来源 |
+ * | --- | --- | --- |
+ * | `teamModuleEnabled` | "这个人格**允许**用吗" | 人格配置（白名单） |
+ * | `moduleMounted` | "这台部署**有**吗" | Core 运行时的模块清单 |
+ *
+ * 为什么需要后者：`echo-agent.checklist` 自 2026-11-21 起是宿主不认识的
+ * 独立产物——不写 `modules.toml` 就没有这个模块，工具也不存在。而
+ * `teamToolAvailable` 读的是配置白名单（"允许"），空名单等于"不限制"，
+ * 于是**没有模块时它仍然返回 true**，UI 会显示一个点不动的死入口。
+ *
+ * Core 的 `ModulesList` 只含已挂载模块（`emit_modules_list` 里
+ * `filter(|d| d.enabled)`），所以"在清单里"就等于"能用"——不需要再看别的
+ * 字段（`ModuleInfo` 也没有 `enabled`）。
+ */
+export function moduleMounted(state: AppState, moduleId: string): boolean {
+  return state.modules.some((m) => m.id === moduleId);
+}
+
 /** 当前 agent 的 team（去主智能体：无 id 时回退列表首个；(core, id) 精确匹配）。 */
 export function currentTeam(state: AppState): TeamInfo | null | undefined {
   return activeTeam(state);

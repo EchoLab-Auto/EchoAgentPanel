@@ -102,6 +102,11 @@ beforeEach(() => {
   state.teams = [];
   state.activeTeamId = null;
   state.activeRegion = null;
+  // 清单模块**已挂载**（2026-11-21 起它是独立产物：不在清单里 = 没装 =
+  // 没有这个工具，入口不该出现）。这几条测的是作用域隔离，前提是模块在。
+  state.modules = [
+    { id: 'echo-agent.checklist', package: 'echo-agent.checklist' },
+  ] as unknown as typeof state.modules;
   state.checklists = {};
   state.checklistVersions = {};
   state.checklistWatermarks = {};

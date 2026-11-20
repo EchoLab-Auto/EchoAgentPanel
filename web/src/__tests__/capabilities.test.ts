@@ -13,12 +13,14 @@ import {
   packageLabel,
   MODULE_KIND_LABELS,
   moduleCheckboxState,
+  moduleMounted,
   isInstanceModuleKind,
   isModuleCheckboxVisible,
   teamModuleEnabled,
   teamToolAvailable,
 } from '../capabilities';
 import type { TeamInfo } from '../protocol';
+import type { AppState } from '../state';
 
 describe('包维度门控模块清单（单一来源）', () => {
   it('勾选区只读 Core 下发的 gating，不再维护自己的模块清单', () => {
@@ -236,5 +238,42 @@ describe('persona 名单语义（含包维度）', () => {
     expect(
       teamToolAvailable(legacy({ enabled_modules: ['echo-agent.tools.builtin'], enabled_tools: ['bash'] }), 'workspace'),
     ).toBe(false);
+  });
+});
+
+describe('模块是否真的挂载（moduleMounted）', () => {
+  // 2026-11-21：任务清单外置成"宿主不认识的产物"之后，`teamToolAvailable`
+  // 单独用会撒谎——它读的是**配置白名单**（空 = 不限制），而"这台部署有没
+  // 有这个模块"是另一件事。两个问题分开问，UI 才不会显示点不动的死入口。
+  const withModules = (modules: unknown[]) =>
+    ({ modules } as unknown as AppState);
+
+  it('模块在清单里 = 已挂载', () => {
+    expect(moduleMounted(withModules([{ id: 'echo-agent.checklist' }]), 'echo-agent.checklist')).toBe(
+      true,
+    );
+  });
+
+  it('模块不在清单里 = 没装（清单只含已挂载模块）', () => {
+    expect(moduleMounted(withModules([]), 'echo-agent.checklist')).toBe(false);
+    expect(moduleMounted(withModules([{ id: 'echo-agent.shell' }]), 'echo-agent.checklist')).toBe(
+      false,
+    );
+  });
+
+  it('判据只看 id 是否在清单里（清单本身已按 enabled 过滤）', () => {
+    // Core 的 `emit_modules_list` 只发已挂载的模块，所以"在清单里"就等于
+    // "能用"。`ModuleInfo` 没有 `enabled` 字段——别在这里造第二条判据。
+    expect(moduleMounted(withModules([{ id: 'x' }]), 'x')).toBe(true);
+    expect(moduleMounted(withModules([{ id: 'y' }]), 'x')).toBe(false);
+  });
+
+  it('与 teamToolAvailable 的分工：配置允许 ≠ 部署具备', () => {
+    // 白名单为空 = "不限制" → teamToolAvailable 返回 true（这是对的：
+    // 它回答"这个 persona 允许用吗"）。
+    const team = { id: 't', name: 't', enabled: true, sessions: 0 } as TeamInfo;
+    expect(teamToolAvailable(team, 'checklist')).toBe(true);
+    // 但部署里没有这个模块 → 入口不该出现。ChatView 的判据是两者的合取。
+    expect(moduleMounted(withModules([]), 'echo-agent.checklist')).toBe(false);
   });
 });
