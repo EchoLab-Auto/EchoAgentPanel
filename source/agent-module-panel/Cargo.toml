@@ -8,8 +8,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-echo-context = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.19.2" }
-echo-module = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.19.2" }
+echo-context = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.19.4" }
+echo-module = { git = "https://github.com/EchoLab-Auto/echo-fabric-arch", tag = "v0.19.4" }
 echo-web-server = { path = "../echo-web-server" }
 anyhow.workspace = true
 serde.workspace = true
