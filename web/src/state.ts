@@ -1146,6 +1146,12 @@ export interface RegionInfo {
 }
 
 /**
+ * 清单模块以**独立产物**形态运行时，状态变更经 `Emit` 上报的事件名
+ * （与 `agent-module-checklist` 的 `serve::STATE_EVENT` 同值）。
+ */
+export const CHECKLIST_STATE_EVENT = 'checklist.updated';
+
+/**
  * 一条**模块事件**（Core 的 `ModuleEvent`；前端只做展示，不解释语义）。
  *
  * `name` / `payload` 是模块与 Core 之间的约定（`module.mounted` 之类由
