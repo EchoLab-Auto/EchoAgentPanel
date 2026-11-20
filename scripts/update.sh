@@ -78,6 +78,10 @@ Options:
 EOF
 }
 
+# 原始命令行：`--remote` 合并到含新脚本的版本后要重入（见下面 re-exec 段），
+# 而解析循环按位置 shift 掉了，所以先留一份。
+ORIGINAL_ARGS=("$@")
+
 while (($#)); do
     case "$1" in
         --source)
@@ -294,8 +298,10 @@ if ! flock -n 9; then
     FINALIZED=1
     exit 0
 fi
-
-if [[ -f "$STATUS_FILE" ]] && grep -q '^state=running' "$STATUS_FILE" 2>/dev/null; then
+# 例外：本进程是上一轮 `exec` 交棒来的（`ECHO_UPDATER_REEXEC=1`，同一个 PID、
+# 同一把锁），那条 running 是**本次尝试自己**刚写的，不是中断残留。
+if [[ "${ECHO_UPDATER_REEXEC:-0}" != 1 ]] \
+    && [[ -f "$STATUS_FILE" ]] && grep -q '^state=running' "$STATUS_FILE" 2>/dev/null; then
     write_status interrupted "previous update was interrupted; starting a new attempt" "$(cat "$REVISION_FILE" 2>/dev/null || true)"
 fi
 installed=$(cat "$REVISION_FILE" 2>/dev/null || true)
@@ -355,10 +361,34 @@ else
     fi
     git -C "$SOURCE_DIR" merge --ff-only "$TARGET"
 
+    # ── 自交棒：本次合并可能改到本脚本自身 ──────────────────────────────
+    # bash 启动时把整份脚本读进内存；`git merge` 之后磁盘上是新脚本，但继续
+    # 执行的是**旧逻辑**。升级那一版引入的新步骤（新产物 / 新校验 / 新落点）
+    # 一条都不会跑，且全程不报错——部署看起来成功。
+    #
+    # 所以合并后先看本脚本是否在本轮变更；是就用新脚本重跑同一批参数。
+    # `exec` 而不是子进程：fd 9 的锁随 PID 一起交出去，新脚本重开 fd 9 时旧锁
+    # 自然释放，不存在"父进程攥着锁、子进程 flock -n 报 busy 直接退出"。
+    # 守卫变量保证只交棒一次（两版对同一差异判读不一致时不会无限重入）。
+    if [[ "${ECHO_UPDATER_REEXEC:-0}" != 1 ]] \
+        && ! git -C "$SOURCE_DIR" diff --quiet "$current" "$TARGET" -- scripts/update.sh 2>/dev/null; then
+        export ECHO_UPDATER_REEXEC=1
+        write_status running "scripts/update.sh changed by this revision; re-executing the new updater" "$TARGET"
+        echo "==> scripts/update.sh changed in this update; handing over to the new version" >&2
+        exec bash "$SOURCE_DIR/scripts/update.sh" "${ORIGINAL_ARGS[@]}"
+    fi
+
+    # 快路径：修订号一致还不够——二进制或静态目录可能缺失（安装被中断 / 手工
+    # 删过）。那种部署看起来"已是最新"，实际跑的仍是旧产物；不修就一直修不好。
     if [[ "$installed" == "$TARGET" && -x "$BINARY" ]]; then
-        write_status current "already up to date" "$TARGET"
-        FINALIZED=1
-        exit 0
+        missing_installed=""
+        [[ -f "$STATIC_DIR/index.html" ]] || missing_installed="static"
+        if [[ -z "$missing_installed" ]]; then
+            write_status current "already up to date" "$TARGET"
+            FINALIZED=1
+            exit 0
+        fi
+        echo "==> revision matches but the installed $missing_installed frontend is missing; repairing" >&2
     fi
 fi
 
