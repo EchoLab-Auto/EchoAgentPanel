@@ -28,21 +28,14 @@ import { state } from '../store';
 import { withBase } from '../base';
 import type { IncomingFile, PendingFile } from '../protocol';
 import { effectiveSessionApi, profileMissing } from '../session-api';
-import { activeTeam, checklistsForRegion, checklistsForSession, pushToast, sessionMessagesFor } from '../state';
-import {
-  checklistCoreAuthoritative,
-  checklistRegionUnsynced,
-  checklistSessionSynced,
-} from '../state_domains/checklists';
-import { refreshChecklists } from '../checklist-requests';
+import { activeTeam, pushToast, sessionMessagesFor } from '../state';
 import { sendCommand } from '../connection';
 import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-adapter';
 import AgentSwitcher from './AgentSwitcher.vue';
-import { checklistKey, sessionScopedKey, teamKey } from '../keys';
-import { isInstanceModuleKind, moduleMounted, teamModuleEnabled, teamToolAvailable } from '../capabilities';
+import { sessionScopedKey, teamKey } from '../keys';
+import { isInstanceModuleKind, teamModuleEnabled, teamToolAvailable } from '../capabilities';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
-import ChecklistSidebar from './ChecklistSidebar.vue';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
 import PanelSidebar from './PanelSidebar.vue';
 import PanelExtensionEntries from './PanelExtensionEntries.vue';
@@ -86,7 +79,6 @@ const TasksPanel = lazy(loaders.tasks, 'TasksPanel');
 const WARM_BY_OVERLAY: Record<BuiltinOverlayId, keyof typeof loaders> = {
   config: 'agentConfig',
   context: 'context',
-  checklist: 'context', // 清单与上下文同属 ContextView 侧栏，共用一份 chunk
   sessions: 'sessions',
   instance: 'instance',
   tasks: 'tasks',
@@ -199,7 +191,7 @@ function persistArchiveDepth(sessionId: string, teamId: string | null, depth: nu
 /** 当前会话的显示历史（含展开状态）。 */
 const historyState = computed(
   () =>
-    state.sessionHistory[checklistKey(state.activeRegion, props.activeTeamId ?? null, props.sessionId)] ??
+    state.sessionHistory[sessionScopedKey(state.activeRegion, props.activeTeamId ?? null, props.sessionId)] ??
     null,
 );
 
@@ -404,12 +396,10 @@ const connected = computed(() => state.connected);
  */
 /** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。
  *
- * 清单面板额外做一次权威补拉（2026-11）：面板可能是长时间开着再点开/看，
- * 中途 WS 重连、Core 重启都可能让本地投影落后；「打开」是最自然的对齐时机。 */
-function toggleOverlay(id: BuiltinOverlayId) {
-  const next = entryOverlay.value === id ? null : id;
-  entryOverlay.value = next;
-  if (next === 'checklist') refreshChecklistData();
+ * 各面板的数据补拉由**提供它的扩展**自己决定（`prefetch`）；壳不做任何
+ * 按面板 id 的特判——壳不该知道某个面板是干什么的。 */
+function toggleOverlay(id: string) {
+  entryOverlay.value = entryOverlay.value === id ? null : id;
 }
 
 /** 无条件关闭（点面板外 / Esc / 选择后）。 */
@@ -1017,92 +1007,6 @@ const contextAvailable = computed(() =>
   teamModuleEnabled(currentTeam.value, 'echo-agent.management.panel'),
 );
 
-/** 清单模块 id（宿主不认识的独立产物；见 `capabilities.ts::moduleMounted`）。 */
-const CHECKLIST_MODULE_ID = 'echo-agent.checklist';
-
-/** 清单工具对当前 agent 是否可用：**模块真的挂载了** + 工具本身没被禁。
- *
- * 两个条件缺一不可，因为它们回答不同的问题（2026-11-21 起清单外置后分得更清）：
- *
- * - `moduleMounted`：这台部署装没装清单模块。它不在 Core 的依赖图里，
- *   `modules.toml` 不写就真的没有这个工具——此时 `teamToolAvailable` 仍会
- *   返回 true（配置白名单为空 = 不限制），只查它就会显示一个点不动的死入口。
- * - `teamToolAvailable`：这个人格允许用吗（工具级黑白名单 + 工具集包门控）。
- */
-const checklistToolAvailable = computed(
-  () =>
-    moduleMounted(state, CHECKLIST_MODULE_ID) &&
-    teamToolAvailable(currentTeam.value, 'checklist'),
-);
-
-/** 当前会话的清单快照（复合键 (core, team, session)；global 视图聚合当前区域全部）。
- * props 是渲染真源；未提供人格时显式使用 null，和 Sidebar/同步标记一致。 */
-const sessionChecklists = computed(() => {
-  if (props.sessionId !== 'global') {
-    return checklistsForSession(state, props.sessionId, props.activeTeamId ?? null);
-  }
-  // global 视图：按写入侧标注的 source.core 过滤当前区域（不反解键前缀）。
-  return checklistsForRegion(state);
-});
-
-/** 清单入口显隐：工具可用，或当前作用域已有快照（工具禁用后仍可只读查看，
- * 不卸载入口、不删除状态——删除会让"禁用工具"变成"丢历史清单"）。 */
-const checklistAvailable = computed(
-  () => checklistToolAvailable.value || sessionChecklists.value.length > 0,
-);
-
-/** 工具已禁用但本地仍有快照：入口保留，只读展示。 */
-const checklistReadOnly = computed(
-  () => !checklistToolAvailable.value && sessionChecklists.value.length > 0,
-);
-
-/** 当前作用域是否已有权威依据。
- * 空清单也要区分"权威没有"与"尚未收到该人格/会话的快照"。 */
-const checklistUnsynced = computed(() => {
-  if (props.sessionId === 'global') {
-    return checklistRegionUnsynced(state, state.activeRegion, sessionChecklists.value);
-  }
-  return !checklistSessionSynced(
-    state,
-    state.activeRegion,
-    props.activeTeamId ?? null,
-    props.sessionId,
-  );
-});
-/** 清单入口的 title：工具只读 / 未同步都要说清楚（不叠加成一句长话）。 */
-const checklistTitle = computed(() => {
-  const parts = ['任务清单'];
-  if (checklistReadOnly.value) parts.push('工具已禁用，仅显示已有清单');
-  if (checklistUnsynced.value) parts.push('未同步（Core 未提供权威快照）');
-  return parts.join('；');
-});
-
-/** 按当前视图补拉权威清单：会话视图拉该会话，global 拉当前 core 全部运行人格。
- * 能力未确认（旧 Core）时 `refreshChecklists` 是 no-op——不反复请求未知命令。 */
-function refreshChecklistData(): void {
-  if (!state.connected) return;
-  refreshChecklists({
-    teamId: props.activeTeamId ?? null,
-    sessionId: props.sessionId === 'global' ? null : props.sessionId,
-    core: state.activeRegion,
-  });
-}
-
-// 刷新 / WS 重连 / 切会话 / 切人格 / 切运行区域 / 能力刚被确认：都补拉一次。
-// 能力位参与依赖：bootstrap 的 RequestState 快照到达前请求会被拒发（旧 Core
-// 降级），到达后这里自动补上定向刷新，用户不必手动重开面板。
-watch(
-  [
-    () => props.sessionId,
-    () => props.activeTeamId,
-    () => state.connected,
-    () => state.activeRegion,
-    () => checklistCoreAuthoritative(state, state.activeRegion),
-  ],
-  () => refreshChecklistData(),
-  { immediate: true },
-);
-
 /** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 模块启用，
  * 或当前会话已有任务记录（即使模块后被禁用，历史任务仍可见）。 */
 const sessionTasks = computed(() => {
@@ -1465,7 +1369,7 @@ const hiddenMessageCount = computed(() =>
 const olderInCore = computed(() => {
   const sid = props.sessionId;
   if (!sid || sid === 'global') return false;
-  const hist = state.sessionHistory[checklistKey(state.activeRegion, props.activeTeamId ?? null, sid)];
+  const hist = state.sessionHistory[sessionScopedKey(state.activeRegion, props.activeTeamId ?? null, sid)];
   return hist ? hist.total > hist.messages.length : false;
 });
 
@@ -2158,27 +2062,6 @@ function mediaSrc(img: string): string {
         </svg>
         上下文
       </NeumorphismButton>
-      <NeumorphismBadge
-        v-if="checklistAvailable"
-        :value="sessionChecklists.length"
-        :show-zero="false"
-      >
-        <NeumorphismButton
-          class="ctx-entry"
-          variant="glass"
-          shape="pill"
-          size="small"
-          :title="checklistTitle"
-          data-overlay="checklist"
-          @click="toggleOverlay('checklist')"
-        >
-          <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
-          清单
-        </NeumorphismButton>
-      </NeumorphismBadge>
       <NeumorphismButton
         v-if="sessionSwitcherAvailable"
         class="ctx-entry"
@@ -2287,25 +2170,6 @@ function mediaSrc(img: string): string {
     >
       <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />
     </SessionOverlay>
-    <SessionOverlay
-      :open="entryOverlay === 'checklist'"
-      :inset="overlayInset"
-      :ignore="entryRowRef"
-      label="清单"
-      @close="closeOverlay()"
-    >
-      <!-- 清单是「卡片」形态的内容：铺满整块消息区会把进度条拉成一米长，
-           限宽后仍靠左上（列表与卡片栈的既有视觉）。 -->
-      <div class="overlay-narrow">
-        <ChecklistSidebar
-          :session-id="sessionId === 'global' ? undefined : sessionId"
-          :lists="sessionId === 'global' ? sessionChecklists : undefined"
-          :team-id="props.activeTeamId ?? null"
-          :unsynced="checklistUnsynced"
-        />
-      </div>
-    </SessionOverlay>
-
     <!-- 上下文占用：同一外壳（内容自带标题与分块列表，故外壳不加内边距）。 -->
     <SessionOverlay
       :open="entryOverlay === 'context'"

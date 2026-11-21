@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
 import { sessionMessagesFor } from '../state';
-import { checklistKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import type { BackendEvent, TeamInfo } from '../protocol';
 import type { DisplayMessage } from '../state';
 
@@ -64,7 +64,7 @@ function msg(over: Partial<DisplayMessage>): DisplayMessage {
   } as DisplayMessage;
 }
 
-const histKey = () => checklistKey(null, TEAM, SID);
+const histKey = () => sessionScopedKey(null, TEAM, SID);
 
 beforeEach(() => {
   state.trunk = [];

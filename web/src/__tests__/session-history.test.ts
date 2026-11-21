@@ -3,7 +3,7 @@
 //! 事件日志派生完整历史（`SessionHistory`）。
 //!
 //! 本测试锁定：
-//!   a) reducer 按 `checklistKey(core, team, session)` 写入快照（messages 转换、
+//!   a) reducer 按 `sessionScopedKey(core, team, session)` 写入快照（messages 转换、
 //!      baseSeq = max_seq）；
 //!   b) `sessionMessagesFor` 的「快照 ⊕ 窗口增量」合并——seq > baseSeq 的窗口
 //!      条目合并（工具按 tool_call_id 就地补丁、旧条目按水位线去重）；
@@ -13,7 +13,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { state, dispatch } from '../store';
 import { sessionMessagesFor } from '../state';
-import { checklistKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import type { TimelineMessage } from '../protocol';
 
 vi.mock('../connection', async (importOriginal) => {
@@ -21,7 +21,7 @@ vi.mock('../connection', async (importOriginal) => {
   return { ...actual, sendCommand: vi.fn(() => true) };
 });
 
-const KEY = checklistKey('core-a', 't', 's1');
+const KEY = sessionScopedKey('core-a', 't', 's1');
 
 /** 事件日志派生条目：user@time1（seq 1）+ tool call-1 运行中（output null）。 */
 function snapshotMessages(): TimelineMessage[] {
@@ -75,7 +75,7 @@ describe('会话历史通道（RequestSessionHistory → SessionHistory）', () 
     );
 
     const hist = state.sessionHistory[KEY];
-    expect(hist, 'SessionHistory 未按 checklistKey(core, team, session) 写入').toBeTruthy();
+    expect(hist, 'SessionHistory 未按 sessionScopedKey(core, team, session) 写入').toBeTruthy();
     expect(hist.messages.length).toBe(2);
     expect(hist.messages[0].role).toBe('user');
     expect(hist.messages[1].role).toBe('tool');

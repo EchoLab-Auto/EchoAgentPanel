@@ -5,10 +5,6 @@ import {
   startSubagent,
   completeSubagent,
 } from './state_domains/orchestration';
-import {
-  applyChecklistUpdated,
-  applyChecklistsSnapshot,
-} from './state_domains/checklists';
 import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessageAt, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 import { isSubagentTool } from './tool-kinds';
@@ -40,7 +36,7 @@ import type {
   WorkspaceSessionInfo,
 } from './protocol';
 
-import { checklistKey, scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
+import { scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
 import { acceptPanelEvent } from './extensions/registry';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -237,9 +233,9 @@ function repositionCompletedTool(state: AppState, index: number, startedAtMs: nu
 
 /** 切换 activeRegion 时清空"单值管理面"缓存，避免短暂显示上一个 core 的值。
  *
- * **不清 `checklists`**（2026-11）：清单快照的键本身带 (core, team, session)
- * 三个作用域，切区域只是换读取用的键；保留缓存让切回原区域时仍能立即看到
- * 既有清单（只读），不必等 Core 重发。 */
+ * 只清**单值**槽（同一时刻只代表一个 core 的那些）。带 (core, team, session)
+ * 复合键的按域缓存在切区域时保留——换的只是读取用的键，切回来还能立即看到
+ * 既有内容，不必等 Core 重发。 */
 export function resetManagementState(state: AppState): void {
   state.api = null;
   state.skills = [];
@@ -435,106 +431,6 @@ export interface OrchActivity {
   branches: BranchActivity[];
 }
 
-/** 清单快照的来源作用域（Panel 写入侧回填；Core 的 ChecklistUpdated 只带
- * `session_id`/`team_id`，core 由信封注入）。 */
-export interface ChecklistSource {
-  core: string | null;
-  teamId: string | null;
-  sessionId: string;
-}
-
-export interface ChecklistEntry {
-  /** 清单 id（Core 2026-11 起提供；旧 Core 缺省 → 行键回退到名字+序号）。 */
-  id?: string;
-  name: string;
-  /** 归档清单（Core 新形状带；归档列表仍展示，样式弱化）。 */
-  archived?: boolean;
-  items: Array<{ id?: string; text: string; done: boolean }>;
-  done: number;
-  total: number;
-  /**
-   * 快照来源（2026-11）：写入侧按 `checklistKey` 的三元回填。global 聚合视图
-   * 用它筛选区域、生成行键与来源标签——**不反解复合键字符串**（键格式是
-   * 存储细节，换分隔符/退化规则时解析必然漂移）。
-   */
-  source?: ChecklistSource;
-}
-
-/** 清单投影的版本（`checklistKey` → 版本；2026-11 清单可靠化）。
- *
- * `epoch`/`revision` 来自 Core 的 per-persona store（文件级，不是每会话
- * 一份）：epoch 在 reset 时换 UUID，revision 单调且 reset 不重置。
- * `authoritative` = 该投影来自权威来源（full 快照 / 带版本的新协议事件）——
- * 旧 Core 的旧式状态为 false，UI 据此标"未同步"，绝不伪装成已同步。 */
-export interface ChecklistProjectionVersion {
-  core: string | null;
-  teamId: string | null;
-  sessionId: string;
-  epoch: string | null;
-  revision: number | null;
-  authoritative: boolean;
-}
-
-/** 人格级清单水位（`teamKey(core, team)` → 水位）。
- *
- * 为什么需要：full 快照是"某个时刻"的结果，但响应可能与 live 事件**乱序**
- * 到达。清理"快照里没有的会话"时，必须保留 revision 高于快照（或高于请求时
- * 水位）的投影——那是快照采集之后才到的更新。`snapshot*` 记最近一次权威
- * full，用来回答"这个会话不在快照里 = 权威地没有清单"。 */
-export interface ChecklistWatermark {
-  core: string | null;
-  teamId: string | null;
-  epoch: string | null;
-  /** 已观测到的最高 revision（live + full 的并集）。 */
-  revision: number | null;
-  /** 最近一次权威 full 的 revision（envelope 必填；重连标脏后为 null）。 */
-  snapshotRevision: number | null;
-  /** 最近一次权威 full 的到达时刻（ms）；null = 从未收到。 */
-  snapshotAt: number | null;
-}
-
-/** 读某会话的清单快照（`(core, team, session)` 复合键；2026-10）：
- * 同一 core 内多 persona 的同名会话（各自的 `local:tui::local_user`）
- * 不互相覆盖。写入侧见 reduce 的 ChecklistUpdated 分支。
- *
- * `teamId` 缺省读 `state.activeTeamId`；组件持有自己的 activeTeamId prop 时
- * 显式传入，避免"props 已切换、state 尚未同步"的瞬间读错人格的清单。 */
-export function checklistsForSession(
-  state: AppState,
-  sessionId: string,
-  teamId: string | null | undefined = state.activeTeamId,
-): ChecklistEntry[] {
-  return state.checklists[checklistKey(state.activeRegion, teamId, sessionId)] ?? [];
-}
-
-/** 读当前运行区域下全部会话的清单（global 会话的聚合视图）。
- *
- * 按写入侧回填的 `source.core` 过滤：区域未指定（单上游）时不过滤；来源缺失
- * 的快照不猜键前缀（旧缓存/直接注入的条目无从判断归属）。 */
-export function checklistsForRegion(state: AppState): ChecklistEntry[] {
-  const core = state.activeRegion;
-  const out: ChecklistEntry[] = [];
-  for (const lists of Object.values(state.checklists)) {
-    for (const list of lists) {
-      if (core == null || list.source?.core === core) out.push(list);
-    }
-  }
-  return out;
-}
-
-/** global 聚合视图的行键：来源三元组 + Core 稳定清单 id。
- * 旧 Core 没有 id 时才退回名称+序号；同名不同来源仍不会撞 key。 */
-export function checklistEntryKey(entry: ChecklistEntry, index = 0): string {
-  const source = entry.source;
-  if (!source) return `${entry.id ?? entry.name}\u0000${index}`;
-  return `${checklistKey(source.core, source.teamId, source.sessionId)}\u0000${entry.id ?? `${entry.name}\u0000${index}`}`;
-}
-/** global 聚合视图的来源标签（core/人格/会话；无来源 → 空串，不猜）。 */
-export function checklistSourceLabel(source: ChecklistSource | null | undefined): string {
-  if (!source) return '';
-  return [source.core, source.teamId ?? '未归属人格', source.sessionId].filter(Boolean).join(' · ');
-}
-
 /** `state.browseDirectories` 常驻上限（目录选择器的浏览结果缓存）。 */
 export const BROWSE_CACHE_LIMIT = 32;
 
@@ -578,7 +474,7 @@ function pruneSessionHistory(state: AppState, keep: string): void {
  * 无历史快照时退回窗口过滤（现行为）。共享显示窗口（每人格 1024 条 FIFO）
  * 淘汰旧会话条目后，快照让无近期活动的会话仍能显示完整历史（2026-10）。 */
 export function sessionMessagesFor(state: AppState, sessionId: string, teamId: string | null): DisplayMessage[] {
-  const key = checklistKey(state.activeRegion, teamId, sessionId);
+  const key = sessionScopedKey(state.activeRegion, teamId, sessionId);
   const hist = state.sessionHistory[key];
   const windowMsgs = state.trunk.filter((m) => m.sessionId === sessionId);
   if (!hist) return windowMsgs;
@@ -1145,13 +1041,7 @@ export interface RegionInfo {
   name: string;
 }
 
-/**
- * 清单模块以**独立产物**形态运行时，状态变更经 `Emit` 上报的事件名
- * （与 `agent-module-checklist` 的 `serve::STATE_EVENT` 同值）。
- */
-export const CHECKLIST_STATE_EVENT = 'checklist.updated';
-
-/**
+/** 一条**模块事件**（Core 的 `ModuleEvent`；前端只做展示，不解释语义）。/**
  * 一条**模块事件**（Core 的 `ModuleEvent`；前端只做展示，不解释语义）。
  *
  * `name` / `payload` 是模块与 Core 之间的约定（`module.mounted` 之类由
@@ -1270,19 +1160,7 @@ export interface AppState {
    */
   instanceUiByKey: Record<string, unknown>;
 
-  /**
-   * 各会话的清单快照（复合键 `(core, team_id, session_id)` → 清单列表；
-   * 2026-10 多上游/多 persona 修复，2026-11 起条目内回填 `source`）。
-   *
-   * ⚠️ 曾是全局单值槽：多 core 下 A/B core 的 `ChecklistUpdated` 互相覆盖
-   * （清单面板在两端之间跳变）。事件本就带 `session_id`/`team_id`，按会话
-   * 隔离本来就是正确语义。读取方按当前选中会话的复合键取值（见
-   * `checklistsForSession`）；global 聚合走 `checklistsForRegion`。
-   *
-   * 切换 activeRegion 时**不清空**（键自带作用域，见 resetManagementState）。
-   */
-  checklists: Record<string, ChecklistEntry[]>;
-  /** 按会话派生的显示历史（`SessionHistory` 事件；key = checklistKey(core, team, session)）。
+  /** 按会话派生的显示历史（`SessionHistory` 事件；key = sessionScopedKey(core, team, session)）。
    * 合并策略：历史快照 + 窗口增量（seq > baseSeq 的窗口条目；工具按 tool_call_id 就地补丁）。 */
   sessionHistory: Record<
     string,
@@ -1299,29 +1177,6 @@ export interface AppState {
     }
   >;
   toasts: Toast[];
-  /**
-   * 各会话清单投影的版本（`checklistKey` → epoch/revision/来源/是否权威）。
-   *
-   * 与 `checklists` 同生共死：写投影必写版本（见
-   * `state_domains/checklists.ts`）。旧事件按此判据拒绝回滚——**不能**只用
-   * 「后到就覆盖」，因为 bootstrap 补发、并发 full/live 必然乱序。
-   * WS 重连时由 `resetChecklistSyncForReconnect` 清成"未版本化"（标脏），
-   * 让新连接的 bootstrap full 重建基线（Core 重启后 revision 可能归零）。
-   */
-  checklistVersions: Record<string, ChecklistProjectionVersion>;
-  /**
-   * 人格级清单水位（`teamKey(core, team)` → 最高 revision + 最近一次权威
-   * full）。full 快照清理旧投影时用它保住"采集后到达的更高 revision live
-   * 更新"（快照 envelope 自带 revision，空 `states` 也能精确判断）。
-   */
-  checklistWatermarks: Record<string, ChecklistWatermark>;
-  /**
-   * Core 是否已确认支持权威清单快照（收到首个 `ChecklistsSnapshot` / 带版本
-   * 的状态事件）。**未确认 = 旧 Core 降级**：不发 `RequestChecklists`（避免
-   * 反复请求未知命令报错），清单面板显示"未同步"标记，不伪装同步。
-   * 键 = core 名（单上游 `null` → 空串）。
-   */
-  checklistCapability: Record<string, boolean>;
   /** 目录选择器浏览结果（RequestBrowseDirectories 响应，2026-10）：
    * 键 = 复合 (activeRegion, 请求 path \u0000 '' 表示根列表) → 结果。
    * 每次浏览（进目录/换位置）一次请求一次响应（乱序到达按 path 键隔离）。 */
@@ -1483,7 +1338,6 @@ export function initialState(): AppState {
       status: null,
     },
     instanceUiByKey: {},
-    checklists: {},
     sessionHistory: {},
     toasts: [],
     browseDirectories: {},
@@ -1496,9 +1350,6 @@ export function initialState(): AppState {
     modules: [],
     modulesByCore: {},
     moduleEvents: [],
-    checklistVersions: {},
-    checklistWatermarks: {},
-    checklistCapability: {},
     teams: [],
     workspaceSessions: [],
     workspaceActive: null,
@@ -1868,38 +1719,6 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       setPhase(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id), 'thinking', null);
       return state;
     }
-    case 'ChecklistUpdated': {
-      const e = (event as {
-        ChecklistUpdated: {
-          session_id: string;
-          team_id?: string | null;
-          state: import('./protocol').ChecklistState;
-        };
-      }).ChecklistUpdated;
-      // 单会话权威状态：按 (core, team_id, session_id) 复合键隔离（2026-10），
-      // 版本判据见 `state_domains/checklists`——低 revision 一律是旧事件（即使
-      // epoch 不同）；旧式无版本事件不能覆盖已版本化的投影。旧 Core 的旧式
-      // 状态照常显示，但标为未同步。
-      applyChecklistUpdated(state, evtCore(e), e.team_id ?? null, e.session_id, e.state);
-      return state;
-    }
-    case 'ChecklistsSnapshot': {
-      // 整人格权威快照（2026-11）：`states` 为空也要清掉该 (core, team) 的
-      // 旧投影——"没有清单"是权威结果，不是"没收到"。envelope 的
-      // `epoch`/`revision` 与 states 同一次存储读取；清理时保留 revision
-      // 高于它的 live 更新（采集后才到的），其余一律清（见 state_domains）。
-      const e = (event as {
-        ChecklistsSnapshot: {
-          team_id: string;
-          /** 文件级版本（必填，空 states 也带）：与 states 同一次存储读取。 */
-          epoch: string;
-          revision: number;
-          states: Array<{ session_id: string; state: import('./protocol').ChecklistState }>;
-        };
-      }).ChecklistsSnapshot;
-      applyChecklistsSnapshot(state, evtCore(e), e.team_id, { epoch: e.epoch, revision: e.revision }, e.states);
-      return state;
-    }
     case 'CompactionProgress': {
       const e = (
         event as {
@@ -2060,7 +1879,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     case 'SessionHistory': {
       const e = (event as { SessionHistory: { team_id?: string | null; session_id: string; messages: TimelineMessage[]; total: number; truncated?: boolean; max_seq?: number; has_older?: boolean; older_unavailable?: boolean; core?: string | null } }).SessionHistory;
       if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) return state;
-      const key = checklistKey(evtCore(e), e.team_id ?? null, e.session_id);
+      const key = sessionScopedKey(evtCore(e), e.team_id ?? null, e.session_id);
       // baseSeq（合并水位线）：优先取服务端下发的 max_seq（派生时快照水位，
       // 避免「派生后~到达前」的新条目被误跳过）；缺失时回退按当前窗口计算。
       const fallbackBase = state.trunk.reduce((max, m) => (m.sessionId === e.session_id && (m.seq ?? 0) > max ? (m.seq ?? 0) : max), 0);
@@ -2748,23 +2567,6 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   for (const key of Object.keys(state.instanceUiByKey)) {
     if (key.startsWith(prefix)) delete state.instanceUiByKey[key];
   }
-  // 清单是独立持久状态，不随普通区域切换清空；但上游被删除时必须回收，
-  // 否则同名 Core 再接入会复活旧投影/能力位。内容、版本、水位一起删。
-  for (const key of Object.keys(state.checklists)) {
-    if (key.startsWith(prefix)) delete state.checklists[key];
-  }
-  for (const [key, version] of Object.entries(state.checklistVersions)) {
-    if ((version.core ?? null) === core || key.startsWith(prefix)) {
-      delete state.checklistVersions[key];
-      delete state.checklists[key];
-    }
-  }
-  for (const [key, watermark] of Object.entries(state.checklistWatermarks)) {
-    if ((watermark.core ?? null) === core || key.startsWith(prefix)) {
-      delete state.checklistWatermarks[key];
-    }
-  }
-  delete state.checklistCapability[core];
   // 联邦目录快照（P2）：随 core 一起清——留着会让拓扑继续引用已移除节点。
   delete state.federationDirectories[core];
   delete state.federationDirectoryAt[core];

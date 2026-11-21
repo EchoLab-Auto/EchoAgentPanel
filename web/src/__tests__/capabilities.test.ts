@@ -249,14 +249,14 @@ describe('模块是否真的挂载（moduleMounted）', () => {
     ({ modules } as unknown as AppState);
 
   it('模块在清单里 = 已挂载', () => {
-    expect(moduleMounted(withModules([{ id: 'echo-agent.checklist' }]), 'echo-agent.checklist')).toBe(
+    expect(moduleMounted(withModules([{ id: 'echo-agent.sample' }]), 'echo-agent.sample')).toBe(
       true,
     );
   });
 
   it('模块不在清单里 = 没装（清单只含已挂载模块）', () => {
-    expect(moduleMounted(withModules([]), 'echo-agent.checklist')).toBe(false);
-    expect(moduleMounted(withModules([{ id: 'echo-agent.shell' }]), 'echo-agent.checklist')).toBe(
+    expect(moduleMounted(withModules([]), 'echo-agent.sample')).toBe(false);
+    expect(moduleMounted(withModules([{ id: 'echo-agent.shell' }]), 'echo-agent.sample')).toBe(
       false,
     );
   });
@@ -272,8 +272,8 @@ describe('模块是否真的挂载（moduleMounted）', () => {
     // 白名单为空 = "不限制" → teamToolAvailable 返回 true（这是对的：
     // 它回答"这个 persona 允许用吗"）。
     const team = { id: 't', name: 't', enabled: true, sessions: 0 } as TeamInfo;
-    expect(teamToolAvailable(team, 'checklist')).toBe(true);
-    // 但部署里没有这个模块 → 入口不该出现。ChatView 的判据是两者的合取。
-    expect(moduleMounted(withModules([]), 'echo-agent.checklist')).toBe(false);
+    expect(teamToolAvailable(team, 'some-external-tool')).toBe(true);
+    // 但部署里没有提供它的模块 → 入口不该出现（提供方扩展的判据是两者的合取）。
+    expect(moduleMounted(withModules([]), 'echo-agent.sample')).toBe(false);
   });
 });

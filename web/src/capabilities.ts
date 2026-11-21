@@ -4,10 +4,9 @@
 //! 只有白名单（黑名单已移除）：包维度模块（tools.builtin/skills.dir/
 //! workspace/management.panel）不在白名单即其注册表整体不可见。这里复刻同一
 //! 语义供 UI 入口显隐。
-//! 2026-11：任务清单（checklist）在 Core 侧重新成为独立模块
-//! （`echo-agent.checklist`，kind = tool → persona 级门控）。Panel **不需要
-//! 任何清单改动**：勾选可见性读 Core 下发的 `ModuleInfo.gating`，包级门控读
-//! `ToolInfo.package`——两处都不是硬编码模块 id。
+//! 模块的市场化形态（2026-11）：外部模块可以只在运行时存在（`modules.toml`
+//! 配一行），因此"人格允许吗"（配置）与"这台部署有吗"（运行时）是两个问题，
+//! 分别由 [`teamModuleEnabled`] 与 [`moduleMounted`] 回答。
 
 import type { TeamInfo } from './protocol';
 import { activeTeam, type AppState } from './state';
@@ -26,8 +25,7 @@ import { activeTeam, type AppState } from './state';
  * 的 kind 判定。这样新增平台（`echo-agent.instance.<platform>`）两侧都自动
  * 生效、无需改清单（2026-10 实例解耦后 QQ 已从两侧清单移除，本清单与 Core
  * `GATED_MODULE_IDS` 的 5 项逐项镜像 + session/transcript 两项**待 Core 侧接线**）。
- * 任务清单（checklist）自 2026-11 起是独立模块 `echo-agent.checklist`
- * （kind = tool），但**不进任何前端清单**——它和其他 tool 模块一样由
+ * 外部模块（`kind = tool` 且不随 Core 发布）不进任何前端清单：它们由
  * Core 的 gating 字段决定是否出现在勾选区。
  *
  * 维护规则（对应 Core 端 `echo-agent/src/modules.rs::GATED_MODULE_IDS`）：
@@ -288,10 +286,10 @@ export function teamModuleEnabled(team: TeamInfo | null | undefined, moduleId: s
  * | `teamModuleEnabled` | "这个人格**允许**用吗" | 人格配置（白名单） |
  * | `moduleMounted` | "这台部署**有**吗" | Core 运行时的模块清单 |
  *
- * 为什么需要后者：`echo-agent.checklist` 自 2026-11-21 起是宿主不认识的
- * 独立产物——不写 `modules.toml` 就没有这个模块，工具也不存在。而
- * `teamToolAvailable` 读的是配置白名单（"允许"），空名单等于"不限制"，
- * 于是**没有模块时它仍然返回 true**，UI 会显示一个点不动的死入口。
+ * 为什么需要后者：外部模块是宿主不认识的独立产物——不写 `modules.toml`
+ * 就没有这个模块，它的工具也不存在。而 `teamToolAvailable` 读的是配置
+ * 白名单（"允许"），空名单等于"不限制"，于是**没有模块时它仍然返回 true**，
+ * UI 会显示一个点不动的死入口。
  *
  * Core 的 `ModulesList` 只含已挂载模块（`emit_modules_list` 里
  * `filter(|d| d.enabled)`），所以"在清单里"就等于"能用"——不需要再看别的

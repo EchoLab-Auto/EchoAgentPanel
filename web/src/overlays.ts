@@ -8,7 +8,6 @@ import { ref } from 'vue';
 export type BuiltinOverlayId =
   | 'config'
   | 'context'
-  | 'checklist'
   | 'sessions'
   | 'instance'
   | 'tasks';

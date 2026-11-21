@@ -34,7 +34,6 @@ function mountChat() {
         SessionSwitcher: true,
         AgentSwitcher: true,
         PanelSidebar: true,
-        ChecklistSidebar: true,
         AgentConfigModal: true,
       },
     },

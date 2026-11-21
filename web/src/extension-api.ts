@@ -10,7 +10,12 @@ export { parseEvent, serializeCommand } from './protocol';
 export { isPending, releasePending, trackRequest, usePending } from './pending';
 export { confirmDialog } from './confirm';
 export { scopedKey, sessionKey, teamKey } from './keys';
-export { currentTeam, teamModuleEnabled, teamToolAvailable } from './capabilities';
+export {
+  currentTeam,
+  moduleMounted,
+  teamModuleEnabled,
+  teamToolAvailable,
+} from './capabilities';
 export { entryOverlay, setEntryOverlay, toggleEntryOverlay } from './overlays';
 export { federatedPeerLabel, remoteDirectoryLabel } from './federation-names';
 export {

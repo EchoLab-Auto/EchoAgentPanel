@@ -24,12 +24,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state } from '../store';
 import { sessionMessagesFor } from '../state';
-import { checklistKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import type { DisplayMessage } from '../state';
 
 const SID = 's1';
 const TEAM = 't';
-const KEY = checklistKey(null, TEAM, SID);
+const KEY = sessionScopedKey(null, TEAM, SID);
 
 function msg(over: Partial<DisplayMessage> & { key: string }): DisplayMessage {
   return {

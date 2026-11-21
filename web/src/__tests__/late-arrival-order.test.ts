@@ -27,7 +27,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state } from '../store';
 import { sessionMessagesFor } from '../state';
-import { checklistKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import type { DisplayMessage } from '../state';
 
 const SID = 'local:workspace:systemx/base:local_user';
@@ -76,7 +76,7 @@ function liveTool(name: string, callId: string, time: number, status: 'running' 
 }
 
 function seedHistory(messages: unknown[], baseSeq = 100) {
-  state.sessionHistory[checklistKey(state.activeRegion, TEAM, SID)] = {
+  state.sessionHistory[sessionScopedKey(state.activeRegion, TEAM, SID)] = {
     baseSeq,
     messages,
   } as never;

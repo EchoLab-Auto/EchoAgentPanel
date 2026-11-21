@@ -38,8 +38,6 @@ const kind = computed<IconKind>(() => {
       return 'files';
     case 'search_code':
       return 'code';
-    case 'checklist':
-      return 'todo';
     case 'calculator':
       return 'calc';
     case 'web_search':

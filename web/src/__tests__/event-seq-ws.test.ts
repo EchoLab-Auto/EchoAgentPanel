@@ -153,22 +153,17 @@ describe('事件流跳号 → 自动补拉 timeline', () => {
       next.triggerOpen();
 
       const { state } = await import('../store');
-      state.checklists = {};
-      state.checklistVersions = {};
-      state.checklistWatermarks = {};
-      state.checklistCapability = {};
+      // 样本用一条**会改状态**的通用事件（实例状态）：旧连接的迟到帧若被
+      // 放行，`state.instances` 会多出一条来。
+      state.instances = [];
       ws.deliver({
-        ChecklistUpdated: {
-          session_id: 'stale-session', team_id: 'alix',
-          state: {
-            lists: [{ id: 'stale', name: 'stale', items: [] }],
-            epoch: '11111111-1111-4111-8111-111111111111', revision: 999,
-          },
+        InstanceStateChanged: {
+          instance_name: 'stale-instance',
+          connected: true,
+          self_id: null,
         },
       }, 1000);
-      expect(state.checklists['stale-session']).toBeUndefined();
-      expect(state.checklistVersions).toEqual({});
-      expect(state.checklistWatermarks).toEqual({});
+      expect(state.instances.some((item) => item.name === 'stale-instance')).toBe(false);
     } finally {
       vi.useRealTimers();
     }

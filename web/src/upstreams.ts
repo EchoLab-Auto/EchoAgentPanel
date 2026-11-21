@@ -9,7 +9,6 @@ import { panelFetch, sendCommand } from './connection';
 import { dropCoreInstanceChannel } from './instanceOps';
 import { evaluateFailover } from './failover';
 import { pruneDiscovered, runDiscovery } from './federation-directory';
-import { resetChecklistSyncForCore } from './state_domains/checklists';
 import type { UpstreamStatus } from './state';
 
 /**
@@ -67,7 +66,6 @@ async function doRefreshUpstreams(): Promise<void> {
         // bootstrap；否则新库较低 revision 会一直被旧水位拒绝。
         // 首次发现不重复补拉：connection.onopen 已广播 RequestState。
         if (upstream.connectivity === 'online' && lastUpstreams.get(upstream.name) !== 'online') {
-          resetChecklistSyncForCore(state, upstream.name);
           sendCommand('RequestState', upstream.name);
         }
       }

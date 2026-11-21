@@ -11,7 +11,7 @@
 //!
 //! | 类型 | 为什么 Panel 侧还要定义 |
 //! |---|---|
-//! | `ChecklistState` / `RemoteApiProfileEntry` | Core 侧是 `serde_json::Value`（不定形），Panel 需要具体形状才能渲染 |
+//! | `RemoteApiProfileEntry` | Core 侧是 `serde_json::Value`（不定形），Panel 需要具体形状才能渲染 |
 //! | `FederationStatus` / `FederationDirectory` | Core 侧是事件变体内的内联字段，提取成命名类型便于复用 |
 //! | `ShellTerminalEntry` | 纯 Panel UI 状态（终端行），Core 不发 |
 //! | `CompactionPhase` | Core 在 `echo-session`，跨 crate 未纳入生成；两端靠注释对齐 |
@@ -117,27 +117,6 @@ export interface ShellTerminalEntry {
 
 
 
-/** 清单状态（Core 清单工具的线形状，2026-11 可靠化版）。
- *
- * `epoch`/`revision` 是 **per-persona store 的文件级版本**（不是每会话一份）：
- * `epoch` 在 reset 时换 UUID，`revision` 每次成功修改 +1 且 reset **不重置**。
- * 旧 Core 两者都缺（`undefined`）——消费侧据此区分"可判新旧的权威状态"与
- * "只能展示的旧式状态"（见 `state_domains/checklists.ts`）。 */
-export interface ChecklistState {
-  lists: Array<{
-    /** 清单 id（新 Core 提供；旧 Core 缺省）。 */
-    id?: string;
-    name: string;
-    /** 归档清单（仍下发，前端弱化展示）。 */
-    archived?: boolean;
-    /** Core 计算好的进度（与 items 等价；前端以 items 为准更稳）。 */
-    done?: number;
-    total?: number;
-    items: Array<{ id?: string; text: string; done: boolean }>;
-  }>;
-  epoch?: string | null;
-  revision?: number | null;
-}
 
 // ── BackendCommand（外部标签枚举）──────────────────────────────────────────
 

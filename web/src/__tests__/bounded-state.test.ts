@@ -25,7 +25,7 @@ import {
   SHELL_ENTRIES_LIMIT,
   SHELL_OUTPUT_TAIL,
 } from '../state';
-import { checklistKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 
 function historyEvent(sessionId: string, count = 2) {
   return {
@@ -67,13 +67,13 @@ describe('sessionHistory 有界（常驻上限 + 最近使用语义）', () => {
       // 每次写入后总量都不超上限
       expect(Object.keys(state.sessionHistory).length).toBeLessThanOrEqual(SESSION_HISTORY_LIMIT);
       // 刚写入的会话一定还在（不能被自己刚触发的裁剪删掉）
-      expect(state.sessionHistory[checklistKey(null, 't', `sess-${i}`)]).toBeTruthy();
+      expect(state.sessionHistory[sessionScopedKey(null, 't', `sess-${i}`)]).toBeTruthy();
     }
     // 最旧的若干份被淘汰
-    expect(state.sessionHistory[checklistKey(null, 't', 'sess-0')]).toBeUndefined();
+    expect(state.sessionHistory[sessionScopedKey(null, 't', 'sess-0')]).toBeUndefined();
     // 最新的在
     const last = `sess-${SESSION_HISTORY_LIMIT + overflow - 1}`;
-    expect(state.sessionHistory[checklistKey(null, 't', last)]).toBeTruthy();
+    expect(state.sessionHistory[sessionScopedKey(null, 't', last)]).toBeTruthy();
   });
 
   it('重新写入已有会话 = 刷新其"最近使用"位置（不会被当成最旧淘汰）', () => {
@@ -83,8 +83,8 @@ describe('sessionHistory 有界（常驻上限 + 最近使用语义）', () => {
     // 再塞入两份新的：被淘汰的应是 s-1 / s-2 而不是刚用过的 s-0
     dispatch(historyEvent('s-new-1'));
     dispatch(historyEvent('s-new-2'));
-    expect(state.sessionHistory[checklistKey(null, 't', 's-0')]).toBeTruthy();
-    expect(state.sessionHistory[checklistKey(null, 't', 's-1')]).toBeUndefined();
+    expect(state.sessionHistory[sessionScopedKey(null, 't', 's-0')]).toBeTruthy();
+    expect(state.sessionHistory[sessionScopedKey(null, 't', 's-1')]).toBeUndefined();
   });
 });
 

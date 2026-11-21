@@ -12,7 +12,6 @@
 import { state, dispatch } from './store';
 import { withBase } from './base';
 import { coreForTeam, currentRegion, pushToast } from './state';
-import { resetChecklistSyncForReconnect } from './state_domains/checklists';
 import { teamKey } from './keys';
 import { trackRequest } from './pending';
 import { observeEventSeq, resetEventSeq } from './event-seq';
@@ -141,12 +140,6 @@ export function startConnection(): void {
       // 由下面的 since_seq 补拉负责，不该在重连后第一帧被误判成"跳号"
       // （见 event-seq.ts）。
       resetEventSeq();
-      // 清单版本基线归零（2026-11 可靠化）：新连接可能连到**重启/换库**的
-      // Core（revision 归零），旧投影的 revision 还停在高位——不清基线的话，
-      // 新的 bootstrap full 永远赢不过旧数字。清掉后旧投影继续展示但标脏
-      //（未同步），由这次连接的权威快照重建基线；能力探测同时归零，旧 Core
-      // 不会推快照 → 保持降级、不发未知命令。
-      resetChecklistSyncForReconnect(state);
       // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
       // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。
       state.tasks = [];

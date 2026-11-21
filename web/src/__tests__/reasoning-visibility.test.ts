@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
 import { sessionMessagesFor } from '../state';
-import { checklistKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import type { BackendEvent, TeamInfo } from '../protocol';
 
 const SID = 'local:tui::local_user';
@@ -64,7 +64,7 @@ beforeEach(() => {
 describe('推理条目不被 baseSeq 过滤掉', () => {
   it('历史在（baseSeq 很大）时，实时推理 + 权威增量 → 仍可见', () => {
     // 1) 会话历史先到：只有 user/backend/tool，**没有推理**（Core 派生如此）
-    state.sessionHistory[checklistKey(null, TEAM, SID)] = {
+    state.sessionHistory[sessionScopedKey(null, TEAM, SID)] = {
       messages: [
         { key: 'h1', role: 'user', content: '问一句', time: 100, sessionId: SID } as never,
       ],
@@ -108,7 +108,7 @@ describe('推理条目不被 baseSeq 过滤掉', () => {
   });
 
   it('带 seq 的推理即使 ≤ baseSeq 也**不**被过滤（旧版 Core 双保险）', () => {
-    state.sessionHistory[checklistKey(null, TEAM, SID)] = {
+    state.sessionHistory[sessionScopedKey(null, TEAM, SID)] = {
       messages: [
         { key: 'h1', role: 'user', content: '问一句', time: 100, sessionId: SID } as never,
       ],
@@ -132,7 +132,7 @@ describe('推理条目不被 baseSeq 过滤掉', () => {
   });
 
   it('对照：非推理条目仍按 seq 水位线过滤（去重语义未破）', () => {
-    state.sessionHistory[checklistKey(null, TEAM, SID)] = {
+    state.sessionHistory[sessionScopedKey(null, TEAM, SID)] = {
       messages: [
         { key: 'h1', role: 'user', content: '问一句', time: 100, sessionId: SID } as never,
         { key: 'h2', role: 'backend', content: '回答', time: 101, sessionId: SID } as never,

@@ -96,13 +96,6 @@ describe('协议一致性（BackendEvent 由 Core 生成）', () => {
     expect(m![1]).toContain('instance_name');
   });
 
-  it('ChecklistUpdated 携带 team_id（同一 core 多 persona 隔离，2026-10）', () => {
-    const seg = backendEventSegment();
-    const m = seg.match(/ChecklistUpdated"?\s*:\s*\{([^}]*)\}/);
-    expect(m, 'ChecklistUpdated 定义缺失').toBeTruthy();
-    expect(m![1]).toContain('team_id');
-  });
-
   it('会话历史事件在联合类型中定义（2026-10 会话历史通道）', () => {
     expect(backendEventSegment()).toContain('SessionHistory');
   });

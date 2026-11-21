@@ -26,7 +26,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state } from '../store';
 import { sessionMessagesFor } from '../state';
-import { checklistKey } from '../keys';
+import { sessionScopedKey } from '../keys';
 import type { DisplayMessage } from '../state';
 
 const SID = 'local:tui::local_user';
@@ -43,7 +43,7 @@ function msg(over: Partial<DisplayMessage>): DisplayMessage {
   } as DisplayMessage;
 }
 
-const histKey = () => checklistKey(null, TEAM, SID);
+const histKey = () => sessionScopedKey(null, TEAM, SID);
 
 /** 造一份 hist（不含推理——与 Core 派生的形状一致）。 */
 function seedHist(messages: DisplayMessage[], baseSeq = 100) {
