@@ -65,7 +65,6 @@ beforeEach(() => {
   state.sessionHistory = {};
   state.teamTimelines = {};
   state.trunkTeamId = null;
-  state.tasks = [];
   state.activities = {};
 });
 

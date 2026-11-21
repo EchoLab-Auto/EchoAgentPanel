@@ -1,4 +1,4 @@
-import type { AgentActivity, AgentPhase, OrchActivity, AppState } from '../state';
+import type { AgentActivity, AgentPhase, AppState } from '../state';
 // ── activity helpers ───────────────────────────────────────────────
 
 /**
@@ -27,78 +27,4 @@ export function setPhase(state: AppState, key: string, phase: AgentPhase, detail
   const act = activity(state, key);
   act.phase = phase;
   act.detail = detail;
-}
-
-// ── orchestration helpers ──────────────────────────────────────────────────
-
-export function pushTask(state: AppState, task: OrchActivity) {
-  state.tasks.push(task);
-  if (state.tasks.length > 128) {
-    state.tasks.splice(0, state.tasks.length - 128);
-  }
-}
-
-export function startSubagent(
-  state: AppState,
-  sessionId: string,
-  core: string | null,
-  task: string,
-  teamId: string | null = null,
-) {
-  state.nextSubagentSeq += 1;
-  const now = Date.now();
-  const sequence = state.nextSubagentSeq;
-  pushTask(state, {
-    id: `subagent-${sequence}`,
-    sequence: null,
-    sessionId,
-    core,
-    teamId,
-    kind: 'subagent',
-    objective: task,
-    status: 'running',
-    createdAtMs: now,
-    completedAtMs: null,
-    branches: [
-      {
-        branchId: 'subagent',
-        task,
-        target: '父 Agent',
-        status: 'running',
-        startedAtMs: now,
-        completedAtMs: null,
-        result: null,
-      },
-    ],
-  });
-}
-
-export function completeSubagent(
-  state: AppState,
-  sessionId: string,
-  core: string | null,
-  success: boolean,
-  teamId: string | null = null,
-) {
-  for (let i = state.tasks.length - 1; i >= 0; i--) {
-    const task = state.tasks[i];
-    if (
-      task.sessionId === sessionId &&
-      (task.core ?? null) === core &&
-      // team 有值时精确匹配（2026-10 作用域普查）：同一 core 内多个人格都可能有
-      // 同名会话，只按 core 匹配会把 A 人格的任务收尾成 B 人格的。
-      (teamId == null || (task.teamId ?? null) === teamId) &&
-      task.kind === 'subagent' &&
-      task.status === 'running'
-    ) {
-      task.status = success ? 'completed' : 'failed';
-      task.completedAtMs = Date.now();
-      const branch = task.branches[0];
-      if (branch) {
-        branch.status = success ? 'succeeded' : 'failed';
-        branch.completedAtMs = task.completedAtMs;
-      }
-      return;
-    }
-  }
 }

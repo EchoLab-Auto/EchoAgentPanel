@@ -140,18 +140,15 @@ export function startConnection(): void {
       // 由下面的 since_seq 补拉负责，不该在重连后第一帧被误判成"跳号"
       // （见 event-seq.ts）。
       resetEventSeq();
-      // 重连后清空运行期状态：Core 若已重启，运行中的分支/任务全部
-      // 消失，残留的 tab 会永远卡在"运行中"（僵尸标签）。
-      state.tasks = [];
+      // 重连后清空运行期状态：Core 若已重启，运行中的分支全部消失，
+      // 残留的 tab 会永远卡在"运行中"（僵尸标签）。
+      // 任务列表归提供它的模块（各有 `panel-ui` 扩展自己处理重连）。
       state.activities = {};
       // 时间线**不再清空**（2026-09 刷新加速）：内存里的 teamTimelines 与
       // 磁盘缓存（trunk-cache）在页面加载时已还原，清空只会让刷新后的首屏
       // 白等一次全量。改为按游标请求增量（since_seq）：Core 侧对"窗口滚出/
       // 游标超前"都会回退全量（响应带 full 标志时这里整体替换），
       // 因此保留旧内容不会造成错配。
-      // 工作区 git 状态与文件浏览器缓存照旧清空（打开面板时会按当前 team 重拉）。
-      state.workspaceGitBySession = {};
-      state.workspaceFiles = {};
       // Bootstrap the panel state on (re)connect.
       // 先广播只读发现命令（RequestState/RequestTeamsList）：必须发往全部在线
       // core，Panel 才能知道有哪些上游。timeline 见下方——core 未知时只能裸

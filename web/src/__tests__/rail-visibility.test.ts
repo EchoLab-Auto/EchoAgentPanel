@@ -14,18 +14,30 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { defineComponent, h, nextTick } from 'vue';
+import { defineComponent, h, nextTick, reactive } from 'vue';
 import ChatView from '../components/ChatView.vue';
 import { state } from '../store';
 import { placeCard, resetRailLayout } from '../rail-layout';
 import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { registerPanelExtension } from '../extensions/registry';
 
+//! 测试用的假扩展：自带一份"工作区已激活"的局部状态。
+//!
+//! 壳里**没有**工作区字段（那归 workspace 扩展），所以本测试也不该写
+//! `state.workspaceX`——它要验证的是"卡片槽位的登记与门控解耦"这条**通用**
+//! 机制，与具体是哪个模块无关。
+// 用 reactive 而不是普通对象：卡片门控要在种子变化后重算（壳不再持有这些
+// 字段，测试自己的假扩展就得自己提供反应性）。
+const fakeWorkspace = reactive({
+  active: null as string | null,
+  sessions: [] as Array<{ id: string; name: string }>,
+});
+
 registerPanelExtension({
   id: 'test',
   railCardSlots: ['files'],
   railCards() {
-    const session = state.workspaceSessions.find((item) => item.id === state.workspaceActive);
+    const session = fakeWorkspace.sessions.find((item) => item.id === fakeWorkspace.active);
     const card = defineComponent({ setup: () => () => h('div') });
     return session ? [{ id: 'files', title: `文件浏览器 · ${session.name}`, component: card }] : [];
   },
@@ -63,16 +75,14 @@ function mountChatView() {
 
 /** 造一个「workspace 已激活」的状态：文件浏览器卡门控全部满足。 */
 function activateWorkspace() {
-  state.workspaceTeamId = 'alix';
-  state.workspaceActive = 'ws1';
-  state.workspaceSessions = [{ id: 'ws1', name: 'demo' } as never];
+  fakeWorkspace.active = 'ws1';
+  fakeWorkspace.sessions = [{ id: 'ws1', name: 'demo' }];
 }
 
 /** 门控全部失效：workspace 会话结束（文件浏览器卡隐藏）。 */
 function deactivateWorkspace() {
-  state.workspaceTeamId = 'alix';
-  state.workspaceActive = null;
-  state.workspaceSessions = [];
+  fakeWorkspace.active = null;
+  fakeWorkspace.sessions = [];
 }
 
 describe('侧栏列显隐：登记（结构）与门控（内容）解耦', () => {

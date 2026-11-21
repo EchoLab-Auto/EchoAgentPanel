@@ -1,13 +1,7 @@
 import { oneLine, truncate, summarizeArguments, summarizeTimerEvent } from './state_domains/helpers';
-import {
-  activity,
-  setPhase,
-  startSubagent,
-  completeSubagent,
-} from './state_domains/orchestration';
+import { activity, setPhase } from './state_domains/orchestration';
 import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessageAt, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
-import { isSubagentTool } from './tool-kinds';
 import { instanceOpKey, settleInstanceOp } from './instanceOps';
 import { settleInstanceOpsOfCore } from './pending';
 
@@ -26,18 +20,15 @@ import type {
   SessionInfo,
   SkillInfo,
   ThinkingMode,
-  WorkspaceFileEntry,
   ReasoningEffort,
   TimelineMessage,
   ToolInfo,
   ModuleInfo,
   TeamInfo,
-  WorkspaceGitInfo,
-  WorkspaceSessionInfo,
 } from './protocol';
 
 import { scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
-import { acceptPanelEvent } from './extensions/registry';
+import { acceptPanelEvent, panelCancelSessionWork, panelCoreRemoved, panelSessionBusy, panelToolPresentation } from './extensions/registry';
 
 export const TRUNK_SESSION_ID = 'trunk';
 
@@ -400,35 +391,6 @@ export interface AgentActivity {
   subagentsCompleted: number;
   promptTokens: number;
   completionTokens: number;
-}
-
-export type OrchKind = 'subagent' | 'reply';
-export type OrchStatus = 'running' | 'completed' | 'failed' | 'cancelled';
-
-export interface BranchActivity {
-  branchId: string;
-  task: string;
-  target: string;
-  status: 'running' | 'succeeded' | 'completed' | 'failed' | 'cancelled';
-  startedAtMs: number;
-  completedAtMs: number | null;
-  result: string | null;
-}
-
-export interface OrchActivity {
-  id: string;
-  sequence: number | null;
-  sessionId: string;
-  /** 归属上游 core（多上游聚合；null = 单上游/未标注）。 */
-  core?: string | null;
-  /** 归属人格（2026-10 作用域普查：同名会话跨人格不互相收尾/串显）。 */
-  teamId?: string | null;
-  kind: OrchKind;
-  objective: string;
-  status: OrchStatus;
-  createdAtMs: number;
-  completedAtMs: number | null;
-  branches: BranchActivity[];
 }
 
 /** `state.browseDirectories` 常驻上限（目录选择器的浏览结果缓存）。 */
@@ -1119,7 +1081,6 @@ export interface AppState {
   /// 上游名 → 运行区域信息（从载荷内建 node_id/region_name 学习）。
   /// 这是 Panel 的"区域注册表"：agent 的「运行区域」即其 `core` 对应的区域名。
   regions: Record<string, RegionInfo>;
-  tasks: OrchActivity[];
   instances: InstanceStatus[];
   api: ApiConfig | null;
   /**
@@ -1230,21 +1191,6 @@ export interface AppState {
   moduleEvents: ModuleEventEntry[];
   /** Team 成员列表（多 agent） */
   teams: TeamInfo[];
-  /** 工作区会话列表（workspace 模块；当前加载归属的 team 见 workspaceTeamId） */
-  workspaceSessions: WorkspaceSessionInfo[];
-  /** 激活的工作区会话 id（null = 未激活） */
-  workspaceActive: string | null;
-  /** 激活的工作区对话 id（2026-10 多对话；旧 Core 恒 null） */
-  workspaceActiveConversation: string | null;
-  workspaceTeamId: string | null;
-  /** 上述列表归属的 core（多上游；与 workspaceTeamId 一起判定新鲜度）。 */
-  workspaceCore: string | null;
-  /** 工作区列表请求代数：拒绝切换 team/core 后到达的旧快照。 */
-  workspaceGeneration: number;
-  /** 各会话目录 git 状态的缓存（session_id → 目录结果） */
-  workspaceGitBySession: Record<string, WorkspaceGitInfo[]>;
-  /** 文件浏览器缓存（目录绝对路径 → 条目/错误；workspace 模块） */
-  workspaceFiles: Record<string, { entries: WorkspaceFileEntry[]; error: string | null }>;
   /** 会话级 API 覆盖（session_id → profile 名；2026-10）。空值 = 跟随
    * persona 级。Panel 从工作区对话的 api_profile 推导（WorkspaceSessions
    * 事件回推时同步）。 */
@@ -1306,7 +1252,6 @@ export interface AppState {
   trunkTeamId: string | null;
   // pendingReasoning/completedReasoning 已删除（2026-10 巡检：死状态，
   // 无任何写入/读取方——reasoning 展示由消息条目自带的 reasoning 字段承载）。
-  nextSubagentSeq: number;
 }
 
 export function initialState(): AppState {
@@ -1327,7 +1272,6 @@ export function initialState(): AppState {
     knownCores: new Set(),
     upstreams: [],
     regions: {},
-    tasks: [],
     instances: [],
     api: null,
     chatgptLogin: {
@@ -1351,14 +1295,6 @@ export function initialState(): AppState {
     modulesByCore: {},
     moduleEvents: [],
     teams: [],
-    workspaceSessions: [],
-    workspaceActive: null,
-    workspaceActiveConversation: null,
-    workspaceTeamId: null,
-    workspaceCore: null,
-    workspaceGeneration: 0,
-    workspaceGitBySession: {},
-    workspaceFiles: {},
     sessionApiOverrides: {},
     activeTeamId: null,
     activeRegion: null,
@@ -1371,7 +1307,6 @@ export function initialState(): AppState {
     teamTimelines: {},
     trunkTeamId: null,
 
-    nextSubagentSeq: 0,
   };
 }
 
@@ -1410,78 +1345,6 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       settleInstanceOpsOfCore(payloadCore(event));
       const e = (event as { InstanceList: { instances: InstanceStatus[] } }).InstanceList;
       state.instances = e.instances;
-      return state;
-    }
-    case 'WorkspaceSessions': {
-      const e = (
-        event as {
-          WorkspaceSessions: {
-            team_id?: string | null;
-            sessions: WorkspaceSessionInfo[];
-            active?: string | null;
-            active_conversation?: string | null;
-            core?: string | null;
-          };
-        }
-      ).WorkspaceSessions;
-      // 响应必须属于当前运行区域；重连/切换 core 后到达的旧响应不能
-      // 覆盖新鲜列表（单上游/旧 Core 的 core=null 仍兼容放行）。
-      if (e.core != null && state.activeRegion != null && e.core !== state.activeRegion) return state;
-      // 响应必须属于当前 **agent**（2026-10 多窗口审计）：workspace store 是
-      // per-persona，`WorkspaceSessions` 广播经进程级 EventSink 发给所有 Panel
-      // 连接并携带 `team_id`。工作区状态在 Panel 是**单槽**——不过滤时：
-      // · 另一窗口（或模型的 use 工具）在别的 agent 上激活工作区 → 通播覆盖
-      //   本窗口的单槽 → `workspaceTeamId !== activeTeamId`，文件浏览器卡
-      //   门控失败、`localLanding` 落点错、`workspacePickIntent` 每次都发激活
-      //   （点一下就把全局 active 抢走，反过来影响另一窗口）；
-      // · 同窗口切 agent 时，旧 agent 的迟到响应/广播污染新 agent 的快照。
-      // 放行条件：team_id 缺省（旧 Core 帧）或本端尚未确定 agent（等 TeamsList
-      // 校正后 App 会按新 agent 重拉）。
-      if (e.team_id != null && state.activeTeamId != null && e.team_id !== state.activeTeamId) {
-        return state;
-      }
-      state.workspaceSessions = e.sessions ?? [];
-      state.workspaceActive = e.active ?? null;
-      state.workspaceActiveConversation = e.active_conversation ?? null;
-      state.workspaceTeamId = e.team_id ?? null;
-      state.workspaceCore = e.core ?? null;
-      state.workspaceGeneration += 1;
-      // `sessionApiOverrides` **不再**从这里推导。
-      //
-      // 本事件描述的是工作区对话文档里的 `api_profile`（模块的领域数据），
-      // 而"当前哪些会话有覆盖"是 Core 的路由状态——后者由 `SessionApiOverrides`
-      // 事件整体下发（含非工作区通道）。两处都写会让同一个键有两个作者：
-      // 用户在工作区对话里清除覆盖时，这里仍从陈旧文档推导出旧值。
-      return state;
-    }
-    case 'WorkspaceGitStatus': {
-      const e = (
-        event as {
-          WorkspaceGitStatus: {
-            team_id?: string | null;
-            session_id: string;
-            directories: WorkspaceGitInfo[];
-          };
-        }
-      ).WorkspaceGitStatus;
-      state.workspaceGitBySession[sessionKey(evtCore(e), e.session_id)] = e.directories ?? [];
-      return state;
-    }
-    case 'WorkspaceFiles': {
-      const e = (
-        event as {
-          WorkspaceFiles: {
-            session_id: string;
-            path: string;
-            entries: WorkspaceFileEntry[];
-            error?: string | null;
-          };
-        }
-      ).WorkspaceFiles;
-      state.workspaceFiles[scopedKey(evtCore(e), e.path)] = {
-        entries: e.entries ?? [],
-        error: e.error ?? null,
-      };
       return state;
     }
     case 'MessageReceived': {
@@ -1642,7 +1505,8 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
       // 别的人格的事件一律丢弃（2026-10 作用域普查）：此前不校验 team，
       // A 人格派子代理会在 B 人格的窗口里也插一行"子代理运行中"并亮起运行态。
       if (!belongsToActiveTeam(state, e.team_id, core)) return state;
-      startSubagent(state, e.session_id, core, e.task, e.team_id ?? null);
+      // 任务条目归**提供它的模块**（`panel-ui` 的 `acceptEvent` 自己归约）；
+      // 壳只维护通用活动相位与时间线。
       // 派发位置插一行"子代理运行中"（执行过程就地可见；完成时就地改写为结果）。
       startSubagentRun(state, e.session_id, e.task, e.profile ?? undefined, e.model ?? undefined);
       setPhase(
@@ -1658,7 +1522,6 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         SubagentCompleted: { session_id: string; success: boolean; team_id?: string | null };
       }).SubagentCompleted;
       const core = evtCore(e);
-      completeSubagent(state, e.session_id, core, e.success, e.team_id ?? null);
       if (!belongsToActiveTeam(state, e.team_id, core)) return state;
       const key = sessionScopedKey(core, e.team_id, e.session_id);
       const act = activity(state, key);
@@ -1669,7 +1532,8 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     case 'ToolCall': {
       const e = (event as { ToolCall: { session_id: string; tool_name: string; arguments: string; tool_call_id?: string; branch_id?: string; team_id?: string | null; started_at_ms?: number } }).ToolCall;
       const startedAtMs = typeof e.started_at_ms === 'number' ? e.started_at_ms : Date.now();
-      setPhase(state, sessionKey(evtCore(e), e.session_id), isSubagentTool(e.tool_name) ? 'subagent' : 'tool', e.tool_name);
+      const toolPhase = panelToolPresentation({ name: e.tool_name })?.phase;
+      setPhase(state, sessionKey(evtCore(e), e.session_id), toolPhase ?? 'tool', e.tool_name);
       // 流式分步切分：工具开始 = 该步内容为中间叙述（此后不再有终值到达）
       // ——冻结当前正文流式行（保留已显示文本）；下一步的增量将新建一行。
       freezeStreams(state, e.session_id, {
@@ -1715,7 +1579,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
         finishToolMessage(state, e.tool_name, e.result, e.tool_call_id, e.timed_out, e.elapsed_ms, entry);
       }
       const act = activity(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id));
-      if (!isSubagentTool(e.tool_name)) act.toolsCompleted += 1;
+      if (!panelToolPresentation({ name: e.tool_name })?.phase) act.toolsCompleted += 1;
       setPhase(state, sessionScopedKey(evtCore(e), e.team_id, e.session_id), 'thinking', null);
       return state;
     }
@@ -1928,28 +1792,15 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     case 'AgentCompleted': {
       const e = (event as { AgentCompleted: { session_id: string; core?: string | null } }).AgentCompleted;
       const core = evtCore(e);
-      if (
-        !state.tasks.some(
-          (t) =>
-            t.sessionId === e.session_id &&
-            (t.core ?? null) === core &&
-            t.kind === 'reply' &&
-            t.status === 'running',
-        )
-      ) {
+      // "回复分支还在跑吗"由**持有任务的扩展**回答（壳没有任务字段）。
+      if (!panelSessionBusy(core, e.session_id, 'reply')) {
         setPhase(state, sessionKey(core, e.session_id), 'completed', null);
       }
       // 回合收尾兜底（2026-10）：ToolResult 一旦丢失，工具行会永久 running
       // 一直读秒，只能刷新页面才好。turn 结束是"本轮不会再有工具结果"的
       // 确定信号——把该会话残留的 running 行收尾（见 settleRunningTools）。
       // 有并发分支/任务在跑时跳过：它们有各自的结束事件与独立会话。
-      const stillBusy =
-        state.tasks.some(
-          (t) =>
-            t.sessionId === e.session_id &&
-            (t.core ?? null) === core &&
-            t.status === 'running',
-        );
+      const stillBusy = panelSessionBusy(core, e.session_id);
       if (!stillBusy) settleRunningTools(state, e.session_id);
       // 兜底：turn 完成时若该会话仍无任何 backend（回答缺失），主动拉取
       // 时间线对齐——推理/工具已实时显示但回答丢失时保证补齐。
@@ -2518,19 +2369,9 @@ export function cancelSessionWork(
     act.phase = 'completed';
     act.detail = null;
   }
-  // 2) 运行中的任务（reply/后台/子代理）→ cancelled
-  for (const task of state.tasks) {
-    if (task.sessionId === sessionId && (task.core ?? null) === core && task.status === 'running') {
-      task.status = 'cancelled';
-      task.completedAtMs = Date.now();
-      for (const b of task.branches) {
-        if (b.status === 'running') {
-          b.status = 'cancelled';
-          b.completedAtMs = Date.now();
-        }
-      }
-    }
-  }
+  // 2) 运行中的任务（reply/后台/子代理）→ cancelled：由**持有它们的扩展**就地
+  //    标记（壳没有任务字段，也不该知道任务长什么样）。
+  panelCancelSessionWork(core, sessionId);
   // 3) 主时间线 running 工具卡 → failed + “已取消”
   for (const msg of state.trunk) {
     if (msg.sessionId === sessionId && msg.tool && msg.tool.status === 'running') {
@@ -2555,9 +2396,9 @@ export function removeSessionsOfCore(state: AppState, core: string): void {
   for (const id of removedIds) {
     delete state.activities[sessionKey(core, id)];
   }
-  // 该 core 的任务与 timeline 缓存（复合键前缀）一并清理，避免残留死条目。
+  // 该 core 的任务（归模块）与 timeline 缓存（复合键前缀）一并清理，避免残留死条目。
+  panelCoreRemoved(core);
   const prefix = `${core}\u0000`;
-  state.tasks = state.tasks.filter(t => (t.core ?? null) !== core);
   for (const key of Object.keys(state.teamTimelines)) {
     if (key.startsWith(prefix)) delete state.teamTimelines[key];
   }

@@ -33,7 +33,6 @@ function seedWithImages(images: string[]) {
       images,
     },
   ] as typeof state.trunk;
-  state.tasks = [];
   state.activities = {};
   state.shellSessions = [];
   state.connected = true;

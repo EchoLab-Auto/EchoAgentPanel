@@ -27,13 +27,21 @@ import type { SessionInfo, TeamInfo } from '../../protocol';
 import { registerPanelExtension } from '../../extensions/registry';
 
 const ExtensionCardStub = defineComponent({ setup: () => () => h('div', 'extension card') });
+//! 假扩展自带的工作区状态：壳里没有这些字段（归 workspace 扩展），测试也不写
+//! `state.workspaceX`——本文件验证的是"卡片槽位 + 门控"这条通用机制。
+const fakeWs = {
+  sessions: [] as Array<{ id: string; name: string; description?: string; directories?: string[] }>,
+  active: null as string | null,
+  teamId: null as string | null,
+  gitBySession: {} as Record<string, Array<{ staged?: number; modified?: number; untracked?: number }>>,
+};
 registerPanelExtension({
   id: 'test.cards',
   railCardSlots: ['files', 'git'],
   railCards() {
-    const session = state.workspaceSessions.find((item) => item.id === state.workspaceActive);
+    const session = fakeWs.sessions.find((item) => item.id === fakeWs.active);
     if (!session) return [];
-    const changed = (state.workspaceGitBySession[sessionKey(null, session.id)] ?? [])
+    const changed = (fakeWs.gitBySession[sessionKey(null, session.id)] ?? [])
       .reduce((sum, dir) => sum + (dir.staged ?? 0) + (dir.modified ?? 0) + (dir.untracked ?? 0), 0);
     return [
       { id: 'files', title: `文件浏览器 · ${session.name}`, component: ExtensionCardStub },
@@ -94,10 +102,10 @@ describe('PanelSidebar（边栏卡片栈）', () => {
     state.sessions = [session({})];
     state.shellSessions = [];
     state.connected = true;
-    state.workspaceSessions = [];
-    state.workspaceActive = null;
-    state.workspaceTeamId = null;
-    state.workspaceGitBySession = {};
+    fakeWs.sessions = [];
+    fakeWs.active = null;
+    fakeWs.teamId = null;
+    fakeWs.gitBySession = {};
   });
 
   it('卡片顺序与门控：连接状态置顶常驻、Shell 常驻（在文件浏览器下方）、无激活工作区时无文件浏览器卡', async () => {
@@ -160,11 +168,11 @@ describe('PanelSidebar（边栏卡片栈）', () => {
   });
 
   it('有激活工作区会话：文件浏览器与 Git 状态卡在连接状态下方、Shell 在其下', async () => {
-    state.workspaceSessions = [
+    fakeWs.sessions = [
       { id: 'core', name: '框架', description: '', directories: ['/srv/core'] },
     ];
-    state.workspaceActive = 'core';
-    state.workspaceTeamId = 'alix';
+    fakeWs.active = 'core';
+    fakeWs.teamId = 'alix';
     const wrapper = await mountSidebar();
     const titles = wrapper.findAll('.rail-stack__title').map((t) => t.text());
     // [连接状态, 文件浏览器, Git, 当前会话, Shell]——Git 卡紧跟文件浏览器（同一工作区）
@@ -184,12 +192,12 @@ describe('PanelSidebar（边栏卡片栈）', () => {
   });
 
   it('Git 状态卡：徽标 = 未提交变更文件数（已暂存 + 已修改 + 未跟踪）', async () => {
-    state.workspaceSessions = [
+    fakeWs.sessions = [
       { id: 'core', name: '框架', description: '', directories: ['/srv/core', '/srv/panel'] },
     ];
-    state.workspaceActive = 'core';
-    state.workspaceTeamId = 'alix';
-    state.workspaceGitBySession = {
+    fakeWs.active = 'core';
+    fakeWs.teamId = 'alix';
+    fakeWs.gitBySession = {
       [sessionKey(null, 'core')]: [
         { directory: '/srv/core', is_repo: true, staged: 2, modified: 3, untracked: 1 },
         { directory: '/srv/panel', is_repo: true, staged: 0, modified: 4, untracked: 0 },
@@ -200,7 +208,7 @@ describe('PanelSidebar（边栏卡片栈）', () => {
       .findAll('.rail-stack__title')
       .find((t) => t.text().includes('Git'))!;
     expect(gitTitle.text()).toContain('10');
-    state.workspaceGitBySession = {};
+    fakeWs.gitBySession = {};
   });
 
   it('卡片可折叠为横条：点卡头收起内容（折叠态持久化）', async () => {
@@ -217,11 +225,11 @@ describe('PanelSidebar（边栏卡片栈）', () => {
   });
 
   it('两张卡都展开时分隔条可拖动（draggable 标记），折叠后不可拖', async () => {
-    state.workspaceSessions = [
+    fakeWs.sessions = [
       { id: 'core', name: '框架', description: '', directories: ['/srv/core'] },
     ];
-    state.workspaceActive = 'core';
-    state.workspaceTeamId = 'alix';
+    fakeWs.active = 'core';
+    fakeWs.teamId = 'alix';
     const wrapper = await mountSidebar();
     // 卡片：[连接状态(紧凑), 文件浏览器, Git, 当前会话(紧凑), Shell]；
     // 与紧凑卡相邻的分隔条不可拖，只有文件浏览器 ↔ Git 可拖。

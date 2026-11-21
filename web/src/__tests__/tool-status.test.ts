@@ -18,6 +18,7 @@
 //! - 同 id 的 ToolCall 不重复建行（结果先到的乱序场景也不产生僵尸行）。
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, dispatch } from '../store';
+import { __resetPanelExtensionsForTest, registerPanelExtension } from '../extensions/registry';
 import type { BackendEvent, TeamInfo } from '../protocol';
 import type { DisplayMessage } from '../state';
 
@@ -93,7 +94,6 @@ beforeEach(() => {
   state.teams = [team('Alice'), team('EchoCode')];
   state.activeTeamId = 'Alice';
   state.activeRegion = null;
-  state.tasks = [];
   state.activities = {};
 });
 
@@ -167,17 +167,17 @@ describe('工具行收尾', () => {
 
   it('回合结束时仍有并发分支在跑：不收尾（避免掐掉子任务的时间线）', () => {
     dispatch(toolCall({ id: 'c1' }));
-    state.tasks = [
-      {
-        id: 't1',
-        sessionId: SID,
-        core: null,
-        kind: 'subagent',
-        status: 'running',
-      } as never,
-    ];
-    dispatch(agentCompleted());
-    expect(running()).toHaveLength(1);
+    // 壳没有任务字段：由**持有任务的扩展**回答"这个会话还有事在做吗"。
+    registerPanelExtension({
+      id: 'test.busy',
+      hooks: { sessionBusy: () => true },
+    });
+    try {
+      dispatch(agentCompleted());
+      expect(running()).toHaveLength(1);
+    } finally {
+      __resetPanelExtensionsForTest();
+    }
   });
 
   it('unknown 之后迟到的结果：修正为完成，不再多一条重复行', () => {

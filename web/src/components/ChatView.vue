@@ -11,8 +11,6 @@
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { lazy, preloadLazy } from '../lazy';
-import { isSubagentTool } from '../tool-kinds';
-import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismCard from '@echolab-auto/ui-frame/components/NeumorphismCard';
 import NeumorphismDrawer from '@echolab-auto/ui-frame/components/NeumorphismDrawer';
@@ -34,6 +32,7 @@ import { formatTime, toChatMessage, type ChatMessageWithImages } from '../chat-a
 import AgentSwitcher from './AgentSwitcher.vue';
 import { sessionScopedKey, teamKey } from '../keys';
 import { isInstanceModuleKind, teamModuleEnabled, teamToolAvailable } from '../capabilities';
+import { panelToolPresentation } from '../extensions/registry';
 import MessageItem from './MessageItem.vue';
 import { composerCornerSpan, composerOutline, toClipPath } from '../utils/squircle';
 import WorkRunGroup, { type WorkRunItem } from './WorkRunGroup.vue';
@@ -66,14 +65,12 @@ const loaders = {
   context: () => import('./ContextView.vue'),
   instance: () => import('./InstancePanel.vue'),
   sessions: () => import('./SessionSwitcher.vue'),
-  tasks: () => import('./TasksPanel.vue'),
 } as const;
 
 const AgentConfigModal = lazy(loaders.agentConfig, 'AgentConfigModal');
 const ContextView = lazy(loaders.context, 'ContextView');
 const InstancePanel = lazy(loaders.instance, 'InstancePanel');
 const SessionSwitcher = lazy(loaders.sessions, 'SessionSwitcher');
-const TasksPanel = lazy(loaders.tasks, 'TasksPanel');
 
 /** 入口行按钮 → 对应的 chunk 键（按 `toggleOverlay` 的 id 一一对应）。 */
 const WARM_BY_OVERLAY: Record<BuiltinOverlayId, keyof typeof loaders> = {
@@ -81,7 +78,6 @@ const WARM_BY_OVERLAY: Record<BuiltinOverlayId, keyof typeof loaders> = {
   context: 'context',
   sessions: 'sessions',
   instance: 'instance',
-  tasks: 'tasks',
 };
 
 /**
@@ -1007,32 +1003,6 @@ const contextAvailable = computed(() =>
   teamModuleEnabled(currentTeam.value, 'echo-agent.management.panel'),
 );
 
-/** 任务（Subagent/后台/并行/临时分支）按钮显隐：subagent 模块启用，
- * 或当前会话已有任务记录（即使模块后被禁用，历史任务仍可见）。 */
-const sessionTasks = computed(() => {
-  const core = state.activeRegion;
-  const inCore = (t: { core?: string | null }) => core == null || (t.core ?? null) === core;
-  return props.sessionId === 'global'
-    ? state.tasks.filter(inCore)
-    : state.tasks.filter((task) => task.sessionId === props.sessionId && inCore(task));
-});
-
-const sessionRunningTaskCount = computed(
-  () =>
-    sessionTasks.value.filter((task) => task.status === 'running').length,
-);
-
-const tasksAvailable = computed(
-  () =>
-    teamModuleEnabled(currentTeam.value, 'echo-agent.subagent') ||
-    sessionTasks.value.length > 0,
-);
-
-// 模块/Team 更新回推后，若任务入口变为不可用，关闭残留弹层。
-watch(tasksAvailable, (available) => {
-  if (!available && entryOverlay.value === 'tasks') closeOverlay();
-});
-
 /** 当前智能体名下的会话（去重团队归属，供「会话」按钮显隐）。 */
 const teamSessions = computed(() => {
   const active = props.activeTeamId ?? state.teams[0]?.id ?? null;
@@ -1072,7 +1042,7 @@ function pickSession(id: string) {
 
 // 入口行按钮随工具可用性增减（会话/工作区/任务/实例各有 v-if），任一变化都要重算。
 watch(
-  [sessionSwitcherAvailable, tasksAvailable, instanceAvailable],
+  [sessionSwitcherAvailable, instanceAvailable],
   () => void nextTick(syncEntryScroll),
 );
 onMounted(() => {
@@ -1520,28 +1490,6 @@ type ChatRow =
   | { kind: 'work-group'; key: string; items: WorkRunItem[] };
 
 /**
- * spawn_subagent 的参数 → 单行任务摘要（工具行悬停/详情头部展示用）。
- *
- * 输入有**两种形态**：
- * - Core 时间线写入的摘要串 `{task=…… · timeout_secs=900}`（`timeline.rs`
- *   的 `summarize_timeline_value`，非合法 JSON）；
- * - 原始 JSON `{"task": "…"}`（其他来源/旧数据）。
- * 两者都尝试；`task` 值在摘要里已被 Core 截断到 48 字符，仅作标签展示。
- */
-function subagentTaskLabel(input: string): string | undefined {
-  let task: string | null = null;
-  try {
-    const parsed = JSON.parse(input) as { task?: unknown };
-    if (typeof parsed.task === 'string') task = parsed.task;
-  } catch {
-    const match = input.match(/^\{task=([\s\S]*?)(?:\s·\s[a-z_]+=|\}$)|^\{task=([\s\S]*)$/);
-    task = match ? (match[1] ?? match[2] ?? null) : null;
-  }
-  if (!task || !task.trim()) return undefined;
-  const line = task.replace(/\s+/g, ' ').trim();
-  return line.length > 80 ? `${line.slice(0, 80)}…` : line;
-}
-/**
  * 工作行对象缓存（2026-10 P0 性能止血）：`messageRows` 是**数组级** computed
  * ——任意一条消息变化（流式 delta 每几十毫秒一次）都会让它整体重算，于是
  * 每次都要对**全部**消息重跑 `workRowOf`（每条工作行还要 `formatTime` +
@@ -1603,7 +1551,8 @@ const buildWorkRow = (m: ChatMessageWithImages): WorkRunItem | null => {
     input: tool.input,
     output: tool.output,
     status: tool.status,
-    label: isSubagentTool(tool.name) ? subagentTaskLabel(tool.input ?? '') : undefined,
+    // 工具名由**提供它的模块**定义：壳不按名字匹配，问扩展"这个工具怎么呈现"。
+    label: panelToolPresentation({ name: tool.name, input: tool.input })?.label,
     time: m.time ? formatTime(m.time) : undefined,
     startedAtMs: tool.startedAtMs,
     elapsedMs: tool.elapsedMs,
@@ -2104,28 +2053,6 @@ function mediaSrc(img: string): string {
         </svg>
         实例
       </NeumorphismButton>
-      <NeumorphismBadge
-        v-if="tasksAvailable"
-        :value="sessionRunningTaskCount"
-        :show-zero="false"
-      >
-        <NeumorphismButton
-          class="ctx-entry"
-          variant="glass"
-          shape="pill"
-          size="small"
-          title="任务（Subagent / 后台 / 分支，仅当前会话）"
-          data-overlay="tasks"
-          @click="toggleOverlay('tasks')"
-        >
-          <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <path d="M8 10h8" />
-            <path d="M8 14h5" />
-          </svg>
-          任务
-        </NeumorphismButton>
-      </NeumorphismBadge>
       <!-- 「还有更多」提示（2026-10 v2）：仅在入口行可横滚且未滚到底时出现。
            叠在容器右端（sticky 右贴边，不随内容滚动），滚到底即消失。 -->
       <span
@@ -2160,15 +2087,6 @@ function mediaSrc(img: string): string {
       @close="closeOverlay()"
     >
       <InstancePanel :team-id="props.activeTeamId ?? null" :core="state.activeRegion ?? null" />
-    </SessionOverlay>
-    <SessionOverlay
-      :open="entryOverlay === 'tasks'"
-      :inset="overlayInset"
-      :ignore="entryRowRef"
-      label="任务与分支"
-      @close="closeOverlay()"
-    >
-      <TasksPanel :session-id="props.sessionId" :core="state.activeRegion ?? null" />
     </SessionOverlay>
     <!-- 上下文占用：同一外壳（内容自带标题与分块列表，故外壳不加内边距）。 -->
     <SessionOverlay

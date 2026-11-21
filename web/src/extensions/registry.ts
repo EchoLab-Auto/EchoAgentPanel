@@ -28,6 +28,13 @@ export interface PanelEntryAction {
   when(context: PanelSlotContext): boolean;
   /** hover/focus/touch/打开时调用，用于按需预热业务数据。 */
   prefetch?(context: PanelSlotContext): void;
+  /**
+   * 按钮右上角的数字徽标（`null` / 0 = 不显示）。
+   *
+   * 壳只负责渲染这个数：它是什么含义（运行中任务数 / 未读数 / 进度…）由扩展
+   * 决定。加这个字段而不是让壳读某个模块的状态，正是「壳不认识业务」的边界。
+   */
+  badge?(context: PanelSlotContext): number | null;
 }
 
 export interface PanelOverlay {
@@ -98,6 +105,40 @@ export interface PanelExtensionHooks {
   sessionPresentation?(session: SessionInfo): { tag: string; tagTone?: 'accent' } | null;
   /** 是否支持按会话覆盖 API（仅业务通道开放此能力）。 */
   canConfigureSessionApi?(session: SessionInfo): boolean;
+  /**
+   * 该会话是否有本扩展登记的**运行中**任务。
+   *
+   * 壳用它决定回合收尾行为（`kind = 'reply'` 时问"回复分支是否还在跑"，
+   * 不传 `kind` 时问"这个会话是否还有事在做"）。壳自己不持有任务状态——
+   * 那属于提供任务的模块。
+   */
+  sessionBusy?(core: string | null, sessionId: string, kind?: string): boolean;
+  /** 用户取消该会话的工作：扩展据此把自己登记的任务标记为已取消。 */
+  cancelSessionWork?(core: string | null, sessionId: string): void;
+  /** 上游 core 被移除：扩展清理归属于它的状态。 */
+  onCoreRemoved?(core: string): void;
+  /**
+   * 为一次工具调用提供呈现信息（行标签 / 阶段）。
+   *
+   * 为什么需要：工具名由提供它的模块定义，壳不该按名字匹配（历史上
+   * `run_subagent` / `spawn_subagent` 分叉就出过事故）。扩展认识自己的工具，
+   * 就在这里给出"这个工具在做什么"；壳只负责渲染。
+   *
+   * 返回 `null` = 本扩展不认识这个工具（继续问下一个）。
+   */
+  toolPresentation?(tool: { name: string; input?: string }): {
+    /** 工具行的补充标签（如子代理的目标文案）。 */
+    label?: string;
+    /** 运行阶段（决定活动浮条文案）。 */
+    phase?: 'subagent';
+    /**
+     * 工具行图标（壳的封闭词汇，见 `ToolIcon.vue` 的 `IconKind`）。
+     *
+     * 词汇归壳（这是**呈现**），映射归模块（"我这个工具该长什么样"）。这样
+     * 壳不必认识任何模块的工具名，模块也不必自带一套 SVG。
+     */
+    icon?: string;
+  } | null;
 }
 
 export interface PanelExtension {
@@ -260,6 +301,72 @@ export function panelSessionPresentation(session: SessionInfo): { tag: string; t
   for (const extension of extensions.value) {
     const presentation = extension.hooks?.sessionPresentation?.(session);
     if (presentation) return presentation;
+  }
+  return null;
+}
+
+/** 是否有任一扩展报告该会话仍有运行中的任务（`kind` 可选过滤）。 */
+export function panelSessionBusy(
+  core: string | null,
+  sessionId: string,
+  kind?: string,
+): boolean {
+  return extensions.value.some((extension) => {
+    try {
+      return extension.hooks?.sessionBusy?.(core, sessionId, kind) === true;
+    } catch (error) {
+      console.error(`[panel-extension:${extension.id}] sessionBusy failed`, error);
+      return false;
+    }
+  });
+}
+
+/** 通知所有扩展：用户取消了该会话的工作。 */
+export function panelCancelSessionWork(core: string | null, sessionId: string): void {
+  for (const extension of extensions.value) {
+    try {
+      extension.hooks?.cancelSessionWork?.(core, sessionId);
+    } catch (error) {
+      console.error(`[panel-extension:${extension.id}] cancelSessionWork failed`, error);
+    }
+  }
+}
+
+/** 通知所有扩展：某个上游 core 被移除。 */
+export function panelCoreRemoved(core: string): void {
+  for (const extension of extensions.value) {
+    try {
+      extension.hooks?.onCoreRemoved?.(core);
+    } catch (error) {
+      console.error(`[panel-extension:${extension.id}] onCoreRemoved failed`, error);
+    }
+  }
+}
+
+/** 问扩展"这个工具的图标是哪一类"（壳的封闭词汇；null = 不认识）。 */
+export function panelToolIcon(toolName: string): string | null {
+  for (const extension of extensions.value) {
+    try {
+      const icon = extension.hooks?.toolPresentation?.({ name: toolName })?.icon;
+      if (icon) return icon;
+    } catch (error) {
+      console.error(`[panel-extension:${extension.id}] toolPresentation(icon) failed`, error);
+    }
+  }
+  return null;
+}
+
+/** 问扩展"这个工具怎么呈现"（第一个认领的赢）。 */
+export function panelToolPresentation(
+  tool: { name: string; input?: string },
+): { label?: string; phase?: 'subagent'; icon?: string } | null {
+  for (const extension of extensions.value) {
+    try {
+      const presentation = extension.hooks?.toolPresentation?.(tool);
+      if (presentation) return presentation;
+    } catch (error) {
+      console.error(`[panel-extension:${extension.id}] toolPresentation failed`, error);
+    }
   }
   return null;
 }

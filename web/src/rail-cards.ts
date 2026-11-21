@@ -16,7 +16,7 @@ import type { RailCardDef } from './components/RailStack.vue';
 /**
  * 本窗口正在查看的会话 id（App.vue 在 activeSessionId 变化时写入）。
  *
- * 为什么要这个：文件浏览器卡此前只按**全局** `state.workspaceActive` 绑定
+ * 为什么要这个：文件浏览器卡此前只按**全局**激活态（壳内单槽）绑定
  * 工作区——那是 per-persona 单槽，另一个窗口（或模型 `use` 工具）一激活，
  * 本窗口的卡片标题/目录树就跟着换、取消激活时整张卡消失（2026-10 多窗口
  * 串台）。按本窗口会话解析后，卡片只反映"我这一格在看哪个工作区"。

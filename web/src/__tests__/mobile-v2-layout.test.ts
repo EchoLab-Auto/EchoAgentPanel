@@ -105,8 +105,10 @@ describe('移动端布局 v2：入口行横滚提示', () => {
     expect(tag![0]).toContain('@pointerover="warmFromEvent"');
     expect(tag![0]).toContain('@focusin="warmFromEvent"');
     expect(chatVue).toContain('preloadLazy');
-    // 每个覆盖面板按钮都带 data-overlay，预热才能识别目标
-    for (const id of ['config', 'context', 'sessions', 'instance', 'tasks']) {
+    // 每个**壳内置**覆盖面板按钮都带 data-overlay，预热才能识别目标。
+    // 扩展提供的面板（清单 / 任务 / 工作区…）走 `PanelExtensionEntries`，
+    // 预热由扩展的 `prefetch` 钩子负责，壳不列它们。
+    for (const id of ['config', 'context', 'sessions', 'instance']) {
       expect(chatVue, `${id} 按钮缺 data-overlay`).toContain(`data-overlay="${id}"`);
     }
   });
@@ -119,7 +121,9 @@ describe('移动端布局 v2：入口行横滚提示', () => {
   });
 
   it('可滚性在能力开关变化时重算（按钮 v-if 会增减）', () => {
-    const idx = chatVue.indexOf('watch(\n  [sessionSwitcherAvailable, tasksAvailable, instanceAvailable]');
+    // 壳体按钮随能力开关增减；扩展按钮由注册表驱动（`PanelExtensionEntries`
+    // 自己 watch `actions`），所以这里只盯壳自己的那两个。
+    const idx = chatVue.indexOf('watch(\n  [sessionSwitcherAvailable, instanceAvailable]');
     expect(idx, '缺能力开关变化的 watch').toBeGreaterThan(0);
   });
 

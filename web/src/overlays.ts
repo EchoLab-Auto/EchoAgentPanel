@@ -9,8 +9,7 @@ export type BuiltinOverlayId =
   | 'config'
   | 'context'
   | 'sessions'
-  | 'instance'
-  | 'tasks';
+  | 'instance';
 
 /** 当前打开的覆盖面板（null = 全关）。 */
 export const entryOverlay = ref<string | null>(null);

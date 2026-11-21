@@ -3,7 +3,7 @@
 //! loading 时播放该工具专属的图标动画（复用图标本体路径，无额外轨道元素）。
 
 import { computed } from 'vue';
-import { SUBAGENT_TOOL } from '../tool-kinds';
+import { panelToolIcon } from '../extensions/registry';
 
 const props = withDefaults(defineProps<{ name: string; loading?: boolean }>(), {
   loading: false,
@@ -42,8 +42,6 @@ const kind = computed<IconKind>(() => {
       return 'calc';
     case 'web_search':
       return 'search';
-    case SUBAGENT_TOOL:
-      return 'subagent';
     case 'send_private_msg':
     case 'send_group_msg':
     case 'send_backend_message':
@@ -53,10 +51,11 @@ const kind = computed<IconKind>(() => {
     case 'instance_restart':
     case 'instance_status':
       return 'settings';
-    case 'workspace':
-      return 'workspace';
-    default:
-      return 'tool';
+    default: {
+      // 外部模块的工具：壳不认识它们的名字，问提供它的扩展（词汇仍是壳的）。
+      const fromExtension = panelToolIcon(n) as IconKind | null;
+      return fromExtension ?? 'tool';
+    }
   }
 });
 

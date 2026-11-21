@@ -42,7 +42,6 @@ describe('Phase 0：运行态/缓存按 (core, id) 隔离', () => {
     state.activeRegion = 'core-a';
     state.activeRegion = 'core-a';
     state.activities = {};
-    state.tasks = [];
     state.teamTimelines = {};
     state.shellSessions = [];
     state.shellTerminals = {};

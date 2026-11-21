@@ -3,13 +3,14 @@
 //! 扩展提供内容，Panel 提供按钮、互斥弹层、布局和关闭行为。
 
 import { computed, nextTick, watch } from 'vue';
+import NeumorphismBadge from '@echolab-auto/ui-frame/components/NeumorphismBadge';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import PanelIcon from './PanelIcon.vue';
 import SessionOverlay, { type OverlayInset } from './SessionOverlay.vue';
 import { state } from '../store';
 import { entryOverlay, setEntryOverlay, toggleEntryOverlay } from '../overlays';
 import { panelEntryActions, panelOverlays } from '../extensions/registry';
-import type { PanelSlotContext } from '../extensions/registry';
+import type { PanelEntryAction, PanelSlotContext } from '../extensions/registry';
 
 const props = defineProps<{
   teamId: string | null;
@@ -32,6 +33,12 @@ const slotContext = computed<PanelSlotContext>(() => ({
   core: state.activeRegion ?? null,
 }));
 const actions = computed(() => panelEntryActions(slotContext.value));
+
+/** 扩展声明的徽标数（`null` / 0 = 不显示）。壳只渲染数字，不解释含义。 */
+function badgeOf(item: { action: PanelEntryAction }): number | null {
+  const value = item.action.badge?.(slotContext.value) ?? null;
+  return value !== null && value > 0 ? value : null;
+}
 const overlays = computed(() => panelOverlays());
 
 watch(actions, async () => {
@@ -65,21 +72,26 @@ function open(overlayId: string): void {
     @pointerover="prefetch(($event.target as HTMLElement).closest('[data-extension-overlay]')?.getAttribute('data-extension-overlay') ?? '')"
     @focusin="prefetch(($event.target as HTMLElement).closest('[data-extension-overlay]')?.getAttribute('data-extension-overlay') ?? '')"
   >
-    <NeumorphismButton
+    <NeumorphismBadge
       v-for="item in actions"
       :key="item.overlayId"
-      variant="glass"
-      shape="pill"
-      size="small"
-      :pressed="entryOverlay === item.overlayId"
-      :title="item.action.title ?? item.action.label"
-      :aria-label="item.action.label"
-      :data-extension-overlay="item.overlayId"
-      @click="open(item.overlayId)"
+      :value="badgeOf(item) ?? 0"
+      :show-zero="false"
     >
-      <PanelIcon :name="item.action.icon" size="md" />
-      <span>{{ item.action.label }}</span>
-    </NeumorphismButton>
+      <NeumorphismButton
+        variant="glass"
+        shape="pill"
+        size="small"
+        :pressed="entryOverlay === item.overlayId"
+        :title="item.action.title ?? item.action.label"
+        :aria-label="item.action.label"
+        :data-extension-overlay="item.overlayId"
+        @click="open(item.overlayId)"
+      >
+        <PanelIcon :name="item.action.icon" size="md" />
+        <span>{{ item.action.label }}</span>
+      </NeumorphismButton>
+    </NeumorphismBadge>
   </div>
   <!-- 按钮在入口行内，但弹层不能以入口行为绝对定位包含块：
        entry-row 只有一行高，inset 却是相对 chat-view 计算的，直接渲染会把
