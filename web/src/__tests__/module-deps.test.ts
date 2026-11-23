@@ -102,5 +102,97 @@ describe('可随依赖关系调整的图模型', () => {
     ]);
   });
 
+  /**
+   * 软依赖同样连边——否则「模块之间真实存在的耦合」在图上完全消失。
+   *
+   * 实例：`echo-agent.prodoc` 的 `optional_services` 里有
+   * `echo-agent.host.skill_registrar`，该键正由 `echo-agent.skills.dir`
+   * `provides`。旧实现只读 `required_services`，这条边从来没被画出来。
+   *
+   * 标签带 `?` 是因为语义不同：软依赖缺失不阻止挂载。
+   */
+  it('软依赖也连边，标签带 ? 与硬依赖区分', () => {
+    const model = buildModuleDependencyModel([
+      module({ id: 'echo-agent.skills.dir', name: '技能目录', provides_services: ['echo-agent.host.skill_registrar'] }),
+      module({ id: 'echo-agent.prodoc', name: 'prodoc', optional_services: ['echo-agent.host.skill_registrar'] }),
+    ]);
+    expect(model.graph.edges).toEqual([
+      expect.objectContaining({
+        from: 'echo-agent_skills_dir',
+        to: 'echo-agent_prodoc',
+        label: 'host.skill_registrar?',
+      }),
+    ]);
+    expect(model.optionalEdgeCount).toBe(1);
+    expect(model.edgeCount).toBe(1);
+    // 软依赖被满足 → 不该进"宿主提供"清单。
+    expect(model.hostProvided).toEqual([]);
+  });
 
+  /**
+   * 无模块提供者的硬依赖分成两种事实，不能用同一个筐装：
+   * - 不在 `pending_services` 里 = Core 说"此刻不缺" → 宿主注册的接缝（`llm`）；
+   * - 在 `pending_services` 里 = Core 说"此刻缺" → 真阻塞挂载。
+   */
+  it('宿主注册的键与真缺失的键分开登记', () => {
+    const model = buildModuleDependencyModel([
+      module({ id: 'echo-agent.loop.single', name: '循环', required_services: ['llm'], provides_services: ['loop'] }),
+      module({
+        id: 'echo-agent.shell',
+        name: 'Shell',
+        required_services: ['tools.builtin'],
+        pending_services: ['tools.builtin'],
+      }),
+    ]);
+    expect(model.graph.edges).toEqual([]);
+    expect(model.hostProvided).toEqual([
+      expect.objectContaining({ moduleId: 'echo-agent.loop.single', key: 'llm', optional: false }),
+    ]);
+    expect(model.missing).toEqual([
+      expect.objectContaining({ moduleId: 'echo-agent.shell', key: 'tools.builtin' }),
+    ]);
+    // 两条都不进图，但模块仍作为节点存在。
+    expect(model.graph.nodes.map((n) => n.id).sort()).toEqual(['echo-agent_loop_single', 'echo-agent_shell']);
+  });
+
+  it('缺失的键若有声明提供者：既连边也登记缺失（提供者没挂上就是这个形状）', () => {
+    const model = buildModuleDependencyModel([
+      module({ id: 'echo-agent.tools.builtin', name: '内置工具', provides_services: ['tools.builtin'] }),
+      module({
+        id: 'echo-agent.shell',
+        name: 'Shell',
+        required_services: ['tools.builtin'],
+        pending_services: ['tools.builtin'],
+      }),
+    ]);
+    expect(model.graph.edges.map((e) => e.label)).toEqual(['tools.builtin']);
+    expect(model.missing.map((m) => m.key)).toEqual(['tools.builtin']);
+    expect(model.hostProvided).toEqual([]);
+  });
+
+  /**
+   * 同一键多个提供者：框架是后者覆盖前者，但"谁是后者"由挂载顺序决定。
+   * 只画一个会撒谎（且旧实现是注册序最后一个胜出，纯偶然），所以都画，
+   * 并在 `multiProviderKeys` 里如实列出。
+   */
+  it('多提供者：每个提供者都连边，并在 multiProviderKeys 里点名', () => {
+    const model = buildModuleDependencyModel([
+      module({ id: 'echo-agent.loop.single', name: '单会话', provides_services: ['loop'] }),
+      module({ id: 'echo-agent.loop.multi', name: '多会话', provides_services: ['loop'] }),
+      module({ id: 'echo-agent.tools.builtin', name: '内置工具', required_services: ['loop'] }),
+    ]);
+    expect(model.graph.edges.map((e) => e.from).sort()).toEqual(['echo-agent_loop_multi', 'echo-agent_loop_single']);
+    expect(model.edgeCount).toBe(2);
+    expect(model.multiProviderKeys).toEqual([{ key: 'loop', providers: ['echo-agent.loop.single', 'echo-agent.loop.multi'] }]);
+  });
+
+  it('全部键都能解析时，两张清单都是空的', () => {
+    const model = buildModuleDependencyModel([
+      module({ id: 'echo-agent.loop.single', name: '循环', provides_services: ['loop'] }),
+      module({ id: 'echo-agent.tools.builtin', name: '内置工具', required_services: ['loop'], optional_services: ['loop'] }),
+    ]);
+    expect(model.hostProvided).toEqual([]);
+    expect(model.missing).toEqual([]);
+    expect(model.multiProviderKeys).toEqual([]);
+  });
 });

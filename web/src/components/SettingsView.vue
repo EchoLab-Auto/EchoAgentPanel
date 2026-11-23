@@ -225,7 +225,9 @@ const toolbarSubtitle = computed(() => {
       if (gated) parts.push(`${gated} 包维度门控`);
       if (modes) parts.push(`${modes} 模式模块`);
     }
-    if (c.disabled) parts.push(`${c.disabled} 已禁用`);
+    // 模块清单里只有 `enabled` 的模块（Core 禁用即卸载），所以这一档说的是
+    // 挂载/运行态失败，不是"被禁用的模块"。
+    if (c.failed) parts.push(`${c.failed} 挂载失败`);
     return parts.join(' · ');
   }
   return `共 ${currentCategory.value.count} 项${disabledCount.value ? ` · ${disabledCount.value} 已禁用` : ''}`;
@@ -738,7 +740,16 @@ async function copyToolParams() {
 // 门控语义分组把「影响面最大的整包门控」提到最上，模式模块单独成组并注明
 // 「互斥；全局停用 ≠ 切换某智能体模式」。
 
-type ModuleFilter = 'all' | 'enabled' | 'disabled';
+/**
+ * 模块筛选维度。
+ *
+ * 只有这两档，**没有「已禁用」**：Core 的模块清单语义是"当前挂载的模块"
+ * （`emit_modules_list` 里 `filter(|d| d.enabled)`，禁用即卸载），清单里根本
+ * 不存在 `enabled = false` 的行。此前这一档叫「已禁用」、判据却是
+ * `state === 'failed'`（运行态失败）——标签与数据源说的不是一件事，用户按
+ * 「已禁用」筛出来的全是崩溃的模块。现在标签直接叫它本来测的东西。
+ */
+type ModuleFilter = 'all' | 'ok' | 'failed';
 const moduleSearch = ref('');
 const moduleFilter = ref<ModuleFilter>('all');
 const moduleGroupBy = ref<'tag' | 'semantic' | 'kind' | 'flat'>('tag');
@@ -820,16 +831,34 @@ function moduleShortId(id: string): string {
   return id.startsWith(prefix) ? id.slice(prefix.length) : id;
 }
 
+/** 当前节点的模块依赖模型（模块 → 服务键 → 模块，含未被模块满足的键）。 */
+const moduleDepModel = computed(() => buildModuleDependencyModel(moduleCatalog.value));
+
+/**
+ * 「无模块提供者」的两种事实，按模块聚合成行（一个模块一行，键用「、」连接）。
+ *
+ * 为什么聚合：本部署有 9 个模块共十几个宿主接缝键，逐条渲染会刷出十几行，
+ * 挤掉画布；按模块聚合成 9 行仍然完整，且符合"这个模块还跟什么打交道"的
+ * 阅读方式。
+ */
+function groupServiceRefs(refs: { moduleId: string; key: string; optional: boolean }[]) {
+  const rows = new Map<string, { moduleId: string; keys: string[] }>();
+  for (const ref of refs) {
+    const row = rows.get(ref.moduleId) ?? { moduleId: ref.moduleId, keys: [] };
+    row.keys.push(ref.optional ? `${ref.key}（可选）` : ref.key);
+    rows.set(ref.moduleId, row);
+  }
+  return [...rows.values()];
+}
+const moduleHostProvidedRows = computed(() => groupServiceRefs(moduleDepModel.value.hostProvided));
+const moduleMissingRows = computed(() => groupServiceRefs(moduleDepModel.value.missing));
 /** 模块工作区的展示形态：列表（默认）/ 依赖树。 */
 const moduleViewMode = ref<'list' | 'deps'>('list');
 
-/** 当前节点的模块依赖图（宿主服务表 → 模块 → 模块）。 */
-const moduleDepModel = computed(() => buildModuleDependencyModel(moduleCatalog.value));
-
 const MODULE_FILTERS: { key: ModuleFilter; label: string }[] = [
   { key: 'all', label: '全部' },
-  { key: 'enabled', label: '已启用' },
-  { key: 'disabled', label: '已禁用' },
+  { key: 'ok', label: '正常' },
+  { key: 'failed', label: '挂载失败' },
 ];
 
 const MODULE_GROUP_OPTIONS = [
@@ -925,9 +954,9 @@ function moduleMatchesFilter(p: ModuleInfo, filter: ModuleFilter): boolean {
   switch (filter) {
     case 'all':
       return true;
-    case 'enabled':
+    case 'ok':
       return p.state !== 'failed';
-    case 'disabled':
+    case 'failed':
       return p.state === 'failed';
   }
 }
@@ -935,12 +964,12 @@ function moduleMatchesFilter(p: ModuleInfo, filter: ModuleFilter): boolean {
 const moduleFilterCounts = computed(() => {
   const counts: Record<ModuleFilter, number> = {
     all: moduleCatalog.value.length,
-    enabled: 0,
-    disabled: 0,
+    ok: 0,
+    failed: 0,
   };
   for (const p of moduleCatalog.value) {
-    if (p.state === 'failed') counts.disabled += 1;
-    else counts.enabled += 1;
+    if (p.state === 'failed') counts.failed += 1;
+    else counts.ok += 1;
   }
   return counts;
 });
@@ -2568,14 +2597,56 @@ watch(
             </div>
           </template>
 
-          <!-- 模块：依赖树（宿主服务表 → 模块 → 模块），与列表互斥 -->
+          <!-- 模块：依赖树（模块 → 服务键 → 模块），与列表互斥 -->
           <template v-else-if="activeCategory === 'module' && moduleViewMode === 'deps'">
             <div class="module-deps-view">
               <div class="module-deps-view__hint">
-                从左到右 = 服务提供者 → 服务消费者；边上是服务键。依赖改变时层级和连线会自动重排。
+                从左到右 = 服务提供者 → 服务消费者；边上是服务键，带
+                <code>?</code> 的是软依赖（缺失不阻止挂载）。依赖改变时层级和连线会自动重排。
+                命中不了任何模块的键不画边，列在下方两张清单里。
               </div>
               <DocFlowCanvas :graph="moduleDepModel.graph" height="560px" />
 
+              <!-- 同一键多个提供者：图上一个都不画会丢信息，只画一个会撒谎 -->
+              <div v-if="moduleDepModel.multiProviderKeys.length" class="module-deps-note">
+                <div class="module-deps-note__title">同一服务键有多个提供者（注册序后注册者胜出，图上每个都连了边）</div>
+                <div
+                  v-for="c in moduleDepModel.multiProviderKeys"
+                  :key="c.key"
+                  class="module-deps-note__line"
+                >
+                  <code>{{ c.key }}</code>
+                  <span class="muted">← {{ c.providers.map((id) => moduleShortId(id)).join(' / ') }}</span>
+                </div>
+              </div>
+
+              <!-- 真缺失：Core 的 pending_services 非空，这些键正在阻塞挂载 -->
+              <div v-if="moduleMissingRows.length" class="module-deps-note module-deps-note--warn">
+                <div class="module-deps-note__title">此刻缺失的硬依赖（Core 正在等，阻塞挂载）</div>
+                <div
+                  v-for="row in moduleMissingRows"
+                  :key="`m:${row.moduleId}`"
+                  class="module-deps-note__line"
+                >
+                  <code>{{ moduleShortId(row.moduleId) }}</code>
+                  <span class="muted">需要 {{ row.keys.join('、') }}</span>
+                </div>
+              </div>
+
+              <!-- 宿主接缝：没有模块提供者，但此刻已在服务表里（不是缺失） -->
+              <div v-if="moduleHostProvidedRows.length" class="module-deps-note">
+                <div class="module-deps-note__title">
+                  无模块提供者、由宿主注册在服务表里（宿主接缝，只是不画边）
+                </div>
+                <div
+                  v-for="row in moduleHostProvidedRows"
+                  :key="`h:${row.moduleId}`"
+                  class="module-deps-note__line"
+                >
+                  <code>{{ moduleShortId(row.moduleId) }}</code>
+                  <span class="muted">{{ row.keys.join('、') }}</span>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -4531,21 +4602,38 @@ watch(
   gap: 8px;
   align-items: flex-start;
 }
-
-/* 分组提示行：中性色（门控语义说明等） */
-.caps-list-group__hint--neutral {
-  color: var(--nm-text-placeholder, #888);
+/**
+ * 依赖树视图下方的三张清单（多提供者 / 缺失 / 宿主接缝）。
+ *
+ * 为什么不都画成节点：宿主接缝（`llm`、`echo-agent.host.*`）不是模块，画成
+ * 节点会让"模块图的边"和"宿主提供"混为一谈；而缺失的键没有提供者，画边就是
+ * 编造关系。两者都要出现，但出现方式是**事实清单**而不是连线。
+ */
+.module-deps-note {
+  flex-shrink: 0;
+  border-top: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.08));
+  padding: 8px 4px 4px;
 }
-
-/* 受保护项：行内锁标记占位（与开关同宽，保持行对齐） */
-.caps-lock {
-  display: inline-flex;
-  align-items: center;
-  opacity: 0.7;
-  cursor: help;
+.module-deps-note--warn .module-deps-note__title {
+  color: var(--panel-err);
 }
-
-/* 参数表 */
+.module-deps-note__title {
+  color: var(--nm-text-secondary);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.module-deps-note__line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  min-width: 0;
+}
+.module-deps-note__line code {
+  font-family: var(--nm-font-mono, monospace);
+  word-break: break-all;
+}
 .skill-param-actions {
   display: inline-flex;
   align-items: center;
@@ -4573,35 +4661,17 @@ watch(
   flex-shrink: 0;
 }
 
-.module-deps-isolated {
-  flex-shrink: 0;
-  border-top: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.08));
-  padding: 12px 4px 4px;
+/* 分组提示行：中性色（门控语义说明等） */
+.caps-list-group__hint--neutral {
+  color: var(--nm-text-placeholder, #888);
 }
-.module-deps-isolated__title {
-  color: var(--nm-text-secondary);
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-.module-deps-isolated__items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.module-deps-isolated__item {
+
+/* 受保护项：行内锁标记占位（与开关同宽，保持行对齐） */
+.caps-lock {
   display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--nm-border-color, rgba(255, 255, 255, 0.1));
-  border-radius: 8px;
-  background: var(--nm-surface-raised);
-  font-size: 12px;
-}
-.module-deps-isolated__item small {
-  color: var(--nm-text-secondary);
-  font-size: 10.5px;
-  font-family: var(--nm-font-mono, monospace);
+  align-items: center;
+  opacity: 0.7;
+  cursor: help;
 }
 
 /* 模块详情：成员 chips（点击跳转到工具/技能分类并选中） */
