@@ -5,7 +5,7 @@
 //! 本测试锁定该契约，防止回归为 absolute/padding hack。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { enableAutoUnmount, mount } from '@vue/test-utils';
 import { defineComponent, h, nextTick } from 'vue';
 import ChatView from '../ChatView.vue';
 import { state, dispatch } from '../../store';
@@ -62,6 +62,21 @@ function mountChatView(sessionId = 'local:tui::local_user') {
     },
   });
 }
+
+enableAutoUnmount(afterEach);
+
+it('卸载时取消空闲 chunk 预热', () => {
+  vi.stubGlobal('requestIdleCallback', vi.fn(() => 715));
+  const cancel = vi.fn();
+  vi.stubGlobal('cancelIdleCallback', cancel);
+  try {
+    const wrapper = mountChatView();
+    wrapper.unmount();
+    expect(cancel).toHaveBeenCalledWith(715);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 describe('ChatView 布局契约', () => {
   it('渲染 .chat-view 纵向 flex 容器，包含消息列表与输入区两个子项', () => {

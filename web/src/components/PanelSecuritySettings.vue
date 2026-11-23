@@ -435,7 +435,7 @@ async function copyToken(token: string): Promise<void> {
 .sec-error {
   padding: 12px 14px;
   font-size: 13px;
-  color: var(--nm-danger, #e5484d);
+  color: var(--nm-color-error, #e5484d);
 }
 
 .sec-card {
@@ -470,9 +470,9 @@ async function copyToken(token: string): Promise<void> {
 .sec-warn {
   margin-top: 2px;
   padding: 10px 12px;
-  border-left: 3px solid var(--nm-warning, #f5a524);
+  border-left: 3px solid var(--nm-color-warning, #f5a524);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--nm-warning, #f5a524) 12%, transparent);
+  background: color-mix(in srgb, var(--nm-color-warning, #f5a524) 12%, transparent);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -503,7 +503,7 @@ async function copyToken(token: string): Promise<void> {
 }
 
 .sec-generated {
-  border: 1px dashed var(--nm-border, #3a3f4b);
+  border: 1px dashed var(--nm-border-color, #3a3f4b);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -511,7 +511,7 @@ async function copyToken(token: string): Promise<void> {
 .sec-generated__head {
   font-size: 12px;
   font-weight: 600;
-  color: var(--nm-warning, #f5a524);
+  color: var(--nm-color-warning, #f5a524);
   margin-bottom: 8px;
 }
 
@@ -560,7 +560,7 @@ async function copyToken(token: string): Promise<void> {
 }
 
 .sec-hint--error {
-  color: var(--nm-danger, #e5484d);
+  color: var(--nm-color-error, #e5484d);
 }
 
 .sec-actions {

@@ -120,19 +120,22 @@ function warmOverlayChunks(scope: keyof typeof loaders | 'all'): void {
 
 /** 首屏空闲预热（只跑一次；页面隐藏时推迟到可见）。 */
 let warmed = false;
+let cancelIdleWarmup: (() => void) | undefined;
 function scheduleIdleWarmup(): void {
-  if (warmed) return;
+  if (warmed || cancelIdleWarmup) return;
   const run = () => {
-    if (warmed) return;
-    if (document.visibilityState === 'hidden') return; // 后台标签页别抢带宽
+    cancelIdleWarmup = undefined;
+    if (warmed || typeof document === 'undefined' || document.visibilityState === 'hidden') return;
     warmed = true;
     warmOverlayChunks('all');
   };
-  const ric = (window as unknown as {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-  }).requestIdleCallback;
-  if (ric) ric(run, { timeout: 3000 });
-  else window.setTimeout(run, 1200);
+  if (typeof window.requestIdleCallback === 'function' && typeof window.cancelIdleCallback === 'function') {
+    const handle = window.requestIdleCallback(run, { timeout: 3000 });
+    cancelIdleWarmup = () => window.cancelIdleCallback(handle);
+  } else {
+    const handle = window.setTimeout(run, 1200);
+    cancelIdleWarmup = () => window.clearTimeout(handle);
+  }
 }
 
 const props = defineProps<{
@@ -1050,7 +1053,11 @@ onMounted(() => {
   syncEntryScroll();
   window.addEventListener('resize', syncEntryScroll, { passive: true });
 });
-onBeforeUnmount(() => window.removeEventListener('resize', syncEntryScroll));
+onBeforeUnmount(() => {
+  cancelIdleWarmup?.();
+  cancelIdleWarmup = undefined;
+  window.removeEventListener('resize', syncEntryScroll);
+});
 
 // 切换 Agent 时关闭内置面板；扩展面板由通用槽位处理，避免残留禁用 agent 的面板
 watch(
