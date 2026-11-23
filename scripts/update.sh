@@ -399,6 +399,14 @@ if [[ ! -v PANEL_UI_EXTENSIONS && -f "$STATE_DIR/ui-extensions" ]]; then
     export PANEL_UI_EXTENSIONS
     PANEL_UI_EXTENSIONS=$(cat "$STATE_DIR/ui-extensions")
 fi
+# 更新路径也要报扩展组成：「装了模块却看不见界面」最常见的成因就是这里悄悄
+# 构建了纯壳（state 文件不存在 / 被 --no-ui-extensions 清过）。
+if [[ -n "${PANEL_UI_EXTENSIONS:-}" ]]; then
+    ext_count=$(printf '%s' "$PANEL_UI_EXTENSIONS" | tr ':' '\n' | grep -c . || true)
+    echo "==> Panel UI extensions ($ext_count): ${PANEL_UI_EXTENSIONS//:/, }"
+else
+    echo "==> Panel UI extensions (0): none — building the plain shell"
+fi
 (
     cd "$SOURCE_DIR/web"
     if [[ -f package-lock.json ]]; then

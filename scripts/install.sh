@@ -505,8 +505,13 @@ elif [[ -z "$UI_EXTENSIONS" && -f "$STATE_DIR/ui-extensions" ]]; then
     UI_EXTENSIONS=$(cat "$STATE_DIR/ui-extensions")
 fi
 export PANEL_UI_EXTENSIONS="$UI_EXTENSIONS"
+# 「本部署一个扩展都没配」必须出声：静默构建纯壳的结果是模块在 Core 里挂着、
+# 界面上却没有任何入口，用户只能去读源码才能发现（2026-11 实测）。
 if [[ -n "$PANEL_UI_EXTENSIONS" ]]; then
-    echo "==> Panel UI extensions: $PANEL_UI_EXTENSIONS"
+    ext_count=$(printf '%s' "$PANEL_UI_EXTENSIONS" | tr ':' '\n' | grep -c . || true)
+    echo "==> Panel UI extensions ($ext_count): ${PANEL_UI_EXTENSIONS//:/, }"
+else
+    echo "==> Panel UI extensions (0): none — building the plain shell"
 fi
 
 echo "==> Building web frontend"
