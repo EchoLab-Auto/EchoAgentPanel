@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "verification/wave2-*"]
   pull_request:
   workflow_dispatch:
 
@@ -63,4 +63,72 @@ jobs:
       # 样式令牌守卫（对照 ui-frame tokens.scss 校验 --nm-* 令牌与字号/
       # 间距字面量）。此前只在本地跑——与 vitest 同批补进 CI，防令牌漂移。
       - run: npm run lint:styles
+        working-directory: web
+
+  protocol:
+    name: protocol binding（严格）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    # 只借 Core 的 `dump-protocol-ts` 生成器；协议基线提交固定在
+    # web/package.json 的 protocolCore。缺源/提交不符/生成物不符都必须失败。
+    #
+    # workflow 级的 RUSTFLAGS=-D warnings 是给本仓 Rust 代码的；Core 按它
+    # 自己的策略构建，别让这里的 lint 策略误伤（Core 当前在 ts-bindings
+    # 构建下就有若干 warning）。
+    env:
+      RUSTFLAGS: ""
+      # 工作流锁死 Core 仓库；package.json 的 repository 必须与它一致，
+      # 避免 PR 只改 package.json 就把 CI 指到别的仓库。
+      PROTOCOL_CORE_REPOSITORY: EchoLab-Auto/EchoAgentCore
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 读取协议绑定的 Core 基线
+        id: core_pin
+        run: |
+          node -e '
+            const pin = require("./web/package.json").protocolCore;
+            const expected = process.env.PROTOCOL_CORE_REPOSITORY;
+            if (pin?.repository !== expected || typeof pin.commit !== "string" || !/^[0-9a-f]{40}$/i.test(pin.commit)) {
+              console.error("protocolCore 必须指定工作流固定的 Core 仓库及完整的 40 位提交号");
+              process.exit(1);
+            }
+            console.log(`repository=${expected}`);
+            console.log(`commit=${pin.commit.toLowerCase()}`);
+          ' >> "$GITHUB_OUTPUT"
+
+      - name: 取 Core 源码（公开仓，按固定提交浅取）
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.core_pin.outputs.repository }}
+          ref: ${{ steps.core_pin.outputs.commit }}
+          path: .protocol-core
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 生成用的独立 target（见 sync-protocol.mjs 的 CORE_TARGET_DIR），
+          # 不与任何 Core 日常构建共用。缓存键包含 Core 的 Cargo.lock。
+          workspaces: ".protocol-core -> target"
+
+      - name: 严格校验协议绑定（缺源/提交不符/生成不符均失败）
+        env:
+          CORE_SOURCE: ${{ github.workspace }}/.protocol-core
+          CORE_TARGET_DIR: ${{ github.workspace }}/.protocol-core/target
+          # 工作流显式提供固定提交；脚本仍会核对它等于 package.json 的记录。
+          CORE_REF: ${{ steps.core_pin.outputs.commit }}
+        run: npm run check-protocol:strict
+        working-directory: web
+
+      - name: sync-protocol.mjs 行为测试（临时假 Core，不跑 cargo）
+        run: npm run test:protocol-sync
         working-directory: web

@@ -48,7 +48,7 @@ cat > "$UNIT_DIR/echo-xr-tls-panel.service" <<EOF
 Description=XR Dev: Panel HTTPS front (8443 -> 127.0.0.1:8080)
 After=network-online.target echo-agent-panel.service
 Wants=network-online.target
-PartOf=echo-agent-panel.service
+# 不使用 PartOf：panel 重启/更新时保持入口存活，避免 TLS 前端被一并停止后不再拉起。
 
 [Service]
 Type=simple
@@ -67,7 +67,7 @@ cat > "$UNIT_DIR/echo-xr-tls-probe.service" <<EOF
 Description=XR Dev: probe HTTPS front (8444 -> 127.0.0.1:8787)
 After=network-online.target echo-xr-probe.service
 Wants=network-online.target
-PartOf=echo-xr-probe.service
+# 不使用 PartOf：probe 重启时保持入口存活，避免 TLS 前端被一并停止后不再拉起。
 
 [Service]
 Type=simple

@@ -230,7 +230,11 @@ fn mount_under(app: Router, base: String, serve_root: bool) -> Router {
                             )
                         }
                     };
-                    let inner_path = if rest.is_empty() { "/".to_string() } else { rest };
+                    let inner_path = if rest.is_empty() {
+                        "/".to_string()
+                    } else {
+                        rest
+                    };
                     let path_and_query = match request.uri().query() {
                         Some(query) => format!("{inner_path}?{query}"),
                         None => inner_path,
@@ -238,11 +242,19 @@ fn mount_under(app: Router, base: String, serve_root: bool) -> Router {
                     let mut parts = request.uri().clone().into_parts();
                     match path_and_query.parse() {
                         Ok(value) => parts.path_and_query = Some(value),
-                        Err(_) => return axum::response::IntoResponse::into_response(axum::http::StatusCode::BAD_REQUEST),
+                        Err(_) => {
+                            return axum::response::IntoResponse::into_response(
+                                axum::http::StatusCode::BAD_REQUEST,
+                            )
+                        }
                     }
                     match axum::http::Uri::from_parts(parts) {
                         Ok(uri) => *request.uri_mut() = uri,
-                        Err(_) => return axum::response::IntoResponse::into_response(axum::http::StatusCode::BAD_REQUEST),
+                        Err(_) => {
+                            return axum::response::IntoResponse::into_response(
+                                axum::http::StatusCode::BAD_REQUEST,
+                            )
+                        }
                     }
                     next.run(request).await
                 }

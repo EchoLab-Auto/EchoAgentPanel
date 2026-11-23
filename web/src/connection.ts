@@ -552,13 +552,28 @@ export function ensurePanelToken(): string {
   const params = new URLSearchParams(window.location.search);
   const fromUrl = params.get('token');
   if (fromUrl) {
-    window.localStorage.setItem('echo-panel-token', fromUrl);
+    // 存储可能被隐私模式/站点策略禁用；持久化失败不能让 WS 建链中止。
+    try {
+      window.localStorage.setItem('echo-panel-token', fromUrl);
+    } catch {
+      // 本次仍用 URL 中的令牌，只是无法跨刷新记住。
+    }
     params.delete('token');
     const rest = params.toString();
-    window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    try {
+      window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    } catch {
+      // 某些嵌入式 WebView 禁止改写地址栏；不阻断连接。
+    }
     return fromUrl;
   }
-  return window.localStorage.getItem('echo-panel-token') ?? '';
+  try {
+    return window.localStorage.getItem('echo-panel-token') ?? '';
+  } catch {
+    // localStorage 在某些浏览器安全策略下连 getItem 都会抛 SecurityError。
+    // 无令牌时继续匿名建链（require_token=false 的部署仍可正常使用）。
+    return '';
+  }
 }
 
 /** 带认证头的 fetch（token 非空时自动加 Bearer）。

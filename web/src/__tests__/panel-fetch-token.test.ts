@@ -69,4 +69,29 @@ describe('panelFetch 令牌播种', () => {
 
     expect(calls[0].auth).toBeNull();
   });
+  it('localStorage 读取抛异常时仍可匿名请求，不阻断面板加载', async () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    const { panelFetch } = await import('../connection');
+
+    await expect(panelFetch('/api/upstreams')).resolves.toBeDefined();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].auth).toBeNull();
+    getItem.mockRestore();
+  });
+
+  it('localStorage 写入抛异常时仍使用 URL 令牌建链', async () => {
+    window.history.replaceState(null, '', '/?token=ephemeral-token');
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    const { panelFetch } = await import('../connection');
+
+    await panelFetch('/api/upstreams');
+
+    expect(calls[0].auth).toBe('Bearer ephemeral-token');
+    setItem.mockRestore();
+  });
 });

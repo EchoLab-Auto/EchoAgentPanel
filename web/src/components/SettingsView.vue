@@ -7,7 +7,7 @@
 //! - API：快速模板 / 表单 / 测试连接 / Profiles（UpdateApiConfig / RenameApi / TestApi / SwitchApi / DeleteApi）
 //! - 技能：启停、编辑（SaveSkill）、新建、删除（DeleteSkill）、Git 安装/更新/移除来源
 //! - 工具：启停（ToggleTool）、参数 Schema 浏览
-//! - 模块：清单（当前挂载集）+ 重启，没有启停开关（禁用动作已删除）
+//! - 模块：清单（当前启用集）+ 重启，没有启停开关（禁用动作已删除）
 //! - 智能体：选中即进编辑态（SaveTeam）、启停（ToggleTeam）、删除（DeleteTeam）
 //! - 日志：Core/Panel 分段、5s 自动刷新（HTTP /api/logs/{core,panel}）
 //! 数据来自后端 SkillsList / ToolsList / ModulesList / TeamsList 事件，打开时主动拉取；
@@ -230,8 +230,10 @@ const toolbarSubtitle = computed(() => {
       if (modes) parts.push(`${modes} 模式模块`);
     }
     // 模块清单里只有 `enabled` 的模块（Core 禁用即卸载），所以这一档说的是
-    // 挂载/运行态失败，不是"被禁用的模块"。
-    if (c.failed) parts.push(`${c.failed} 挂载失败`);
+    // **已知失败**（挂载失败 / 外部进程 failed），不是"被禁用的模块"。
+    // 就绪与未确认只在存在对比时才报（全是进程内模块时说"5 未确认"纯噪音）。
+    if (c.failed) parts.push(`${c.failed} 失败`);
+    if (c.ready && c.unready) parts.push(`${c.ready} 就绪 · ${c.unready} 未确认`);
     return parts.join(' · ');
   }
   return `共 ${currentCategory.value.count} 项${disabledCount.value ? ` · ${disabledCount.value} 已禁用` : ''}`;
@@ -365,7 +367,10 @@ function skillPackageLabel(pkg: string | null | undefined, standalone = '独立�
   return packageLabel(pkg, state.modules, standalone);
 }
 
-/** 清单只含当前挂载模块；已卸载的模块不在清单里，不会产生包禁用标记。 */
+/**
+ * 清单只含 **enabled** 的模块（Core 的 `emit_modules_list` 就按这个筛），
+ * 已卸载/未启用的模块不在清单里，不会产生包禁用标记。
+ */
 const disabledModuleIds = computed(
   () => new Set(state.modules.filter((p) => p.state === 'failed').map((p) => p.id)),
 );
@@ -745,15 +750,22 @@ async function copyToolParams() {
 // 「互斥；全局停用 ≠ 切换某智能体模式」。
 
 /**
- * 模块筛选维度。
+ * 模块筛选维度：**按运行态的可观测性分层**，不按"启用/禁用"。
  *
- * 只有这两档，**没有「已禁用」**：Core 的模块清单语义是"当前挂载的模块"
- * （`emit_modules_list` 里 `filter(|d| d.enabled)`，禁用即卸载），清单里根本
- * 不存在 `enabled = false` 的行。此前这一档叫「已禁用」、判据却是
- * `state === 'failed'`（运行态失败）——标签与数据源说的不是一件事，用户按
- * 「已禁用」筛出来的全是崩溃的模块。现在标签直接叫它本来测的东西。
+ * 三层事实（2026-11 核实，D1）：
+ * 1. `emit_modules_list` 只筛 `enabled`（禁用即卸载），清单里根本没有
+ *    `enabled = false` 的行——所以没有「已禁用」这一档；
+ * 2. **清单存在 ≠ 已就绪**：`ModuleInfo.error` 是独立字段（挂载被跳过/外部
+ *    进程起不来），那一行的 `enabled` 仍是 true；
+ * 3. `state` 只有外部进程（`modules.toml` 的 stdio 条目 / 实例门控壳）才有：
+ *    `pending` / `ready` / `draining` / `stopped` / `failed`。**进程内模块的
+ *    state 是空串**，空串不可推断"就绪"——既可能挂好也可能没挂。
+ *
+ * 于是三档：`ready`（能证成就绪）/ `failed`（能证成失败）/ `unready`
+ * （其余，含"进程内无字段 → 没证据"与"启动中/停止中/已停止"）。此前那档
+ * 叫「正常」、判据是 `state !== 'failed'`——把"没证据"说成了"正常"。
  */
-type ModuleFilter = 'all' | 'ok' | 'failed';
+type ModuleFilter = 'all' | 'ready' | 'unready' | 'failed';
 const moduleSearch = ref('');
 const moduleFilter = ref<ModuleFilter>('all');
 const moduleGroupBy = ref<'tag' | 'semantic' | 'kind' | 'flat'>('tag');
@@ -859,10 +871,11 @@ const moduleMissingRows = computed(() => groupServiceRefs(moduleDepModel.value.m
 /** 模块工作区的展示形态：列表（默认）/ 依赖树。 */
 const moduleViewMode = ref<'list' | 'deps'>('list');
 
-const MODULE_FILTERS: { key: ModuleFilter; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'ok', label: '正常' },
-  { key: 'failed', label: '挂载失败' },
+const MODULE_FILTERS: { key: ModuleFilter; label: string; hint: string }[] = [
+  { key: 'all', label: '全部', hint: '当前管理节点的模块清单（Core 只下发 enabled 的模块）' },
+  { key: 'ready', label: '就绪', hint: '外部进程运行态为 ready（Core 已握手）——这是唯一能证成"在跑"的证据' },
+  { key: 'unready', label: '未确认', hint: '没有就绪证据：进程内实现没有运行态字段，或外部进程处于启动中/停止中/已停止' },
+  { key: 'failed', label: '失败', hint: '已知失败：挂载失败（error）或外部进程运行态 failed' },
 ];
 
 const MODULE_GROUP_OPTIONS = [
@@ -954,29 +967,155 @@ function moduleRuntimeLabel(p: ModuleInfo): string {
   return MODULE_RUNTIME_LABELS[p.runtime === 'subprocess' ? 'subprocess' : 'in_process'];
 }
 
+/**
+ * 运行态的**原始值**（Core 的 `ModuleInfo.state`）；空串 = Core 没给这个字段。
+ *
+ * 只有外部进程（`modules.toml` 的 stdio 条目、实例门控壳）才有独立运行态；
+ * 进程内实现的空串**不可推断就绪**——它是"无从观测"，不是"正常"。
+ */
+function moduleRawState(p: ModuleInfo): string {
+  return (p.state ?? '').trim();
+}
+
+const MODULE_RUNTIME_STATE_LABELS: Record<string, string> = {
+  pending: '启动中',
+  ready: '就绪',
+  draining: '停止中',
+  stopped: '已停止',
+  failed: '失败',
+};
+
+/**
+ * `state` 的人读标签；**未识别的值原样返回**（新 Core 加了枚举值时不该静默
+ * 消失——宁可显示 `restarting` 也不要显示空白）。空串 → 空串。
+ */
+function moduleStateLabel(p: ModuleInfo): string {
+  const raw = moduleRawState(p);
+  if (!raw) return '';
+  return MODULE_RUNTIME_STATE_LABELS[raw] ?? raw;
+}
+
+/**
+ * 面板能断言的运行态**只有四类**（2026-11 D1 核实）：
+ *
+ * - `ready`：外部进程 `state = ready`（Core 已握手）——唯一能证成"在跑"；
+ * - `not_ready`：外部进程在 `pending` / `draining` / `stopped`（可观测但没就绪）；
+ * - `failed`：`error` 非空（挂载被跳过 / 外部进程起不来）或 `state = failed`；
+ * - `unknown`：`state` 为空（进程内实现、旧 Core）——**没有证据**，
+ *   既不能说就绪也不能说失败。
+ *
+ * 判定顺序很重要：`error` 优先于 `state`。外部进程失败时 Core 会把
+ * `SubprocessStatus.error` 补进 `error`（`descriptors()` 里只补空位），
+ * 于是"起不来"能同时有两个信号，而挂载失败的进程内模块只有 `error`。
+ */
+type ModuleRunStatus = 'ready' | 'not_ready' | 'failed' | 'unknown';
+
+function moduleRunStatus(p: ModuleInfo): ModuleRunStatus {
+  if (moduleMountError(p)) return 'failed';
+  const raw = moduleRawState(p);
+  if (raw === 'failed') return 'failed';
+  if (raw === 'ready') return 'ready';
+  if (raw === 'pending' || raw === 'draining' || raw === 'stopped') return 'not_ready';
+  return 'unknown';
+}
+
+/** 运行态的一词结论（行卡徽标 / 详情「运行态」行共用）。 */
+function moduleRunStatusText(p: ModuleInfo): string {
+  switch (moduleRunStatus(p)) {
+    case 'ready':
+      return '就绪';
+    case 'failed':
+      return '失败';
+    case 'not_ready':
+      return moduleStateLabel(p) || '未就绪';
+    default:
+      return moduleStateLabel(p) || '未观测';
+  }
+}
+
+/**
+ * 运行态的**判定依据**（tooltip / 详情里那行「依据」）。
+ *
+ * 写清"凭什么是这个结论"，因为面板最容易犯的错就是把"没数据"说成"正常"。
+ */
+function moduleRunStatusHint(p: ModuleInfo): string {
+  const restartNote = moduleRestartNote(p);
+  const tail = restartNote ? ` · ${restartNote}` : '';
+  switch (moduleRunStatus(p)) {
+    case 'ready':
+      return `外部进程 state = ready（Core 已握手，独立 PID）${tail}`;
+    case 'failed':
+      if (moduleMountError(p)) {
+        const kind = moduleIsExternalEntry(p) ? '外部进程没起来' : '挂载被跳过';
+        return `${kind}：${moduleMountError(p)}${tail}`;
+      }
+      return `运行态 state = failed${tail}`;
+    case 'not_ready':
+      return `外部进程 state = ${moduleRawState(p)}（未就绪）${tail}`;
+    default:
+      return moduleRawState(p)
+        ? `Core 下发了未识别的运行态「${moduleRawState(p)}」`
+        : moduleIsSubprocess(p)
+          ? 'Core 未下发独立进程的运行态，无法确认是否就绪。'
+          : '进程内实现：没有独立运行态字段。清单只说明它已启用（Core 只下发 enabled 的模块），是否挂载成功看不出来——能看到的只是"没有 error"';
+  }
+}
+
+/** 行卡徽标文本：`ready` 与"进程内无字段"都不喊，只标异常与过渡态。 */
+function moduleRowStateBadge(p: ModuleInfo): string {
+  const status = moduleRunStatus(p);
+  if (status === 'ready') return '';
+  if (status === 'failed') return '失败';
+  // not_ready → 启动中/停止中/已停止；unknown 且无 state → 空串（不喊）。
+  return moduleStateLabel(p);
+}
+
 function moduleMatchesFilter(p: ModuleInfo, filter: ModuleFilter): boolean {
+  const status = moduleRunStatus(p);
   switch (filter) {
     case 'all':
       return true;
-    case 'ok':
-      return p.state !== 'failed';
+    case 'ready':
+      return status === 'ready';
+    case 'unready':
+      return status === 'unknown' || status === 'not_ready';
     case 'failed':
-      return p.state === 'failed';
+      return status === 'failed';
   }
 }
 
 const moduleFilterCounts = computed(() => {
   const counts: Record<ModuleFilter, number> = {
     all: moduleCatalog.value.length,
-    ok: 0,
+    ready: 0,
+    unready: 0,
     failed: 0,
   };
   for (const p of moduleCatalog.value) {
-    if (p.state === 'failed') counts.failed += 1;
-    else counts.ok += 1;
+    switch (moduleRunStatus(p)) {
+      case 'ready':
+        counts.ready += 1;
+        break;
+      case 'failed':
+        counts.failed += 1;
+        break;
+      // unknown（进程内无字段）与 not_ready（启动中/停止中/已停止）同属"没就绪证据"
+      default:
+        counts.unready += 1;
+    }
   }
   return counts;
 });
+
+/**
+ * 清单里是否有"运行态未观测"的模块——决定列表头那条点义说明出不出。
+ *
+ * 绝大多数部署的模块都是进程内的（`state` 空），这条说明用来挡住最容易被
+ * 误读的一步：**清单里有这一行 ≠ 它已经挂好**。
+ */
+const moduleHasUnobserved = computed(() =>
+  moduleCatalog.value.some((p) => moduleRunStatus(p) === 'unknown'),
+);
 
 const filteredModules = computed(() => {
   const needle = moduleSearch.value.trim().toLowerCase();
@@ -1082,7 +1221,10 @@ const moduleImpactText = computed(() => {
   if (moduleIsExternalEntry(p)) {
     const members = moduleMembers(p);
     const tools = members.tools.length;
-    return `外部模块（独立进程）：由 \`modules.toml\` 的 \`[[module]]\` 条目定义，随 Core 启动拉起、随 Core 退出停止${tools > 0 ? `，带来 ${tools} 个工具` : ''}。运行期只能重启（重新握手），不能就地卸载。`;
+    const running = moduleRunStatus(p) === 'ready' || moduleRunStatus(p) === 'not_ready';
+    return `外部模块（独立进程）：由 \`modules.toml\` 的 \`[[module]]\` 条目定义，随 Core 启动拉起、随 Core 退出停止${tools > 0 ? `，带来 ${tools} 个工具` : ''}。运行期只能重启（重新握手），不能就地卸载${
+      running ? '。' : '；**它现在没有在跑**，热替换没有可用的子进程句柄，改配置后要重启 Core 服务。'
+    }`;
   }
   const sem = moduleSemantic(p);
   if (sem === 'gated') {
@@ -1734,25 +1876,70 @@ function toggleSkill(skill: SkillInfo, enabled: boolean) {
 }
 
 // ── 模块重启 ──
-// 模块没有启停开关：清单 = 当前挂载集，卸载即从清单消失。唯一可做的运行期
-// 操作是「重启」（卸下 → 重新挂载），让模块按最新配置重新初始化。
+// 模块**没有启停开关**：Core 的命令表里只有 `RestartModule`，没有
+// `ToggleModule`（2026-11 核实）。清单只包含启用项，关闭的条目不在清单中，所以"在线启停"这条通用路径在协议层就不存在——旧文档里的
+// 「行内快速启停」是历史残留，别再照着它开按钮。
+//
+// 唯一可做的运行期操作是「重启」（卸下 → 重新挂载），**而且不是处处能重启**：
+// 见 [`moduleRestartBlockedReason`]——受保护模块与"没有在跑的外部模块"都
+// 没有后端路径，UI 不给能点的按钮。
 const MANAGEMENT_PANEL_MODULE_ID = 'echo-agent.management.panel';
+
+/**
+ * 此刻点「重启」会不会真的有后端路径；返回空串 = 可用，否则是不可用原因。
+ *
+ * 三条边界（全部来自 Core 实现，不靠猜）：
+ *
+ * 1. **管理面受保护**：`RestartModule` 对 `management.panel` 直接拒绝
+ *    （先卸下 = 先断 management WS，Panel 自锁且无法经界面恢复）。
+ * 2. **外部条目要现成句柄**：`RestartModule` 对外部条目走
+ *    `upgrade_subprocess` → `SubprocessModuleControl::upgrade`，它要求
+ *    `handles` 里有这个 id 的 `ModuleHandle`。启动就失败（`status()` 报
+ *    `failed`）或配置关掉从未启动（`stopped`）的条目**没有 handle**，
+ *    `upgrade` 只会返回 `不是已启动的外部模块`——那是假按钮。
+ * 3. **外部条目只有 `ready` 可热替换**：启动中、排空中以及未观测状态
+ *    同样不给入口。
+ *
+ * 进程内模块没有 `state`，但 `registry.restart` 是**真路径**（重挂载），
+ * 所以"进程内 + 无 state"是唯一允许的未知态。
+ */
+function moduleRestartBlockedReason(p: ModuleInfo): string {
+  if (moduleProtected(p)) {
+    return '「管理面」模块承载 Panel ↔ Core 的 management 通道：重启会先断开这条通道，Core 也直接拒绝。恢复只能重启 Core 服务。';
+  }
+  const status = moduleRunStatus(p);
+  if (status === 'failed') {
+    return moduleIsExternalEntry(p)
+      ? '这个外部模块没有在跑（没有可热替换的子进程句柄）：改好 modules.toml 的 command / args 后重启 Core 服务。'
+      : '运行态 state = failed：没有可热替换的子进程句柄可供重试，按失败原因修好后重启 Core 服务。';
+  }
+  if (moduleIsExternalEntry(p) && moduleRawState(p) === 'stopped') {
+    return '这个外部模块当前未启动（modules.toml 里未启用或已停止）：热替换需要一个在跑的子进程。先在配置里启用，再重启 Core 服务。';
+  }
+  if (moduleIsExternalEntry(p) && moduleRawState(p) !== 'ready') {
+    const state = moduleStateLabel(p);
+    return state
+      ? `外部模块当前状态：${state}。热替换只接受就绪的子进程。`
+      : 'Core 未下发外部模块运行态，无法确认能否热替换。';
+  }
+  return '';
+}
+
+function moduleCanRestart(p: ModuleInfo): boolean {
+  return !moduleRestartBlockedReason(p);
+}
 
 /**
  * 模块「重启」= 卸下 + 重新挂载（Core 的 `RestartModule`）。
  *
- * 纯粹让模块按最新配置 / 外部状态重新初始化（子进程模块重连、实例模块重启
- * 进程），不触碰任何持久化状态。管理面模块受保护：重启 = 先断 management WS，
- * Panel 立即失联。
+ * 纯粹让模块按最新配置 / 外部状态重新初始化（子进程模块重新握手、实例模块
+ * 重启进程），不触碰任何持久化状态。**没有后端路径时在这里拦住**：
+ * UI 已经不给按钮，万一还有入口（快捷键 / 旧缓存）也不发一条注定失败的命令。
  */
 function restartModule(module: ModuleInfo, targetCore?: string) {
-  if (module.id === MANAGEMENT_PANEL_MODULE_ID) {
-    addToast({
-      message:
-        '「管理面」模块承载 Panel 与 Core 的通信通道，重启会先断开这条通道（Panel 无法经界面恢复）。如需重载请重启 Core 服务。',
-      type: 'warning',
-      duration: 6000,
-    });
+  const blocked = moduleRestartBlockedReason(module);
+  if (blocked) {
+    addToast({ message: blocked, type: 'warning', duration: 6000 });
     return;
   }
   sendCommand({ RestartModule: { id: module.id } }, targetCore);
@@ -1773,7 +1960,7 @@ function moduleConfigOrigin(p: ModuleInfo): string {
   return (p.config_origin ?? '').trim();
 }
 
-/** 挂载失败原因（与「用户主动禁用」区分开：两者 enabled 都是 false）。 */
+/** 挂载或运行失败原因；禁用项不会出现在清单中。 */
 function moduleMountError(p: ModuleInfo): string {
   return (p.error ?? '').trim();
 }
@@ -1824,24 +2011,6 @@ function moduleRecentEvents(p: ModuleInfo): ModuleEventEntry[] {
 }
 
 /**
- * 子进程运行态（`state`）的人读标签与色调。
- *
- * 空 = 进程内实现（没有独立生命周期）；只有 `modules.toml` 的外部条目与
- * 实例门控壳才有这个字段。它描述的是**进程**，与 `enabled`（用户开关）
- * 正交——`ready` + `enabled=false` 是「开着但被停」，`failed` 是「起不来」。
- */
-const MODULE_RUNTIME_STATE_LABELS: Record<string, string> = {
-  pending: '启动中',
-  ready: '运行中',
-  draining: '停止中',
-  stopped: '已停止',
-  failed: '失败',
-};
-function moduleStateLabel(p: ModuleInfo): string {
-  const state = (p.state ?? '').trim();
-  return MODULE_RUNTIME_STATE_LABELS[state] ?? '';
-}
-/**
  * 是不是 `modules.toml` 的**外部条目**（stdio 子进程模块）。
  *
  * 判据与 Core 的 `ModuleHost::is_external_entry` 一致：`subprocess` 且
@@ -1852,10 +2021,6 @@ function moduleIsExternalEntry(p: ModuleInfo): boolean {
   return p.runtime === 'subprocess' && p.builtin === false;
 }
 
-/** 运行态是否处于故障（决定徽标用红还是中性色）。 */
-function moduleStateIsError(p: ModuleInfo): boolean {
-  return (p.state ?? '').trim() === 'failed';
-}
 /**
  * 启动命令的展示文本：`命令 + 参数`（参数为空时只有命令）。
  *
@@ -2263,6 +2428,7 @@ watch(
             type="button"
             class="caps-chip"
             :class="{ 'caps-chip--active': moduleFilter === f.key }"
+            :title="f.hint"
             @click="moduleFilter = f.key"
           >
             {{ f.label }}
@@ -2497,6 +2663,10 @@ watch(
           <!-- 模块：工作台分组（门控语义 / kind / 平铺）+ 双行行卡 -->
           <template v-else-if="activeCategory === 'module' && moduleViewMode === 'list'">
             <LoadHint :phase="modulePhase" label="模块清单" @retry="refreshModules" />
+            <!-- 点的语义：只有外部进程能证明"就绪"，进程内模块没有运行态字段 -->
+            <div v-if="moduleHasUnobserved" class="caps-list-note" title="清单 = Core 下发的 enabled 模块集合，不等于已就绪">
+              空心点＝运行态未观测：进程内实现没有独立运行态字段，清单只说明它已启用
+            </div>
             <div v-for="g in moduleWorkbenchGroups" :key="g.key" class="caps-list-group">
               <div class="caps-list-group__head" @click="toggleGroup('module:' + g.key)">
                 <span class="caret">{{ isCollapsed('module:' + g.key) ? '▸' : '▾' }}</span>
@@ -2518,10 +2688,14 @@ watch(
                   @click="selectModuleItem(p)"
                 >
                   <div class="caps-skill-item__main">
+                    <!-- 点的三态：绿=外部进程就绪 · 红=已知失败 · 空=未观测（进程内无字段） -->
                     <span
                       class="caps-skill-item__dot"
-                      :class="{ 'caps-skill-item__dot--on': true }"
-                      title="已挂载"
+                      :class="{
+                        'caps-skill-item__dot--on': moduleRunStatus(p) === 'ready',
+                        'caps-skill-item__dot--err': moduleRunStatus(p) === 'failed',
+                      }"
+                      :title="moduleRunStatusHint(p)"
                     />
                     <span class="caps-list-item__id" :title="p.id">{{ moduleShortId(p.id) }}</span>
                     <span class="caps-list-item__name">{{ p.name }}</span>
@@ -2536,14 +2710,14 @@ watch(
                       <span
                         v-if="moduleIsSubprocess(p)"
                         class="caps-mark caps-mark--system"
-                        :title="`实现在独立子进程（Core 侧只有启停门控）：${p.name}`"
+                        :title="`实现在独立子进程：Core 侧只有生命周期门控，实现不在这里（${p.name}）`"
                       >
                         独立进程
                       </span>
                       <span
                         v-if="moduleProtected(p)"
                         class="caps-mark caps-mark--warn caps-mark--icon"
-                        title="禁用即断连自锁，Core 拒绝"
+                        title="受保护：它承载 Panel ↔ Core 的 management 通道，重启即断连自锁，Core 直接拒绝；停用只能改 core.toml 后重启 Core"
                       >
                         <PanelIcon name="lock" size="xs" tone="warn" />
                         受保护
@@ -2551,13 +2725,22 @@ watch(
                       <span v-else-if="moduleSemantic(p) === 'mode'" class="caps-mark caps-mark--system" title="互斥模式模块">
                         模式
                       </span>
+                      <!-- 运行态徽标：就绪与"进程内无字段"都不喊；失败/过渡态才出 -->
                       <span
-                        v-if="moduleStateLabel(p) && p.state !== 'ready'"
+                        v-if="moduleRowStateBadge(p)"
                         class="caps-mark caps-mark--icon"
-                        :class="moduleStateIsError(p) ? 'caps-mark--err' : 'caps-mark--system'"
-                        :title="`子进程运行态：${moduleStateLabel(p)}${moduleRestartNote(p) ? ' · ' + moduleRestartNote(p) : ''}`"
+                        :class="
+                          moduleRunStatus(p) === 'failed' ? 'caps-mark--err' : 'caps-mark--system'
+                        "
+                        :title="moduleRunStatusHint(p)"
                       >
-                        {{ moduleStateLabel(p) }}
+                        <PanelIcon
+                          v-if="moduleRunStatus(p) === 'failed'"
+                          name="warning"
+                          size="xs"
+                          tone="err"
+                        />
+                        {{ moduleRowStateBadge(p) }}
                       </span>
                       <span
                         v-if="moduleOriginBadge(p)"
@@ -2566,21 +2749,14 @@ watch(
                       >
                         {{ moduleOriginBadge(p) }}
                       </span>
-                      <span
-                        v-if="moduleMountError(p)"
-                        class="caps-mark caps-mark--err caps-mark--icon"
-                        :title="`装配失败：${moduleMountError(p)}`"
-                      >
-                        <PanelIcon name="warning" size="xs" tone="err" />
-                        失败
-                      </span>
                     </span>
                     <span class="caps-skill-item__quick" @click.stop>
+                      <!-- 没有后端路径就不给按钮（受保护 / 外部模块没在跑） -->
                       <button
-                        v-if="!moduleProtected(p) && p.state !== 'failed'"
+                        v-if="moduleCanRestart(p)"
                         type="button"
                         class="module-restart-btn"
-                        title="重启（卸下后重新挂载）"
+                        :title="`重启（卸下后重新挂载）：${p.name}`"
                         aria-label="重启模块"
                         @click="quickRestartModule(p)"
                       >
@@ -3377,7 +3553,7 @@ watch(
             </NeumorphismForm>
           </div>
 
-          <!-- 模块详情（分区检查器：带来什么 / 被谁使用 / 启停影响 / 技术信息） -->
+          <!-- 模块详情（分区检查器：带来什么 / 被谁使用 / 卸载·重启影响 / 技术信息） -->
           <div v-else-if="activeCategory === 'module' && selectedModule" class="caps-detail skill-detail">
             <div class="detail-head">
               <div class="skill-detail__title">
@@ -3391,15 +3567,21 @@ watch(
                 <span
                   v-if="moduleProtected(selectedModule)"
                   class="caps-mark caps-mark--warn caps-mark--icon"
+                  :title="moduleRestartBlockedReason(selectedModule)"
                 >
                   <PanelIcon name="lock" size="xs" tone="warn" />
                   受保护
                 </span>
+                <!-- 有后端路径才给能点的按钮；没有就禁用并把原因写出来（不给假按钮） -->
                 <NeumorphismButton
-                  v-if="!moduleProtected(selectedModule)"
                   size="small"
                   variant="glass"
-                  title="卸下后重新挂载（不改启用状态、不写配置）"
+                  :disabled="!moduleCanRestart(selectedModule)"
+                  :title="
+                    moduleCanRestart(selectedModule)
+                      ? '卸下后重新挂载（不改启用状态、不写配置）'
+                      : moduleRestartBlockedReason(selectedModule)
+                  "
                   @click="restartModule(selectedModule!, moduleCoreEffective ?? undefined)"
                 >
                   <PanelIcon name="refresh" size="xs" />
@@ -3414,12 +3596,28 @@ watch(
             <div v-if="moduleMountError(selectedModule)" class="module-mount-error">
               <PanelIcon name="warning" size="sm" tone="err" />
               <div>
-                <strong>装配失败（已跳过挂载）</strong>
+                <strong>{{ moduleIsExternalEntry(selectedModule) ? '启动失败（进程没起来）' : '挂载失败（已跳过挂载）' }}</strong>
                 <p>{{ moduleMountError(selectedModule) }}</p>
                 <p class="muted">
                   常见原因：`modules.toml` 里的 `command` 路径不存在/不可执行、模块进程启动后握手失败。
-                  修好后点「重启」即可重试，无需重启 Core。
+                  <template v-if="moduleCanRestart(selectedModule)">修好后点「重启」即可重试，无需重启 Core。</template>
+                  <template v-else>
+                    这个模块**没有可热替换的实例**（进程内重挂载走不到它，外部条目的热替换需要一个在跑的子进程），
+                    所以修好后要**重启 Core 服务**才生效。
+                  </template>
                 </p>
+              </div>
+            </div>
+
+            <!-- 重启入口存在但被拦下：把原因摆在详情里，别只在 tooltip -->
+            <div
+              v-if="!moduleProtected(selectedModule) && !moduleCanRestart(selectedModule)"
+              class="module-restart-blocked"
+            >
+              <PanelIcon name="lock" size="sm" tone="warn" />
+              <div>
+                <strong>没有可用的重启路径</strong>
+                <p>{{ moduleRestartBlockedReason(selectedModule) }}</p>
               </div>
             </div>
 
@@ -3467,7 +3665,7 @@ watch(
             </div>
 
             <div class="detail-section">
-              <div class="detail-section__title">启停影响</div>
+              <div class="detail-section__title">卸载 / 重启影响</div>
               <div class="module-impact" :class="{ 'module-impact--warn': moduleProtected(selectedModule) }">
                 {{ moduleImpactText }}
               </div>
@@ -3507,10 +3705,12 @@ watch(
                   <span class="muted">来源</span>
                   <code>{{ MODULE_ORIGIN_LABELS[moduleOrigin(selectedModule)] }}</code>
                 </div>
-                <div v-if="moduleStateLabel(selectedModule)" class="skill-source__row">
+                <!-- 运行态：**总是**给一行。空 state（进程内）写「未观测」而不是
+                     省略——省略会被读成"正常"，而实际情况是面板没证据。 -->
+                <div class="skill-source__row">
                   <span class="muted">运行态</span>
                   <code>
-                    {{ moduleStateLabel(selectedModule) }}
+                    {{ moduleRunStatusText(selectedModule) }}
                     <template v-if="moduleRestartNote(selectedModule)">
                       · {{ moduleRestartNote(selectedModule) }}
                     </template>
@@ -3518,6 +3718,10 @@ watch(
                       · 代际 {{ selectedModule.generation }}
                     </template>
                   </code>
+                </div>
+                <div class="skill-source__row">
+                  <span class="muted">依据</span>
+                  <span class="muted skill-source__hint">{{ moduleRunStatusHint(selectedModule) }}</span>
                 </div>
                 <div class="skill-source__row">
                   <span class="muted">Author</span>
@@ -4331,6 +4535,35 @@ watch(
   color: var(--panel-accent);
   background: color-mix(in srgb, var(--panel-accent) 12%, transparent);
 }
+/* 详情：有重启入口但后端没有可用路径（受保护 / 外部模块没在跑） */
+.module-restart-blocked {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nm-text-primary) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nm-text-primary) 12%, transparent);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.module-restart-blocked strong {
+  display: block;
+  font-size: 12px;
+  color: var(--nm-text-secondary);
+}
+.module-restart-blocked p {
+  margin: 4px 0 0;
+  color: var(--nm-text-secondary);
+}
+/* 技术信息「依据」列：长句折行，不撑破详情栏 */
+.skill-source__hint {
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* 详情：装配失败提示块 */
 .module-mount-error {
   display: flex;
@@ -4674,6 +4907,23 @@ watch(
 /* 分组提示行：中性色（门控语义说明等） */
 .caps-list-group__hint--neutral {
   color: var(--nm-text-placeholder, #888);
+}
+
+/* 列表头：点义说明（空心点 = 运行态未观测）——一屏一条，不逐行喊 */
+.caps-list-note {
+  margin: 2px 2px 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--nm-text-placeholder, #888);
+  background: color-mix(in srgb, var(--nm-text-primary) 4%, transparent);
+}
+
+/* 运行态未知但**不该**算失败：空心点；失败用红色实心点 */
+.caps-skill-item__dot--err {
+  border-color: var(--panel-err);
+  background: var(--panel-err);
 }
 
 /* 受保护项：行内锁标记占位（与开关同宽，保持行对齐） */

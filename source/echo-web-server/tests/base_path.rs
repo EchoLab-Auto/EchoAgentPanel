@@ -111,7 +111,11 @@ async fn subpath_base_serves_shell_and_assets_under_prefix() {
     let client = reqwest::Client::new();
 
     // ① 不带尾斜杠：反向代理/手敲最可能发出的形态。
-    let response = client.get(format!("{base}/agent-panel")).send().await.unwrap();
+    let response = client
+        .get(format!("{base}/agent-panel"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.text().await.unwrap().contains("shell"));
 
@@ -139,7 +143,11 @@ async fn subpath_base_serves_shell_and_assets_under_prefix() {
     //    否则旧标签页请求旧哈希 chunk 会拿到 200 text/html，
     //    动态 import 失败、异步组件永久空白。
     assert_eq!(
-        status(&client, &format!("{base}/agent-panel/assets/missing-abc.js")).await,
+        status(
+            &client,
+            &format!("{base}/agent-panel/assets/missing-abc.js")
+        )
+        .await,
         StatusCode::NOT_FOUND
     );
 }
@@ -174,7 +182,11 @@ async fn subpath_base_also_serves_the_root_for_direct_access() {
     );
 
     // 前缀入口不受影响：反代那条链路照旧。
-    for path in ["/agent-panel", "/agent-panel/", "/agent-panel/assets/app.js"] {
+    for path in [
+        "/agent-panel",
+        "/agent-panel/",
+        "/agent-panel/assets/app.js",
+    ] {
         assert_eq!(
             status(&client, &format!("{base}{path}")).await,
             StatusCode::OK,

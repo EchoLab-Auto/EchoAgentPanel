@@ -3,6 +3,11 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
+  "protocolCore": {
+    "repository": "EchoLab-Auto/EchoAgentCore",
+    "commit": "d67ceb12b72b316cfda72c19dd7ff77aced4cec9",
+    "generatedSha256": "bbab13dbb65b1286a7396c545d58cf20e346a1b7f64381aa1b7cc7d13fc4f982"
+  },
   "scripts": {
     "dev": "vite",
     "build": "node scripts/sync-protocol.mjs --check && vue-tsc -b && node scripts/typecheck-extensions.mjs && vite build",
@@ -17,7 +22,9 @@
     "ui-frame:sync": "node scripts/use-ui-frame.mjs sync",
     "ui-frame:diff": "node scripts/use-ui-frame.mjs diff",
     "sync-protocol": "node scripts/sync-protocol.mjs",
-    "check-protocol": "node scripts/sync-protocol.mjs --check"
+    "check-protocol": "node scripts/sync-protocol.mjs --check",
+    "check-protocol:strict": "node scripts/sync-protocol.mjs --strict",
+    "test:protocol-sync": "node --test scripts/sync-protocol.test.mjs"
   },
   "dependencies": {
     "@echolab-auto/ui-frame": "file:./vendor/ui-frame",

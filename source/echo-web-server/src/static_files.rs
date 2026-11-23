@@ -349,10 +349,16 @@ mod tests {
     #[test]
     fn strip_base_only_removes_whole_segments() {
         assert_eq!(strip_base("/assets/a.js", "/"), "/assets/a.js");
-        assert_eq!(strip_base("/agent-panel/assets/a.js", "/agent-panel/"), "/assets/a.js");
+        assert_eq!(
+            strip_base("/agent-panel/assets/a.js", "/agent-panel/"),
+            "/assets/a.js"
+        );
         assert_eq!(strip_base("/agent-panel", "/agent-panel/"), "/");
         assert_eq!(strip_base("/agent-panel/", "/agent-panel/"), "/");
-        assert_eq!(strip_base("/agent-panelx/assets/a.js", "/agent-panel/"), "/agent-panelx/assets/a.js");
+        assert_eq!(
+            strip_base("/agent-panelx/assets/a.js", "/agent-panel/"),
+            "/agent-panelx/assets/a.js"
+        );
         assert_eq!(strip_base("/", "/agent-panel/"), "/");
     }
 

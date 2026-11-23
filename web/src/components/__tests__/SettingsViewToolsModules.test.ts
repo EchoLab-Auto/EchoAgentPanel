@@ -5,7 +5,7 @@
 //!   详情分区（能力说明 / 被谁使用 / 所属包 / 参数表）；
 //! - 模块：默认按来源分组（内部 / 外部），可切到门控语义 / kind / 平铺；
 //!   多 Core 下按选定节点取列表（moduleCatalog），包规模徽标、
-//!   受保护模块不给开关、详情四分区（带来什么 / 被谁使用 / 启停影响 / 技术信息）；
+//!   受保护模块不给开关、详情四分区（带来什么 / 被谁使用 / 卸载·重启影响 / 技术信息）；
 //! - 交叉跳转：模块成员 chip → 工具/技能分类并选中；工具「所属包」→ 模块分类。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -501,7 +501,7 @@ describe('SettingsView 模块工作台', () => {
     expect(qqRow.find('.module-restart-btn').exists()).toBe(false);
   });
 
-  it('装配失败：行内出「失败」徽标，详情出失败原因块（与主动禁用区分）', async () => {
+  it('挂载失败：行内出「失败」徽标，详情出失败原因块（与主动禁用区分）', async () => {
     const reason = 'module echo-agent.adapter.qq mount failed: command not found';
     state.modules = state.modules.map((p) =>
       p.id === 'echo-agent.adapter.qq' ? { ...p, state: 'failed', error: reason } : p,
@@ -514,7 +514,8 @@ describe('SettingsView 模块工作台', () => {
     await qqRow.trigger('click');
     const banner = wrapper.find('.module-mount-error');
     expect(banner.exists()).toBe(true);
-    expect(banner.text()).toContain('装配失败');
+    // 进程内模块的 error = 挂载被跳过（外部条目才叫"启动失败"）。
+    expect(banner.text()).toContain('挂载失败（已跳过挂载）');
     expect(banner.text()).toContain('command not found');
   });
 
@@ -701,14 +702,15 @@ describe('SettingsView 模块工作台', () => {
     expect(text).not.toContain('启动命令');
   });
 
-  it('模块详情：四分区 + 成员 chips + 启停影响文案', async () => {
+  it('模块详情：四分区 + 成员 chips + 卸载/重启影响文案', async () => {
     const wrapper = await openCategory('模块');
     const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes('QQ 实例'))!;
     await row.trigger('click');
     const titles = wrapper.findAll('.detail-section__title').map((t) => t.text());
     expect(titles.some((t) => t.includes('这个模块带来什么'))).toBe(true);
     expect(titles.some((t) => t.includes('被谁使用'))).toBe(true);
-    expect(titles.some((t) => t.includes('启停影响'))).toBe(true);
+    // 分区名不能再叫「启停影响」：Core 没有通用在线启停（只有 RestartModule）。
+    expect(titles.some((t) => t.includes('卸载 / 重启影响'))).toBe(true);
     expect(titles.some((t) => t.includes('技术信息'))).toBe(true);
     // 成员 chips：工具 + 技能
     const chips = wrapper.findAll('.module-member-chip').map((c) => c.text());
@@ -759,6 +761,184 @@ describe('SettingsView 模块工作台', () => {
     await wrapper.find('.module-info__head').trigger('click');
     expect(wrapper.find('.skill-source').text()).toContain('echo-agent.adapter.qq');
     expect(wrapper.find('.skill-source').text()).toContain('instance');
+  });
+});
+
+//! ── 运行态可观测性（D2）───────────────────────────────────────────────
+//!
+//! D1 核实过的四条事实，这组用例逐条钉住（**都是"别撒谎"的回归**）：
+//! 1. Core 的 `emit_modules_list` 只筛 `enabled`：清单存在 ≠ 已挂载/就绪；
+//! 2. 进程内实现的 `ModuleInfo.state` 是空串 → **不可推断就绪**；
+//! 3. `error` 是独立字段，可表示挂载失败（进程内）或外部进程起不来；
+//! 4. 命令表只有 `RestartModule`（没有 `ToggleModule`）；外部条目重启走
+//!    supervisor 热替换，**需要现成的子进程句柄**——起不来的条目没有句柄，
+//!    后端没有可用路径，所以 UI 不能给能点的按钮。
+describe('模块运行态可观测性（进程内 / 外部失败 / 受保护）', () => {
+  beforeEach(() => {
+    seed();
+    vi.mocked(sendCommand).mockClear();
+  });
+
+  /** 造一个 `modules.toml` 的外部条目（`runtime=subprocess` + `builtin=false`）。 */
+  function external(partial: Partial<ModuleInfo> & { id: string }): ModuleInfo {
+    return mod({ name: partial.id, builtin: false, runtime: 'subprocess', ...partial });
+  }
+
+  async function openModule(wrapper: ReturnType<typeof mount>, name: string) {
+    const row = wrapper.findAll('.caps-skill-item').find((r) => r.text().includes(name))!;
+    await row.trigger('click');
+    return row;
+  }
+
+  it('普通进程内模块：运行态「未观测」，不宣称已挂载/就绪，重启可点（重挂载是真路径）', async () => {
+    const wrapper = await openCategory('模块');
+    const row = await openModule(wrapper, '内置工具集');
+
+    // 行卡：空心点（不是绿点），也没有「已挂载」的假承诺。
+    expect(row.find('.caps-skill-item__dot--on').exists()).toBe(false);
+    expect(row.find('.caps-skill-item__dot').attributes('title')).toContain('进程内实现');
+    expect(row.text()).not.toContain('已挂载');
+    expect(row.text()).not.toContain('就绪');
+    expect(row.find('.caps-mark--err').exists()).toBe(false);
+
+    // 列表头一条点义说明：清单只说明已启用。
+    const note = wrapper.find('.caps-list-note');
+    expect(note.exists()).toBe(true);
+    expect(note.text()).toContain('只说明它已启用');
+
+    // 技术信息：运行态写成「未观测」+ 依据（不能靠"省略"让人误读成正常）。
+    await wrapper.find('.module-info__head').trigger('click');
+    const tech = wrapper.find('.skill-source').text();
+    expect(tech).toContain('运行态');
+    expect(tech).toContain('未观测');
+    expect(tech).toContain('进程内实现');
+
+    // 进程内模块的重启是注册表重挂载（真路径）→ 按钮可用。
+    const restart = wrapper
+      .findAll('.detail-actions button')
+      .find((b) => b.text().includes('重启'))!;
+    expect(restart.attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('.module-restart-blocked').exists()).toBe(false);
+  });
+
+  it('外部失败：红点 + 失败徽标 + 没有重启路径（没有可热替换的子进程）', async () => {
+    state.modules = [
+      ...state.modules,
+      external({
+        id: 'example-ext',
+        name: '示例外部模块',
+        state: 'failed',
+        error: 'spawn failed: No such file or directory',
+        command: '/opt/modules/example',
+      }),
+    ];
+    const wrapper = await openCategory('模块');
+    const row = await openModule(wrapper, '示例外部模块');
+
+    expect(row.find('.caps-skill-item__dot--err').exists()).toBe(true);
+    const badge = row.find('.caps-mark--err');
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toContain('失败');
+    // 行内不给按钮（后端 `upgrade` 需要一个在跑的句柄；这里没有）。
+    expect(row.find('.module-restart-btn').exists()).toBe(false);
+
+    // 详情：按钮在但禁用（不是能点的假按钮），原因写在块里。
+    const restart = wrapper
+      .findAll('.detail-actions button')
+      .find((b) => b.text().includes('重启'))!;
+    expect(restart.attributes('disabled')).toBeDefined();
+    const blocked = wrapper.find('.module-restart-blocked');
+    expect(blocked.exists()).toBe(true);
+    expect(blocked.text()).toContain('没有可用的重启路径');
+    expect(blocked.text()).toContain('重启 Core 服务');
+
+    // 失败块改成「启动失败（进程没起来）」，且不再说"点重启即可、无需重启 Core"。
+    const banner = wrapper.find('.module-mount-error');
+    expect(banner.text()).toContain('启动失败（进程没起来）');
+    expect(banner.text()).not.toContain('无需重启 Core');
+    expect(banner.text()).toContain('重启 Core 服务');
+  });
+
+  it('外部条目 stopped（从未启动）：同样没有可热替换的子进程 → 不给重启', async () => {
+    state.modules = [
+      ...state.modules,
+      external({ id: 'example-idle', name: '未启用外部模块', state: 'stopped' }),
+    ];
+    const wrapper = await openCategory('模块');
+    const row = await openModule(wrapper, '未启用外部模块');
+    expect(row.find('.module-restart-btn').exists()).toBe(false);
+    expect(wrapper.find('.module-restart-blocked').text()).toContain('热替换需要一个在跑的子进程');
+  });
+
+  it.each(['pending', 'draining', 'unknown-future-state'])('外部条目 %s 无法热替换', async (status) => {
+    state.modules = [...state.modules, external({ id: 'transition', name: '过渡态外部模块', state: status })];
+    const wrapper = await openCategory('模块');
+    const row = await openModule(wrapper, '过渡态外部模块');
+    expect(row.find('.module-restart-btn').exists()).toBe(false);
+    expect(wrapper.find('.module-restart-blocked').text()).toContain('热替换只接受就绪的子进程');
+  });
+
+  it('外部就绪：绿点 + 可以重启（发 RestartModule）', async () => {
+    state.modules = [
+      ...state.modules,
+      external({ id: 'example-ok', name: '运行中外部模块', state: 'ready', generation: 2 }),
+    ];
+    const wrapper = await openCategory('模块');
+    const row = await openModule(wrapper, '运行中外部模块');
+    expect(row.find('.caps-skill-item__dot--on').exists()).toBe(true);
+    // 就绪不喊徽标（只在 tooltip / 详情里说）。
+    expect(row.text()).not.toContain('就绪');
+
+    const restart = wrapper
+      .findAll('.detail-actions button')
+      .find((b) => b.text().includes('重启'))!;
+    expect(restart.attributes('disabled')).toBeUndefined();
+    await restart.trigger('click');
+    expect(vi.mocked(sendCommand).mock.calls.map((c) => c[0])).toContainEqual({
+      RestartModule: { id: 'example-ok' },
+    });
+  });
+
+  it('受保护（管理面）：不给重启按钮，详情禁用并说明只能重启 Core', async () => {
+    const wrapper = await openCategory('模块');
+    const row = await openModule(wrapper, '管理面');
+    expect(row.find('.module-restart-btn').exists()).toBe(false);
+    const lock = row.findAll('.caps-mark').find((m) => m.text().includes('受保护'))!;
+    expect(lock.attributes('title')).toContain('management 通道');
+
+    const restart = wrapper
+      .findAll('.detail-actions button')
+      .find((b) => b.text().includes('重启'))!;
+    expect(restart.attributes('disabled')).toBeDefined();
+    expect(restart.attributes('title')).toContain('重启 Core 服务');
+  });
+
+  it('筛选按可观测性分层：就绪 / 未确认 / 失败，计数与列表同源', async () => {
+    state.modules = [
+      ...state.modules,
+      external({ id: 'example-ok', name: '运行中外部模块', state: 'ready' }),
+      external({ id: 'example-bad', name: '失败外部模块', state: 'failed', error: 'boom' }),
+    ];
+    const wrapper = await openCategory('模块');
+    const chip = (label: string) => wrapper.findAll('.caps-chip').find((c) => c.text().includes(label))!;
+
+    // 5 个进程内（未观测）+ 1 就绪 + 1 失败
+    expect(chip('全部').text()).toContain('7');
+    expect(chip('就绪').text()).toContain('1');
+    expect(chip('未确认').text()).toContain('5');
+    expect(chip('失败').text()).toContain('1');
+    // 副标题同时给出两个"有对比意义"的计数。
+    const subtitle = wrapper.find('.caps-toolbar-title .muted').text();
+    expect(subtitle).toContain('1 失败');
+    expect(subtitle).toContain('1 就绪 · 5 未确认');
+
+    await chip('就绪').trigger('click');
+    expect(rowNames(wrapper)).toEqual(['运行中外部模块']);
+    await chip('失败').trigger('click');
+    expect(rowNames(wrapper)).toEqual(['失败外部模块']);
+    await chip('未确认').trigger('click');
+    expect(rowNames(wrapper)).not.toContain('运行中外部模块');
+    expect(rowNames(wrapper)).toHaveLength(5);
   });
 });
 

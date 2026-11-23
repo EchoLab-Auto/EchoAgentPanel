@@ -431,8 +431,11 @@ mod tests {
         assert_eq!(cfg.server.effective_base_path(), "/agent-panel/");
 
         // 显式关掉：整站交给面板时用严格模式。
-        std::fs::write(&path, "[server]\nbase_path = \"/agent-panel\"\nserve_root = false\n")
-            .unwrap();
+        std::fs::write(
+            &path,
+            "[server]\nbase_path = \"/agent-panel\"\nserve_root = false\n",
+        )
+        .unwrap();
         let cfg = PanelConfig::load(&path).unwrap();
         assert!(!cfg.server.serve_root);
         std::fs::remove_dir_all(&dir).ok();
