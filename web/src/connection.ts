@@ -565,10 +565,17 @@ export function ensurePanelToken(): string {
  *
  * 站内绝对路径统一在这里加应用基址：这是本模块所有 HTTP 出站的**唯一**出口，
  * 调用方（`/api/upstreams`、`/api/security`、`/api/panel-identity` …）照旧写
- * `/api/...` 即可，不必各自关心部署在根还是子路径。 */
+ * `/api/...` 即可，不必各自关心部署在根还是子路径。
+ *
+ * 令牌取 `ensurePanelToken()` 而不是直接读 localStorage：首次带
+ * `?token=xxx` 打开时，模块级/挂载期的第一个请求（实测是 `/api/upstreams`）
+ * 可能早于 WS 连接（播种在 `startConnection` 里），那时 localStorage 还空着，
+ * 于是首个请求必然 401——界面表现是"上游列表空着/面板像个坏页面"。
+ * `ensurePanelToken` 幂等：URL 里没有令牌时它就是一次 localStorage 读。
+ */
 export function panelFetch(input: string, init?: RequestInit): Promise<Response> {
   const url = withBase(input);
-  const token = window.localStorage.getItem('echo-panel-token');
+  const token = ensurePanelToken();
   if (!token) return fetch(url, init);
   const headers = new Headers(init?.headers);
   headers.set('Authorization', `Bearer ${token}`);

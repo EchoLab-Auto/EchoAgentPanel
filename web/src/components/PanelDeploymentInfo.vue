@@ -118,9 +118,11 @@ onMounted(() => {
       <div class="dep-note">{{ layoutInfo().note }}</div>
 
       <div class="dep-row">
-        <span class="dep-row__label">版本</span>
+        <span class="dep-row__label">Panel 版本</span>
         <span class="dep-mono">{{ text(view?.version) }}</span>
-        <span v-if="embedded()" class="dep-muted">（与 Core 同版本：同一份二进制）</span>
+        <span v-if="embedded()" class="dep-muted">
+          （模块自身版本；内嵌时随 Core 二进制一起发布，Core 版本见 <code>echo-agent-core --version</code>）
+        </span>
       </div>
 
       <div class="dep-row">
