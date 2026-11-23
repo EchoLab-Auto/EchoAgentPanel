@@ -68,6 +68,10 @@ const PanelSecuritySettings = lazy(
   () => import('./PanelSecuritySettings.vue'),
   'PanelSecuritySettings',
 );
+const PanelDeploymentInfo = lazy(
+  () => import('./PanelDeploymentInfo.vue'),
+  'PanelDeploymentInfo',
+);
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
@@ -2312,12 +2316,18 @@ watch(
         </div>
       </div>
 
-      <!-- 面板工作区（2026-11）：面板自身的安全设置。
-           与「Core 连接」分开：那页管的是上游与联邦，这页管的是"谁能打开这个
-           Web 界面"。 -->
+      <!-- 面板工作区（2026-11）：Panel 自身的事实与设置。
+           与「Core 连接」分开：那页管的是上游与联邦，这页管的是"这是个什么
+           形态的 Panel、谁能打开它"。 -->
       <div v-else-if="activeCategory === 'panel'" class="caps-workspace">
         <div class="caps-detail-pane">
-          <PanelSecuritySettings />
+          <!-- 两块之间要间距：detail-pane 本身不是 flex 列，包一层 `.caps-detail`
+               （display:flex + gap:12px，本文件已定义）。 -->
+          <div class="caps-detail">
+            <!-- 部署方式在前：它回答"我在看的是哪一种 Panel"，是后面所有设置的前置事实。 -->
+            <PanelDeploymentInfo />
+            <PanelSecuritySettings />
+          </div>
         </div>
       </div>
 

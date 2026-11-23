@@ -39,6 +39,18 @@ export interface PanelIdentityView {
   discover: boolean;
   /** 是否跑在 Core 进程内（`agent-module-panel`）。缺字段 = 旧版后端 = 独立。 */
   embedded?: boolean;
+  /** Panel 版本（内嵌形态下等于 Core 的版本）。 */
+  version?: string;
+  /** 部署布局：`installed`（安装前缀）| `source`（源码目录）| `unknown`。 */
+  layout?: string;
+  /** 正在服务的前端产物目录（绝对路径）。 */
+  static_dir?: string;
+  /** 应用基址（恒以 `/` 结尾）。 */
+  base_path?: string;
+  /** 实际监听地址。 */
+  bind?: string;
+  /** 子路径部署时是否同时接受根路径入口。 */
+  serve_root?: boolean;
 }
 
 /** 发现节流：两轮发现之间的最短间隔（目录事件可能很密）。 */
@@ -50,13 +62,21 @@ const lastAttempt = new Map<string, number>();
 /** 缓存后端能力一问（进程内基本不变，省掉每次目录事件的 HTTP 往返）。 */
 let identityCache: PanelIdentityView | null = null;
 
-async function panelIdentity(): Promise<PanelIdentityView> {
+/**
+ * 拿一次 `/api/panel-identity`（进程内缓存）。
+ *
+ * **保留全部字段**而不是只挑发现相关的三个：设置页要展示部署事实
+ * （形态 / 布局 / 前端目录 / 基址），多问一次 HTTP 不值得。旧后端缺这些
+ * 字段时它们就是 `undefined`，展示端按"未知"处理。
+ */
+export async function panelIdentity(): Promise<PanelIdentityView> {
   if (identityCache) return identityCache;
   try {
     const res = await panelFetch('/api/panel-identity');
     if (!res.ok) return { panel_key_set: false, discover: false, embedded: false };
     const view = (await res.json()) as PanelIdentityView;
     identityCache = {
+      ...view,
       panel_key_set: !!view.panel_key_set,
       discover: !!view.discover,
       embedded: !!view.embedded,
@@ -66,6 +86,11 @@ async function panelIdentity(): Promise<PanelIdentityView> {
     // 后端不可达：本帧不做发现（下次事件再试）。
     return { panel_key_set: false, discover: false, embedded: false };
   }
+}
+
+/** 重置缓存（令牌轮换后重连、或面板换了后端实例时用）。 */
+export function resetPanelIdentityCache(): void {
+  identityCache = null;
 }
 
 /**

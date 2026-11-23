@@ -302,12 +302,15 @@ bind = "127.0.0.1:8081"
 `config_file` 仍指向独立 Panel 的 TOML：**多上游 / SSH / 联邦发现只该有一份
 配置**，内嵌与独立复用同一份（复制到模块配置里两份必然漂移）。
 
-### 形态差异只有一处：谁负责生命周期
-
 两种形态共用同一条中继代码路径（内嵌时 Panel 连的是自己所在进程的管理面），
 功能完全一致。唯一区别是**归属**：内嵌时面板与 Core 同生共死，"重启面板"
 等于重启 Core。前端通过 `GET /api/panel-identity` 的 `embedded` 字段得知形态，
-在「设置·Core 连接」页头标注出来。
+连同同一响应里的部署事实（`version` / `layout` / `static_dir` / `base_path` /
+`bind`）一起显示在「设置 · 面板 → 部署方式」页头。
+
+`layout` 只说前端产物在哪：`installed`（安装前缀的 `libexec` 下）、`source`
+（git checkout 里的 `web/dist`）、`unknown`（都不匹配）。**它不判断"Core 是
+二进制装还是源码编译"**——Panel 进程读不到邻进程的状态文件，猜错比说未知差。
 
 对外监听必须 `allow_remote = true` **且**配置 `access_token_secret_file`，
 令牌不写进模块诊断配置。独立部署与内嵌部署都受支持，但**不能在同一端口

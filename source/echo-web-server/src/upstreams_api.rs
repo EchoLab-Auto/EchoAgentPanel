@@ -218,6 +218,11 @@ pub async fn upsert_upstream(
 /// 前端在发起发现前先问一次：`{discover: true}` 才去 POST 派生接入点。
 /// **不回传密钥明文**（`panel_key_set` 只表明有没有），与令牌类字段同一条
 /// 纪律：能连上的人不需要看见凭据，需要配的人自己在配置文件里填。
+///
+/// 除发现能力外，这里也带**部署事实**（`embedded` / `layout` / `static_dir`
+/// …）：「设置 · 面板 → 部署方式」要把它们原样显示出来。只放进程自己知道
+/// 的事实，不做跨进程推断——Core 是二进制装还是源码装，本进程无从得知，
+/// 于是干脆不猜（见 `layout`）。
 #[derive(serde::Serialize)]
 pub struct PanelIdentityView {
     /// 是否配置了 Panel 身份密钥。
@@ -229,14 +234,76 @@ pub struct PanelIdentityView {
     /// 前端用它区分两种形态：内嵌时 Panel 的生命周期与版本都归 Core，
     /// 「重启 Panel」实际是重启 Core。
     pub embedded: bool,
+    /// Panel 版本（`CARGO_PKG_VERSION`）。
+    ///
+    /// 内嵌形态下它等于 Core 的版本——同一份二进制；独立外壳则是外壳自己的。
+    pub version: String,
+    /// 部署布局：`installed` | `source` | `unknown`（判定见 [`detect_layout`]）。
+    pub layout: String,
+    /// 正在服务的前端产物目录（绝对路径；`static_dir` 原值相对时已补全）。
+    pub static_dir: String,
+    /// 应用基址（恒以 `/` 结尾）。
+    pub base_path: String,
+    /// 实际监听地址。
+    pub bind: String,
+    /// 子路径部署时是否同时接受根路径入口。
+    pub serve_root: bool,
+}
+
+/// 判定前端产物来自**安装布局**还是**源码目录**。
+///
+/// 只用一个可自证的事实：`static_dir` 落在哪。
+///
+/// - `installed`：路径含 `libexec` 段 —— 两条安装脚本（`install.sh` /
+///   `install-binary.sh`）都把前端装到 `<prefix>/libexec/…/web`，独立外壳
+///   与内嵌形态一致。
+/// - `source`：`static_dir` 的某个祖先目录里有 `.git` —— 这是从源码 checkout
+///   构建出来的 `web/dist`。
+/// - `unknown`：两者都不成立（自定义目录、反向代理挂载的静态站等）。
+///
+/// **刻意不猜"二进制 vs 源码编译"**：那是 Core 的安装方式，Panel 进程读不到
+/// 邻进程的状态文件（前缀/用户都可能不同）。猜错的代价是界面给出一个自信
+/// 的错误答案，比 `unknown` 差得多。
+fn detect_layout(static_dir: &std::path::Path) -> &'static str {
+    // 只看最多 6 层祖先：`<checkout>/web/dist` 是常规形态，更深的查找只会在
+    // 大目录树上白跑一遍 stat。
+    let mut cursor = Some(static_dir);
+    let mut depth = 0;
+    while let Some(dir) = cursor {
+        if depth > 6 {
+            break;
+        }
+        if let Some(name) = dir.file_name() {
+            if name == "libexec" {
+                return "installed";
+            }
+        }
+        if dir.join(".git").exists() {
+            return "source";
+        }
+        cursor = dir.parent();
+        depth += 1;
+    }
+    "unknown"
 }
 
 pub async fn panel_identity(State(state): State<AppState>) -> impl IntoResponse {
     let panel_key_set = !state.registry.panel_key().is_empty();
+    // `static_dir` 配置里可能是相对路径（独立外壳的 `web/dist`）：绝对化一次，
+    // 让界面上看到的就是进程真正打开的那个目录。
+    let static_dir = std::path::absolute(state.static_dir.as_ref())
+        .unwrap_or_else(|_| std::path::PathBuf::from(state.static_dir.as_ref()));
+    let layout = detect_layout(&static_dir);
     Json(PanelIdentityView {
         panel_key_set,
         discover: state.registry.can_discover(),
         embedded: state.embedded,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        layout: layout.to_string(),
+        static_dir: static_dir.display().to_string(),
+        base_path: state.base_path.to_string(),
+        bind: state.bind.clone(),
+        serve_root: state.serve_root,
     })
 }
 
@@ -371,3 +438,33 @@ pub async fn require_auth(
 // 保持 Arc 链接（文档用）
 #[allow(dead_code)]
 fn _assert_arc(_: Arc<UpstreamConfig>) {}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::detect_layout;
+
+    /// 安装布局：两条安装脚本都落到 `<prefix>/libexec/<组件>/web`。
+    #[test]
+    fn libexec_is_installed() {
+        let dir = std::env::temp_dir().join("panel-layout-installed/libexec/echo-agent-core/web");
+        assert_eq!(detect_layout(&dir), "installed");
+    }
+
+    /// 源码目录：`<checkout>/web/dist`，祖先里有 `.git`。
+    #[test]
+    fn git_ancestor_is_source() {
+        let root = std::env::temp_dir().join(format!("panel-layout-src-{}", std::process::id()));
+        let static_dir = root.join("web/dist");
+        std::fs::create_dir_all(&static_dir).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        assert_eq!(detect_layout(&static_dir), "source");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// 两者都不成立时必须是 `unknown`——界面宁可说"未知"，也不猜。
+    #[test]
+    fn arbitrary_dir_is_unknown() {
+        let dir = std::env::temp_dir().join(format!("panel-layout-any-{}", std::process::id()));
+        assert_eq!(detect_layout(&dir.join("static/web")), "unknown");
+    }
+}
