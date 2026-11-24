@@ -135,7 +135,23 @@ method: string,
 /**
  * 方法参数（JSON；缺省空对象）。模块自行约定形状。
  */
-payload: JsonValue, } } | { "RequestWorkspaceSessions": { team_id?: string | null, } } | { "SaveWorkspaceSession": { team_id?: string | null, session: WorkspaceSessionInfo, } } | { "DeleteWorkspaceSession": { team_id?: string | null, id: string, } } | { "ActivateWorkspaceSession": { team_id?: string | null, id?: string | null, 
+payload: JsonValue, } } | { "InvokeService": { 
+/**
+ * 服务名（`PanelService::name()`，如 `echo-agent.sessions`）。
+ */
+service: string, 
+/**
+ * 方法名（必在该服务的 `methods()` 里）。
+ */
+method: string, 
+/**
+ * 方法参数（JSON；缺省空对象）。服务自行约定形状。
+ */
+payload: JsonValue, 
+/**
+ * 调用方生成的配对 id；回执原样带回。
+ */
+request_id: string, } } | { "RequestWorkspaceSessions": { team_id?: string | null, } } | { "SaveWorkspaceSession": { team_id?: string | null, session: WorkspaceSessionInfo, } } | { "DeleteWorkspaceSession": { team_id?: string | null, id: string, } } | { "ActivateWorkspaceSession": { team_id?: string | null, id?: string | null, 
 /**
  * 工作区内的对话 id（2026-10 多对话；None = 进入该工作区的
  * `last_conversation` / 首条对话）。`id = None`（取消激活）时忽略。
@@ -431,6 +447,30 @@ module: string,
  * 方法名（回显请求里的 `method`，前端据此配对并发调用）。
  */
 method: string, 
+/**
+ * 是否成功。
+ */
+ok: boolean, 
+/**
+ * 返回值（失败时为 `null`，原因在 `error`）。
+ */
+data: JsonValue, 
+/**
+ * 失败原因（成功时缺省）。
+ */
+error?: string | null, } } | { "ServiceInvokeResult": { 
+/**
+ * 服务名（回显请求里的 `service`）。
+ */
+service: string, 
+/**
+ * 方法名（回显请求里的 `method`）。
+ */
+method: string, 
+/**
+ * 调用方生成的配对 id（回显请求里的 `request_id`）。
+ */
+request_id: string, 
 /**
  * 是否成功。
  */

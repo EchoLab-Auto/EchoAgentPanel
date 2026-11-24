@@ -28,6 +28,8 @@ import type {
 } from './protocol';
 
 import { scopedKey, sessionKey, sessionScopedKey, teamKey } from './keys';
+
+export type { SessionInfo } from './protocol';
 import { acceptPanelEvent, panelCancelSessionWork, panelCoreRemoved, panelSessionBusy, panelToolPresentation } from './extensions/registry';
 
 export const TRUNK_SESSION_ID = 'trunk';
@@ -1310,6 +1312,65 @@ export function initialState(): AppState {
   };
 }
 
+/**
+ * 一条会话身份并入 `state.sessions`（**upsert，不删**）。
+ *
+ * 会话身份 = `(id, team_id)`；`core` 只是**归属标注**，不是身份的一部分。
+ *
+ * ⚠️ 曾经的 bug：去重要求 core 精确相等，于是中继加壳抖动期间同一会话会以
+ * `core=null` 与 `core='core'` 两份并存 → 切换器出现同名重复会话。现在：
+ * 无归属的旧副本被"收编"（替换为带归属的），或收到无归属副本时直接丢弃
+ * （已有带归属的同名会话）；同时清掉同身份的多余副本。
+ *
+ * ## 为什么抽成函数
+ *
+ * 两条路径都要用它：`SessionUpdated`（增量广播）与面板服务的
+ * `echo-agent.sessions.list`（一次性基线）。抄两份的话，某天改去重规则只会
+ * 改一处——而两处的输入正是同一种数据，分叉表现为"刷新前后列表不一致"。
+ *
+ * ## 为什么不删
+ *
+ * 服务回包只做 upsert。删除仍归既有路径（团队被删 / 会话退役），因为回包
+ * 可能**晚于**一条更新的广播（`SessionUpdated` 没有序号，无法判定先后）——
+ * 拿它当"权威全集"去删，会在抖动时把刚出现的会话删掉。
+ */
+export function upsertSessionInto(
+  state: AppState,
+  session: SessionInfo & { core?: string | null },
+): void {
+  const teamOf = (s: SessionInfo) => s.team_id ?? null;
+  const coreOf = (s: SessionInfo & { core?: string | null }) => s.core ?? null;
+  const isSame = (s: SessionInfo & { core?: string | null }) =>
+    s.id === session.id && teamOf(s) === teamOf(session);
+  const incomingCore = coreOf(session);
+  const same = state.sessions.filter(isSame);
+  const adoptIdx = (() => {
+    const exact = same.find((s) => coreOf(s) === incomingCore);
+    if (exact) return state.sessions.indexOf(exact);
+    const orphan = same.find((s) => coreOf(s) == null);
+    if (orphan) return state.sessions.indexOf(orphan);
+    return -1;
+  })();
+  if (adoptIdx >= 0) {
+    state.sessions = state.sessions
+      .map((s, index) => (index === adoptIdx ? session : s))
+      .filter((s, index) => index === adoptIdx || !isSame(s));
+    return;
+  }
+  if (incomingCore != null || same.length === 0) {
+    state.sessions.push(session);
+    // 会话列表上限（2026-10 内存治理）：QQ 群多时 `SessionUpdated` 会持续
+    // 新增，此前只增不裁（`SessionSwitcher` 全量渲染所有条目）。按
+    // `last_active` 保留最近的，避免长时间运行后列表无界增长。
+    if (state.sessions.length > SESSIONS_LIMIT) {
+      state.sessions = state.sessions
+        .slice()
+        .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
+        .slice(0, SESSIONS_LIMIT);
+    }
+  }
+}
+
 export function reduce(state: AppState, event: BackendEvent, entry?: string): AppState {
   if (!acceptPanelEvent(event)) return state;
   switch (Object.keys(event)[0]) {
@@ -1827,40 +1888,7 @@ export function reduce(state: AppState, event: BackendEvent, entry?: string): Ap
     }
     case 'SessionUpdated': {
       const e = (event as { SessionUpdated: { session: SessionInfo } }).SessionUpdated;
-      // 会话身份 = (id, team_id)；`core` 只是**归属标注**，不是身份的一部分。
-      // ⚠️ 曾经的 bug：去重要求 core 精确相等，于是中继加壳抖动期间同一会话
-      // 会以 `core=null` 与 `core='core'` 两份并存 → 切换器出现同名重复会话。
-      // 现在：无归属的旧副本被"收编"（替换为带归属的），或收到无归属副本时
-      // 直接丢弃（已有带归属的同名会话）；同时清掉同身份的多余副本。
-      const teamOf = (session: SessionInfo) => session.team_id ?? null;
-      const coreOf = (session: SessionInfo & { core?: string | null }) => session.core ?? null;
-      const isSame = (s: SessionInfo & { core?: string | null }) =>
-        s.id === e.session.id && teamOf(s) === teamOf(e.session);
-      const incomingCore = coreOf(e.session);
-      const same = state.sessions.filter(isSame);
-      const adoptIdx = (() => {
-        const exact = same.find((s) => coreOf(s) === incomingCore);
-        if (exact) return state.sessions.indexOf(exact);
-        const orphan = same.find((s) => coreOf(s) == null);
-        if (orphan) return state.sessions.indexOf(orphan);
-        return -1;
-      })();
-      if (adoptIdx >= 0) {
-        state.sessions = state.sessions
-          .map((s, index) => (index === adoptIdx ? e.session : s))
-          .filter((s, index) => index === adoptIdx || !isSame(s));
-      } else if (incomingCore != null || same.length === 0) {
-        state.sessions.push(e.session);
-        // 会话列表上限（2026-10 内存治理）：QQ 群多时 `SessionUpdated` 会
-        // 持续新增，此前只增不裁（`SessionSwitcher` 全量渲染所有条目）。
-        // 按 last_active 保留最近的，避免长时间运行后列表无界增长。
-        if (state.sessions.length > SESSIONS_LIMIT) {
-          state.sessions = state.sessions
-            .slice()
-            .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
-            .slice(0, SESSIONS_LIMIT);
-        }
-      }
+      upsertSessionInto(state, e.session);
       return state;
     }
     case 'ApiConfigUpdated': {

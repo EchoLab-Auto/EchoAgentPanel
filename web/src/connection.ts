@@ -14,6 +14,7 @@ import { withBase } from './base';
 import { coreForTeam, currentRegion, pushToast } from './state';
 import { teamKey } from './keys';
 import { trackRequest } from './pending';
+import { resetServiceCalls } from './panel-services';
 import { observeEventSeq, resetEventSeq } from './event-seq';
 import {
   parseEvent,
@@ -231,6 +232,10 @@ export function startConnection(): void {
       if (socket !== ws) return; // 旧连接的迟到事件，忽略
       socket = null;
       state.connected = false;
+      // 在飞的面板服务调用全部作废：连接已经没了，回执不可能再来。
+      // 必须 **reject** 而不是静默清表——调用方的 `await` 会挂住，视图的
+      // 加载态就永远收不掉（2026-11 工作区「看不到文件浏览器」的同款形状）。
+      resetServiceCalls('与后端断开');
       // Toast 去风暴（2026-10 巡检）：仅"已连接后掉线"的首次弹提示
       // ——此前每次 onclose 都弹（服务宕机时每 ≤30s 一条刷屏）。断开
       // 期间的重试不再提示；重连成功由 onopen 的「已连接」提示收尾。

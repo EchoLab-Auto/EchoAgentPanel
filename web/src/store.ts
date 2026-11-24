@@ -8,6 +8,7 @@ import { reactive } from 'vue';
 import { initialState, reduce, type AppState } from './state';
 import type { BackendEvent } from './protocol';
 import { resolvePendingEvent } from './pending';
+import { consumeServiceResult } from './panel-services';
 import type { SessionInfo, TeamInfo } from './protocol';
 
 export const state = reactive(initialState()) as AppState;
@@ -30,6 +31,12 @@ export function dispatch(event: BackendEvent, core: string | null = null, entry?
   // 请求-响应跟踪：响应事件到达即销账（各视图加载态，见 pending.ts）。
   // 带 core 传入，多上游下只销目标 core 相同的登记。
   resolvePendingEvent(event, core);
+  // 面板服务回执（`InvokeService` → `ServiceInvokeResult`）：按 `request_id`
+  // 配对（见 panel-services.ts）。命中即**消费掉**——返回值归调用方解释，
+  // 壳不该把它塞进任何 `state` 字段（那是模块的数据，壳不认识）。
+  // 未命中（别的窗口发起的 / 已超时放弃的）也返回 false，继续走下面的注入
+  // 与 reducer：那条分支对未知事件是忽略，不会出错。
+  if (consumeServiceResult(event)) return;
   // 多上游聚合视图：会话事件注入来源 core（复合键第三维度，防止
   // A/B 两 Core 上同名会话（如各自的 local:tui）互相覆盖）。
   if (core && 'SessionUpdated' in (event as object)) {

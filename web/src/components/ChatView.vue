@@ -43,6 +43,7 @@ import RailDragGhost from './RailDragGhost.vue';
 import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
 import { entryOverlay, type BuiltinOverlayId } from '../overlays';
+import { requestSessions } from '../session-list';
 import { railDragEngaged } from '../rail-drag';
 import { claimReasoningAnimation } from '../reasoning-anim';
 import {
@@ -393,6 +394,21 @@ const connected = computed(() => state.connected);
  * 面板里按实例/会话按需拉）。要加新的一项时：这里加一行 + 面板侧的补拉也走
  * 同一个 `ensure*` 函数（它自带"已有数据/已在飞就不发"的去重）。
  */
+/**
+ * 打开/关闭内置的「会话」面板，并在**打开时**向会话模块的面板服务要一次基线。
+ *
+ * 为什么要单独一个函数（而不是给 `toggleOverlay` 加 id 特判）：会话列表是
+ * **壳内置**的能力，不是扩展提供的——`prefetch` 那条通道只服务扩展（壳不该
+ * 认识扩展的业务）。这里反过来：壳自己的面板，壳自己取数。
+ *
+ * 取数是"基线"，广播仍负责增量（见 `session-list.ts` 的分工表）。失败不阻塞
+ * 打开——面板照旧能从广播累积出的 `state.sessions` 渲染。
+ */
+function toggleSessions() {
+  if (entryOverlay.value !== 'sessions') void requestSessions(null);
+  toggleOverlay('sessions');
+}
+
 /** 打开某个覆盖面板（自动关闭其它的），或再次点击同一按钮时关闭。
  *
  * 各面板的数据补拉由**提供它的扩展**自己决定（`prefetch`）；壳不做任何
@@ -2026,7 +2042,9 @@ function mediaSrc(img: string): string {
         size="small"
         title="切换会话（每个群/私聊独立上下文）"
         data-overlay="sessions"
-        @click="toggleOverlay('sessions')"
+        @click="toggleSessions()"
+        @pointerenter="requestSessions(null)"
+        @focusin="requestSessions(null)"
       >
         <svg class="ctx-entry__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
