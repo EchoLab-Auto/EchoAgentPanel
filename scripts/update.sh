@@ -383,6 +383,9 @@ else
     if [[ "$installed" == "$TARGET" && -x "$BINARY" ]]; then
         missing_installed=""
         [[ -f "$STATIC_DIR/index.html" ]] || missing_installed="static"
+        # 刻意**不**用 "panel-extensions/ 缺失" 判坏：没装任何带界面的模块的
+        # 部署本来就没有这个目录，那样会让每次更新都白跑一遍完整构建。
+        # 目录被误删的情形由替换逻辑兜住（见下方的搬走/搬回）。
         if [[ -z "$missing_installed" ]]; then
             write_status current "already up to date" "$TARGET"
             FINALIZED=1
@@ -395,18 +398,9 @@ fi
 PHASE=building
 write_status running "building revision $TARGET" "$TARGET"
 cargo build --release --locked -p echo-web-server --manifest-path "$SOURCE_DIR/Cargo.toml"
-if [[ ! -v PANEL_UI_EXTENSIONS && -f "$STATE_DIR/ui-extensions" ]]; then
-    export PANEL_UI_EXTENSIONS
-    PANEL_UI_EXTENSIONS=$(cat "$STATE_DIR/ui-extensions")
-fi
-# 更新路径也要报扩展组成：「装了模块却看不见界面」最常见的成因就是这里悄悄
-# 构建了纯壳（state 文件不存在 / 被 --no-ui-extensions 清过）。
-if [[ -n "${PANEL_UI_EXTENSIONS:-}" ]]; then
-    ext_count=$(printf '%s' "$PANEL_UI_EXTENSIONS" | tr ':' '\n' | grep -c . || true)
-    echo "==> Panel UI extensions ($ext_count): ${PANEL_UI_EXTENSIONS//:/, }"
-else
-    echo "==> Panel UI extensions (0): none — building the plain shell"
-fi
+# UI 扩展**不在构建期注入**（2026-11 起）：模块自己 `npm run build` 出 ES
+# bundle，`mount` 时向 Core 登记，Panel 启动后从 `<static_dir>/panel-extensions/`
+# 加载。所以这里既不读 `PANEL_UI_EXTENSIONS`，也不写它。
 (
     cd "$SOURCE_DIR/web"
     if [[ -f package-lock.json ]]; then
@@ -436,8 +430,21 @@ if [[ -d "$STATIC_DIR" ]]; then
     cp -a "$STATIC_DIR/." "$static_rollback/"
     ROLLBACK_STATIC="$static_rollback"
 fi
+# `panel-extensions/` 里是**模块自己的 UI 产物**，不属于 Panel 构建输出：
+# 整个替换静态目录会把它一起删掉，表现是"更新一次面板，所有模块界面消失"
+# （而 Core 里模块还好好的，日志无异常）。先搬走、换完再搬回。
+extensions_stash=""
+if [[ -d "$STATIC_DIR/panel-extensions" ]]; then
+    extensions_stash="$(mktemp -d "$(dirname -- "$STATIC_DIR")/web.extensions.XXXXXX")"
+    cp -a "$STATIC_DIR/panel-extensions/." "$extensions_stash/"
+fi
 rm -rf "$STATIC_DIR"
 cp -a "$SOURCE_DIR/web/dist" "$STATIC_DIR"
+if [[ -n "$extensions_stash" ]]; then
+    rm -rf "$STATIC_DIR/panel-extensions"
+    cp -a "$extensions_stash" "$STATIC_DIR/panel-extensions"
+    rm -rf "$extensions_stash"
+fi
 STATIC_REPLACED=1
 # 替换完成后立即修剪历史备份（保留最近 N 个，见 prune_backups）。
 prune_backups || true

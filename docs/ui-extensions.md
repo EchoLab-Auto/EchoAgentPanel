@@ -45,21 +45,35 @@
 
 ## 扩展包
 
-Panel 壳不内置业务模块 UI。扩展在**构建期显式**组合，没有远程脚本下载或运行时
-执行未知代码的隐式入口。未配置扩展时，构建产物只包含 Panel 壳与内置管理界面。
+Panel 壳不内置业务模块 UI。扩展是**独立构建的 ES bundle**，由模块自己
+`npm run build` 产出，模块 `mount` 时向 Core 登记，Panel 启动后运行期 `import()`。
+（2026-11 之前是构建期注入：改一行 UI 要重建整个面板，忘了配环境变量就静默
+变纯壳。那种静默失效是这次改造的直接原因。）
 
 ```text
-my-extension/
-├── panel-extension.json
-├── index.ts
-└── components/...
+panel-ui/
+├── index.ts            # registerPanelExtension(...) 的入口
+├── components/...
+├── package.json        # npm run build → dist/index.js
+└── vite.config.ts      # externalize 共享模块 + 内联 CSS
 ```
 
-`panel-extension.json`：
+条目由 Core 侧登记，形状与 `echo_defs::panel_ui::PanelUiContribution` 一致：
 
 ```json
-{ "id": "example.module", "entry": "index.ts" }
+{ "id": "echo-agent.example",
+  "name": "示例",
+  "bundle": "panel-extensions/echo-agent.example/index.js",
+  "sdk_version": "1" }
 ```
+
+三条硬约束（全部由 Core 在登记时校验）：
+
+| 约束 | 为什么 |
+|---|---|
+| `bundle` 必须是**站点相对路径**，不得含协议 / 前导 `/` / `..` | 否则一个被投毒的模块描述就能让面板加载任意远程脚本 |
+| 产物文件名**固定**（不带 hash） | 面板按固定路径 `import()`，名字一变所有已构建的扩展立刻失联 |
+| `sdk_version` 必填且加载前逐字比对 | UI 在运行期加载，API 用错不会在构建期报错，只会在用户浏览器里崩 |
 
 `index.ts` 使用公开 SDK（禁止穿透引用 Panel 私有路径）：
 
@@ -149,32 +163,44 @@ when: ({ team }) => !!team && moduleMounted(state, 'example.module') && teamModu
 
 只判 `teamToolAvailable` 的后果是：没装模块的部署上也会显示入口，点了没有任何反应。
 
-## 安装与更新
+## 部署
+
+Panel 本身不再需要任何扩展参数：
 
 ```bash
-# 纯 Panel（默认）
-scripts/install.sh --scope system
-
-# 显式加入扩展；参数可重复
-scripts/install.sh --scope system --ui-extension /path/to/my-extension
-
-# 清空之前保存的扩展，恢复纯 Panel
-scripts/install.sh --scope system --no-ui-extensions
+scripts/install.sh --scope system     # 纯 Panel；模块界面由各自的产物提供
 ```
 
-也可在构建前设置冒号分隔的 `PANEL_UI_EXTENSIONS=/path/a:/path/b`。安装器把列表保存到
-`$XDG_STATE_HOME/echo-agent-panel/ui-extensions`，后续 `scripts/update.sh` 保留同一组成。
-扩展目录必须存在且包含 manifest；依赖与类型由 Panel 构建统一检查。
+模块一侧两步（以工作区模块为例）：
+
+```bash
+cd panel-ui && npm install && npm run build        # → dist/index.js
+mkdir -p <static_dir>/panel-extensions/echo-agent.workspace
+cp -a dist/. <static_dir>/panel-extensions/echo-agent.workspace/
+```
+
+`<static_dir>` 是 Panel 配置里的 `static_dir`（默认
+`<prefix>/libexec/echo-agent-panel/web`）。**这个目录由模块拥有**：Panel 的
+`install.sh` / `update.sh` 在替换静态目录时会原样保留 `panel-extensions/`
+（否则一次面板更新就会把所有模块界面删掉，而 Core 日志里毫无异常）。
+
+注册与加载的完整链路见 Core 仓 `document/modules/panel-service.md`。
 
 ## 本地验证
 
 ```bash
 cd web
-npm run build
+npm run build     # 壳 + 共享 chunk（assets/panel-*.js）+ import map
 npm test
 
-PANEL_UI_EXTENSIONS=/path/to/crate-workspace/panel-ui npm run build
-PANEL_UI_EXTENSIONS=/path/to/crate-workspace/panel-ui npm test
+# 注：扩展自己的测试在各自模块仓
+cd /path/to/module/panel-ui && npm run build
 ```
 
-第二种模式会同时类型检查并运行扩展包内的测试。
+构建产物里可以直接核对三件事：
+
+- `dist/index.html` 有 `<script type="importmap">`（10+ 条，指向 `assets/panel-*.js`）；
+- 那些 `panel-*.js` 是**固定文件名**（不带 hash）；
+- 它们里**没有** CSS import（浏览器原生 ES 模块不支持，样式已内联进 JS）。
+
+运行期状态在设置页「面板 UI 扩展」小节可见（加载了几个、哪个失败、为什么）。

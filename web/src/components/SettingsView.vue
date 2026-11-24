@@ -72,6 +72,14 @@ const PanelDeploymentInfo = lazy(
   () => import('./PanelDeploymentInfo.vue'),
   'PanelDeploymentInfo',
 );
+/**
+ * 面板 UI 扩展的加载状态。
+ *
+ * **静态引入**（不走 `lazy`）：它只是一个 `ref` 的只读渲染，进不了首包多少
+ * 体积；而 lazy 会让"这块什么时候加载"多一层时序，排查加载问题的时候反而
+ * 要先怀疑这块自己。
+ */
+import PanelUiExtensions from './PanelUiExtensions.vue';
 
 const UNCATEGORIZED = '未分类';
 const TOOL_BUILTIN = '内置工具';
@@ -2492,6 +2500,9 @@ watch(
           <div class="caps-detail">
             <!-- 部署方式在前：它回答"我在看的是哪一种 Panel"，是后面所有设置的前置事实。 -->
             <PanelDeploymentInfo />
+            <!-- UI 扩展的加载状态放在部署信息之后：先回答"这是什么形态的
+                 Panel"，再说"它加载到了哪些模块界面"。 -->
+            <PanelUiExtensions />
             <PanelSecuritySettings />
           </div>
         </div>

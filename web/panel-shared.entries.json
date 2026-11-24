@@ -1,0 +1,66 @@
+{
+  "comment": "面板与 UI 扩展的共享模块清单（单一真值）。vite 用它生成多入口与 import map，extension-loader 用它校验。改这里必须同步改 echo-defs::panel_ui::PANEL_UI_SDK_VERSION。",
+  "sdkVersion": "1",
+  "entries": [
+    {
+      "id": "vue",
+      "file": "src/panel-shared/vue.ts",
+      "output": "panel-vue.js"
+    },
+    {
+      "id": "@echo-agent/panel",
+      "file": "src/extension-api.ts",
+      "output": "panel-sdk.js"
+    },
+    {
+      "id": "@echo-agent/panel/components/LoadHint",
+      "file": "src/panel-shared/components/LoadHint.ts",
+      "output": "panel-components/LoadHint.js"
+    },
+    {
+      "id": "@echo-agent/panel/components/PanelIcon",
+      "file": "src/panel-shared/components/PanelIcon.ts",
+      "output": "panel-components/PanelIcon.js"
+    },
+    {
+      "id": "@echo-agent/panel/components/PanelSidebar",
+      "file": "src/panel-shared/components/PanelSidebar.ts",
+      "output": "panel-components/PanelSidebar.js"
+    },
+    {
+      "id": "@echo-agent/panel/components/SessionSwitcher",
+      "file": "src/panel-shared/components/SessionSwitcher.ts",
+      "output": "panel-components/SessionSwitcher.js"
+    },
+    {
+      "id": "@echolab-auto/ui-frame/components/NeumorphismButton",
+      "file": "src/panel-shared/ui-frame/NeumorphismButton.ts",
+      "output": "ui-frame/NeumorphismButton.js"
+    },
+    {
+      "id": "@echolab-auto/ui-frame/components/NeumorphismSelect",
+      "file": "src/panel-shared/ui-frame/NeumorphismSelect.ts",
+      "output": "ui-frame/NeumorphismSelect.js"
+    },
+    {
+      "id": "@echolab-auto/ui-frame/components/NeumorphismSpinner",
+      "file": "src/panel-shared/ui-frame/NeumorphismSpinner.ts",
+      "output": "ui-frame/NeumorphismSpinner.js"
+    },
+    {
+      "id": "@echolab-auto/ui-frame/components/NeumorphismTag",
+      "file": "src/panel-shared/ui-frame/NeumorphismTag.ts",
+      "output": "ui-frame/NeumorphismTag.js"
+    },
+    {
+      "id": "@echolab-auto/ui-frame",
+      "file": "src/panel-shared/ui-frame-root.ts",
+      "output": "ui-frame/index.js"
+    },
+    {
+      "id": "@echolab-auto/ui-frame/doc",
+      "file": "src/panel-shared/ui-frame/doc.ts",
+      "output": "ui-frame/doc.js"
+    }
+  ]
+}

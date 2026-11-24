@@ -24,7 +24,7 @@ import {
   teamLanding,
   type PanelSlotContext,
 } from './extensions/registry';
-import 'virtual:panel-extensions';
+import { startPanelUiLoading } from './extension-loader';
 import ChatView from './components/ChatView.vue';
 import CompactionIndicator from './components/CompactionIndicator.vue';
 // 首屏瘦身（2026-10 审计修复）：设置视图（3400+ 行，含 5 个子设置页）、
@@ -158,8 +158,8 @@ function loadView(): View {
     if (saved === 'caps' || saved === 'logs') return 'settings';
     if (saved === 'tasks') return 'chat';
     if (typeof saved === 'string' && saved.startsWith('ext:')) {
-      // 这里只校验**形状**：扩展是否还注册着要等注册完成（`virtual:panel-extensions`
-      // 的 import 在 setup 之前执行，但门控依赖 team/module 状态，那一刻还没拉到）。
+      // 这里只校验**形状**：扩展是否还注册着要等运行期加载完成（`extension-loader`
+      // 在首次连上后才 import 扩展，而门控还依赖 team/module 状态）。
       // 真正的兜底在 `resolvedView`。
       return saved as View;
     }
@@ -278,6 +278,11 @@ setupPanelExtensions({
   setSession: setActiveSession,
   syncTeamCore: applyActiveTeam,
 });
+// UI 扩展改为**运行期加载**（2026-11）：模块自己构建 ES bundle，`mount` 时向
+// Core 登记 URL；这里在首次连上后拉清单并 import()。必须在
+// `setupPanelExtensions` **之后**——扩展在 import 时就会 `registerPanelExtension`，
+// 那时 app context 必须已经就位（否则 `hooks.setup` 要等下一次注册才跑）。
+startPanelUiLoading();
 startConnection();
 
 /**

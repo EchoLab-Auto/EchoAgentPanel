@@ -148,10 +148,9 @@ Options:
   --no-deps             Skip automatic installation of missing prerequisites
   --dry-run             Print resolved paths without changing the system
   --scope <user|system> Which systemd scope to install into (default: user).
-  --ui-extension <dir>  Include a Panel UI extension package (repeatable).
-                        The directory must contain panel-extension.json.
-                        May also use PANEL_UI_EXTENSIONS (colon-separated).
-  --no-ui-extensions    Build the plain Panel shell and clear saved UI extensions.
+  (UI 扩展已改为运行期加载：模块自己 `npm run build` 出 bundle，`mount` 时向
+   Core 登记，Panel 启动后从 `<static_dir>/panel-extensions/<id>/` 加载。
+   本脚本不再接受 `--ui-extension`——见 document/modules/panel-service.md。)
 
                         `user` writes ~/.config/systemd/user units and drives them
                         with `systemctl --user`; it enables linger so the service
@@ -171,10 +170,6 @@ One-liner (no clone needed):
 EOF
 }
 
-UI_EXTENSIONS=${PANEL_UI_EXTENSIONS:-}
-UI_EXTENSIONS_SET=0
-[[ -v PANEL_UI_EXTENSIONS ]] && UI_EXTENSIONS_SET=1
-
 while (($#)); do
     case "$1" in
         --repository)
@@ -185,34 +180,10 @@ while (($#)); do
             REPOSITORY_URL=$2
             shift 2
             ;;
-        --ui-extension)
-            if (($# < 2)) || [[ -z "$2" ]]; then
-                echo "error: --ui-extension requires a directory" >&2
-                exit 2
-            fi
-            extension_dir=$(CDPATH= cd -- "$2" 2>/dev/null && pwd -P) || {
-                echo "error: UI extension directory not found: $2" >&2
-                exit 2
-            }
-            [[ -f "$extension_dir/panel-extension.json" ]] || {
-                echo "error: missing $extension_dir/panel-extension.json" >&2
-                exit 2
-            }
-            UI_EXTENSIONS="${UI_EXTENSIONS:+$UI_EXTENSIONS:}$extension_dir"
-            UI_EXTENSIONS_SET=1
-            shift 2
-            ;;
-        --ui-extension=*)
-            [[ -n "${1#--ui-extension=}" ]] || {
-                echo "error: --ui-extension requires a directory" >&2
-                exit 2
-            }
-            set -- --ui-extension "${1#--ui-extension=}" "${@:2}"
-            ;;
-        --no-ui-extensions)
-            UI_EXTENSIONS=""
-            UI_EXTENSIONS_SET=1
-            shift
+        # 已移除（2026-11）：UI 扩展改为运行期加载，构建期不再注入任何模块源码。
+        --ui-extension|--ui-extension=*|--no-ui-extensions)
+            echo "error: $1 已移除——UI 扩展现在由模块自己构建并在运行期登记，见 document/modules/panel-service.md" >&2
+            exit 2
             ;;
         --no-start)
             START_SERVICE=0
@@ -497,21 +468,20 @@ fi
 echo "==> Building Rust backend"
 cargo build --release --locked -p echo-web-server --manifest-path "$SOURCE_DIR/Cargo.toml"
 
-# UI 扩展是显式部署组成，不属于 Panel 默认源码。写入状态文件，后续
-# scripts/update.sh 自动保留；--no-ui-extensions 可清空。
-if ((UI_EXTENSIONS_SET)); then
-    printf '%s\n' "$UI_EXTENSIONS" > "$STATE_DIR/ui-extensions"
-elif [[ -z "$UI_EXTENSIONS" && -f "$STATE_DIR/ui-extensions" ]]; then
-    UI_EXTENSIONS=$(cat "$STATE_DIR/ui-extensions")
-fi
-export PANEL_UI_EXTENSIONS="$UI_EXTENSIONS"
-# 「本部署一个扩展都没配」必须出声：静默构建纯壳的结果是模块在 Core 里挂着、
-# 界面上却没有任何入口，用户只能去读源码才能发现（2026-11 实测）。
-if [[ -n "$PANEL_UI_EXTENSIONS" ]]; then
-    ext_count=$(printf '%s' "$PANEL_UI_EXTENSIONS" | tr ':' '\n' | grep -c . || true)
-    echo "==> Panel UI extensions ($ext_count): ${PANEL_UI_EXTENSIONS//:/, }"
-else
-    echo "==> Panel UI extensions (0): none — building the plain shell"
+# UI 扩展**不在构建期注入**（2026-11 起）：模块自己 `npm run build` 出 ES
+# bundle，`mount` 时向 Core 登记，Panel 启动后从 `<static_dir>/panel-extensions/`
+# 加载。所以这里不再传 `PANEL_UI_EXTENSIONS`。
+#
+# 旧的 `$STATE_DIR/ui-extensions` 里如果还留着路径列表，说明这台机器是从构建期
+# 方案升级上来的——留着它不会生效（构建已不读），但会让人误以为配过。提示一句
+# 并给出删除命令，不做静默处理（静默删用户的文件更糟）。
+if [[ -s "$STATE_DIR/ui-extensions" ]]; then
+    echo "==> 注意：$STATE_DIR/ui-extensions 已不再生效（UI 扩展改为运行期加载）。"
+    echo "    模块界面缺失时请检查 <static_dir>/panel-extensions/ 与 Core 的"
+    echo "    echo-agent.panel-ui.list 服务；确认无用后可删除该文件。"
+    if [[ -n "${PANEL_UI_EXTENSIONS:-}" ]]; then
+        echo "==> 同时检测到 PANEL_UI_EXTENSIONS 环境变量，构建期不会再用它。"
+    fi
 fi
 
 echo "==> Building web frontend"
@@ -627,8 +597,21 @@ EOF
 chmod 755 "$launcher_temporary"
 mv -f "$launcher_temporary" "$BIN_DIR/echo-agent-panel"
 
+# `panel-extensions/` 里是**模块自己的 UI 产物**，不属于 Panel 构建输出：整个
+# 替换静态目录会把它一起删掉，表现是"重装一次面板，所有模块界面消失"（而 Core
+# 里模块还好好的，日志无异常）。先搬走、装完再搬回。
+extensions_stash=""
+if [[ -d "$STATIC_DIR/panel-extensions" ]]; then
+    extensions_stash="$(mktemp -d "$(dirname -- "$STATIC_DIR")/web.extensions.XXXXXX")"
+    cp -a "$STATIC_DIR/panel-extensions/." "$extensions_stash/"
+fi
 rm -rf "$STATIC_DIR"
 cp -a "$SOURCE_DIR/web/dist" "$STATIC_DIR"
+if [[ -n "$extensions_stash" ]]; then
+    rm -rf "$STATIC_DIR/panel-extensions"
+    cp -a "$extensions_stash" "$STATIC_DIR/panel-extensions"
+    rm -rf "$extensions_stash"
+fi
 
 SERVICE_PATH=$(printf '%s\n' \
     "$(dirname -- "$(command -v cargo)")" \
