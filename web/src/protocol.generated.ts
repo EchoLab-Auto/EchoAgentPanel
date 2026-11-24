@@ -140,7 +140,17 @@ payload: JsonValue, } } | { "RequestWorkspaceSessions": { team_id?: string | nul
  * 工作区内的对话 id（2026-10 多对话；None = 进入该工作区的
  * `last_conversation` / 首条对话）。`id = None`（取消激活）时忽略。
  */
-conversation?: string | null, } } | { "RequestWorkspaceGitStatus": { team_id?: string | null, session_id: string, } } | { "RequestWorkspaceFiles": { team_id?: string | null, session_id: string, path: string, } } | { "RequestBrowseDirectories": { path?: string | null, } } | { "RequestProDocBundle": { team_id?: string | null, root: string, } } | { "BrowseProDocDirs": { path?: string | null, } } | "ProDocRoots" | { "ReadProDocFile": { team_id?: string | null, root: string, path: string, 
+conversation?: string | null, } } | { "RequestWorkspaceGitStatus": { team_id?: string | null, session_id: string, 
+/**
+ * 只刷新这些目录（与 `WorkspaceGitInfo.directory` 同一写法：本机绝对
+ * 路径或 `node://<peer>/<路径>`）；缺省 / 空 = 全部目录。
+ *
+ * 为什么需要：一个工作区常有 5 个仓库，改完其中一个点刷新，其余四个
+ * 也要各跑 5～6 条 git 子进程（跨机目录还得过一遍网络）。面板的
+ * 「刷新此目录」靠它把开销收敛到真正变了的那一个；不认得的路径
+ * （不在该会话目录里）由模块忽略，不报错。
+ */
+directories?: Array<string> | null, } } | { "RequestWorkspaceFiles": { team_id?: string | null, session_id: string, path: string, } } | { "RequestBrowseDirectories": { path?: string | null, } } | { "RequestProDocBundle": { team_id?: string | null, root: string, } } | { "BrowseProDocDirs": { path?: string | null, } } | "ProDocRoots" | { "ReadProDocFile": { team_id?: string | null, root: string, path: string, 
 /**
  * 面板生成的回执关联 id（模块原样带回）。
  */
@@ -1204,6 +1214,21 @@ changed_entries: Array<WorkspaceChangedEntry>,
  * 最近一次提交的摘要（`<short-hash> <subject>`）。
  */
 last_commit?: string | null, 
+/**
+ * 最近一次提交的**提交者时间**（RFC 3339，如 `2026-10-19T10:23:45+08:00`）。
+ *
+ * 与 `last_commit` 分开传而不是塞进那个字符串：面板要算"3 分钟前"这类
+ * 相对时间，塞进摘要就只能靠解析字符串——一改摘要格式就静默失效。
+ * 取不到（老 git / 无提交）时为 None，面板不显示时间而不是显示假时间。
+ */
+last_commit_time?: string | null, 
+/**
+ * stash 条目数（`git stash list` 的行数；没有 stash 时为 0）。
+ *
+ * 为什么单独一列：stash 是"我以为处理了、其实还挂在那儿"的东西，
+ * 攒到十几个才发现通常已经忘了哪个是哪个。只读计数，不碰内容。
+ */
+stash: number, 
 /**
  * 采集失败原因（目录不存在 / git 不可用等；非仓库时为 None）。
  */

@@ -474,4 +474,83 @@ describe('WorkRunGroup', () => {
     expect(raw).toMatch(/import ElapsedText from '\.\/ElapsedText\.vue'/);
     expect(raw).toMatch(/<ElapsedText[\s\S]{0,200}compact/);
   });
+
+  // ── chip 折叠（2026-11）：一回合上百个工具时只铺头尾 ──────────────────
+
+  /** n 个工具 chip（key 与 aria-label 都带序号，便于断言"渲染了哪几段"）。 */
+  function many(n: number): ToolWorkItem[] {
+    return Array.from({ length: n }, (_, i) =>
+      tool({ key: `t${i}`, name: `bash-${i}`, output: `out-${i}` }),
+    );
+  }
+
+  it('超过阈值折叠：只渲染头 3 + 尾 24 + 一枚「…N」', async () => {
+    const wrapper = mount(WorkRunGroup, { props: { items: many(270) } });
+    const chips = wrapper.findAll('.work-run-group__chip');
+    // 3 + 24 + 1 折叠占位（270 个全量时的 1000+ 节点 → 28 个）
+    expect(chips.length).toBe(28);
+    expect(wrapper.find('.work-run-group__chip--fold').text()).toBe('…243');
+    // 头 3 与尾 24 都是真实 chip，中间那段不渲染
+    const keys = wrapper.findAll('.work-run-group__chip--tool').map((c) => c.attributes('aria-label'));
+    expect(keys.length).toBe(27);
+    wrapper.unmount();
+  });
+
+  it('未超阈值全量渲染（32 个以内不折叠）', async () => {
+    const wrapper = mount(WorkRunGroup, { props: { items: many(32) } });
+    expect(wrapper.findAll('.work-run-group__chip').length).toBe(32);
+    expect(wrapper.find('.work-run-group__chip--fold').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('点「…N」全量展开，末尾出现「收起」；再点收起回到折叠', async () => {
+    const wrapper = mount(WorkRunGroup, { props: { items: many(100) } });
+    expect(wrapper.findAll('.work-run-group__chip--tool').length).toBe(27);
+
+    await wrapper.find('.work-run-group__chip--fold').trigger('click');
+    expect(wrapper.findAll('.work-run-group__chip--tool').length).toBe(100);
+    const unfold = wrapper.find('.work-run-group__chip--unfold');
+    expect(unfold.exists()).toBe(true);
+    expect(unfold.text()).toBe('收起');
+
+    await unfold.trigger('click');
+    expect(wrapper.findAll('.work-run-group__chip--tool').length).toBe(27);
+    wrapper.unmount();
+  });
+
+  it('折叠窗口随新条目滑动：头固定、尾贴着最新', async () => {
+    const wrapper = mount(WorkRunGroup, { props: { items: many(100) } });
+    const shown = () =>
+      wrapper.findAll('.work-run-group__chip--tool').map((c) => c.attributes('aria-label'));
+    // 头 3 + 尾 24：[bash-0..2] + [bash-76..99]
+    expect(shown()).toEqual([
+      'bash-0',
+      'bash-1',
+      'bash-2',
+      ...Array.from({ length: 24 }, (_, i) => `bash-${76 + i}`),
+    ]);
+
+    // 追加 5 条：头不动，尾滑动到最新一段（新条目一定在窗口里）
+    await wrapper.setProps({ items: many(105) });
+    const after = shown();
+    expect(after.slice(0, 3)).toEqual(['bash-0', 'bash-1', 'bash-2']);
+    expect(after[after.length - 1]).toBe('bash-104');
+    expect(after.length).toBe(27);
+    wrapper.unmount();
+  });
+
+  it('被展开的中间条目不会被折叠吃掉（详情卡与 chip 同生共死）', async () => {
+    const items = many(100);
+    const wrapper = mount(WorkRunGroup, { props: { items } });
+    // 先全量展开，点开中间某一项（第 10 个），再收起
+    await wrapper.find('.work-run-group__chip--fold').trigger('click');
+    await wrapper.findAll('.work-run-group__chip--tool')[10].trigger('click');
+    expect(wrapper.find('.work-run-group__detail').exists()).toBe(true);
+    await wrapper.find('.work-run-group__chip--unfold').trigger('click');
+    // 折叠态下该项被钉住：chip 仍在（27 + 1 钉住），详情卡仍开
+    expect(wrapper.findAll('.work-run-group__chip--tool').length).toBe(28);
+    expect(wrapper.find('.work-run-group__detail').exists()).toBe(true);
+    expect(wrapper.find('.work-run-group__chip--open').exists()).toBe(true);
+    wrapper.unmount();
+  });
 });

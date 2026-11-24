@@ -182,6 +182,65 @@ function toggle(key: string) {
   }
 }
 
+// ── chip 折叠（2026-11 性能止血）───────────────────────────────────────
+//
+// 一回合里工具与思考可能连续几十上百条：本机实测（`echo-sessions-base.json`，
+// 1024 条时间线）单组最大 **270 个 chip**，6 组超过 50，平均 66.6。全量铺开有
+// 两个后果：
+//   1. DOM 数量（270 chip ≈ 1000+ 节点）。行级缓存只保证"没变化的行不重建"，
+//      而**变化的那一行**一旦重建就是整行 270 个 chip 全 diff——流式 delta
+//      恰好总落在最后一条上，也就是最大的那一组；
+//   2. 读不出"这一轮干了什么"：270 个图标摊成几屏，没有起点也没有终点。
+//
+// 折叠窗口 = 头 3（这一轮怎么开始的）+ 尾 24（刚刚发生了什么），中间收成
+// 一枚「…N」chip，点开即全量。**被展开的条目（openKey）强制留在窗口里**——
+// 否则会出现"详情卡开着、对应 chip 被折叠吃掉"的自相矛盾。
+const FOLD_THRESHOLD = 32;
+const FOLD_HEAD = 3;
+const FOLD_TAIL = 24;
+
+/** 用户点过「…N」= 本轮全量渲染（新条目继续追加在尾部）。 */
+const allExpanded = ref(false);
+
+/** 是否折叠（条目数未超阈值 / 已全量展开 → 不折叠）。 */
+const folded = computed(() => !allExpanded.value && props.items.length > FOLD_THRESHOLD);
+
+/**
+ * 一段 chip 序列：`hidden` 有值 = 折叠占位（此时 `items` 为空）。
+ *
+ * 用可选字段而不是可辨识联合：模板里 `seg.hidden !== undefined` 一处判断就能
+ * 同时收窄分支，`vue-tsc` 不必推联合成员。
+ */
+interface ChipSegment {
+  key: string;
+  items: WorkRunItem[];
+  hidden?: number;
+}
+
+const chipSegments = computed<ChipSegment[]>(() => {
+  const items = props.items;
+  if (!folded.value) return [{ key: 'all', items }];
+  const head = items.slice(0, FOLD_HEAD);
+  const tail = items.slice(-FOLD_TAIL);
+  const shown = new Set([...head, ...tail].map((item) => item.key));
+  // 手动展开 / 自动展开（思考播放中、失败项）的条目：在窗口外就钉住。
+  const pinned = openKey.value && !shown.has(openKey.value)
+    ? items.filter((item) => item.key === openKey.value)
+    : [];
+  for (const item of pinned) shown.add(item.key);
+  const hidden = items.length - shown.size;
+  return [
+    { key: 'head', items: head },
+    ...(hidden > 0 ? [{ key: 'fold', items: [], hidden } as ChipSegment] : []),
+    ...(pinned.length ? [{ key: 'pinned', items: pinned }] : []),
+    { key: 'tail', items: tail },
+  ];
+});
+
+/** 折叠占位的悬停 / 无障碍文案。 */
+function foldLabel(hidden: number): string {
+  return `展开中间被折叠的 ${hidden} 个条目（共 ${props.items.length} 个）`;
+}
 // ── 悬停 / 角标 / 详情文案 ──────────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
   running: '运行中',
@@ -298,80 +357,109 @@ function ariaOf(item: WorkRunItem): string {
 <template>
   <div class="work-run-group" :class="{ 'work-run-group--running': hasRunning }">
     <div class="work-run-group__row">
+      <template v-for="seg in chipSegments" :key="seg.key">
+        <!-- 折叠占位：中间那一长串收成一枚可点开的 chip（见 setup 里的
+             FOLD_THRESHOLD 说明）。与普通 chip 同高，折叠/展开不改变行高基准。 -->
+        <button
+          v-if="seg.hidden !== undefined"
+          type="button"
+          class="work-run-group__chip work-run-group__chip--fold"
+          :title="foldLabel(seg.hidden)"
+          :aria-label="foldLabel(seg.hidden)"
+          :aria-expanded="false"
+          @click="allExpanded = true"
+        >
+          …{{ seg.hidden }}
+        </button>
+        <template v-else>
+          <button
+            v-for="item in seg.items"
+            :key="item.key"
+            type="button"
+            class="work-run-group__chip"
+            :class="[
+              `work-run-group__chip--${item.kind}`,
+              {
+                'work-run-group__chip--open': openKey === item.key,
+                'work-run-group__chip--failed': chipFailed(item),
+                'work-run-group__chip--active': chipActive(item),
+              },
+            ]"
+            :title="titleOf(item)"
+            :aria-label="ariaOf(item)"
+            @click="toggle(item.key)"
+          >
+            <ToolIcon
+              v-if="item.kind === 'tool'"
+              :name="item.name"
+              :loading="item.status === 'running'"
+            />
+            <!-- 思考：双闪星（与工具图标的 stroke 风格一致） -->
+            <svg
+              v-else-if="item.kind === 'reasoning'"
+              class="work-run-group__think"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M10.5 5 12.1 9.9 17 11.5 12.1 13.1 10.5 18 8.9 13.1 4 11.5 8.9 9.9 Z" />
+              <path d="M17.5 4 18.3 6.2 20.5 7 18.3 7.8 17.5 10 16.7 7.8 14.5 7 16.7 6.2 Z" />
+            </svg>
+            <!-- 子代理：分叉流程（一任务派出一子代理） -->
+            <svg
+              v-else
+              class="work-run-group__agent"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="6" cy="6" r="2.5" />
+              <circle cx="18" cy="18" r="2.5" />
+              <path d="M8.5 6h5.5a4 4 0 0 1 4 4v5.5" />
+            </svg>
+            <span v-if="chipFailed(item)" class="work-run-group__dot work-run-group__dot--failed" />
+            <span
+              v-if="item.kind === 'subagent' && item.running"
+              class="work-run-group__dot work-run-group__dot--live"
+            />
+            <!-- 工具角标：运行中耗时（读秒在叶子组件里，不再带着整行一起重渲染） -->
+            <span v-if="toolBadgeVisible(item)" class="work-run-group__badge">
+              <ElapsedText
+                :started-at-ms="(item as ToolWorkItem).startedAtMs"
+                :elapsed-ms="(item as ToolWorkItem).elapsedMs"
+                :running="true"
+                compact
+              />
+            </span>
+            <!-- 思考角标：播放中的字数（内容一变本来就要重渲染，留在组内） -->
+            <span
+              v-else-if="item.kind === 'reasoning' && reasoningActive(item)"
+              class="work-run-group__badge work-run-group__badge--reasoning"
+            >
+              {{ fmtCharCompact(item.text.length) }}
+            </span>
+          </button>
+        </template>
+      </template>
+      <!-- 全量展开后给一个收口（否则 270 个 chip 只能靠刷新回去） -->
       <button
-        v-for="item in items"
-        :key="item.key"
+        v-if="allExpanded && items.length > FOLD_THRESHOLD"
         type="button"
-        class="work-run-group__chip"
-        :class="[
-          `work-run-group__chip--${item.kind}`,
-          {
-            'work-run-group__chip--open': openKey === item.key,
-            'work-run-group__chip--failed': chipFailed(item),
-            'work-run-group__chip--active': chipActive(item),
-          },
-        ]"
-        :title="titleOf(item)"
-        :aria-label="ariaOf(item)"
-        @click="toggle(item.key)"
+        class="work-run-group__chip work-run-group__chip--fold work-run-group__chip--unfold"
+        title="收起中间条目，只看最近的一段"
+        aria-label="收起中间条目"
+        :aria-expanded="true"
+        @click="allExpanded = false"
       >
-        <ToolIcon
-          v-if="item.kind === 'tool'"
-          :name="item.name"
-          :loading="item.status === 'running'"
-        />
-        <!-- 思考：双闪星（与工具图标的 stroke 风格一致） -->
-        <svg
-          v-else-if="item.kind === 'reasoning'"
-          class="work-run-group__think"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M10.5 5 12.1 9.9 17 11.5 12.1 13.1 10.5 18 8.9 13.1 4 11.5 8.9 9.9 Z" />
-          <path d="M17.5 4 18.3 6.2 20.5 7 18.3 7.8 17.5 10 16.7 7.8 14.5 7 16.7 6.2 Z" />
-        </svg>
-        <!-- 子代理：分叉流程（一任务派出一子代理） -->
-        <svg
-          v-else
-          class="work-run-group__agent"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="6" cy="6" r="2.5" />
-          <circle cx="18" cy="18" r="2.5" />
-          <path d="M8.5 6h5.5a4 4 0 0 1 4 4v5.5" />
-        </svg>
-        <span v-if="chipFailed(item)" class="work-run-group__dot work-run-group__dot--failed" />
-        <span
-          v-if="item.kind === 'subagent' && item.running"
-          class="work-run-group__dot work-run-group__dot--live"
-        />
-        <!-- 工具角标：运行中耗时（读秒在叶子组件里，不再带着整行一起重渲染） -->
-        <span v-if="toolBadgeVisible(item)" class="work-run-group__badge">
-          <ElapsedText
-            :started-at-ms="(item as ToolWorkItem).startedAtMs"
-            :elapsed-ms="(item as ToolWorkItem).elapsedMs"
-            :running="true"
-            compact
-          />
-        </span>
-        <!-- 思考角标：播放中的字数（内容一变本来就要重渲染，留在组内） -->
-        <span
-          v-else-if="item.kind === 'reasoning' && reasoningActive(item)"
-          class="work-run-group__badge work-run-group__badge--reasoning"
-        >
-          {{ fmtCharCompact(item.text.length) }}
-        </span>
+        收起
       </button>
     </div>
 
@@ -544,6 +632,30 @@ function ariaOf(item: WorkRunItem): string {
 .work-run-group__chip svg {
   width: 15px;
   height: 15px;
+}
+
+/* 折叠占位（「…N」与「收起」）：虚线框 + 等宽数字，一眼看出"这不是一个工具"。
+   与普通 chip 同高（26px），折叠/展开只改变换行数，不改变行高基准。 */
+.work-run-group__chip--fold {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--nm-text-secondary) 42%, transparent);
+  color: var(--nm-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  box-shadow: none;
+  opacity: 0.9;
+}
+.work-run-group__chip--fold:hover {
+  border-color: var(--panel-accent);
+  color: var(--panel-accent);
+  opacity: 1;
+}
+/* 「收起」比「…N」弱一档：展开是主路径，收起只是收口 */
+.work-run-group__chip--unfold {
+  font-weight: 500;
+  opacity: 0.7;
 }
 
 /* 思考 chip：静态为柔和紫（与工具的灰系同族但可辨识），悬停/展开/播放转亮紫 */
