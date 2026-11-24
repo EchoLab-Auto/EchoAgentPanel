@@ -43,13 +43,13 @@ Core 源码位置默认取 `~/.local/share/echo-agent-core/source`；也可用
 4. 跑 `npm run check-protocol:strict`，再跑
    `npm run test:protocol-sync`（脚本自身的行为测试，不需要真实 Core）。
 
-绑定记录长这样：
+绑定记录长这样（下例是**字段示意**，真值见 `web/package.json` 的 `protocolCore`）：
 
 ```json
 "protocolCore": {
   "repository": "EchoLab-Auto/EchoAgentCore",
-  "commit": "d67ceb12b72b316cfda72c19dd7ff77aced4cec9",
-  "generatedSha256": "bbab13dbb65b1286a7396c545d58cf20e346a1b7f64381aa1b7cc7d13fc4f982"
+  "commit": "<40 位完整提交，产出当前生成物的那个 Core 提交>",
+  "generatedSha256": "<64 位十六进制，生成物字节的 sha256>"
 }
 ```
 

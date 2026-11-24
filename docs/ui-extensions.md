@@ -55,8 +55,13 @@ panel-ui/
 ├── index.ts            # registerPanelExtension(...) 的入口
 ├── components/...
 ├── package.json        # npm run build → dist/index.js
-└── vite.config.ts      # externalize 共享模块 + 内联 CSS
+├── vite.config.ts      # externalize 共享模块 + 内联 CSS
+└── vitest.config.ts    # 可选：跑组件测试时需要它（见「测试」）
 ```
+
+`index.ts` 里不要 `import 'x.css'`：浏览器原生 ES 模块不支持，样式必须内联进 JS
+（`vite.config.ts` 里的 `inlineCss` 插件干的就是这件事，`cssCodeSplit: false` 配合
+使用）。产物是**纯 JS**，动态 `import()` 一个文件即可。
 
 条目由 Core 侧登记，形状与 `echo_defs::panel_ui::PanelUiContribution` 一致：
 
@@ -75,7 +80,9 @@ panel-ui/
 | 产物文件名**固定**（不带 hash） | 面板按固定路径 `import()`，名字一变所有已构建的扩展立刻失联 |
 | `sdk_version` 必填且加载前逐字比对 | UI 在运行期加载，API 用错不会在构建期报错，只会在用户浏览器里崩 |
 
-`index.ts` 使用公开 SDK（禁止穿透引用 Panel 私有路径）：
+`index.ts` 使用公开 SDK（**约定**：不要穿透引用 Panel 私有路径。这不是构建期强制
+——扩展是独立 vite 构建，没人看得见 Panel 的源码树，穿透会一路构建成功、到浏览器
+里才失败）：
 
 ```ts
 import { definePanelExtension, registerPanelExtension } from '@echo-agent/panel';
@@ -88,16 +95,11 @@ registerPanelExtension(definePanelExtension({
     id: 'manage', label: '示例', icon: 'folder',
     when: ({ teamId }) => Boolean(teamId),
     prefetch: ({ teamId }) => { /* 可选：预热业务数据 */ },
-  }],
-  overlays: [{ id: 'manage', label: '示例管理', component: ExamplePanel }],
-  railCards(teamId) { /* 返回动态卡片、门控、标题、计数 */ return []; },
-  entries: [{
-    id: 'manage', label: '示例', icon: 'folder',
-    when: ({ teamId }) => Boolean(teamId),
-    prefetch: ({ teamId }) => { /* 可选：预热业务数据 */ },
     // 可选：右上角数字徽标（壳只渲染数字，含义由扩展决定）
     badge: ({ sessionId }) => 0,
   }],
+  overlays: [{ id: 'manage', label: '示例管理', component: ExamplePanel }],
+  railCards(teamId) { /* 返回动态卡片、门控、标题、计数 */ return []; },
   hooks: {
     setup(context) { /* 安装响应式 watcher */ },
     teamLanding(teamId) { return null; },
@@ -115,9 +117,14 @@ registerPanelExtension(definePanelExtension({
 }));
 ```
 
-扩展 id 会成为 UI 命名空间，例如 `extension:example.module:manage`。扩展复用 Panel
-的 Vue、ui-frame、弹层互斥、卡片拖动/折叠和布局持久化；数据请求与业务能力门控由
-扩展自己负责。
+`mainViews` 是第四个插槽（顶栏可切换的一级视图，与「聊天 / 设置 / Shell」同级）。比
+`overlays` 多 `icon` / `hint?` / `when?`：`{ id, label, icon, hint?, component, when? }`。
+完整签名见 `web/src/extensions/registry.ts` 的 `PanelMainView`。
+
+扩展 id 会成为 UI 命名空间，但**三个插槽前缀不同**：overlays 与 railCards 是
+`extension:<id>:<itemId>`，mainViews 是 `ext:<id>:<viewId>`。扩展复用 Panel 的 Vue、
+ui-frame、弹层互斥、卡片拖动/折叠和布局持久化；数据请求与业务能力门控由扩展自己
+负责。
 
 
 ## 数据通路与门控
@@ -151,7 +158,7 @@ acceptEvent(event) {
 
 | 判据 | 回答的问题 | 数据来源 | 坑 |
 | --- | --- | --- | --- |
-| `moduleMounted(state, id)` | 这台部署**有**这个模块吗 | Core 的 `ModulesList` | 只反映挂载，不反映「界面是否编入产物」 |
+| `moduleMounted(state, id)` | 这台部署**有**这个模块吗 | Core 的 `ModulesList` | 只反映挂载，不反映 bundle 是否部署到静态目录 |
 | `teamModuleEnabled(team, id)` | 这个**人格**允许用吗 | 人格白名单 | 空名单 = 不限制 |
 | `teamToolAvailable(team, tool)` | 这个**工具**可用吗 | 人格白名单 | 空名单同样不限制，**没装模块也可能 true** |
 
@@ -194,13 +201,62 @@ npm run build     # 壳 + 共享 chunk（assets/panel-*.js）+ import map
 npm test
 
 # 注：扩展自己的测试在各自模块仓
-cd /path/to/module/panel-ui && npm run build
+cd /path/to/module/panel-ui && npm run build && npm test
 ```
 
 构建产物里可以直接核对三件事：
 
-- `dist/index.html` 有 `<script type="importmap">`（10+ 条，指向 `assets/panel-*.js`）；
-- 那些 `panel-*.js` 是**固定文件名**（不带 hash）；
+- `dist/index.html` 有 `<script type="importmap">`，**12 条**（真值在
+  `web/panel-shared.entries.json`）：6 条指向 `assets/panel-*`（`panel-vue.js`、
+  `panel-sdk.js`、`panel-components/` 下 4 个组件），6 条指向 `assets/ui-frame/`
+  （4 个组件 + 根入口 + `doc`）；
+- 那些 `panel-*.js` / `ui-frame/*.js` 都是**固定文件名**（不带 hash）——扩展按裸
+  标识符引用它们，名字一变全部失联；
 - 它们里**没有** CSS import（浏览器原生 ES 模块不支持，样式已内联进 JS）。
+
+## 测试
+
+模块自己的扩展要跑单测时，需要**面板源码**：`state` / `sendCommand` 这些运行时值
+以及 ui-frame 组件都在面板仓里（`web/vendor/ui-frame` 是全站唯一那份源码）。所以
+模块 `panel-ui/vitest.config.ts` 要 alias 过去：
+
+```ts
+const PANEL_SOURCE =
+  process.env.PANEL_SOURCE ?? path.resolve(here, '../../../.local/share/echo-agent-panel/source');
+```
+
+两个踩过的坑：
+
+- **路径算错的表现极具误导性**：上跳层级少一级会得到 `<home>/src/.local/...`（一个
+  永远不存在的路径），而报错是每个测试文件一句 "Failed to resolve import
+  `@echo-agent/panel`"——看不出是路径问题。配置里应当先 `existsSync` 检查
+  `<PANEL_SOURCE>/web/src/extension-api.ts`，缺了就直接抛「找不到面板源码：<路径>」。
+- **`vitest` 自带一份 `vite`**：它与 `package.json` 里的 vite 大版本不一致时，
+  `.ts` 形式的 vitest 配置可能整份不生效（alias 全部失效，症状同上）。模块仓应把
+  vitest 对齐到与面板同大版本。
+
+## 裸标识符是封闭清单
+
+扩展产物里保留 `import ... from 'vue'` 是对的：浏览器拿裸标识符去上表那张 import
+map 里查。但它是**封闭**的——表里没有的名字，浏览器报 "Failed to resolve module
+specifier"，而构建阶段**不会**报错。
+
+壳里有 42 个 `.vue`，能被扩展引用的只有 8 个：
+
+| 裸标识符 | 说明 |
+|---|---|
+| `vue` | 唯一实例（两份 vue = 两套响应式系统） |
+| `@echo-agent/panel` | 单例：`state` / `dispatch` / `sendCommand` / 注册表 |
+| `@echo-agent/panel/components/{LoadHint,PanelIcon,PanelSidebar,SessionSwitcher}` | 壳的公开组件 |
+| `@echolab-auto/ui-frame`、`@echolab-auto/ui-frame/doc` | ui-frame 根入口 |
+| `@echolab-auto/ui-frame/components/{NeumorphismButton,NeumorphismSelect,NeumorphismSpinner,NeumorphismTag}` | ui-frame 公开组件 |
+
+要加新的共享模块（新增导出、要暴露第 9 个组件）：改
+`web/panel-shared.entries.json` → 重建面板 → **同时**升 `sdkVersion` 并同步
+Core 仓 `echo-defs::panel_ui::PANEL_UI_SDK_VERSION`，否则老扩展会在新面板上白屏而
+没有任何提示。只在自己模块的 `vite.config.ts` 里加一行 externalize 不解决任何
+问题——那只是把裸标识符留在产物里，浏览器照样查不到。
+
+其余一切（包括所有工具库、其余壳组件、业务类型）都必须打进扩展自己的产物。
 
 运行期状态在设置页「面板 UI 扩展」小节可见（加载了几个、哪个失败、为什么）。
