@@ -166,7 +166,7 @@ conversation?: string | null, } } | { "RequestWorkspaceGitStatus": { team_id?: s
  * 「刷新此目录」靠它把开销收敛到真正变了的那一个；不认得的路径
  * （不在该会话目录里）由模块忽略，不报错。
  */
-directories?: Array<string> | null, } } | { "RequestWorkspaceFiles": { team_id?: string | null, session_id: string, path: string, } } | { "RequestBrowseDirectories": { path?: string | null, } } | { "RequestProDocBundle": { team_id?: string | null, root: string, } } | { "BrowseProDocDirs": { path?: string | null, } } | "ProDocRoots" | { "ReadProDocFile": { team_id?: string | null, root: string, path: string, 
+directories?: Array<string> | null, } } | { "FetchWorkspaceGit": { team_id?: string | null, session_id: string, directories?: Array<string> | null, } } | { "RequestWorkspaceFiles": { team_id?: string | null, session_id: string, path: string, } } | { "RequestBrowseDirectories": { path?: string | null, } } | { "RequestProDocBundle": { team_id?: string | null, root: string, } } | { "BrowseProDocDirs": { path?: string | null, } } | "ProDocRoots" | { "ReadProDocFile": { team_id?: string | null, root: string, path: string, 
 /**
  * 面板生成的回执关联 id（模块原样带回）。
  */
