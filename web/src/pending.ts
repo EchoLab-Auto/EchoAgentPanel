@@ -51,12 +51,15 @@ export const REQUEST_RESPONSES: Record<string, string> = {
   RequestModulesList: 'ModulesList',
   RequestTeamsList: 'TeamsList',
   RequestShellSessions: 'ShellSessionsList',
-  // 工作区三条命令（RequestWorkspaceSessions / Files / GitStatus）此前也在这里，
-  // 2026-11 删除：文件浏览器卡移除后**全仓已无发送方**（`state.ts` 仍消费这三个
-  // 事件——那是 Core 主动推的状态，不是对本面板请求的应答）。留着只会让人以为
-  // "面板会请求工作区状态"，从而在别处复制一份发送逻辑。
+  // 工作区会话：发送方在**外部扩展仓** `agent-module-workspace` 的 panel-ui
+  // （`workspace-prefetch.ts` / `WorkspacePanel.vue`），壳里 grep 不到。2026-11
+  // 曾按"壳内无发送方"删掉这一行，结果扩展登记的等待永远没人销账——空工作区
+  // 时点开面板 20s 后必然弹「加载工作区会话超时」，连"暂无会话"空态都被压掉。
   //
-  // 要恢复工作区 UI 时：先有发送方，再把 (请求 → 应答) 这张表补回来。
+  // 教训：这张表的发送方**可以住在扩展里**，删表项前要查扩展仓，不能只查壳。
+  // （`RequestWorkspaceFiles` / `RequestWorkspaceGitStatus` 走 `sendCommand`，
+  // 不登记等待，故不在此表。）
+  RequestWorkspaceSessions: 'WorkspaceSessions',
   RequestSystemPrompt: 'SystemPrompt',
   TestApi: 'ApiTestResult',
   QueryApiBalance: 'ApiBalanceResult',

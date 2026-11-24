@@ -148,6 +148,43 @@ describe('pending：阶段推进', () => {
   });
 });
 
+describe('pending：工作区会话等待（回归 2026-11）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('空列表广播也销账：不再落到 timeout，空态文案得以显示', () => {
+    // 真实缺口：`RequestWorkspaceSessions` 的发送方在**外部扩展仓**
+    // agent-module-workspace 的 panel-ui 里（预取 + 面板挂载），壳内 grep 不到。
+    // 关联表曾按"壳内已无发送方"删掉这一行 → 扩展登记的等待永远没人销账，
+    // 没建过工作区（列表恒空、预取永不判新鲜）时点开面板 20s 后必弹
+    // 「加载工作区会话超时」，并且 `phase==='timeout'` 还压掉了"暂无会话"空态。
+    trackRequest(
+      'workspace:sessions',
+      { RequestWorkspaceSessions: { team_id: 't' } } as BackendCommand,
+      null,
+    );
+    const { phase, failed } = usePending('workspace:sessions');
+    vi.advanceTimersByTime(PENDING_VISIBLE_AFTER_MS);
+    expect(phase.value).toBe('pending');
+
+    // Core 对 RequestWorkspaceSessions **必答**，空列表也广播。
+    resolvePendingEvent({
+      WorkspaceSessions: { team_id: 't', sessions: [], active: null, active_conversation: null },
+    });
+    vi.advanceTimersByTime(PENDING_MIN_VISIBLE_MS);
+    expect(phase.value).toBe('idle');
+
+    // 登记已删：再走满超时窗口也不会回头成 timeout。
+    vi.advanceTimersByTime(PENDING_TIMEOUT_AFTER_MS);
+    expect(phase.value).toBe('idle');
+    expect(failed.value).toBe(false);
+  });
+});
+
 describe('pending：关联表与命令名', () => {
   it('commandName 支持裸串与对象两种命令形态', () => {
     expect(commandName('RequestState')).toBe('RequestState');
@@ -159,6 +196,9 @@ describe('pending：关联表与命令名', () => {
     expect(REQUEST_RESPONSES.RequestContext).toBe('ContextSnapshot');
     expect(REQUEST_RESPONSES.RequestTeamsList).toBe('TeamsList');
     expect(REQUEST_RESPONSES.RequestShellSessions).toBe('ShellSessionsList');
+    // 工作区会话：发送方在扩展仓（agent-module-workspace/panel-ui），壳里没有
+    // 发送方 ≠ 没有等待登记。漏了这一项，空工作区时面板必弹超时。
+    expect(REQUEST_RESPONSES.RequestWorkspaceSessions).toBe('WorkspaceSessions');
     // 刻意不收：时间线（状态标志判定）与 RequestState（多事件响应）
     expect(REQUEST_RESPONSES.RequestTrunkTimeline).toBeUndefined();
     expect(REQUEST_RESPONSES.RequestState).toBeUndefined();
