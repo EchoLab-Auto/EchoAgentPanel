@@ -5,8 +5,8 @@
   "type": "module",
   "protocolCore": {
     "repository": "EchoLab-Auto/EchoAgentCore",
-    "commit": "ba4fed2794a79faa4efb1c6f3fff8e905b51bfe7",
-    "generatedSha256": "cc8fd247dfeff4f989c3b2845af6dbc7398dfe7f805ca6b6e9126ddecfc95134"
+    "commit": "eb1a475c42aaa4f7d76628cca7c645818f401143",
+    "generatedSha256": "8160e18beb1a2f86f3f946ff5a5f4407ea9ba02b848a64e2cc4ae3fccf1d4207"
   },
   "scripts": {
     "dev": "vite",
