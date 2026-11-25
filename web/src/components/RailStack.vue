@@ -396,10 +396,15 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
               : undefined
           "
         />
-        <!-- 卡片 = ui-frame NeumorphismCard（glass 磨砂玻璃；布局经透传的
-             rail-stack__card 类施加——卡片自身不内置布局，见库的布局契约） -->
+        <!-- 卡片 = ui-frame NeumorphismCard（凸起，elevation 2 与「当前会话」等
+             侧栏卡一致；布局经透传的 rail-stack__card 类施加——卡片自身不内置
+             布局，见库的布局契约）。
+             2026-11 由 `glass`（半透明磨砂）改为凸起：玻璃底的半透明让卡内控件
+             （按钮 / 标签 / 输入）都得各自再算一遍「怎么在磨砂上才看得见」，
+             而实色底让「控件与卡同色」成为默认事实——按钮不画自己的背景即天然
+             对齐，不必复制混合比例。 -->
         <NeumorphismCard
-          glass
+          :elevation="2"
           no-padding
           class="rail-stack__card"
           :class="{
@@ -574,15 +579,13 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
   right: 12px;
 }
 
-/* 布局（经透传类施加在 NeumorphismCard 根节点上；材质由库 glass 提供） */
+/* 布局（经透传类施加在 NeumorphismCard 根节点上；材质由库的 elevation 提供，
+   实色底 `--nm-surface-color`） */
 .rail-stack__card {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  /* 覆盖库 glass 底色的不透明度，与面板其他悬浮元素一致 */
-  --nm-glass-bg: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
-  --nm-glass-blur: 24px;
   border-radius: 20px;
   transition: opacity 0.18s ease-out;
 }
