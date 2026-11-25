@@ -88,6 +88,13 @@ export interface PanelRailCard {
   count?: number;
   countTitle?: string;
   compact?: boolean;
+  /**
+   * 展开态的最小高度（px，可选）。
+   *
+   * 给「内容要占满卡体高度」的卡片用（如文件浏览器：内部树做唯一滚动区）。
+   * 不声明时走列的默认 80px——那种高度下 `flex: 1` 的内容区会被压到 0。
+   */
+  minHeight?: number;
   component: Component;
   componentProps?: Record<string, unknown>;
 }

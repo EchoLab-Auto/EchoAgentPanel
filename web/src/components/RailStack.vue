@@ -50,6 +50,17 @@ export interface RailCardDef {
    * 拖动比例——否则小卡片会被撑成大块、把下方卡片挤扁。
    */
   compact?: boolean;
+  /**
+   * 展开态的最小高度（px，可选）。
+   *
+   * 默认用列的 `--rail-card-min-h`（80px）——对「一行摘要」类卡片够用，对
+   * **自身内容要占满卡体高度**的卡片（如文件浏览器：内部树用 `flex: 1` +
+   * `overflow-y: auto` 做唯一滚动区）则会把内容压到 0 高。这类卡片在这里
+   * 声明「至少给我这么高」，树才拿得到可视高度。
+   *
+   * 只在展开且非紧凑时生效；超出列高时由 `.rail-stack__list` 整列滚动。
+   */
+  minHeight?: number;
   /** 扩展卡片组件；内置卡片继续使用同名具名插槽。 */
   component?: Component;
   componentProps?: Record<string, unknown>;
@@ -380,7 +391,7 @@ const isEmpty = computed(() => visibleCards.value.length === 0);
           'rail-stack__slot--open': isOpen(card.id) && !card.compact,
           'rail-stack__slot--arriving': railDrag.arrivingId === card.id,
         }"
-        :style="isOpen(card.id) && !card.compact ? { flexGrow: flexOf(card.id) } : undefined"
+        :style="isOpen(card.id) && !card.compact ? { flexGrow: flexOf(card.id), minHeight: card.minHeight ? `${card.minHeight}px` : undefined } : undefined"
       >
         <!-- 落点指示线（拖动中，指针悬停在本列） -->
         <div v-if="isDropIndexAt(side, index)" class="rail-stack__drop-line" />
