@@ -11,8 +11,10 @@
 //! 所以这里把 `echo-agent.panel-ui.list` 的结果与每条 `import()` 的成败
 //! 摆出来：装了哪些、哪个失败了、为什么。
 
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import { panelUiStatus, panelUiSummary } from '../panel-ui-status';
+import { reloadPanelExtensions } from '../extension-loader';
 
 const status = computed(() => panelUiStatus.value);
 const summary = computed(() => panelUiSummary(status.value));
@@ -20,6 +22,19 @@ const loadedCount = computed(() => status.value.loaded.length);
 const failedCount = computed(() => status.value.failed.length);
 /** 健康态：不需要用户做任何事。 */
 const healthy = computed(() => status.value.phase === 'ready' || status.value.phase === 'unavailable');
+
+/** 手动重载中（按钮 loading；重载本身很轻，只防连点）。 */
+const reloading = ref(false);
+
+async function reload() {
+  if (reloading.value) return;
+  reloading.value = true;
+  try {
+    await reloadPanelExtensions();
+  } finally {
+    reloading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -31,7 +46,14 @@ const healthy = computed(() => status.value.phase === 'ready' || status.value.ph
           {{ loadedCount }} 个已加载<template v-if="failedCount">，{{ failedCount }} 个失败</template>
         </span>
       </div>
-      <span class="panel-ui-ext__sdk">SDK {{ status.sdk || '—' }}</span>
+      <div class="panel-ui-ext__actions">
+        <span class="panel-ui-ext__sdk">SDK {{ status.sdk || '—' }}</span>
+        <!-- 手动重载（2026-11）：自动重试用尽后界面就是空的，而这时唯一能做的
+             「刷新整页」连入口都没有。这里把自救成本降到一次点击。 -->
+        <NeumorphismButton :size="26" variant="ghost" :loading="reloading" @click="reload">
+          重新加载
+        </NeumorphismButton>
+      </div>
     </header>
 
     <p v-if="summary" class="panel-ui-ext__summary">{{ summary }}</p>
@@ -87,6 +109,13 @@ const healthy = computed(() => status.value.phase === 'ready' || status.value.ph
 .panel-ui-ext__sdk {
   font-size: 12px;
   opacity: 0.7;
+}
+
+/* 右组：SDK 版本 + 手动重载钮（版本是诊断信息，重载是动作，同一行右对齐）。 */
+.panel-ui-ext__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .panel-ui-ext__summary {

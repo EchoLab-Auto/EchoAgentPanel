@@ -206,6 +206,18 @@ const RETRY_DELAYS_MS = [400, 1200, 3000] as const;
  * 现在的收敛条件：拿到清单（`ready` / `partial` / `failed` /
  * `version-mismatch`）就收工；只有 `unavailable`（服务不可用）才按
  * {@link RETRY_DELAYS_MS} 重试，用尽后挂回 watcher 等下一次重连。
+ *
+ * ## 还有两条兜底（2026-11 用户实际踩到「全缺」之后加的）
+ *
+ * 一次用尽 ≠ 这个页面永远不行：服务在"用尽"之后才就绪的部署（慢机器 / Core
+ * 冷启动读盘）、以及用户把标签页放后台很久再回来（浏览器节流定时器，重试全
+ * 被推迟）都会落在"已经放弃"的状态里。所以：
+ *
+ * - 标签页重新可见（`visibilitychange`）时，若还没拿到清单就再来一轮；
+ * - 设置页给一个手动的「重新加载扩展」入口（见 `reloadPanelExtensions`）。
+ *
+ * 两条都只是重新调一次幂等的 `loadPanelExtensions`，不会重复注册扩展
+ * （已加载 id 记在 `panelUiStatus.loaded` 里）。
  */
 export function startPanelUiLoading(): void {
   /** 收工标志：拿到清单后置位，此后不再打服务端。 */
@@ -215,6 +227,9 @@ export function startPanelUiLoading(): void {
   let attempts = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  /** 标签页重新可见时的监听解绑（收工 / 卸载时释放）。 */
+  let stopVisibility: () => void = () => {};
+
   function finish() {
     done = true;
     if (timer !== null) {
@@ -222,6 +237,7 @@ export function startPanelUiLoading(): void {
       timer = null;
     }
     stopWatch();
+    stopVisibility();
   }
 
   function attempt() {
@@ -254,6 +270,43 @@ export function startPanelUiLoading(): void {
     },
     { immediate: true },
   );
+
+  // 标签页回到前台：定时器在后台会被浏览器节流到几十秒一次，"用尽三次"很可能
+  // 全部发生在用户切走的那段时间里——回来时看到的还是空的界面。
+  if (typeof document !== 'undefined') {
+    const onVisible = () => {
+      if (done || document.visibilityState !== 'visible') return;
+      if (!state.connected) return;
+      attempts = 0;
+      attempt();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    stopVisibility = () => document.removeEventListener('visibilitychange', onVisible);
+  }
   // 首轮就命中（页面加载时已连上）：watcher 的回调已经跑过，这里不必再停——
   // `finish()` 会在拿到清单时停。
+}
+
+/**
+ * 手动重新加载扩展（设置页的按钮）。
+ *
+ * 与 `startPanelUiLoading` 的区别只有"谁来触发"：这条是用户点出来的，所以
+ * **不**重试、**不**装监听，把结果原样留在 `panelUiStatus` 里给人看。已加载的
+ * 扩展不会重复注册（`loadPanelExtensions` 按 `loaded` 去重）。
+ *
+ * 存在理由：自动重试总有用尽的时候，而"用尽之后服务才就绪"只会表现为界面
+ * 空白、没有任何按钮。这个入口把"只能刷新整页"降级为"点一下"。
+ */
+export async function reloadPanelExtensions(): Promise<void> {
+  if (!state.connected) {
+    setPanelUiStatus({
+      phase: 'idle',
+      sdk: localSdkVersion(),
+      loaded: [...panelUiStatus.value.loaded],
+      failed: [],
+      reason: '未连接 Core，先等连接恢复',
+    });
+    return;
+  }
+  await loadPanelExtensions();
 }
