@@ -22,7 +22,7 @@
     "test:protocol-sync": "node --test scripts/sync-protocol.test.mjs"
   },
   "dependencies": {
-    "@echolab-auto/ui-frame": "git+https://github.com/EchoLab-Auto/ui-frame.git#eeb6db0a20da427b55f2d7f7e3e1b7ecc8b65409",
+    "@echolab-auto/ui-frame": "git+https://github.com/EchoLab-Auto/ui-frame.git#79b5c46f1db389f42fd88a684cdc4aeacef7dcba",
     "dompurify": "^3.2.4",
     "katex": "^0.19.1",
     "marked": "^18.0.5",

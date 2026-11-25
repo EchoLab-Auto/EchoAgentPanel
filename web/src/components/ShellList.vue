@@ -77,9 +77,13 @@ onUnmounted(() => releasePending('shell:sessions'));
       <NeumorphismButton :size="32" variant="glass" :disabled="!state.connected" @click="startShell">
         新建
       </NeumorphismButton>
+      <!-- 图标钮走库的 `ghost` + `square`（2026-11）：透明底跟随卡片底色、
+           26px 方钮，与侧栏其它卡头图标钮同一档。此前是 `variant="glass"` 32px
+           ——玻璃底比卡片更亮一块，且各卡尺寸不一。 -->
       <NeumorphismButton
-        :size="32"
-        variant="glass"
+        :size="26"
+        variant="ghost"
+        shape="square"
         :disabled="!state.connected"
         title="刷新 Shell 会话"
         aria-label="刷新 Shell 会话"

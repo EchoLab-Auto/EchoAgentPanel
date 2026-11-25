@@ -6,6 +6,7 @@
 //! 包含提示词块与历史；Core 的 total_tokens 只计历史，不能直接当作总占用。
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
 import NeumorphismProgress from '@echolab-auto/ui-frame/components/NeumorphismProgress';
 import { sendCommand } from '../connection';
 import { railSessionId } from '../rail-cards';
@@ -146,15 +147,20 @@ watch(activityPhase, (phase, previous) => {
       <div class="session-context__label">会话名称</div>
       <div class="session-context__name" :title="sessionName">{{ sessionName }}</div>
     </div>
-    <button
+    <!-- 图标钮走库的 `ghost` + `square`（2026-11）：此前是自绘 `<button>`，
+         26×26 透明底 + hover 色块（`--panel-hover`）。色块与侧栏其它卡头按钮的
+         「凸起 / 内凹」深度语言不是一套，故改为库变体，只保留绝对定位。 -->
+    <NeumorphismButton
       class="session-context__refresh"
-      type="button"
+      :size="26"
+      variant="ghost"
+      shape="square"
       title="刷新上下文占用"
       aria-label="刷新上下文占用"
       @click="requestSnapshot"
     >
       <PanelIcon name="refresh" size="sm" />
-    </button>
+    </NeumorphismButton>
 
     <template v-if="snapshot">
       <div class="session-context__meter-head">
@@ -221,25 +227,13 @@ watch(activityPhase, (phase, previous) => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 只留定位：尺寸（26px 方钮）、透明底与三态深度全部由库的
+   `variant="ghost" shape="square"` 提供——同一套规则在 Shell / 文件浏览器 /
+   Git 卡复用，不在这里再写一份。 */
 .session-context__refresh {
   position: absolute;
   top: 2px;
   right: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--nm-text-secondary);
-  cursor: pointer;
-}
-.session-context__refresh:hover {
-  background: var(--panel-hover);
-  color: var(--panel-accent);
 }
 .session-context__meter-head,
 .session-context__usage {
