@@ -759,20 +759,6 @@ function overviewBalanceFmt(value: number, seriesName: string): string {
   return formatMoney(value, currencyOf(key));
 }
 
-/** 近 7 天估算费用摘要（有可估算用量才显示） */
-const costSummary = computed(() => {
-  const parts: string[] = [];
-  for (const entry of metricsEntries.value) {
-    const totals = entryTotals(entry);
-    if (totals.tokens > 0 && totals.cost != null) {
-      parts.push(`${entry.name || '默认'} 约 ${formatMoney(totals.cost, totals.currency)}`);
-    }
-  }
-  return parts.length > 0
-    ? `近 7 天估算费用：${parts.join(' · ')}（按 [agent.pricing] 定价估算；缓存命中按命中价计，未配置命中价的模型按未命中价）`
-    : '';
-});
-
 /** 保存：编辑模式存回 profile（改名则两步提交）；添加模式以名称为准新建/覆盖 */
 function sendUpdate(name: string, fields: ReturnType<typeof currentFormPayload>) {
   sendCommand({
@@ -1145,7 +1131,6 @@ watch(
             />
           </div>
         </div>
-        <div v-if="costSummary" class="muted api-metrics__cost">{{ costSummary }}</div>
       </template>
     </div>
 
@@ -1751,8 +1736,5 @@ watch(
 .api-metrics__chart-title {
   font-size: 12px;
   color: var(--nm-text-secondary);
-}
-.api-metrics__cost {
-  font-size: 12px;
 }
 </style>
