@@ -179,27 +179,81 @@ export function bundleUrl(bundle: string): string {
 }
 
 /**
- * 启动加载（首次连上 Core 时执行一次）。
+ * 首连未拿到清单时的重试节奏。
+ *
+ * 为什么要按时间重试而不是「等下次重连」：Core 重启后浏览器往往**一次就连上**
+ * （WebSocket 监听比模块装配早几百毫秒），此后 `connected` 长期为 true——只挂
+ * 在重连上等于永不重试。而模块服务表没就绪时 `InvokeService` 必然失败，正是
+ * 这个窗口内的常态。
+ */
+const RETRY_DELAYS_MS = [400, 1200, 3000] as const;
+
+/**
+ * 启动加载（拿到清单为止）。
  *
  * 为什么要等连接：`InvokeService` 需要 WS 就绪。握手期 `sendCommand` 虽然会
  * 排队，但清单是"一次基线"，排在首帧之后更稳（也避免和 `RequestState` 抢带宽）。
+ *
+ * ## 为什么不能"首连试一次就收工"（2026-11「工作区 UI 整块消失」）
+ *
+ * 此前的写法是首连触发一次 `loadPanelExtensions()` 后立刻 `stop()` 掉 watcher。
+ * 于是 Core 刚重启的那一小段（模块服务表尚未就绪）首连的页面会拿到
+ * `phase = 'unavailable'`，然后**再也不会重试**——所有运行期 UI 扩展（工作区
+ * 的文件浏览器卡 / Git 卡 / 工作区会话管理入口）整块消失，用户只能靠手动刷新
+ * 页面自救。`loadPanelExtensions` 本身明确是幂等的（只加载新增条目），一次
+ * 性守卫没有存在的理由。
+ *
+ * 现在的收敛条件：拿到清单（`ready` / `partial` / `failed` /
+ * `version-mismatch`）就收工；只有 `unavailable`（服务不可用）才按
+ * {@link RETRY_DELAYS_MS} 重试，用尽后挂回 watcher 等下一次重连。
  */
 export function startPanelUiLoading(): void {
-  let stop: (() => void) | null = null;
-  let started = false;
-  stop = watch(
+  /** 收工标志：拿到清单后置位，此后不再打服务端。 */
+  let done = false;
+  /** watcher 的停止函数；先占位再替换，避开 `immediate` 首轮回调的 TDZ。 */
+  let stopWatch: () => void = () => {};
+  let attempts = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  function finish() {
+    done = true;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    stopWatch();
+  }
+
+  function attempt() {
+    if (done) return;
+    timer = null;
+    void loadPanelExtensions().then(() => {
+      if (done) return;
+      const phase = panelUiStatus.value.phase;
+      // unavailable = 服务还没就绪；其余状态都表示「清单已拿到」——重试只会
+      // 重复同一个失败（坏 bundle / 版本不符），没有意义。
+      if (phase !== 'unavailable') {
+        finish();
+        return;
+      }
+      if (attempts < RETRY_DELAYS_MS.length) {
+        timer = setTimeout(attempt, RETRY_DELAYS_MS[attempts]);
+        attempts += 1;
+        return;
+      }
+      // 用尽：把 watcher 留着，等断线重连时再来一轮（首连时就断过的部署）。
+      attempts = 0;
+    });
+  }
+
+  stopWatch = watch(
     () => state.connected,
     (connected) => {
-      if (!connected || started) return;
-      started = true;
-      void loadPanelExtensions();
-      // **下一微任务再停**：`immediate` 的首轮回调发生在 `watch` 返回**之前**，
-      // 那一刻 `stop` 还是 `null`——直接调它会撞上 TDZ
-      // （`Cannot access 'stop' before initialization`，2026-11 App 测试现场）。
-      queueMicrotask(() => stop?.());
+      if (!connected || done) return;
+      attempt();
     },
     { immediate: true },
   );
-  // 首轮已命中（页面加载时就连上了）：立刻停，不必等微任务。
-  if (started) stop();
+  // 首轮就命中（页面加载时已连上）：watcher 的回调已经跑过，这里不必再停——
+  // `finish()` 会在拿到清单时停。
 }
