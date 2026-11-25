@@ -162,7 +162,7 @@ function runInstanceOp(op: InstanceOpKind, name: string): void {
         <p class="ap-head__sub">连接状态 · 启停控制 · 管理界面</p>
       </div>
       <NeumorphismButton
-        size="small"
+        :size="32"
         variant="glass"
         :disabled="!state.connected"
         @click="refresh"
@@ -192,7 +192,7 @@ function runInstanceOp(op: InstanceOpKind, name: string): void {
 
     <!-- 实例状态行（仅可见实例） -->
     <div v-for="row in rows" :key="row.instance.name" class="instance-row">
-      <NeumorphismStatusDot :status="row.view.dot" size="small" />
+      <NeumorphismStatusDot :status="row.view.dot" :size="8" />
       <span class="instance-row__name">{{ row.instance.display_name || row.instance.name }}</span>
       <span v-if="row.instance.self_id" class="instance-row__id">{{ row.instance.self_id }}</span>
       <span class="instance-row__state" :class="`is-${row.view.dot}`">
@@ -200,7 +200,7 @@ function runInstanceOp(op: InstanceOpKind, name: string): void {
       </span>
       <span class="instance-row__actions">
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="glass"
           :disabled="!state.connected"
           @click="runInstanceOp(row.instance.running ? 'stop' : 'start', row.instance.name)"
@@ -208,7 +208,7 @@ function runInstanceOp(op: InstanceOpKind, name: string): void {
           {{ row.instance.running ? '停止' : '启动' }}
         </NeumorphismButton>
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="glass"
           :disabled="!state.connected"
           @click="runInstanceOp('restart', row.instance.name)"

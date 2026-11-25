@@ -62,7 +62,7 @@ watch(ctx.running, (running) => {
     <div class="image-node__head">
       <span v-if="node.label" class="instance-node__label">{{ node.label }}</span>
       <NeumorphismButton
-        size="small"
+        :size="32"
         variant="glass"
         :disabled="ctx.disabled.value"
         :loading="pending"

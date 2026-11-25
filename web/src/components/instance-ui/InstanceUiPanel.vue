@@ -36,7 +36,7 @@ function nodeKey(index: number, type: UiNodeType): string {
     <div v-if="panel.title" class="instance-ui-panel__head">
       <h3>{{ panel.title }}</h3>
     </div>
-    <NeumorphismEmpty v-if="!panel.nodes.length" description="暂无可配置项" size="small" />
+    <NeumorphismEmpty v-if="!panel.nodes.length" description="暂无可配置项" :size="60" />
     <component
       :is="NODE_COMPONENTS[node.type]"
       v-for="(node, index) in panel.nodes"

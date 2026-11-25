@@ -10,5 +10,5 @@ const { theme } = useTheme();
 </script>
 
 <template>
-  <NeumorphismThemeToggle v-model="theme" size="small" />
+  <NeumorphismThemeToggle v-model="theme" :size="5" />
 </template>

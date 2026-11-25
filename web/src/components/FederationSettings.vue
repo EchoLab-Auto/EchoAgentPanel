@@ -712,7 +712,7 @@ function migrateSession() {
       </div>
       <div class="fed-actions">
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="primary"
           class="fed-btn fed-btn--primary fed-create"
           @click="openWizard"
@@ -720,7 +720,7 @@ function migrateSession() {
           {{ hasFederation ? '添加节点' : '创建联邦' }}
         </NeumorphismButton>
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="glass"
           class="fed-btn fed-refresh"
           @click="refreshAll"
@@ -744,12 +744,12 @@ function migrateSession() {
           >
             <NeumorphismCheckbox
               :model-value="!!wizardSel[n.name]"
-              size="small"
+              :size="18"
               :disabled="!n.online"
               @update:model-value="(v: boolean) => toggleWizardSel(n.name, v)"
             />
             <span class="fed-dot">
-              <NeumorphismStatusDot :status="n.online ? 'online' : 'offline'" size="small" />
+              <NeumorphismStatusDot :status="n.online ? 'online' : 'offline'" :size="8" />
             </span>
             <span class="fed-wizard__name">{{ n.name }}</span>
             <span class="fed-sub fed-wizard__meta">
@@ -769,7 +769,7 @@ function migrateSession() {
         <div v-else class="fed-sub fed-sub--warn">至少选择 2 个在线节点。</div>
         <div class="fed-wizard__actions">
           <NeumorphismButton
-            size="small"
+            :size="32"
             variant="glass"
             class="fed-btn fed-wizard__cancel"
             @click="closeWizard"
@@ -777,7 +777,7 @@ function migrateSession() {
             取消
           </NeumorphismButton>
           <NeumorphismButton
-            size="small"
+            :size="32"
             variant="primary"
             class="fed-btn fed-btn--primary fed-wizard__go"
             :disabled="wizardPlan.pairs.length === 0"
@@ -809,7 +809,7 @@ function migrateSession() {
                       ? 'busy'
                       : 'offline'
                 "
-                size="small"
+                :size="8"
               />
             </span>
             <span class="fed-wizard__pair">{{ t.a }} ⇄ {{ t.b }}</span>
@@ -832,7 +832,7 @@ function migrateSession() {
         <div class="fed-wizard__actions">
           <NeumorphismButton
             v-if="!wizardRunning && wizardFailCount"
-            size="small"
+            :size="32"
             variant="glass"
             class="fed-btn fed-wizard__retry"
             @click="retryFailed"
@@ -840,7 +840,7 @@ function migrateSession() {
             重试失败项（{{ wizardFailCount }}）
           </NeumorphismButton>
           <NeumorphismButton
-            size="small"
+            :size="32"
             variant="primary"
             class="fed-btn fed-btn--primary fed-wizard__done"
             :disabled="wizardRunning"
@@ -865,7 +865,7 @@ function migrateSession() {
             <span class="fed-topo__dash" :class="{ 'fed-topo__dash--on': e.online }" />
           </span>
           <span class="fed-dot">
-            <NeumorphismStatusDot :status="e.online ? 'online' : 'offline'" size="small" />
+            <NeumorphismStatusDot :status="e.online ? 'online' : 'offline'" :size="8" />
           </span>
           <span class="fed-topo__line">
             <span class="fed-topo__dash" :class="{ 'fed-topo__dash--on': e.online }" />
@@ -883,7 +883,7 @@ function migrateSession() {
       <div v-for="c in cards" :key="c.name || '(core)'" class="fed-core">
         <div class="fed-core__head">
           <span class="fed-dot">
-            <NeumorphismStatusDot :status="c.online ? 'online' : 'offline'" size="small" />
+            <NeumorphismStatusDot :status="c.online ? 'online' : 'offline'" :size="8" />
           </span>
           <div class="fed-core__id">
             <div class="fed-core__name">{{ c.label }}</div>
@@ -900,7 +900,7 @@ function migrateSession() {
           </div>
           <div class="fed-core__actions">
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="glass"
               class="fed-btn fed-refresh-core"
               @click="refreshCore(c.name)"
@@ -908,7 +908,7 @@ function migrateSession() {
               刷新
             </NeumorphismButton>
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="glass"
               class="fed-btn fed-gen-invite"
               @click="requestInvite(c.name)"
@@ -916,7 +916,7 @@ function migrateSession() {
               生成邀请
             </NeumorphismButton>
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="glass"
               class="fed-btn fed-add-peer"
               @click="openAdd(c.name)"
@@ -934,7 +934,7 @@ function migrateSession() {
           <div class="fed-invite-row">
             <code class="fed-invite-text">{{ c.invite }}</code>
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="glass"
               class="fed-btn fed-copy-invite"
               @click="copyInvite(c.name)"
@@ -953,7 +953,7 @@ function migrateSession() {
             <NeumorphismInput
               v-model="inviteInput"
               class="fed-input"
-              size="small"
+              :size="36"
               placeholder="粘贴 echofed:// 邀请串自动填充（推荐）"
               @update:model-value="applyInvite"
             />
@@ -964,7 +964,7 @@ function migrateSession() {
               <NeumorphismInput
                 v-model="formName"
                 class="fed-input"
-                size="small"
+                :size="36"
                 :disabled="!!editName"
                 placeholder="gpu-box"
               />
@@ -974,7 +974,7 @@ function migrateSession() {
               <NeumorphismInput
                 v-model="formUrl"
                 class="fed-input"
-                size="small"
+                :size="36"
                 placeholder="ws://192.168.1.20:3133"
               />
             </label>
@@ -983,14 +983,14 @@ function migrateSession() {
               <NeumorphismInput
                 v-model="formToken"
                 class="fed-input"
-                size="small"
+                :size="36"
                 placeholder="与对端一致"
               />
             </label>
             <div class="fed-field fed-field--check">
               <NeumorphismCheckbox
                 v-model="formAllowAll"
-                size="small"
+                :size="18"
                 label="允许对端调用本机全部工具（默认满权限；联邦互信 ≈ SSH 免密）"
               />
             </div>
@@ -999,7 +999,7 @@ function migrateSession() {
               <NeumorphismTextarea
                 v-model="formToolsCustom"
                 class="fed-input fed-textarea"
-                size="small"
+                :size="36"
                 :rows="3"
                 placeholder="bash&#10;read_file"
               />
@@ -1010,7 +1010,7 @@ function migrateSession() {
                 <div v-for="kind in QUERY_KINDS" :key="kind.key" class="fed-check">
                   <NeumorphismCheckbox
                     :model-value="formQueries.includes(kind.key)"
-                    size="small"
+                    :size="18"
                     :label="kind.label"
                     @update:model-value="(v: boolean) => toggleQuery(kind.key, v)"
                   />
@@ -1020,7 +1020,7 @@ function migrateSession() {
             <div class="fed-field fed-field--check">
               <NeumorphismCheckbox
                 v-model="formAllowSubagent"
-                size="small"
+                :size="18"
                 label="接受对端的子代理委派（spawn_subagent node=本机）"
               />
             </div>
@@ -1029,7 +1029,7 @@ function migrateSession() {
               <NeumorphismInput
                 v-model="formRequireConfirm"
                 class="fed-input"
-                size="small"
+                :size="36"
                 placeholder="（空 = 无需确认）"
               />
             </label>
@@ -1037,7 +1037,7 @@ function migrateSession() {
           <div v-if="inviteError" class="fed-error">{{ inviteError }}</div>
           <div class="fed-form-actions">
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="glass"
               class="fed-btn fed-form-cancel"
               @click="showAdd = false"
@@ -1045,7 +1045,7 @@ function migrateSession() {
               取消
             </NeumorphismButton>
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="primary"
               class="fed-btn fed-btn--primary fed-form-save"
               @click="savePeer"
@@ -1064,7 +1064,7 @@ function migrateSession() {
             <span class="fed-dot" :title="p.link === 'Online' ? '在线' : '离线'">
               <NeumorphismStatusDot
                 :status="p.link === 'Online' ? 'online' : 'offline'"
-                size="small"
+                :size="8"
               />
             </span>
             <div class="fed-peer-main">
@@ -1107,7 +1107,7 @@ function migrateSession() {
             </div>
             <div class="fed-peer-actions">
               <NeumorphismButton
-                size="small"
+                :size="32"
                 variant="glass"
                 class="fed-btn fed-btn--small fed-peer-edit"
                 @click="openEdit(c.name, p)"
@@ -1115,7 +1115,7 @@ function migrateSession() {
                 编辑
               </NeumorphismButton>
               <NeumorphismButton
-                size="small"
+                :size="32"
                 variant="glass"
                 class="fed-btn fed-btn--small fed-btn--danger fed-peer-del"
                 @click="deletePeer(c.name, p.name)"
@@ -1143,12 +1143,12 @@ function migrateSession() {
       <NeumorphismSelect
         v-model="migratePeer"
         class="fed-migrate__peer"
-        size="small"
+        :size="36"
         :options="migrateOptions"
         placeholder="（自动：首个在线节点）"
       />
       <NeumorphismButton
-        size="small"
+        :size="32"
         variant="primary"
         class="fed-btn fed-btn--primary fed-migrate__go"
         :disabled="!canMigrate"

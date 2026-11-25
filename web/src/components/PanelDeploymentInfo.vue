@@ -96,7 +96,7 @@ onMounted(() => {
           都是本进程自报的事实，不跨进程推断。
         </div>
       </div>
-      <NeumorphismButton size="small" variant="glass" :loading="loading" @click="load(true)">
+      <NeumorphismButton :size="32" variant="glass" :loading="loading" @click="load(true)">
         刷新
       </NeumorphismButton>
     </div>

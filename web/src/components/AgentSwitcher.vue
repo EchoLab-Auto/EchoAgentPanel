@@ -169,7 +169,7 @@ function select(id: string, core: string | null) {
           </span>
           <NeumorphismStatusDot
             :status="team.enabled ? 'online' : 'offline'"
-            size="small"
+            :size="8"
           />
         </div>
       </div>

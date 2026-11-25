@@ -125,7 +125,7 @@ const instances = computed<InstanceRow[]>(() =>
   <div class="conn-card">
     <!-- 浏览器 ↔ Panel 通道 -->
     <div class="conn-row">
-      <NeumorphismStatusDot :status="coreDot" size="small" />
+      <NeumorphismStatusDot :status="coreDot" :size="8" />
       <span class="conn-row__label">Panel 通道</span>
       <span class="conn-row__value" :class="state.connected ? 'is-ok' : 'is-pending'">
         {{ state.connected ? '已连接' : '连接中…' }}
@@ -145,7 +145,7 @@ const instances = computed<InstanceRow[]>(() =>
         class="conn-row conn-row--core"
         :title="row.detail"
       >
-        <NeumorphismStatusDot :status="row.dot" size="small" />
+        <NeumorphismStatusDot :status="row.dot" :size="8" />
         <span class="conn-row__label">
           {{ row.name }}
           <!-- 区域名是"人对那台机器的称呼"，配置名是"键"：两者不同才并列显示，
@@ -165,7 +165,7 @@ const instances = computed<InstanceRow[]>(() =>
         {{ instanceGroupTitle }}（{{ state.activeRegion ?? '本机' }}）
       </div>
       <div v-for="row in instances" :key="row.key" class="conn-row">
-        <NeumorphismStatusDot :status="row.dot" size="small" />
+        <NeumorphismStatusDot :status="row.dot" :size="8" />
         <span class="conn-row__label" :title="row.label">{{ row.label }}</span>
         <span v-if="row.selfId" class="conn-row__id">{{ row.selfId }}</span>
         <span class="conn-row__value" :class="row.dot === 'online' ? 'is-ok' : 'is-muted'">

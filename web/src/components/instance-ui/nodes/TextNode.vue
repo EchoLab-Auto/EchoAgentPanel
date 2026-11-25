@@ -79,13 +79,13 @@ function copy() {
         <div class="text-node__edit">
           <NeumorphismInput
             v-model="draft"
-            size="small"
+            :size="36"
             :disabled="pending || ctx.disabled.value"
             @update:model-value="dirty = true"
             @enter="save"
           />
           <NeumorphismButton
-            size="small"
+            :size="32"
             variant="glass"
             :disabled="!canSave"
             :loading="pending"
@@ -97,7 +97,7 @@ function copy() {
         <NeumorphismAlert
           v-if="error"
           type="error"
-          size="small"
+          :size="12"
           :message="error"
           closable
           @close="ctx.bus.clearError(nodeKey)"
@@ -109,7 +109,7 @@ function copy() {
       <span class="text-node__value">{{ display }}</span>
       <NeumorphismButton
         v-if="display !== '—'"
-        size="small"
+        :size="32"
         variant="glass"
         aria-label="复制"
         @click="copy"

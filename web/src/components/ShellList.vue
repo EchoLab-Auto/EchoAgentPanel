@@ -74,11 +74,11 @@ onUnmounted(() => releasePending('shell:sessions'));
 <template>
   <div class="shell-list">
     <div class="shell-list__actions">
-      <NeumorphismButton size="small" variant="glass" :disabled="!state.connected" @click="startShell">
+      <NeumorphismButton :size="32" variant="glass" :disabled="!state.connected" @click="startShell">
         新建
       </NeumorphismButton>
       <NeumorphismButton
-        size="small"
+        :size="32"
         variant="glass"
         :disabled="!state.connected"
         title="刷新 Shell 会话"
@@ -109,7 +109,7 @@ onUnmounted(() => releasePending('shell:sessions'));
         {{ session.workdir }} · {{ session.exec_count }} 条
       </span>
       <NeumorphismButton
-        size="small"
+        :size="32"
         variant="glass"
         @click="emit('openDetail', session.session_id, session.core ?? null)"
       >

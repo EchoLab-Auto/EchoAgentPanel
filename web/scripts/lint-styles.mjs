@@ -45,14 +45,16 @@ function loadUiFrameTokens() {
   const candidates = [
     process.env.UI_FRAME_TOKENS,
     join(process.env.HOME ?? '', 'code_file/gitlab/echo-tech/ui-frame/src/styles/tokens.scss'),
-    join(WEB_DIR, 'vendor/ui-frame/dist/tokens.css'),
+    join(WEB_DIR, 'node_modules/@echolab-auto/ui-frame/dist/tokens.css'),
   ].filter(Boolean);
   for (const file of candidates) {
     if (!existsSync(file)) continue;
     const tokens = new Set();
-    for (const line of readFileSync(file, 'utf-8').split('\n')) {
-      const match = line.match(/^\s*(--nm-[a-z0-9-]+)\s*:/);
-      if (match) tokens.add(match[1]);
+    // 整份文本扫一遍，不按行：ui-frame 产出的 `tokens.css` 是**压缩过的单行**
+    // （`:root{--nm-a: …;--nm-b: …}`），按行匹配只能拿到 0 个令牌，于是这道
+    // 全量对照会静默退化成名单检查——「守卫看起来在跑，其实没比对」。
+    for (const match of readFileSync(file, 'utf-8').matchAll(/(--nm-[a-z0-9-]+)\s*:/g)) {
+      tokens.add(match[1]);
     }
     if (tokens.size > 0) return { file, tokens };
   }

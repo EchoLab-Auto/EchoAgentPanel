@@ -28,7 +28,7 @@ const text = computed(() => {
 <template>
   <div class="instance-node status-node" :data-node-key="nodeKey">
     <span v-if="node.label" class="instance-node__label">{{ node.label }}</span>
-    <NeumorphismStatusDot :status="dot" size="small" />
+    <NeumorphismStatusDot :status="dot" :size="8" />
     <span class="status-node__text">{{ text }}</span>
   </div>
 </template>

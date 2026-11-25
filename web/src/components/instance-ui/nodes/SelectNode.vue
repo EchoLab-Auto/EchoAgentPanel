@@ -72,14 +72,14 @@ async function onChange(value: string | number | (string | number)[] | undefined
       <NeumorphismSelect
         :model-value="shown"
         :options="options"
-        size="small"
+        :size="36"
         :disabled="selectDisabled"
         @change="onChange"
       />
       <NeumorphismAlert
         v-if="error"
         type="error"
-        size="small"
+        :size="12"
         :message="error"
         closable
         @close="ctx.bus.clearError(nodeKey)"

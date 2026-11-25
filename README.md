@@ -86,36 +86,55 @@ npm run check-protocol           # 只校验（build 前置；不一致拒绝构
 细节与坑（`bigint` vs `number`、`JsonValue`、必填字段）见
 [docs/protocol-sync.md](docs/protocol-sync.md)。
 
-### ui-frame 组件库引用方式（本地快照 ⇄ npm 包）
+### ui-frame 组件库引用方式（git 依赖）
 
-前端默认以**仓库内提交的本地快照**引用 `@echolab-auto/ui-frame`
-（`web/vendor/ui-frame`，上游源码仓库的构建产物），也可一键切到 **npm 已发布包**：
+前端以 **git 依赖**引用 `@echolab-auto/ui-frame`，钉在精确提交上：
 
-```bash
-npm run ui-frame:status          # 当前模式 + 安装形态 + npm dist-tags 对照
-npm run ui-frame:npm             # 切到 npm 包（默认跟随当前通道：预发布用 dev、否则 latest）
-npm run ui-frame:npm -- 1.3.2    # 或指定版本 / 标签 / 范围（一律解析为精确版本写入）
-npm run ui-frame:local           # 切回本地快照（file:./vendor/ui-frame）
-npm run ui-frame:sync            # 用 ui-frame 源码仓库刷新快照（默认 ~/code_file/gitlab/echo-tech/ui-frame，可用 UI_FRAME_REPO 覆盖）
-npm run ui-frame:sync -- --build # 先构建源码仓库再刷新（联合开发 UI 库时用）
-npm run ui-frame:diff            # 对比快照与 npm 版本——查看尚未发版的改动
-npm run ui-frame:diff -- 1.3.2   # 对比指定版本 / 标签
+```json
+"@echolab-auto/ui-frame": "git+https://github.com/EchoLab-Auto/ui-frame.git#<sha>"
 ```
 
-约定与提示：
+为什么不再用仓库内快照（`web/vendor/ui-frame`，2026-11 移除）：
 
-- **依赖行是唯一事实来源**（`web/package.json` 的 `@echolab-auto/ui-frame`）；
-  切换会改写该行与 `package-lock.json`——**会出现在 git diff 里**，按需提交或回滚。
-- 切到 npm 前先跑 `npm run ui-frame:diff`：本地快照常含**尚未发版**的修复
-  （如 `useClipboard` 非安全上下文兜底），diff 会列出切过去会丢哪些文件。
-- 本地联调 UI 库的循环：改 `ui-frame` 源码 → `npm run ui-frame:sync -- --build`
-  → Panel dev server 若未热更新则重启（或 `npm run dev -- --force`）。
-- 本地快照模式（`file:` 目录依赖）会连带安装快照 `package.json` 的
-  devDependencies（storybook 等工具链，约 560 包）——首次安装偏慢属正常；
-  切到 npm 模式会移除它们。
-- CI 用 `npm ci` + 提交的 vendor 快照，无需任何切换动作。
+- **快照的版本号是谎话**。此前 vendor 的 `package.json` 写着 `1.3.2-dev.4`，但内容
+  是从源码 `db08388` 重建的（多出 `NeumorphismIcon` / `GraphView` / `PixelFont`
+  与 `./icons` 子路径，这些在已发布的 `1.3.2-dev.4` 里都没有）。同名不同物，
+  升级判断只能靠人记。
+- **产物与源码会漂移**，而漂移只在消费方崩。git 依赖由 npm 在安装时按 `prepare`
+  现场构建（ui-frame 的 `prepare` = 构建 `dist/`），装到的一定与本提交的源码一致。
+
+日常操作：
+
+```bash
+npm install                                  # 自动 clone + 构建 ui-frame（约 20s）
+npm ls @echolab-auto/ui-frame                # 确认装的是哪个 commit
+```
+
+**升级**：把 `package.json` 里的 sha 换成目标提交 → `npm install`。依赖行是唯一事实
+来源，变更会出现在 git diff 里（有意如此，便于审阅/回滚）。
+
+`package-lock.json` 里该包的 `resolved` 可能显示 `git+ssh://…`——那是 npm 对 GitHub
+仓库的**记录约定**（有 https auth 才记 https），实际抓取走 `package.json` 里的
+`git+https` 规格，CI 与 Docker 无需 SSH 凭证（已用「禁用 SSH + 冷启动 `npm ci`」验证）。
+
+**本地联调 UI 库**（改 ui-frame 源码让 Panel 立刻看到）：临时装成目录链接，
+不进 git——
+
+```bash
+npm install file:/path/to/ui-frame          # 目录依赖，Panel dev server 直接读源码构建产物
+npm install                                 # 联调结束，按 package.json 的 sha 还原
+```
+
+注意目录依赖是软链，**不会**触发对方的 `prepare`，所以联调前要先去 ui-frame
+跑一次 `npm run build`（或 `npm run dev` 让它 watch）。
+
+CI 直接 `npm ci`，从 git 拉取并构建——需要 runner 能访问 github.com（公开仓库，
+无需凭证）。首次安装会连 ui-frame 的 devDependencies 一起装（构建 `dist/` 需要
+vue-tsc / vite），比过去装快照略慢，但不再有「快照落后于源码」这一整类问题。
 
 ### ui-frame 升级适配（2026-10-26）
+
+> 历史记录：该次适配针对的是仓库内快照；此后已改为 git 依赖（见上一节）。
 
 快照已刷新到 ui-frame 源码 `db08388`（版本号仍是 `1.3.2-dev.4`，但含一批
 **尚未发版**的破坏性变更）。Panel 侧的适配口径与结果：

@@ -331,7 +331,7 @@ function save() {
           <span class="agent-config__id">{{ props.team.id }}</span>
         </div>
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="glass"
           aria-label="关闭"
           @click="emit('close')"
@@ -342,15 +342,15 @@ function save() {
 
       <div class="agent-config__body">
         <NeumorphismFormItem label="名称" required>
-          <NeumorphismInput v-model="name" size="small" placeholder="Agent 名称" />
+          <NeumorphismInput v-model="name" :size="36" placeholder="Agent 名称" />
         </NeumorphismFormItem>
         <NeumorphismFormItem label="描述">
-          <NeumorphismInput v-model="description" size="small" placeholder="一句话说明这个 Agent 的职责" />
+          <NeumorphismInput v-model="description" :size="36" placeholder="一句话说明这个 Agent 的职责" />
         </NeumorphismFormItem>
         <NeumorphismFormItem label="系统提示词（留空继承全局）">
           <NeumorphismTextarea
             v-model="systemPrompt"
-            size="small"
+            :size="36"
             :rows="4"
             placeholder="留空则继承全局系统提示词"
           />
@@ -366,13 +366,13 @@ function save() {
           <NeumorphismSelect
             :model-value="apiProfile"
             :options="apiProviderOptions"
-            size="small"
+            :size="36"
             @update:model-value="apiProfile = String($event ?? '')"
           />
         </div>
 
         <!-- 能力分区（ui-frame NeumorphismCollapse；pkg 分组 + 表格） -->
-        <NeumorphismCollapse v-model="openSections" :items="CAP_SECTIONS" size="small">
+        <NeumorphismCollapse v-model="openSections" :items="CAP_SECTIONS" :size="13">
           <template #header-modules>
             <span class="agent-config__sec-title">启用模块</span>
             <span class="agent-config__sec-summary">{{ moduleLoading ? '…' : `${moduleItems.length} 项` }}</span>
@@ -387,7 +387,7 @@ function save() {
                   :indeterminate="isGroupPartial(enabledModules, g)"
                   :disabled="isGroupReadonly(g)"
                   :label="`${g.group}（${g.items.length}）`"
-                  size="small"
+                  :size="18"
                   @update:model-value="enabledModules = toggleGroup(enabledModules, moduleWritableKeys, g)"
                 />
               </div>
@@ -395,7 +395,7 @@ function save() {
                 :data="tableRows(g.items)"
                 :columns="CAPABILITY_COLUMNS"
                 row-key="key"
-                size="small"
+                :size="8"
                 class="agent-config__table"
               >
                 <template #cell-name="{ row }">
@@ -408,7 +408,7 @@ function save() {
                   <NeumorphismCheckbox
                     :model-value="isRowOn(enabledModules, row)"
                     :disabled="row.readonly === true"
-                    size="small"
+                    :size="18"
                     @update:model-value="enabledModules = toggleRow(enabledModules, moduleItems, row)"
                   />
                 </template>
@@ -429,7 +429,7 @@ function save() {
                   :model-value="isGroupOn(enabledTools, g)"
                   :indeterminate="isGroupPartial(enabledTools, g)"
                   :label="`${g.group}（${g.items.length}）`"
-                  size="small"
+                  :size="18"
                   @update:model-value="enabledTools = toggleGroup(enabledTools, toolItems.map((i) => i.key), g)"
                 />
               </div>
@@ -437,7 +437,7 @@ function save() {
                 :data="tableRows(g.items)"
                 :columns="CAPABILITY_COLUMNS"
                 row-key="key"
-                size="small"
+                :size="8"
                 class="agent-config__table"
               >
                 <template #cell-name="{ row }">
@@ -449,7 +449,7 @@ function save() {
                 <template #cell-check="{ row }">
                   <NeumorphismCheckbox
                     :model-value="isRowOn(enabledTools, row)"
-                    size="small"
+                    :size="18"
                     @update:model-value="enabledTools = toggleRow(enabledTools, toolItems, row)"
                   />
                 </template>
@@ -470,7 +470,7 @@ function save() {
                   :model-value="isGroupOn(enabledSkills, g)"
                   :indeterminate="isGroupPartial(enabledSkills, g)"
                   :label="`${g.group}（${g.items.length}）`"
-                  size="small"
+                  :size="18"
                   @update:model-value="enabledSkills = toggleGroup(enabledSkills, skillItems.map((i) => i.key), g)"
                 />
               </div>
@@ -478,7 +478,7 @@ function save() {
                 :data="tableRows(g.items)"
                 :columns="CAPABILITY_COLUMNS"
                 row-key="key"
-                size="small"
+                :size="8"
                 class="agent-config__table"
               >
                 <template #cell-name="{ row }">
@@ -490,7 +490,7 @@ function save() {
                 <template #cell-check="{ row }">
                   <NeumorphismCheckbox
                     :model-value="isRowOn(enabledSkills, row)"
-                    size="small"
+                    :size="18"
                     @update:model-value="enabledSkills = toggleRow(enabledSkills, skillItems, row)"
                   />
                 </template>
@@ -501,8 +501,8 @@ function save() {
       </div>
 
       <div class="agent-config__foot">
-        <NeumorphismButton size="small" variant="glass" @click="emit('close')">取消</NeumorphismButton>
-        <NeumorphismButton size="small" variant="primary" @click="save">保存</NeumorphismButton>
+        <NeumorphismButton :size="32" variant="glass" @click="emit('close')">取消</NeumorphismButton>
+        <NeumorphismButton :size="32" variant="primary" @click="save">保存</NeumorphismButton>
       </div>
     </div>
   </SessionOverlay>

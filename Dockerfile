@@ -14,6 +14,11 @@
 # ── Stage 1: 前端构建 ──
 FROM node:22-bookworm-slim AS webbuilder
 WORKDIR /web
+# ui-frame 是 git 依赖（见 README「ui-frame 组件库引用方式」）：`npm ci` 要 clone
+# 并跑它的 prepare 构建 dist，slim 镜像里没有 git。
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./

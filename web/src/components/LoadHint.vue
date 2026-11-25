@@ -23,10 +23,10 @@ defineEmits<{ retry: [] }>();
 <template>
   <div v-if="phase === 'timeout'" class="load-hint load-hint--error">
     <span>加载{{ label }}超时——Core 可能正在重启</span>
-    <NeumorphismButton size="small" variant="glass" @click="$emit('retry')">重试</NeumorphismButton>
+    <NeumorphismButton :size="32" variant="glass" @click="$emit('retry')">重试</NeumorphismButton>
   </div>
   <div v-else-if="phase === 'pending' || phase === 'slow'" class="load-hint">
-    <NeumorphismSpinner size="small" />
+    <NeumorphismSpinner :size="14" />
     <span v-if="phase === 'slow'">正在加载{{ label }}…（Core 响应较慢，可能正在重启）</span>
     <span v-else>正在加载{{ label }}…</span>
   </div>

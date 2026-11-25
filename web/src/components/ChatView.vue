@@ -1998,7 +1998,7 @@ function mediaSrc(img: string): string {
         class="ctx-entry"
         variant="glass"
         shape="pill"
-        size="small"
+        :size="32"
         title="配置当前 Agent（系统提示词 / 能力白名单 / 禁用工具等）"
         data-overlay="config"
         @click="toggleOverlay('config')"
@@ -2023,7 +2023,7 @@ function mediaSrc(img: string): string {
         class="ctx-entry"
         variant="glass"
         shape="pill"
-        size="small"
+        :size="32"
         title="查看上下文占用"
         data-overlay="context"
         @click="toggleOverlay('context')"
@@ -2039,7 +2039,7 @@ function mediaSrc(img: string): string {
         class="ctx-entry"
         variant="glass"
         shape="pill"
-        size="small"
+        :size="32"
         title="切换会话（每个群/私聊独立上下文）"
         data-overlay="sessions"
         @click="toggleSessions()"
@@ -2066,7 +2066,7 @@ function mediaSrc(img: string): string {
         class="ctx-entry"
         variant="glass"
         shape="pill"
-        size="small"
+        :size="32"
         title="平台实例"
         data-overlay="instance"
         @click="toggleOverlay('instance')"
@@ -2150,11 +2150,11 @@ function mediaSrc(img: string): string {
       >
       <div v-if="messageRows.length === 0" class="chat-view__empty">
         <template v-if="!connected">
-          <NeumorphismSpinner size="large" />
+          <NeumorphismSpinner :size="28" />
           <span>正在连接 Core…</span>
         </template>
         <template v-else-if="timelineLoading">
-          <NeumorphismSpinner size="large" />
+          <NeumorphismSpinner :size="28" />
           <span>正在加载时间线…</span>
         </template>
         <span v-else>{{ emptyText }}</span>
@@ -2429,7 +2429,7 @@ function mediaSrc(img: string): string {
               <NeumorphismButton
                 v-if="busy"
                 class="chat-view__cancel"
-                size="small"
+                :size="32"
                 variant="glass"
                 @click="emit('cancel')"
               >
@@ -2441,7 +2441,7 @@ function mediaSrc(img: string): string {
                    `addFiles` 按 MIME 分流：图片进多模态，其余落盘成路径。 -->
               <NeumorphismButton
                 class="chat-view__attach-btn"
-                size="small"
+                :size="32"
                 variant="glass"
                 title="添加附件：文件或图片（也可直接拖入、或粘贴截图）"
                 aria-label="添加附件"
@@ -2477,7 +2477,7 @@ function mediaSrc(img: string): string {
               />
               <NeumorphismButton
                 class="chat-view__send"
-                size="small"
+                :size="32"
                 variant="raised"
                 :disabled="!canSubmit"
                 @click="submit"

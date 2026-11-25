@@ -216,9 +216,10 @@ cd /path/to/module/panel-ui && npm run build && npm test
 
 ## 测试
 
-模块自己的扩展要跑单测时，需要**面板源码**：`state` / `sendCommand` 这些运行时值
-以及 ui-frame 组件都在面板仓里（`web/vendor/ui-frame` 是全站唯一那份源码）。所以
-模块 `panel-ui/vitest.config.ts` 要 alias 过去：
+模块自己的扩展要跑单测时，需要**面板源码**：`state` / `sendCommand` 这些运行时值在
+面板仓里；ui-frame 组件在面板仓的 `web/node_modules/@echolab-auto/ui-frame`（git 依赖，
+见 README「ui-frame 组件库引用方式」）。所以模块 `panel-ui/vitest.config.ts` 要 alias
+过去（`web/src` 走源码，ui-frame 走已安装的 `dist/`）：
 
 ```ts
 const PANEL_SOURCE =

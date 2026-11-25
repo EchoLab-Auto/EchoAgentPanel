@@ -299,7 +299,7 @@ onMounted(() => {
       </div>
       <div class="up-actions">
         <NeumorphismButton :size="32" :loading="refreshing" @click="refreshNow">刷新</NeumorphismButton>
-        <NeumorphismButton size="small" variant="primary" @click="openAdd">添加 Core</NeumorphismButton>
+        <NeumorphismButton :size="32" variant="primary" @click="openAdd">添加 Core</NeumorphismButton>
       </div>
     </div>
 
@@ -314,7 +314,7 @@ onMounted(() => {
       </label>
       <div class="up-field">
         <span>接入方式</span>
-        <NeumorphismSegmented v-model="formAccess" :options="ACCESS_OPTIONS" size="small" />
+        <NeumorphismSegmented v-model="formAccess" :options="ACCESS_OPTIONS" :size="26" />
       </div>
 
       <template v-if="formAccess === 'direct'">
@@ -368,8 +368,8 @@ onMounted(() => {
       </label>
       <div v-if="formError" class="up-error">{{ formError }}</div>
       <div class="up-form-actions">
-        <NeumorphismButton size="small" @click="showAdd = false">取消</NeumorphismButton>
-        <NeumorphismButton size="small" variant="primary" :loading="saving" @click="save">保存</NeumorphismButton>
+        <NeumorphismButton :size="32" @click="showAdd = false">取消</NeumorphismButton>
+        <NeumorphismButton :size="32" variant="primary" :loading="saving" @click="save">保存</NeumorphismButton>
       </div>
     </NeumorphismCard>
 
@@ -378,7 +378,7 @@ onMounted(() => {
          占位）≈100px，5 个上游要 500px+，一屏装不下还全是空白。 -->
     <div v-if="!list.length && !loading" class="up-empty">
       <NeumorphismEmpty
-        size="medium"
+        :size="100"
         description="尚未配置 Core 连接。点「添加 Core」填入对端 management WS 地址或 SSH 信息即可上线。"
       />
     </div>
@@ -387,16 +387,16 @@ onMounted(() => {
       <NeumorphismCard v-for="u in list" :key="u.name" no-padding class="up-item">
         <!-- 第一行：状态点 · 名称 · 来源标签 …… 操作 -->
         <div class="up-item__head">
-          <NeumorphismStatusDot :status="connectivityMeta(u).status" size="small" />
+          <NeumorphismStatusDot :status="connectivityMeta(u).status" :size="8" />
           <span class="up-item__name" :title="u.name">{{ u.name }}</span>
-          <NeumorphismTag v-if="u.access === 'ssh'" variant="default" size="small">SSH</NeumorphismTag>
+          <NeumorphismTag v-if="u.access === 'ssh'" variant="default" :size="11">SSH</NeumorphismTag>
           <!-- 自动发现（P2）：由联邦节点目录派生，不是人工配置。
                标签的意义是"我知道它从哪来"——删掉它不影响真实节点，
                下一个巡检周期若它仍在联邦里会被重新发现。 -->
           <NeumorphismTag
             v-if="u.source === 'discovered'"
             variant="success"
-            size="small"
+            :size="11"
             title="由联邦节点目录自动发现（删除后若仍在联邦中会被重新发现）"
           >自动</NeumorphismTag>
           <span class="up-item__grow" />
@@ -409,10 +409,10 @@ onMounted(() => {
         <div class="up-item__meta">
           <span class="up-item__url" :title="addressOf(u)">{{ addressOf(u) }}</span>
           <span class="up-item__health" :title="`探活时间 ${formatChecked(u.last_checked) || '—'}`">
-            <NeumorphismSpinner v-if="u.connectivity === 'connecting'" size="small" />
+            <NeumorphismSpinner v-if="u.connectivity === 'connecting'" :size="14" />
             {{ connectivityMeta(u).label }}<template v-if="u.access === 'ssh'">·{{ sshPhaseMeta(u).label }}</template>
           </span>
-          <NeumorphismTag :variant="authMeta(u).variant" size="small">{{ authMeta(u).label }}</NeumorphismTag>
+          <NeumorphismTag :variant="authMeta(u).variant" :size="11">{{ authMeta(u).label }}</NeumorphismTag>
         </div>
         <!-- 错误只在真有的时候占一行（占位式隐藏会让卡片高度在有无错误间跳） -->
         <div v-if="u.last_error" class="up-item__err" :title="u.last_error">{{ u.last_error }}</div>

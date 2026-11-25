@@ -81,13 +81,13 @@ function remove(raw: unknown) {
     </div>
     <template v-else>
       <div class="list-editor-node__body">
-        <NeumorphismEmpty v-if="shown.length === 0" description="未添加" size="small" />
-        <NeumorphismList v-else :items="shown" size="small" split>
+        <NeumorphismEmpty v-if="shown.length === 0" description="未添加" :size="60" />
+        <NeumorphismList v-else :items="shown" :size="12" split>
           <template #default="{ item }">
             <div class="list-editor-node__row">
               <span class="list-editor-node__item">{{ item }}</span>
               <NeumorphismButton
-                size="small"
+                :size="32"
                 variant="glass"
                 :disabled="controlsDisabled"
                 :aria-label="`移除 ${item}`"
@@ -103,13 +103,13 @@ function remove(raw: unknown) {
       <div v-if="node.action" class="list-editor-node__add">
         <NeumorphismInput
           v-model="draft"
-          size="small"
+          :size="36"
           placeholder="输入 ID 后添加"
           :disabled="controlsDisabled"
           @enter="add"
         />
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="glass"
           :disabled="controlsDisabled || !draft.trim()"
           :loading="pending"
@@ -123,7 +123,7 @@ function remove(raw: unknown) {
       <NeumorphismAlert
         v-if="error"
         type="error"
-        size="small"
+        :size="12"
         :message="error"
         closable
         @close="ctx.bus.clearError(nodeKey)"

@@ -121,7 +121,7 @@ function onClick() {
       :model-value="progressValue"
       :indeterminate="indeterminate"
       variant="primary"
-      size="small"
+      :size="4"
     />
   </button>
 </template>

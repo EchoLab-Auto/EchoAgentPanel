@@ -49,7 +49,7 @@ async function activate() {
 <template>
   <div class="instance-node button-node" :data-node-key="nodeKey">
     <NeumorphismButton
-      size="small"
+      :size="32"
       variant="glass"
       :disabled="ctx.disabled.value"
       :loading="pending"
@@ -62,7 +62,7 @@ async function activate() {
     <NeumorphismAlert
       v-if="error"
       type="error"
-      size="small"
+      :size="12"
       :message="error"
       closable
       @close="ctx.bus.clearError(nodeKey)"

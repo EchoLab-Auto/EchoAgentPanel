@@ -81,7 +81,7 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', sync));
   <!-- fullscreen-toggle 类：类必须落在根按钮上，样式规则才匹配得到
        （2026-10 修复：此前该类缺失，全屏按钮在手机上溢出屏外）。 -->
   <NeumorphismButton
-    size="small"
+    :size="32"
     variant="glass"
     class="fullscreen-toggle"
     :class="{ 'fullscreen-toggle--compact': props.compact }"

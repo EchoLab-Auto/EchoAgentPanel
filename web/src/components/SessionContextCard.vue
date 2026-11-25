@@ -161,7 +161,7 @@ watch(activityPhase, (phase, previous) => {
         <span>上下文容量</span>
         <strong>{{ percentText }}</strong>
       </div>
-      <NeumorphismProgress :model-value="percent" :variant="progressVariant" size="small" />
+      <NeumorphismProgress :model-value="percent" :variant="progressVariant" :size="4" />
       <div
         class="session-context__usage"
         :title="`${used} / ${limit} tokens`"

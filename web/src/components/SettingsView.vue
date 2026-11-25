@@ -2321,7 +2321,7 @@ watch(
         <span v-if="cat.count !== null" class="caps-count">{{ cat.count }}</span>
       </div>
       <div class="caps-nav-spacer" />
-      <NeumorphismButton size="small" variant="glass" :loading="settingsLoading" @click="refresh">刷新</NeumorphismButton>
+      <NeumorphismButton :size="32" variant="glass" :loading="settingsLoading" @click="refresh">刷新</NeumorphismButton>
       <span v-if="navScrollable && !navAtEnd" class="caps-nav__more" aria-hidden="true">›</span>
     </nav>
 
@@ -2331,7 +2331,7 @@ watch(
         <!-- 移动端 Master-Detail 返回（2026-10）：仅详情态出现 -->
         <NeumorphismButton
           v-if="mobileDetailOpen"
-          size="small"
+          :size="32"
           variant="glass"
           class="caps-mobile-back"
           aria-label="返回列表"
@@ -2346,14 +2346,14 @@ watch(
         <!-- 列表侧动作（新建 / Git 安装）：详情态没有作用对象，不渲染 -->
         <div v-if="!mobileDetailOpen" class="caps-toolbar-actions">
           <template v-if="activeCategory === 'skill'">
-            <NeumorphismButton size="small" variant="glass" @click="openGitModal">
+            <NeumorphismButton :size="32" variant="glass" @click="openGitModal">
               Git 安装
             </NeumorphismButton>
-            <NeumorphismButton size="small" variant="glass" @click="startCreate">新建技能</NeumorphismButton>
+            <NeumorphismButton :size="32" variant="glass" @click="startCreate">新建技能</NeumorphismButton>
           </template>
           <NeumorphismButton
             v-if="activeCategory === 'team'"
-            size="small"
+            :size="32"
             variant="glass"
             @click="startTeamCreate"
           >
@@ -2369,7 +2369,7 @@ watch(
         <NeumorphismInput
           v-model="skillSearch"
           placeholder="搜索名称 / 描述 / 触发词"
-          size="small"
+          :size="36"
           class="caps-filters__search"
         />
         <div class="caps-filters__chips">
@@ -2388,7 +2388,7 @@ watch(
         <NeumorphismSegmented
           v-model="skillGroupBy"
           :options="SKILL_GROUP_OPTIONS"
-          size="small"
+          :size="26"
           aria-label="分组维度"
         />
       </div>
@@ -2397,7 +2397,7 @@ watch(
         <NeumorphismInput
           v-model="toolSearch"
           placeholder="搜索名称 / 描述"
-          size="small"
+          :size="36"
           class="caps-filters__search"
         />
         <div class="caps-filters__chips">
@@ -2416,17 +2416,17 @@ watch(
         <NeumorphismSegmented
           v-model="toolGroupBy"
           :options="TOOL_GROUP_OPTIONS"
-          size="small"
+          :size="26"
           aria-label="分组维度"
         />
       </div>
 
       <div v-else-if="activeCategory === 'module'" class="caps-filters">
-        <NeumorphismSelect :model-value="moduleCoreEffective ?? ''" :options="moduleCoreOptions.map(core => ({ label: coreDisplay(state, core).title, value: core }))" size="small" aria-label="管理节点" @update:model-value="moduleCore = String($event ?? '') || null; selectedModule = null; sendPending('RequestModulesList', 'settings:modules', moduleCoreEffective ?? undefined)" />
+        <NeumorphismSelect :model-value="moduleCoreEffective ?? ''" :options="moduleCoreOptions.map(core => ({ label: coreDisplay(state, core).title, value: core }))" :size="36" aria-label="管理节点" @update:model-value="moduleCore = String($event ?? '') || null; selectedModule = null; sendPending('RequestModulesList', 'settings:modules', moduleCoreEffective ?? undefined)" />
         <NeumorphismInput
           v-model="moduleSearch"
           placeholder="搜索名称 / ID / 描述"
-          size="small"
+          :size="36"
           class="caps-filters__search"
         />
         <div class="caps-filters__chips">
@@ -2446,13 +2446,13 @@ watch(
         <NeumorphismSegmented
           v-model="moduleGroupBy"
           :options="MODULE_GROUP_OPTIONS"
-          size="small"
+          :size="26"
           aria-label="分组维度"
         />
         <NeumorphismSegmented
           v-model="moduleViewMode"
           :options="[{ label: '列表', value: 'list' }, { label: '依赖树', value: 'deps' }]"
-          size="small"
+          :size="26"
           aria-label="展示形态"
         />
       </div>
@@ -2582,7 +2582,7 @@ watch(
                     <span class="caps-skill-item__quick" @click.stop>
                       <NeumorphismSwitch
                         :model-value="s.enabled"
-                        size="small"
+                        :size="24"
                         @change="quickToggleSkill(s, $event)"
                       />
                     </span>
@@ -2600,7 +2600,7 @@ watch(
               <span class="muted">无匹配技能</span>
               <NeumorphismButton
                 v-if="skillSearch || skillFilter !== 'all'"
-                size="small"
+                :size="32"
                 variant="glass"
                 @click="skillSearch = ''; skillFilter = 'all'"
               >
@@ -2647,7 +2647,7 @@ watch(
                     <span class="caps-skill-item__quick" @click.stop>
                       <NeumorphismSwitch
                         :model-value="t.enabled"
-                        size="small"
+                        :size="24"
                         @change="quickToggleTool(t, $event)"
                       />
                     </span>
@@ -2662,7 +2662,7 @@ watch(
               <span class="muted">无匹配工具</span>
               <NeumorphismButton
                 v-if="toolSearch || toolFilter !== 'all'"
-                size="small"
+                :size="32"
                 variant="glass"
                 @click="toolSearch = ''; toolFilter = 'all'"
               >
@@ -2785,7 +2785,7 @@ watch(
               <span class="muted">无匹配模块</span>
               <NeumorphismButton
                 v-if="moduleSearch || moduleFilter !== 'all'"
-                size="small"
+                :size="32"
                 variant="glass"
                 @click="moduleSearch = ''; moduleFilter = 'all'"
               >
@@ -2911,14 +2911,14 @@ watch(
               <div class="detail-actions">
                 <NeumorphismSwitch
                   :model-value="selectedSkill.enabled"
-                  size="small"
+                  :size="24"
                   active-text="启用"
                   inactive-text="禁用"
                   @change="toggleSkill(selectedSkill!, $event)"
                 />
                 <span class="skill-menu">
                   <NeumorphismButton
-                    size="small"
+                    :size="32"
                     variant="glass"
                     title="更多操作"
                     @click="skillMenuOpen = !skillMenuOpen"
@@ -2981,7 +2981,7 @@ watch(
                 <NeumorphismTag
                   v-for="k in selectedSkill.keywords"
                   :key="k"
-                  size="small"
+                  :size="11"
                   variant="info"
                   closable
                   @close="removeSkillKeyword(selectedSkill, k)"
@@ -2992,13 +2992,13 @@ watch(
                 <span class="skill-kw-add">
                   <NeumorphismInput
                     v-model="skillKeywordDraft"
-                    size="small"
+                    :size="36"
                     placeholder="＋ 触发词"
                     class="skill-kw-add__input"
                     @keydown.enter.prevent="addSkillKeyword(selectedSkill, skillKeywordDraft); skillKeywordDraft = ''"
                   />
                   <NeumorphismButton
-                    size="small"
+                    :size="32"
                     variant="glass"
                     :disabled="!skillKeywordDraft.trim()"
                     @click="addSkillKeyword(selectedSkill, skillKeywordDraft); skillKeywordDraft = ''"
@@ -3012,7 +3012,7 @@ watch(
                 <span>常驻注入（每轮对话都注入，不看触发词）</span>
                 <NeumorphismSwitch
                   :model-value="selectedSkill.always"
-                  size="small"
+                  :size="24"
                   @change="toggleSkillAlways(selectedSkill!, $event)"
                 />
               </div>
@@ -3029,7 +3029,7 @@ watch(
                 </span>
                 <NeumorphismSwitch
                   :model-value="selectedSkill.system === true"
-                  size="small"
+                  :size="24"
                   @change="toggleSkillSystem(selectedSkill!, $event)"
                 />
               </div>
@@ -3041,7 +3041,7 @@ watch(
               <div v-if="skillUsageRows.length" class="skill-usage">
                 <div v-for="row in skillUsageRows" :key="row.team" class="skill-usage__row">
                   <span class="skill-usage__team">{{ row.team }}</span>
-                  <NeumorphismTag :variant="row.variant" size="small">{{ row.label }}</NeumorphismTag>
+                  <NeumorphismTag :variant="row.variant" :size="11">{{ row.label }}</NeumorphismTag>
                 </div>
               </div>
               <span v-else class="muted">（无智能体，或智能体列表尚未加载）</span>
@@ -3064,8 +3064,8 @@ watch(
                   <code>{{ selectedSkill.source.installed_at }}</code>
                 </div>
                 <div class="skill-source__actions">
-                  <NeumorphismButton size="small" variant="glass" @click="updateGitSkill(selectedSkill)">更新</NeumorphismButton>
-                  <NeumorphismButton size="small" variant="glass" @click="removeGitSource(selectedSkill)">移除来源</NeumorphismButton>
+                  <NeumorphismButton :size="32" variant="glass" @click="updateGitSkill(selectedSkill)">更新</NeumorphismButton>
+                  <NeumorphismButton :size="32" variant="glass" @click="removeGitSource(selectedSkill)">移除来源</NeumorphismButton>
                 </div>
               </div>
               <span v-else class="muted">内置技能（随 Core 分发的 skills 目录）</span>
@@ -3078,15 +3078,15 @@ watch(
                 <NeumorphismSegmented
                   v-model="skillContentMode"
                   :options="[{ label: '预览', value: 'preview' }, { label: '源码', value: 'source' }]"
-                  size="small"
+                  :size="26"
                   aria-label="内容视图"
                 />
               </div>
               <div class="skill-frontmatter">
                 <span class="muted">frontmatter：</span>
-                <NeumorphismTag size="small">{{ selectedSkill.category || '未分类' }}</NeumorphismTag>
-                <NeumorphismTag v-if="selectedSkill.always" variant="warning" size="small">常驻</NeumorphismTag>
-                <NeumorphismTag v-if="selectedSkill.system" variant="primary" size="small">系统提示词</NeumorphismTag>
+                <NeumorphismTag :size="11">{{ selectedSkill.category || '未分类' }}</NeumorphismTag>
+                <NeumorphismTag v-if="selectedSkill.always" variant="warning" :size="11">常驻</NeumorphismTag>
+                <NeumorphismTag v-if="selectedSkill.system" variant="primary" :size="11">系统提示词</NeumorphismTag>
                 <span class="muted">{{ selectedSkill.keywords.length }} 个触发词</span>
               </div>
               <div v-if="skillContentMode === 'preview'" class="skill-content-preview">
@@ -3121,11 +3121,11 @@ watch(
               <NeumorphismInput v-model="formCategory" placeholder="信息检索" />
               <div class="detail-field">
                 <span>常驻（总是注入）</span>
-                <NeumorphismSwitch v-model="formAlways" size="small" />
+                <NeumorphismSwitch v-model="formAlways" :size="24" />
               </div>
               <div class="detail-field">
                 <span>系统提示词（注入 base 区，可插拔身份/规则层）</span>
-                <NeumorphismSwitch v-model="formSystem" size="small" />
+                <NeumorphismSwitch v-model="formSystem" :size="24" />
               </div>
               <label>内容（Markdown 正文）</label>
               <NeumorphismTextarea
@@ -3156,14 +3156,14 @@ watch(
               <h3>{{ selectedTeam.name }}</h3>
               <div class="detail-actions">
                 <NeumorphismButton
-                  size="small"
+                  :size="32"
                   variant="primary"
                   @click="startTeamEdit(selectedTeam!)"
                 >
                   编辑
                 </NeumorphismButton>
                 <NeumorphismButton
-                  size="small"
+                  :size="32"
                   variant="glass"
                   :title="
                     selectedTeam.enabled
@@ -3181,7 +3181,7 @@ watch(
                 </NeumorphismButton>
                 <NeumorphismButton
                   v-if="teamsInCore(selectedTeam.core) > 1"
-                  size="small"
+                  :size="32"
                   variant="glass"
                   @click="deleteTeam(selectedTeam!)"
                 >
@@ -3190,8 +3190,8 @@ watch(
               </div>
             </div>
             <div class="detail-meta">
-              <NeumorphismTag variant="info" size="small">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
-              <NeumorphismTag size="small">
+              <NeumorphismTag variant="info" :size="11">{{ selectedTeam.sessions }} 会话</NeumorphismTag>
+              <NeumorphismTag :size="11">
                 单会话
               </NeumorphismTag>
             </div>
@@ -3201,18 +3201,18 @@ watch(
               <span>运行状态</span>
               <NeumorphismTag
                 v-if="!selectedTeam.enabled"
-                size="small"
+                :size="11"
               >
                 已停用（未加载，磁盘上的会话与事件日志保留）
               </NeumorphismTag>
               <NeumorphismTag
                 v-else-if="selectedTeam.running === false"
                 variant="error"
-                size="small"
+                :size="11"
               >
                 未运行（启动失败或正在重建）
               </NeumorphismTag>
-              <NeumorphismTag v-else-if="selectedTeam.running === true" variant="info" size="small">
+              <NeumorphismTag v-else-if="selectedTeam.running === true" variant="info" :size="11">
                 运行中
               </NeumorphismTag>
               <span v-else class="muted">（该 Core 未上报运行状态）</span>
@@ -3220,7 +3220,7 @@ watch(
             <p class="muted">{{ selectedTeam.description || '（无描述）' }}</p>
             <div class="detail-field">
               <span>运行区域</span>
-              <NeumorphismTag variant="info" size="small">
+              <NeumorphismTag variant="info" :size="11">
                 {{ coreDisplay(state, selectedTeam.core).name }}
               </NeumorphismTag>
             </div>
@@ -3232,7 +3232,7 @@ watch(
                     {{ coreDisplay(state, r).title }}
                   </option>
                 </select>
-                <NeumorphismButton size="small" variant="glass" @click="doMoveRegion">
+                <NeumorphismButton :size="32" variant="glass" @click="doMoveRegion">
                   迁移
                 </NeumorphismButton>
               </div>
@@ -3244,13 +3244,13 @@ watch(
             <div class="detail-keywords">
               <span class="muted">启用白名单：</span>
               <template v-if="(selectedTeam.enabled_modules?.length ?? 0) + (selectedTeam.enabled_tools?.length ?? 0) + (selectedTeam.enabled_skills?.length ?? 0) > 0">
-                <NeumorphismTag v-for="e in selectedTeam.enabled_modules ?? []" :key="e" size="small" variant="primary">
+                <NeumorphismTag v-for="e in selectedTeam.enabled_modules ?? []" :key="e" :size="11" variant="primary">
                   {{ e }}
                 </NeumorphismTag>
-                <NeumorphismTag v-for="e in selectedTeam.enabled_tools ?? []" :key="e" size="small" variant="primary">
+                <NeumorphismTag v-for="e in selectedTeam.enabled_tools ?? []" :key="e" :size="11" variant="primary">
                   {{ e }}
                 </NeumorphismTag>
-                <NeumorphismTag v-for="e in selectedTeam.enabled_skills ?? []" :key="e" size="small" variant="primary">
+                <NeumorphismTag v-for="e in selectedTeam.enabled_skills ?? []" :key="e" :size="11" variant="primary">
                   {{ e }}
                 </NeumorphismTag>
               </template>
@@ -3259,10 +3259,10 @@ watch(
             <div class="detail-keywords">
               <span class="muted">禁用能力：</span>
               <template v-if="(selectedTeam.disabled_tools?.length ?? 0) || (selectedTeam.disabled_skills?.length ?? 0)">
-                <NeumorphismTag v-for="d in selectedTeam.disabled_tools ?? []" :key="d" size="small" variant="error">
+                <NeumorphismTag v-for="d in selectedTeam.disabled_tools ?? []" :key="d" :size="11" variant="error">
                   {{ d }}
                 </NeumorphismTag>
-                <NeumorphismTag v-for="d in selectedTeam.disabled_skills ?? []" :key="d" size="small" variant="error">
+                <NeumorphismTag v-for="d in selectedTeam.disabled_skills ?? []" :key="d" :size="11" variant="error">
                   {{ d }}
                 </NeumorphismTag>
               </template>
@@ -3284,18 +3284,18 @@ watch(
                          时显示「未运行」——那是故障，不是用户的停用选择。 -->
                     <NeumorphismTag
                       v-if="teamFormIsEdit && selectedTeam && !selectedTeam.enabled"
-                      size="small"
+                      :size="11"
                     >
                       已停用
                     </NeumorphismTag>
                     <NeumorphismTag
                       v-else-if="teamFormIsEdit && selectedTeam && selectedTeam.running === false"
                       variant="error"
-                      size="small"
+                      :size="11"
                     >
                       未运行
                     </NeumorphismTag>
-                    <NeumorphismTag v-else variant="success" size="small">已启用</NeumorphismTag>
+                    <NeumorphismTag v-else variant="success" :size="11">已启用</NeumorphismTag>
                   </div>
                   <div class="team-hero__id">
                     {{ teamFormIsEdit ? teamFormId : 'ID 待填写' }} · {{ teamBasicSummary }}
@@ -3339,7 +3339,7 @@ watch(
                     <NeumorphismSelect
                       :model-value="teamFormCore ?? regionOptions[0] ?? ''"
                       :options="regionOptions.map((r) => ({ label: coreDisplay(state, r).title, value: r }))"
-                      size="small"
+                      :size="36"
                       aria-label="运行区域"
                       @update:model-value="teamFormCore = String($event ?? '') || null"
                     />
@@ -3414,7 +3414,7 @@ watch(
                       <NeumorphismCheckbox
                         v-for="sk in state.skills"
                         :key="sk.name"
-                        size="small"
+                        :size="18"
                         :model-value="teamFormSystemSkills.includes(sk.name)"
                         :label="sk.name"
                         @update:model-value="
@@ -3439,7 +3439,7 @@ watch(
                     <NeumorphismCheckbox
                       v-for="opt in capabilityModuleOptions"
                       :key="opt.key"
-                      size="small"
+                      :size="18"
                       :disabled="opt.readonly"
                       :model-value="
                         opt.readonly || isWhitelisted(teamFormEnabledModules, opt.key)
@@ -3467,12 +3467,12 @@ watch(
                   <div v-for="pkg in capabilityPackages" :key="pkg.id" class="caps-tool-group">
                     <div class="caps-tool-group__head">
                       <NeumorphismCheckbox
-                        size="small"
+                        :size="18"
                         :model-value="isPackageFullyEnabled(pkg)"
                         :label="pkg.name"
                         @update:model-value="togglePackage(pkg)"
                       />
-                      <NeumorphismTag size="small" variant="info">
+                      <NeumorphismTag :size="11" variant="info">
                         {{ pkg.tools.length + pkg.skills.length }} 项
                       </NeumorphismTag>
                     </div>
@@ -3490,13 +3490,13 @@ watch(
                   <div v-for="group in capabilityToolGroups" :key="group.cat" class="caps-tool-group">
                     <div class="caps-tool-group__head">
                       {{ group.title }}
-                      <NeumorphismTag size="small" variant="info">{{ group.items.length }}</NeumorphismTag>
+                      <NeumorphismTag :size="11" variant="info">{{ group.items.length }}</NeumorphismTag>
                     </div>
                     <div class="caps-checkbox-grid caps-checkbox-grid--grid">
                       <NeumorphismCheckbox
                         v-for="opt in group.items"
                         :key="opt.key"
-                        size="small"
+                        :size="18"
                         :model-value="isWhitelisted(teamFormEnabledTools, opt.key)"
                         :label="opt.label"
                         @update:model-value="teamFormEnabledTools = toggleAllowlist(teamFormEnabledTools, capabilityToolOptions.map(o => o.key), opt.key)"
@@ -3512,7 +3512,7 @@ watch(
                     <NeumorphismCheckbox
                       v-for="opt in capabilitySkillOptions"
                       :key="opt.key"
-                      size="small"
+                      :size="18"
                       :model-value="isWhitelisted(teamFormEnabledSkills, opt.key)"
                       :label="opt.label"
                       @update:model-value="teamFormEnabledSkills = toggleAllowlist(teamFormEnabledSkills, capabilitySkillOptions.map(o => o.key), opt.key)"
@@ -3572,7 +3572,7 @@ watch(
                 <span class="skill-detail__pkg">{{ MODULE_SEMANTIC_LABELS[moduleSemantic(selectedModule)] }}</span>
               </div>
               <div class="detail-actions">
-                <NeumorphismTag v-if="moduleIsSubprocess(selectedModule)" variant="info" size="small">
+                <NeumorphismTag v-if="moduleIsSubprocess(selectedModule)" variant="info" :size="11">
                   外部模块 · 独立进程
                 </NeumorphismTag>
                 <span
@@ -3585,7 +3585,7 @@ watch(
                 </span>
                 <!-- 有后端路径才给能点的按钮；没有就禁用并把原因写出来（不给假按钮） -->
                 <NeumorphismButton
-                  size="small"
+                  :size="32"
                   variant="glass"
                   :disabled="!moduleCanRestart(selectedModule)"
                   :title="
@@ -3669,7 +3669,7 @@ watch(
               <div v-if="moduleUsageRows.length" class="skill-usage">
                 <div v-for="row in moduleUsageRows" :key="row.team" class="skill-usage__row">
                   <span class="skill-usage__team">{{ row.team }}</span>
-                  <NeumorphismTag :variant="row.variant" size="small">{{ row.label }}</NeumorphismTag>
+                  <NeumorphismTag :variant="row.variant" :size="11">{{ row.label }}</NeumorphismTag>
                 </div>
               </div>
               <span v-else class="muted">（无智能体，或智能体列表尚未加载）</span>
@@ -3792,7 +3792,7 @@ watch(
               <div class="detail-actions">
                 <NeumorphismSwitch
                   :model-value="selectedTool.enabled"
-                  size="small"
+                  :size="24"
                   active-text="启用"
                   inactive-text="禁用"
                   @change="toggleTool(selectedTool!, $event)"
@@ -3823,7 +3823,7 @@ watch(
               <div v-if="toolUsageRows.length" class="skill-usage">
                 <div v-for="row in toolUsageRows" :key="row.team" class="skill-usage__row">
                   <span class="skill-usage__team">{{ row.team }}</span>
-                  <NeumorphismTag :variant="row.variant" size="small">{{ row.label }}</NeumorphismTag>
+                  <NeumorphismTag :variant="row.variant" :size="11">{{ row.label }}</NeumorphismTag>
                 </div>
               </div>
               <span v-else class="muted">（无智能体，或智能体列表尚未加载）</span>
@@ -3838,7 +3838,7 @@ watch(
                 </div>
                 <div class="skill-source__actions">
                   <NeumorphismButton
-                    size="small"
+                    :size="32"
                     variant="glass"
                     @click="jumpToCategory('module', selectedTool!.package!)"
                   >
@@ -3856,10 +3856,10 @@ watch(
                   <NeumorphismSegmented
                     v-model="toolParamMode"
                     :options="[{ label: '参数表', value: 'table' }, { label: 'JSON', value: 'json' }]"
-                    size="small"
+                    :size="26"
                     aria-label="参数视图"
                   />
-                  <NeumorphismButton size="small" variant="glass" @click="copyToolParams">
+                  <NeumorphismButton :size="32" variant="glass" @click="copyToolParams">
                     {{ toolParamText ? '已复制' : '复制' }}
                   </NeumorphismButton>
                 </span>
@@ -3874,13 +3874,13 @@ watch(
                     { key: 'description', label: '说明' },
                   ]"
                   :data="toolParamRows"
-                  size="small"
+                  :size="8"
                 >
                   <template #cell-name="{ row }">
                     <code>{{ row.name }}</code>
                   </template>
                   <template #cell-required="{ row }">
-                    <NeumorphismTag v-if="row.required" variant="warning" size="small">必填</NeumorphismTag>
+                    <NeumorphismTag v-if="row.required" variant="warning" :size="11">必填</NeumorphismTag>
                     <span v-else class="muted">—</span>
                   </template>
                   <template #cell-description="{ row }">
@@ -3900,7 +3900,7 @@ watch(
     <NeumorphismModal
       :model-value="gitModalOpen"
       title="从 Git 仓库安装技能"
-      size="small"
+      :size="400"
       :footer="false"
       @update:model-value="gitModalOpen = $event"
     >
@@ -3920,20 +3920,20 @@ watch(
           HTTPS 若被网络阻断，只能在 120s 超时后失败。
         </p>
         <label class="git-modal__label">仓库 URL（https / ssh / 本地路径）<span class="git-modal__req">*</span></label>
-        <NeumorphismInput v-model="gitUrl" placeholder="git@github.com:user/my-skill.git" size="small" :disabled="gitInstalling" />
+        <NeumorphismInput v-model="gitUrl" placeholder="git@github.com:user/my-skill.git" :size="36" :disabled="gitInstalling" />
         <div class="git-modal__row">
           <div class="git-modal__col">
             <label class="git-modal__label">安装目录名（默认仓库名）</label>
-            <NeumorphismInput v-model="gitName" placeholder="my-skill" size="small" />
+            <NeumorphismInput v-model="gitName" placeholder="my-skill" :size="36" />
           </div>
           <div class="git-modal__col">
             <label class="git-modal__label">分支（默认仓库默认分支）</label>
-            <NeumorphismInput v-model="gitBranch" placeholder="main" size="small" />
+            <NeumorphismInput v-model="gitBranch" placeholder="main" :size="36" />
           </div>
         </div>
         <div class="git-modal__actions">
           <NeumorphismButton
-            size="small"
+            :size="32"
             variant="glass"
             :disabled="gitInstalling"
             @click="gitModalOpen = false"
@@ -3941,7 +3941,7 @@ watch(
             取消
           </NeumorphismButton>
           <NeumorphismButton
-            size="small"
+            :size="32"
             variant="primary"
             :disabled="!gitUrl.trim() || gitInstalling"
             @click="installGitSkill"

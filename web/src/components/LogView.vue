@@ -150,14 +150,14 @@ watch(sshCores, () => {
 <template>
   <div class="log-view-panel">
     <div class="log-head">
-      <NeumorphismSegmented v-model="kind" :options="KIND_OPTIONS" size="small" />
+      <NeumorphismSegmented v-model="kind" :options="KIND_OPTIONS" :size="26" />
       <NeumorphismSegmented
         v-if="kind === 'core' && sshCores.length"
         v-model="core"
         :options="coreOptions"
-        size="small"
+        :size="26"
       />
-      <NeumorphismSegmented v-model="level" :options="LEVEL_OPTIONS" size="small" />
+      <NeumorphismSegmented v-model="level" :options="LEVEL_OPTIONS" :size="26" />
       <input
         v-model="keyword"
         class="log-filter"
@@ -166,13 +166,13 @@ watch(sshCores, () => {
         aria-label="过滤关键字"
       />
       <span class="log-count">{{ filtered.length }} / {{ allLines.length }} 行</span>
-      <NeumorphismButton variant="glass" size="small" @click="follow = !follow">
+      <NeumorphismButton variant="glass" :size="32" @click="follow = !follow">
         {{ follow ? '跟随最新' : '已暂停跟随' }}
       </NeumorphismButton>
-      <NeumorphismButton variant="glass" size="small" @click="auto = !auto">
+      <NeumorphismButton variant="glass" :size="32" @click="auto = !auto">
         {{ auto ? '自动刷新中' : '手动刷新' }}
       </NeumorphismButton>
-      <NeumorphismButton variant="glass" size="small" @click="load()">刷新</NeumorphismButton>
+      <NeumorphismButton variant="glass" :size="32" @click="load()">刷新</NeumorphismButton>
     </div>
     <pre ref="viewer" class="log-viewer">{{ visibleText }}</pre>
   </div>

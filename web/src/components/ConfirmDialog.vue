@@ -19,18 +19,18 @@ function onVisibleChange(open: boolean) {
   <NeumorphismModal
     :model-value="active !== null"
     :title="active?.title ?? '确认操作'"
-    size="small"
+    :size="400"
     :footer="false"
     @update:model-value="onVisibleChange"
   >
     <div class="confirm-dialog">
       <p class="confirm-dialog__message">{{ active?.message }}</p>
       <div class="confirm-dialog__actions">
-        <NeumorphismButton size="small" variant="glass" @click="settleConfirm(false)">
+        <NeumorphismButton :size="32" variant="glass" @click="settleConfirm(false)">
           {{ active?.cancelText ?? '取消' }}
         </NeumorphismButton>
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="primary"
           :class="{ 'confirm-dialog__confirm--danger': active?.danger }"
           @click="settleConfirm(true)"

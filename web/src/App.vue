@@ -654,7 +654,7 @@ watch(
                压成省略号），且 Shell 视图当时没有顶栏入口。 -->
           <template v-if="!isMobile">
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="glass"
               :pressed="view === 'chat'"
               @click="setView('chat')"
@@ -662,7 +662,7 @@ watch(
               聊天
             </NeumorphismButton>
             <NeumorphismButton
-              size="small"
+              :size="32"
               variant="glass"
               :pressed="view === 'settings'"
               @click="setView('settings')"
@@ -675,7 +675,7 @@ watch(
             <NeumorphismButton
               v-for="item in extensionViews"
               :key="item.viewId"
-              size="small"
+              :size="32"
               variant="glass"
               :pressed="view === item.viewId"
               :title="item.view.hint ?? item.view.label"
@@ -693,7 +693,7 @@ watch(
                state 经 mobile-sheets.ts 的互斥 sheet 开关通信） -->
           <NeumorphismButton
             v-if="isMobile && view === 'chat'"
-            size="small"
+            :size="32"
             variant="glass"
             class="mobile-cards-btn"
             aria-label="打开信息卡片"
@@ -769,7 +769,7 @@ watch(
               <code>shell_start</code> 工具创建。
             </template>
           </p>
-          <NeumorphismButton size="small" variant="glass" @click="setView('chat')">
+          <NeumorphismButton :size="32" variant="glass" @click="setView('chat')">
             回到聊天
           </NeumorphismButton>
         </div>

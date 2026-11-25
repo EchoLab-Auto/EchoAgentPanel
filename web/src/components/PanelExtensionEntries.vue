@@ -81,7 +81,7 @@ function open(overlayId: string): void {
       <NeumorphismButton
         variant="glass"
         shape="pill"
-        size="small"
+        :size="32"
         :pressed="entryOverlay === item.overlayId"
         :title="item.action.title ?? item.action.label"
         :aria-label="item.action.label"

@@ -54,7 +54,7 @@ function anchorEl(): HTMLElement | null {
     class="ctx-entry"
     variant="glass"
     shape="pill"
-    size="small"
+    :size="32"
     :title="`当前模型：${currentModel || '未知'}（点击切换 API profile）`"
     @click="open = !open"
   >

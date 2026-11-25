@@ -68,7 +68,7 @@ provide(ADAPTER_UI_CONTEXT, {
       <NeumorphismAlert
         v-if="parsed.newerVersion"
         type="info"
-        size="small"
+        :size="12"
         :message="`该实例的界面描述版本较新（v${parsed.version}），部分控件可能未显示，请升级 Panel`"
       />
       <InstanceUiPanel v-for="panel in parsed.panels" :key="panel.id" :panel="panel" />

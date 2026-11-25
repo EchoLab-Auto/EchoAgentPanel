@@ -257,7 +257,7 @@ async function copyToken(token: string): Promise<void> {
           <code>?token=</code> 出示令牌。改完即时生效，不必重启。
         </div>
       </div>
-      <NeumorphismButton size="small" variant="glass" :loading="loading" @click="load">
+      <NeumorphismButton :size="32" variant="glass" :loading="loading" @click="load">
         刷新
       </NeumorphismButton>
     </div>
@@ -333,10 +333,10 @@ async function copyToken(token: string): Promise<void> {
           <div class="sec-generated__head">新令牌（只显示这一次，请立刻保存）</div>
           <div class="sec-generated__body">
             <code class="sec-generated__token">{{ reveal ? freshlyGenerated : '••••••••••••••••••••' }}</code>
-            <NeumorphismButton size="small" variant="glass" @click="reveal = !reveal">
+            <NeumorphismButton :size="32" variant="glass" @click="reveal = !reveal">
               {{ reveal ? '隐藏' : '显示' }}
             </NeumorphismButton>
-            <NeumorphismButton size="small" @click="copyToken(freshlyGenerated)">复制</NeumorphismButton>
+            <NeumorphismButton :size="32" @click="copyToken(freshlyGenerated)">复制</NeumorphismButton>
           </div>
         </div>
 
@@ -351,10 +351,10 @@ async function copyToken(token: string): Promise<void> {
               placeholder="至少 16 位，建议用「生成随机令牌」"
               autocomplete="new-password"
             />
-            <NeumorphismButton size="small" variant="glass" @click="reveal = !reveal">
+            <NeumorphismButton :size="32" variant="glass" @click="reveal = !reveal">
               {{ reveal ? '隐藏' : '显示' }}
             </NeumorphismButton>
-            <NeumorphismButton size="small" variant="primary" :loading="saving" :disabled="!canSave" @click="saveToken">
+            <NeumorphismButton :size="32" variant="primary" :loading="saving" :disabled="!canSave" @click="saveToken">
               保存
             </NeumorphismButton>
           </div>
@@ -369,12 +369,12 @@ async function copyToken(token: string): Promise<void> {
         </div>
 
         <div class="sec-actions">
-          <NeumorphismButton size="small" :loading="saving" @click="generate">
+          <NeumorphismButton :size="32" :loading="saving" @click="generate">
             生成随机令牌
           </NeumorphismButton>
           <NeumorphismButton
             v-if="view.token_set"
-            size="small"
+            :size="32"
             variant="glass"
             :loading="saving"
             @click="clearToken"

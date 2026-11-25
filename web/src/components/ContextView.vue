@@ -308,7 +308,7 @@ async function compactHistory() {
       </button>
       <NeumorphismButton
         variant="glass"
-        size="small"
+        :size="32"
         :disabled="compacting"
         :title="compacting ? '正在压缩/归档中，请等待完成' : '归档当前会话的历史快照'"
         @click="archiveHistory"
@@ -317,17 +317,17 @@ async function compactHistory() {
       </NeumorphismButton>
       <NeumorphismButton
         variant="glass"
-        size="small"
+        :size="32"
         :disabled="compacting"
         :title="compacting ? '正在压缩/归档中，请等待完成' : '仅压缩当前会话的历史（其他会话不受影响）'"
         @click="compactHistory"
       >
         压缩
       </NeumorphismButton>
-      <NeumorphismButton variant="glass" size="small" title="重新发现技能目录中的 SKILL.md 并刷新注入" @click="reloadSkills">重载技能</NeumorphismButton>
+      <NeumorphismButton variant="glass" :size="32" title="重新发现技能目录中的 SKILL.md 并刷新注入" @click="reloadSkills">重载技能</NeumorphismButton>
       <NeumorphismButton
         variant="glass"
-        size="small"
+        :size="32"
         title="刷新"
         :loading="ctxLoading"
         aria-label="刷新上下文快照"
@@ -368,14 +368,14 @@ async function compactHistory() {
         :model-value="compactionPct"
         :variant="compactionVariant"
         :indeterminate="compacting && compaction.total === 0"
-        size="small"
+        :size="4"
       />
       <p class="ctx-compaction-msg">{{ compaction.message }}</p>
     </div>
 
     <div v-if="!snapshot" class="ctx-state">
       <template v-if="!connected">
-        <NeumorphismSpinner size="large" />
+        <NeumorphismSpinner :size="28" />
         <span class="muted">正在连接 Core…</span>
       </template>
       <template v-else-if="ctxLoading">

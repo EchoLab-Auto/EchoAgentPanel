@@ -132,8 +132,8 @@ watch(shellTailSignature, () => {
         </p>
       </div>
       <div class="shell-head__actions">
-        <NeumorphismButton size="small" variant="glass" @click="emit('back')">返回列表</NeumorphismButton>
-        <NeumorphismButton v-if="session" size="small" variant="glass" @click="stopSession(session.session_id)">
+        <NeumorphismButton :size="32" variant="glass" @click="emit('back')">返回列表</NeumorphismButton>
+        <NeumorphismButton v-if="session" :size="32" variant="glass" @click="stopSession(session.session_id)">
           停止会话
         </NeumorphismButton>
       </div>

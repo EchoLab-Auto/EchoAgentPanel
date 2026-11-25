@@ -157,10 +157,10 @@ onUnmounted(stopPoll);
     <NeumorphismCard class="su-status" :elevation="1">
       <div class="su-status-row">
         <span class="su-label">当前状态</span>
-        <NeumorphismTag :variant="stateMeta(status?.state ?? '').variant" size="small">
+        <NeumorphismTag :variant="stateMeta(status?.state ?? '').variant" :size="11">
           {{ stateMeta(status?.state ?? '').label }}
         </NeumorphismTag>
-        <NeumorphismSpinner v-if="status?.state === 'running'" size="small" />
+        <NeumorphismSpinner v-if="status?.state === 'running'" :size="14" />
       </div>
       <!-- 阶段进度条（state=running/restarting 时显示） -->
       <div v-if="status && (status.state === 'running' || status.state === 'restarting')" class="su-phases">
@@ -181,7 +181,7 @@ onUnmounted(stopPoll);
       <div v-if="status?.revision" class="su-field"><span>版本</span>{{ status.revision }}</div>
       <div v-if="status?.updated_at" class="su-field"><span>时间</span>{{ status.updated_at }}</div>
       <div class="su-actions">
-        <NeumorphismButton size="small" @click="refreshStatus">刷新状态</NeumorphismButton>
+        <NeumorphismButton :size="32" @click="refreshStatus">刷新状态</NeumorphismButton>
       </div>
     </NeumorphismCard>
 
@@ -199,7 +199,7 @@ onUnmounted(stopPoll);
         <NeumorphismSegmented
           :model-value="policy"
           :options="policyOptions"
-          size="small"
+          :size="26"
           @update:model-value="onPolicyChange"
         />
       </div>
@@ -211,7 +211,7 @@ onUnmounted(stopPoll);
           :class="{ 'su-node--offline': !n.online }"
         >
           <span class="su-node-name">{{ n.name }}</span>
-          <NeumorphismTag :variant="n.online ? 'default' : 'error'" size="small">
+          <NeumorphismTag :variant="n.online ? 'default' : 'error'" :size="11">
             {{ n.online ? '在线' : '离线' }}
           </NeumorphismTag>
           <span class="su-node-load">负载 {{ n.load }}</span>

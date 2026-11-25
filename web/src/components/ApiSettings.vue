@@ -874,10 +874,10 @@ watch(
     <div v-if="formMode !== 'none'" class="api-form-section">
       <div class="api-form-title-row">
         <h3 class="api-form-title">{{ formTitle }}</h3>
-        <NeumorphismTag v-if="formMode === 'edit'" variant="warning" size="small">
+        <NeumorphismTag v-if="formMode === 'edit'" variant="warning" :size="11">
           编辑中
         </NeumorphismTag>
-        <NeumorphismButton size="small" variant="glass" @click="closeForm">
+        <NeumorphismButton :size="32" variant="glass" @click="closeForm">
           收起
         </NeumorphismButton>
       </div>
@@ -922,10 +922,10 @@ watch(
         <div class="chatgpt-login__head">
           <PanelIcon name="lock" size="xs" tone="muted" />
           <span class="chatgpt-login__title">ChatGPT 订阅登录</span>
-          <NeumorphismTag v-if="chatgptStatus?.logged_in" size="small" variant="success">
+          <NeumorphismTag v-if="chatgptStatus?.logged_in" :size="11" variant="success">
             已登录
           </NeumorphismTag>
-          <NeumorphismTag v-else size="small" variant="default">未登录</NeumorphismTag>
+          <NeumorphismTag v-else :size="11" variant="default">未登录</NeumorphismTag>
         </div>
 
         <div v-if="chatgptStatus?.logged_in" class="chatgpt-login__body">
@@ -934,7 +934,7 @@ watch(
             用 Plus/Pro 订阅额度，不单独计 API 费。Key 留空即可——凭据是登录态。
             <span v-if="!chatgptStatus.refreshable">（无 refresh_token：过期后需重新登录）</span>
           </div>
-          <NeumorphismButton size="small" variant="glass" @click="startChatGptLogin">
+          <NeumorphismButton :size="32" variant="glass" @click="startChatGptLogin">
             重新登录
           </NeumorphismButton>
         </div>
@@ -945,7 +945,7 @@ watch(
             回调会打到 Core 那台的 1455 端口。
           </div>
           <NeumorphismButton
-            size="small"
+            :size="32"
             variant="raised"
             :loading="chatgptLogin.pending"
             @click="startChatGptLogin"
@@ -963,10 +963,10 @@ watch(
           </div>
           <div class="chatgpt-login__url-row">
             <code class="chatgpt-login__url-text">{{ chatgptLogin.url }}</code>
-            <NeumorphismButton size="small" variant="glass" @click="copyChatGptAuthUrl">
+            <NeumorphismButton :size="32" variant="glass" @click="copyChatGptAuthUrl">
               复制
             </NeumorphismButton>
-            <NeumorphismButton size="small" variant="glass" @click="openChatGptAuthUrl">
+            <NeumorphismButton :size="32" variant="glass" @click="openChatGptAuthUrl">
               打开
             </NeumorphismButton>
           </div>
@@ -983,7 +983,7 @@ watch(
                 @keyup.enter="submitManualCode"
               />
               <NeumorphismButton
-                size="small"
+                :size="32"
                 variant="raised"
                 :disabled="!manualCode.trim()"
                 @click="submitManualCode"
@@ -1004,7 +1004,7 @@ watch(
             1455、Core 收不到。在浏览器那台机器上先开隧道：
             <code>{{ lanTunnelHint }}</code>
           </div>
-          <NeumorphismButton size="small" variant="glass" @click="cancelChatGptLogin">
+          <NeumorphismButton :size="32" variant="glass" @click="cancelChatGptLogin">
             取消登录
           </NeumorphismButton>
         </div>
@@ -1101,7 +1101,7 @@ watch(
       <div class="api-metrics__head">
         <h3>余额与用量（近 7 天）</h3>
         <NeumorphismButton
-          size="small"
+          :size="32"
           variant="glass"
           :loading="metricsLoading"
           @click="fetchMetrics('')"
@@ -1168,7 +1168,7 @@ watch(
             <NeumorphismTag
               v-if="formMode === 'edit' && editingProfile === profile.name"
               variant="warning"
-              size="small"
+              :size="11"
             >
               编辑中
             </NeumorphismTag>
@@ -1209,7 +1209,7 @@ watch(
                 </span>
               </div>
               <NeumorphismButton
-                size="small"
+                :size="32"
                 variant="glass"
                 :loading="balanceLoading === profile.name"
                 :disabled="balanceLoading !== null && balanceLoading !== profile.name"
@@ -1256,7 +1256,7 @@ watch(
             <!-- 操作行：三按钮等宽网格 -->
             <div class="profile-card__actions">
               <NeumorphismButton
-                size="small"
+                :size="32"
                 variant="glass"
                 :loading="testing === profile.name"
                 :disabled="testing !== null && testing !== profile.name"
@@ -1264,11 +1264,11 @@ watch(
               >
                 测试
               </NeumorphismButton>
-          <NeumorphismButton size="small" variant="glass" @click="openEdit(profile)">
+          <NeumorphismButton :size="32" variant="glass" @click="openEdit(profile)">
                 编辑
               </NeumorphismButton>
               <NeumorphismButton
-                size="small"
+                :size="32"
                 variant="glass"
                 @click="sendCommand({ DeleteApi: { name: profile.name } })"
               >
@@ -1308,11 +1308,11 @@ watch(
           v-model="importPeer"
           :options="federatedPeers.map((p) => ({ label: p, value: p }))"
           placeholder="选择联邦节点…"
-          size="small"
+          :size="36"
         />
         <NeumorphismButton
           variant="glass"
-          size="small"
+          :size="32"
           :disabled="!importPeer || remoteLoading"
           @click="queryRemoteProfiles"
         >
@@ -1333,7 +1333,7 @@ watch(
           <PanelIcon name="warning" size="xs" tone="warn" />
           无 key
         </span>
-        <NeumorphismButton variant="glass" size="small" @click="importFromRemote(entry)">
+        <NeumorphismButton variant="glass" :size="32" @click="importFromRemote(entry)">
           导入
         </NeumorphismButton>
       </div>
