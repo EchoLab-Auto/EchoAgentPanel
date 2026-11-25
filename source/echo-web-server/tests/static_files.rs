@@ -184,13 +184,22 @@ async fn etag_round_trips_to_304() {
 async fn cache_policy_follows_path() {
     let dir = temp_static_dir("cache");
     std::fs::write(dir.join("index.html"), "<html>shell</html>").unwrap();
-    std::fs::write(dir.join("assets/app-abc.js"), "code".repeat(300)).unwrap();
+    // 带内容哈希（8 位）→ 可 immutable。
+    std::fs::write(dir.join("assets/app-BXr0LlrB.js"), "code".repeat(300)).unwrap();
+    // 固定名共享入口（import map 指向、名字不能变）→ 只能协商。
+    std::fs::create_dir_all(dir.join("assets/ui-frame")).unwrap();
+    std::fs::write(
+        dir.join("assets/ui-frame/NeumorphismButton.js"),
+        "code".repeat(300),
+    )
+    .unwrap();
+    std::fs::write(dir.join("assets/panel-vue.js"), "code".repeat(300)).unwrap();
     let base = spawn_panel(dir.to_string_lossy().into_owned()).await;
     let client = reqwest::Client::new();
 
     // 哈希资源：一年 immutable。
     let resp = client
-        .get(format!("{base}/assets/app-abc.js"))
+        .get(format!("{base}/assets/app-BXr0LlrB.js"))
         .send()
         .await
         .unwrap();
@@ -200,6 +209,25 @@ async fn cache_policy_follows_path() {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     assert!(cc.contains("immutable"), "assets cc: {cc}");
+
+    // 固定名共享入口：**必须**可协商。immutable 会让老访客长期拿旧模块
+    // 配新 CSS（scoped 样式 data-v-* 不匹配 → 控件退化成裸元素）。
+    for path in [
+        "assets/ui-frame/NeumorphismButton.js",
+        "assets/panel-vue.js",
+    ] {
+        let resp = client.get(format!("{base}/{path}")).send().await.unwrap();
+        let cc = resp
+            .headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            !cc.contains("immutable"),
+            "{path} 是固定名共享入口，不能 immutable：{cc}"
+        );
+        assert!(cc.contains("no-cache"), "{path} 应为 no-cache 协商：{cc}");
+    }
 
     // SPA shell：no-store。
     let resp = client.get(format!("{base}/")).send().await.unwrap();

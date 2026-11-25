@@ -4,9 +4,12 @@
 //! 无 ETag —— 缓存 5 分钟过期后或硬刷新时，浏览器每次都要重下全量，在
 //! 局域网/慢机上肉眼可见地拖慢面板打开。本模块三件事：
 //!
-//! - **按路径分级的缓存策略**：`assets/` 下的文件名含内容哈希，字节永不
-//!   变化 → `max-age=31536000, immutable`（更新即换名，无需过期重下）；
-//!   HTML（SPA shell）保持 `no-store`；其余给短缓存 + ETag 兜底。
+//! - **按路径分级的缓存策略**：`assets/` 下**带内容哈希**的文件名（Vite 的
+//!   `index-CHecbJNP.js`）字节永不变化 → `max-age=31536000, immutable`（更新即
+//!   换名，无需过期重下）；但 `assets/` 里的**固定名共享入口**（import map 指向
+//!   的 `panel-vue.js` / `ui-frame/*.js`）每次重建内容都变而名字不变，只能给
+//!   `no-cache` 协商（见 [`content_hashed`] 的说明）；HTML（SPA shell）保持
+//!   `no-store`；其余给短缓存 + ETag 兜底。
 //! - **gzip 协商**：≥1KB 的文本资源（js/css/html/json/svg/map）在
 //!   `Accept-Encoding: gzip` 时压缩发送；压缩结果按 (路径, mtime, 大小)
 //!   进程内缓存，命中零开销。
@@ -138,6 +141,34 @@ async fn real_path_within(root: &Path, candidate: &Path) -> Option<(PathBuf, Pat
         .then_some((real_root, real_candidate))
 }
 
+/// 文件名是否带有**内容哈希**（Vite 产物形如 `index-CHecbJNP.js`）。
+///
+/// 判据：文件 stem 里存在「`-` + 至少 8 个 `[A-Za-z0-9_-]` 到结尾」的片段。
+///
+/// 为什么要判：`assets/` 下**并非全部**带哈希——面板 import map 的共享入口必须是
+/// 固定名字（`panel-vue.js` / `ui-frame/NeumorphismButton.js` …），扩展按裸标识符
+/// 引用它们，名字一变全部失联（见 `web/panel-shared.entries.json`）。把它们也标
+/// 成 immutable，就等于承诺「这个 URL 的字节永不变化」，而事实是每次重建都变。
+fn content_hashed(path: &Path) -> bool {
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    for (index, ch) in stem.char_indices().rev() {
+        if ch != '-' {
+            continue;
+        }
+        let tail = &stem[index + 1..];
+        if tail.len() >= 8
+            && tail
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return true;
+        }
+    }
+    false
+}
+
 async fn serve_file(root: &Path, file: PathBuf, headers: &HeaderMap) -> Response {
     let metadata = match tokio::fs::metadata(&file).await {
         Ok(metadata) => metadata,
@@ -154,9 +185,16 @@ async fn serve_file(root: &Path, file: PathBuf, headers: &HeaderMap) -> Response
     let cache_control = if is_html {
         // HTML（SPA shell）禁止任何缓存：no-store 避免浏览器启发式缓存旧壳。
         "no-store, no-cache, must-revalidate"
-    } else if in_assets {
+    } else if in_assets && content_hashed(&file) {
         // 内容哈希文件名 → 永久强缓存；新构建换名，天然免过期。
         "public, max-age=31536000, immutable"
+    } else if in_assets {
+        // **固定名的共享入口**（import map 指向它们）：内容随每次重建变化，但
+        // 文件名不能变。若也给 immutable，老访客会长期拿旧模块配新 CSS——而
+        // scoped 样式靠 `data-v-*` 匹配，两边 hash 不同就整块失效：按钮退化成
+        // 没有背景与阴影的裸元素（2026-11 实际事故）。这里每次都协商，ETag 让
+        // 未变化时只回 304，代价很小。
+        "no-cache"
     } else {
         "public, max-age=300"
     };
@@ -405,6 +443,57 @@ mod tests {
         assert!(resolve_static_path(root, "assets/../../secret.txt").is_none());
         assert!(resolve_static_path(root, "/etc/passwd").is_none());
         assert!(resolve_static_path(root, "assets/..").is_none());
+    }
+
+    #[test]
+    fn content_hashed_recognises_vite_names() {
+        // 带哈希（Vite 各类形态）
+        for name in [
+            "assets/index-CHecbJNP.js",
+            "assets/style-BXR0LlrB.css",
+            "assets/AgentConfigModal-DX9-3SEp.js",
+            "assets/NeumorphismIcon-CFyBR-Sk-D2fpR2o8.js",
+            "assets/_plugin-vue_export-helper-CHgC5LLL-Cv-XqcBN.js",
+            "assets/ProDocPanel-DjVZYVwD.js",
+        ] {
+            assert!(content_hashed(Path::new(name)), "{name} 应判为带哈希");
+        }
+        // 固定名（import map 共享入口 / 普通文件）
+        for name in [
+            "assets/panel-vue.js",
+            "assets/panel-sdk.js",
+            "assets/panel-components/PanelIcon.js",
+            "assets/ui-frame/NeumorphismButton.js",
+            "assets/ui-frame/index.js",
+            "index.html",
+            "manifest.webmanifest",
+        ] {
+            assert!(!content_hashed(Path::new(name)), "{name} 应判为不带哈希");
+        }
+    }
+
+    /// 面板的共享入口清单是「固定名」的权威来源：任何一个都不能被判成带哈希。
+    /// 清单变了（新增共享入口）而分类器误判时，这里直接红。
+    #[test]
+    fn panel_shared_entries_are_never_immutable() {
+        let manifest =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/panel-shared.entries.json");
+        let Ok(raw) = std::fs::read_to_string(&manifest) else {
+            // 脱离完整仓检出（只拷了 crate）时跳过：这不是被测行为。
+            return;
+        };
+        let json: serde_json::Value = serde_json::from_str(&raw).expect("清单应是合法 JSON");
+        let entries = json["entries"].as_array().expect("清单应有 entries 数组");
+        for entry in entries {
+            let output = entry["output"].as_str().expect("每条应有 output");
+            // 面板把它拼到 `assets/` 下再对外服务。
+            let served = format!("assets/{output}");
+            assert!(
+                !content_hashed(Path::new(&served)),
+                "共享入口 {served} 被判成带哈希，会被标成 immutable —— \
+                 它的名字必须固定，内容每次重建都变"
+            );
+        }
     }
 
     #[test]
