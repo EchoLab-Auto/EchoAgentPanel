@@ -29,17 +29,30 @@ let lastUpstreams: Map<string, string> | null = null;
  * 后端健康表被拉两次、`state.upstreams` 被赋值两次，界面白抖一轮。共享
  * 同一个 promise 即可，语义上仍是「最近一次快照」。
  */
-let inflight: Promise<void> | null = null;
+let inflight: Promise<boolean> | null = null;
+
+/**
+ * 上一轮的**实质状态签名**（`name:connectivity:auth:last_error`）。
+ *
+ * 只包含"用户看得见的状态"，**不含 `last_checked`**——后端每次探活都会更新
+ * 它，把它算进签名等于每轮都"有变化"，退避永远不会生效。`last_upstreams`
+ * 仍保留（离线检测要按 name 对齐），这里另起一个专门用于退避的字符串。
+ */
+let lastSignature = '';
 
 /**
  * 拉取一次上游状态并写入共享 state（失败保留上次结果，不弹错）。
+ *
+ * 返回**本轮是否有实质变化**（connectivity / auth / last_error 任一变化）：
+ * 轮询据此退避——远程访问下 8s 一次的空往返是持续的带宽与耗电开销，而
+ * 上游状态在绝大多数时间里不变。
  *
  * **内容没变就不写 state**（2026-10 修「Core 连接页闪烁」）：后端健康泵每
  * 次探活都会更新 `last_checked`，但绝大多数轮询里 connectivity/auth 是不变
  * 的；此前无条件 `state.upstreams = next` 会让整张列表每 3s 重渲染一次。
  * 结构没变的轮询不该产生任何 DOM 变更。
  */
-export function refreshUpstreams(): Promise<void> {
+export function refreshUpstreams(): Promise<boolean> {
   if (inflight) return inflight;
   inflight = doRefreshUpstreams().finally(() => {
     inflight = null;
@@ -47,12 +60,30 @@ export function refreshUpstreams(): Promise<void> {
   return inflight;
 }
 
-async function doRefreshUpstreams(): Promise<void> {
+/**
+ * 上游快照的**实质状态签名**（`name:connectivity:auth:last_error`）。
+ *
+ * 刻意**排除 `last_checked`**：后端每次探活都会更新它，把它算进来等于每轮
+ * 都"有变化"，自适应退避永远不会生效。排序是为了让列表顺序不影响签名。
+ *
+ * 导出仅为可测：轮询退避的整个正确性都压在这一个判断上。
+ */
+export function upstreamSignature(list: UpstreamStatus[]): string {
+  return list
+    .map((u) => `${u.name}:${u.connectivity}:${u.auth}:${u.last_error ?? ''}`)
+    .sort()
+    .join('|');
+}
+
+async function doRefreshUpstreams(): Promise<boolean> {
   try {
     const res = await panelFetch('/api/upstreams');
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const list = (await res.json()) as UpstreamStatus[];
     const next = Array.isArray(list) ? list : [];
+    const signature = upstreamSignature(next);
+    const changed = signature !== lastSignature;
+    lastSignature = signature;
     if (lastUpstreams) {
       for (const [name, connectivity] of lastUpstreams) {
         const now = next.find((u) => u.name === name)?.connectivity;
@@ -81,8 +112,10 @@ async function doRefreshUpstreams(): Promise<void> {
     for (const u of next) state.knownCores.add(u.name);
     evaluateFailover(next);
     await discoverFromFederation(next);
+    return changed;
   } catch {
     // Panel 后端不可达：保留上次快照。
+    return false;
   }
 }
 
@@ -124,7 +157,10 @@ async function discoverFromFederation(list: UpstreamStatus[]): Promise<void> {
   await pruneDiscovered();
 }
 
-const POLL_MS = 8_000;
+/** 轮询最短间隔（状态刚变过：跟紧，别让用户看到过期的在线状态）。 */
+const POLL_MIN_MS = 8_000;
+/** 轮询最长间隔（长时间无变化时的退避上限）。 */
+const POLL_MAX_MS = 30_000;
 
 /**
  * 启动周期轮询；返回停止函数。
@@ -132,19 +168,56 @@ const POLL_MS = 8_000;
  * 后台标签页暂停轮询、回到前台立即补一次（2026-10 审计）：状态卡不在
  * 视野内，后台 8s 一次的 fetch 纯属浪费（移动端耗电/流量）；回前台补
  * 一次保证看到的是最新状态。
+ *
+ * ## 自适应退避（2026-11 远程访问优化）
+ *
+ * 原来是固定 `setInterval(8s)`：远程访问下这就是**每分钟 7 次完整的 HTTP
+ * 往返**，而上游状态绝大多数时间是不变的——空转的请求既占带宽又让笔记本
+ * 网卡无法进入低功耗。改为「有实质变化 → 保持 8s；连续无变化 → 8→16→24→
+ * 30s」。状态一变立刻回到 8s，所以不会漏掉恢复/掉线。
+ *
+ * 用 `setTimeout` 递归而不是 `setInterval`：间隔是**每轮**重新决定的，固定
+ * 周期无法退避。（顺带修掉了原来"后台暂停"仍每 8s 空转一次回调的问题。）
  */
 export function startUpstreamsPolling(): () => void {
+  let delay = POLL_MIN_MS;
+  let timer: number | undefined;
+  let stopped = false;
+
+  const schedule = () => {
+    if (stopped) return;
+    if (timer !== undefined) window.clearTimeout(timer);
+    timer = window.setTimeout(tick, delay);
+  };
+
+  const tick = () => {
+    if (stopped) return;
+    if (document.visibilityState !== 'visible') {
+      // 后台：不请求，但保持"最短间隔"的节奏——回前台由 onVisible 立即补。
+      delay = POLL_MIN_MS;
+      schedule();
+      return;
+    }
+    void refreshUpstreams().then((changed) => {
+      delay = changed ? POLL_MIN_MS : Math.min(delay * 2, POLL_MAX_MS);
+      schedule();
+    });
+  };
+
   void refreshUpstreams();
-  const timer = window.setInterval(() => {
-    if (document.visibilityState !== 'visible') return; // 后台暂停
-    void refreshUpstreams();
-  }, POLL_MS);
+  schedule();
+
   const onVisible = () => {
-    if (document.visibilityState === 'visible') void refreshUpstreams();
+    if (document.visibilityState !== 'visible') return;
+    // 回前台：立即补一次并复位退避（用户正看着，状态必须是最新的）。
+    delay = POLL_MIN_MS;
+    void refreshUpstreams();
+    schedule();
   };
   document.addEventListener('visibilitychange', onVisible);
   return () => {
-    window.clearInterval(timer);
+    stopped = true;
+    if (timer !== undefined) window.clearTimeout(timer);
     document.removeEventListener('visibilitychange', onVisible);
   };
 }

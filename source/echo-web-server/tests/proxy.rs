@@ -745,3 +745,113 @@ async fn tightening_require_token_closes_existing_websocket() {
         "require_token 收紧后旧 WS 未被吊销（旧实现只比较 epoch，而收紧不改 epoch）"
     );
 }
+
+// ── 下行帧压缩的端到端行为（2026-11 远程访问优化）───────────────────────
+//
+// 单测只能覆盖两端各自的逻辑，这里验证**链路真的按协商工作**：
+//   · 客户端声明 `frame_gzip=1` + 帧超过阈值 → 回程是二进制帧、可解压；
+//   · 客户端没声明 → 同样的大帧仍是文本帧（旧前端行为完全不变）；
+//   · 小帧无论是否声明都不压缩（压缩收益抵不过一层封装 + 一次解压）。
+
+/// gzip 解压（跳过中继的 4 字节魔数）。
+fn unzip_compressed_frame(payload: &[u8]) -> String {
+    assert_eq!(
+        &payload[..4],
+        b"EGZ1",
+        "压缩帧必须以魔数开头（前端靠它同步识别）"
+    );
+    let mut decoder = flate2::read::GzDecoder::new(&payload[4..]);
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut decoder, &mut out).expect("gunzip");
+    out
+}
+
+#[tokio::test]
+async fn large_downstream_frame_is_compressed_only_when_declared() {
+    use echo_web_server::ws_compress::MIN_BYTES;
+
+    let core_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let core_url = format!(
+        "ws://127.0.0.1:{}",
+        core_listener.local_addr().unwrap().port()
+    );
+    tokio::spawn(fake_core(core_listener));
+    let panel_ws = spawn_panel(core_url).await;
+
+    // 可压缩的大帧（重复结构，正是时间线首屏的形状）。
+    let big = format!(
+        "{{\"type\":\"event\",\"payload\":{{\"AgentOutput\":{{\"session_id\":\"s\",\"content\":\"{}\"}}}}}}",
+        "同一段正文，用来制造可压缩的重复结构".repeat(MIN_BYTES / 30)
+    );
+    assert!(big.len() > MIN_BYTES, "测试载荷必须超过压缩阈值");
+
+    // ── 声明支持：回程应当是**二进制帧** ──
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("{panel_ws}?frame_gzip=1"))
+        .await
+        .unwrap();
+    ws.send(WsMessage::Text(big.clone().into())).await.unwrap();
+    let frame = loop {
+        match ws.next().await.unwrap().unwrap() {
+            // 跳过中继心跳。
+            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+            other => break other,
+        }
+    };
+    let payload = match frame {
+        WsMessage::Binary(bytes) => bytes,
+        WsMessage::Text(text) => panic!("声明了 frame_gzip 却收到文本帧（{} 字节）", text.len()),
+        other => panic!("意外的帧类型：{other:?}"),
+    };
+    assert!(
+        payload.len() < big.len() / 2,
+        "压缩帧应当明显更小（{} → {}）",
+        big.len(),
+        payload.len()
+    );
+    assert_eq!(unzip_compressed_frame(&payload), big);
+    ws.close(None).await.unwrap();
+
+    // ── 未声明：完全不走压缩（旧前端 / 命令行调试的行为不变）──
+    let (mut plain, _) = tokio_tungstenite::connect_async(&panel_ws).await.unwrap();
+    plain.send(WsMessage::Text(big.clone().into())).await.unwrap();
+    let frame = loop {
+        match plain.next().await.unwrap().unwrap() {
+            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+            other => break other,
+        }
+    };
+    match frame {
+        WsMessage::Text(text) => assert_eq!(text.as_str(), big.as_str()),
+        other => panic!("未声明压缩时必须是文本帧，实际：{other:?}"),
+    }
+    plain.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn small_frames_are_never_compressed() {
+    let core_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let core_url = format!(
+        "ws://127.0.0.1:{}",
+        core_listener.local_addr().unwrap().port()
+    );
+    tokio::spawn(fake_core(core_listener));
+    let panel_ws = spawn_panel(core_url).await;
+
+    // 声明了压缩，但帧很小（单条 delta 的量级）→ 仍然发明文。
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("{panel_ws}?frame_gzip=1"))
+        .await
+        .unwrap();
+    let small = r#"{"type":"event","payload":{"AgentContentDelta":{"session_id":"s","branch_id":"b","delta":"嗯","team_id":null}}}"#;
+    ws.send(WsMessage::Text(small.into())).await.unwrap();
+    let frame = loop {
+        match ws.next().await.unwrap().unwrap() {
+            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+            other => break other,
+        }
+    };
+    match frame {
+        WsMessage::Text(text) => assert_eq!(text.as_str(), small),
+        other => panic!("小帧不该被压缩，实际：{other:?}"),
+    }
+    ws.close(None).await.unwrap();
+}

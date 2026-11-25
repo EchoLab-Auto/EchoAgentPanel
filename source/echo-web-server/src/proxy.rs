@@ -351,9 +351,13 @@ pub async fn ws_handler(
     let gate = gate
         .map(|axum::Extension(gate)| gate)
         .unwrap_or_else(crate::deployment::DeploymentGate::from_env);
+    // 下行帧压缩（2026-11）：只在浏览器显式声明支持时开启（`frame_gzip=1`，
+    // 见 web/src/ws-codec.ts 的能力探测）。不声明 = 明文透传，旧前端与
+    // 命令行调试完全不受影响。
+    let frame_gzip = crate::ws_compress::client_accepts(params.get("frame_gzip").map(String::as_str));
     ws.max_message_size(WS_MAX_BYTES)
         .max_frame_size(WS_MAX_BYTES)
-        .on_upgrade(move |socket| bridge(socket, state, peer.0, auth_epoch, gate))
+        .on_upgrade(move |socket| bridge(socket, state, peer.0, auth_epoch, gate, frame_gzip))
         .into_response()
 }
 
@@ -742,6 +746,12 @@ struct LinkStats {
     seq_gaps: u64,
     /// 跳号累计缺失条数。
     seq_missed: u64,
+    /// 本连接内被压缩下发的帧数（2026-11 远程访问优化）。
+    ///
+    /// 与 `frames` 对照就能判断压缩链路是否真的在工作：为 0 而 `frames`
+    /// 很大，说明客户端没声明（或 `PANEL_WS_COMPRESS=0`）——远程卡顿若在
+    /// 这时出现，可以直接排除压缩路径。
+    compressed: u64,
     /// 加壳模式下无法解析（非 JSON）而被丢弃的帧数。
     non_json: u64,
     /// 因浏览器侧写不动而提前结束（其余排队帧由重连补拉）。
@@ -870,6 +880,8 @@ async fn bridge(
     peer: Option<std::net::SocketAddr>,
     auth_epoch: u64,
     gate: crate::deployment::DeploymentGate,
+    // 浏览器是否声明支持压缩帧（见 `crate::ws_compress::client_accepts`）。
+    frame_gzip: bool,
 ) {
     // 浏览器侧的连接与断开此前**都没有日志**：上游那条 "upstream link closed"
     // 是被动结果（浏览器走了 → 连带拆除），却成了唯一可见的线索，于是每次
@@ -1044,6 +1056,9 @@ async fn bridge(
                     // 报出"断开期间丢了多少条"。Core 重启会让序号归 1，那时
                     // 差值为负，`saturating_sub` 自然不报警。
                     let resume_from = last_seq_seen;
+                    // 压缩开关在 spawn 前取一份（`frame_gzip` 是 Copy 的 bool，
+                    // 但外层循环后续还可能重连，显式命名更清楚）。
+                    let compress_frames = frame_gzip;
                     let reader = tokio::spawn(async move {
                         let mut last_frame = Instant::now();
                         let mut hb = tokio::time::interval(heartbeat_interval());
@@ -1124,7 +1139,22 @@ async fn bridge(
                                                         }
                                                         stats.last_seq = Some(cur);
                                                     }
-                                                    BrowserMessage::Text(out.into())
+                                                    // 下行帧压缩（2026-11 远程访问优化）：
+                                                    // 只压大帧（阈值见 ws_compress），
+                                                    // 压不动或未达阈值时照旧发明文——
+                                                    // 这条路径永远不会因为压缩而丢帧。
+                                                    match compress_frames
+                                                        .then(|| {
+                                                            crate::ws_compress::compress_frame(&out)
+                                                        })
+                                                        .flatten()
+                                                    {
+                                                        Some(payload) => {
+                                                            stats.compressed += 1;
+                                                            BrowserMessage::Binary(payload.into())
+                                                        }
+                                                        None => BrowserMessage::Text(out.into()),
+                                                    }
                                                 }
                                                 None => {
                                                     // 加壳模式下无法解析的帧：无法归属
@@ -1264,6 +1294,7 @@ async fn bridge(
                         warn!(
                             core = %name,
                             frames = stats.frames,
+                            compressed = stats.compressed,
                             last_seq = ?stats.last_seq,
                             seq_gaps = stats.seq_gaps,
                             missed = stats.seq_missed,
@@ -1277,6 +1308,7 @@ async fn bridge(
                         info!(
                             core = %name,
                             frames = stats.frames,
+                            compressed = stats.compressed,
                             last_seq = ?stats.last_seq,
                             reason,
                             up_ms = link_started.elapsed().as_millis() as u64,

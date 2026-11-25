@@ -193,8 +193,11 @@ function select(id: string, core: string | null) {
   border: 1px solid var(--panel-glass-border);
   border-radius: 999px;
   background: color-mix(in srgb, var(--nm-surface-raised) 42%, transparent);
-  backdrop-filter: blur(20px) saturate(1.6);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  /* 玻璃档位（2026-11）：过去这里硬编码 20px + saturate(1.6)，与浮层各自
+     一套值。统一到 `--panel-glass-filter` 后，Retina 折半与系统「降低
+     透明度」降级对它一并生效。 */
+  backdrop-filter: var(--panel-glass-filter);
+  -webkit-backdrop-filter: var(--panel-glass-filter);
   color: var(--nm-text-primary);
   font-size: 12px;
   cursor: pointer;

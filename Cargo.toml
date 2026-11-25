@@ -19,9 +19,11 @@ tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 tokio-tungstenite = "0.24"
 
-# 静态资源 gzip 协商（echo-web-server 静态路由）
+# 静态资源压缩（echo-web-server 静态路由）：gzip + brotli 协商
 flate2 = "1"
-
+# brotli 压缩质量 5：与 gzip(6) 相比在 JS/CSS 上再省 15~20%，编译期成本
+# 只在首次请求时付一次（产物按 (路径, mtime, 大小) 进程内缓存）。
+brotli = "7"
 # http / ws server
 axum = { version = "0.8", features = ["ws"] }
 

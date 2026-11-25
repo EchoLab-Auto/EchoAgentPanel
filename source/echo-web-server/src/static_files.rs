@@ -31,19 +31,44 @@ use axum::response::{IntoResponse, Response};
 
 use crate::proxy::AppState;
 
-/// 小于该大小的文件不做 gzip（省不了多少，还多一层解压开销）。
+/// 小于该大小的文件不做压缩（省不了多少，还多一层解压开销）。
 const GZIP_MIN_BYTES: u64 = 1024;
-/// gzip 产出缓存的条目上限（静态目录文件数有限，防御性封顶）。
+/// 压缩产出缓存的条目上限（静态目录文件数有限，防御性封顶）。
 const GZIP_CACHE_MAX: usize = 128;
 
-struct GzipEntry {
+/// 支持的压缩编码（2026-11 加 brotli：同内容在 JS/CSS 上再省 15~20%，
+/// 远程访问下这部分直接体现在首屏时间上）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Encoding {
+    Gzip,
+    Brotli,
+}
+
+impl Encoding {
+    fn header(self) -> &'static str {
+        match self {
+            Self::Gzip => "gzip",
+            Self::Brotli => "br",
+        }
+    }
+
+    /// 缓存键的编码位（`PathBuf` 不能直接和 `&str` 组合成可 Hash 的键）。
+    fn id(self) -> u8 {
+        match self {
+            Self::Gzip => 1,
+            Self::Brotli => 2,
+        }
+    }
+}
+
+struct EncodedEntry {
     modified: SystemTime,
     plain_len: u64,
     body: Arc<Vec<u8>>,
 }
 
-fn gzip_cache() -> &'static Mutex<HashMap<PathBuf, GzipEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, GzipEntry>>> = OnceLock::new();
+fn encoded_cache() -> &'static Mutex<HashMap<(PathBuf, u8), EncodedEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, u8), EncodedEntry>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -212,13 +237,11 @@ async fn serve_file(root: &Path, file: PathBuf, headers: &HeaderMap) -> Response
         }
     }
 
-    let compressible =
-        accepts_gzip(headers) && compressible_ext(&file) && plain_len >= GZIP_MIN_BYTES;
-    if compressible {
-        if let Some(body) = gzipped_body(&file, modified, plain_len).await {
+    if let Some(encoding) = negotiate_encoding(headers, &file, plain_len) {
+        if let Some(body) = encoded_body(&file, modified, plain_len, encoding).await {
             return Response::builder()
                 .header(CONTENT_TYPE, content_type(&file))
-                .header(CONTENT_ENCODING, "gzip")
+                .header(CONTENT_ENCODING, encoding.header())
                 .header(VARY, "accept-encoding")
                 .header(ETAG, &etag)
                 .header(CACHE_CONTROL, cache_control)
@@ -239,26 +262,55 @@ async fn serve_file(root: &Path, file: PathBuf, headers: &HeaderMap) -> Response
     }
 }
 
-/// 取 gzip 产物：进程内缓存命中（路径 + mtime + 大小一致）则直接复用，
+/// 选出本次要用的压缩编码；不该压（不可压类型 / 太小的文件）返回 `None`。
+///
+/// **brotli 优先**：同一份 JS/CSS 通常再省 15~20%，而浏览器解 brotli 与解
+/// gzip 一样快。客户端不支持 br 时回退 gzip（老浏览器 / 某些代理会剥掉 br）。
+fn negotiate_encoding(headers: &HeaderMap, file: &Path, plain_len: u64) -> Option<Encoding> {
+    if !compressible_ext(file) || plain_len < GZIP_MIN_BYTES {
+        return None;
+    }
+    if accepts_encoding(headers, Encoding::Brotli) {
+        return Some(Encoding::Brotli);
+    }
+    if accepts_encoding(headers, Encoding::Gzip) {
+        return Some(Encoding::Gzip);
+    }
+    None
+}
+
+/// 取压缩产物：进程内缓存命中（路径 + 编码 + mtime + 大小一致）则直接复用，
 /// 否则现压并写入缓存。
-async fn gzipped_body(file: &Path, modified: SystemTime, plain_len: u64) -> Option<Arc<Vec<u8>>> {
-    if let Ok(cache) = gzip_cache().lock() {
-        if let Some(entry) = cache.get(file) {
+///
+/// 压缩本身跑在 `spawn_blocking` 里：brotli 质量 5 约 10~20 MB/s，一个
+/// 2 MB 的 JS 要 100~200 ms——放在 reactor 线程上会把同一瞬间的其它请求
+/// （首屏那 20 多个模块）全部堵住。
+async fn encoded_body(
+    file: &Path,
+    modified: SystemTime,
+    plain_len: u64,
+    encoding: Encoding,
+) -> Option<Arc<Vec<u8>>> {
+    let key = (file.to_path_buf(), encoding.id());
+    if let Ok(cache) = encoded_cache().lock() {
+        if let Some(entry) = cache.get(&key) {
             if entry.modified == modified && entry.plain_len == plain_len {
                 return Some(Arc::clone(&entry.body));
             }
         }
     }
     let plain = tokio::fs::read(file).await.ok()?;
-    let compressed = gzip_bytes(&plain)?;
+    let compressed = tokio::task::spawn_blocking(move || compress_bytes(&plain, encoding))
+        .await
+        .ok()??;
     let body = Arc::new(compressed);
-    if let Ok(mut cache) = gzip_cache().lock() {
+    if let Ok(mut cache) = encoded_cache().lock() {
         if cache.len() >= GZIP_CACHE_MAX {
             cache.clear();
         }
         cache.insert(
-            file.to_path_buf(),
-            GzipEntry {
+            key,
+            EncodedEntry {
                 modified,
                 plain_len,
                 body: Arc::clone(&body),
@@ -268,10 +320,30 @@ async fn gzipped_body(file: &Path, modified: SystemTime, plain_len: u64) -> Opti
     Some(body)
 }
 
+fn compress_bytes(plain: &[u8], encoding: Encoding) -> Option<Vec<u8>> {
+    match encoding {
+        Encoding::Gzip => gzip_bytes(plain),
+        Encoding::Brotli => brotli_bytes(plain),
+    }
+}
+
 fn gzip_bytes(plain: &[u8]) -> Option<Vec<u8>> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
     encoder.write_all(plain).ok()?;
     encoder.finish().ok()
+}
+
+/// brotli 压缩（质量 5、窗口 22 = 4 MiB）。
+///
+/// 质量取 5 而不是 11：前者体积只差 2~4%，速度是后者的 5~10 倍。静态资源
+/// 在首次请求时现压（之后走缓存），所以首屏延迟比"再小 20KB"重要得多。
+fn brotli_bytes(plain: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    {
+        let mut writer = brotli::CompressorWriter::new(&mut out, 4096, 5, 22);
+        writer.write_all(plain).ok()?;
+    }
+    Some(out)
 }
 
 /// 弱 ETag：`W/"<hex 长度>-<hex mtime 纳秒>"`。跨表示（gzip/identity）共用
@@ -295,15 +367,14 @@ fn etag_matches(header_value: &str, etag: &str) -> bool {
     })
 }
 
-/// `Accept-Encoding` 是否接受 gzip（显式 `q=0` 视为拒绝）。
-fn accepts_gzip(headers: &HeaderMap) -> bool {
+fn accepts_encoding(headers: &HeaderMap, encoding: Encoding) -> bool {
     let Some(value) = headers.get(ACCEPT_ENCODING).and_then(|v| v.to_str().ok()) else {
         return false;
     };
     value.split(',').any(|part| {
         let mut bits = part.trim().split(';');
         let name = bits.next().unwrap_or("").trim();
-        if !name.eq_ignore_ascii_case("gzip") {
+        if !name.eq_ignore_ascii_case(encoding.header()) {
             return false;
         }
         let rejected = bits.any(|param| {

@@ -94,6 +94,11 @@ export interface ChatMessageWithImages extends ChatMessage {
   tool?: ChatToolCallWithTiming;
   /** 压缩前归档名（只有「上下文已压缩」提示行带；2026-11）。 */
   archive?: string;
+  /**
+   * 乐观回显中（2026-11）：本端刚发出、还没收到 Core 回推（见
+   * `DisplayMessage.pending`）。渲染层据此显示淡态 + 「发送中」标记。
+   */
+  pending?: boolean;
 }
 
 /**
@@ -125,6 +130,7 @@ export function toChatMessage(m: DisplayMessage): ChatMessageWithImages {
     time: m.time, // 双方都是秒级 Unix 时间戳，无需换算
     animate: m.animate,
     streaming: m.streamState === 'streaming',
+    pending: m.pending === true || undefined,
     images: m.images,
     reasoning: m.reasoning,
     tool: m.tool && {

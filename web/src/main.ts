@@ -12,12 +12,18 @@ import App from './App.vue';
 import { hydrateTrunkCache, installTrunkCacheAutosave } from './trunk-cache';
 import { startUpstreamsPolling } from './upstreams';
 import { installChunkErrorGuard } from './lazy';
+import { installFrameBudget } from './frame-budget';
 import './styles.css';
 
 // chunk 加载失败全局兜底（部署后旧标签页请求旧哈希 chunk）：非异步组件
 // 路径（vite:preloadError / 未处理的动态 import rejection）同样一次性自动
 // 重载（10s 防循环，见 lazy.ts）。尽早安装。
 installChunkErrorGuard();
+
+// 主线程帧预算探针（2026-11）：首屏稳定后采样 6 秒，真掉帧就给 <html> 打
+// `data-perf="low"`，CSS 据此关掉毛玻璃（媒体查询枚举不了的组合——外接 5K、
+// 低电量模式、网络突发——靠它兜底）。采样窗口有限，之后零开销。
+installFrameBudget();
 
 // 挂载前还原上次的时间线快照（2026-09 刷新加速）：首屏直接渲染缓存，
 // 网络请求只补缺口（引导请求带 since_seq，见 connection.ts）。

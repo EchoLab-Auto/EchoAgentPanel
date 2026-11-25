@@ -172,11 +172,17 @@ const timeLabel = computed(() => {
   <div
     v-else
     class="msg-item"
-    :class="isUser ? 'msg-item--user' : 'msg-item--agent'"
+    :class="[
+      isUser ? 'msg-item--user' : 'msg-item--agent',
+      message.pending ? 'msg-item--pending' : '',
+    ]"
   >
     <div class="msg-item__head">
       <span v-if="!isUser" class="msg-item__role">{{ t('chatRoleAgent') }}</span>
       <span v-if="sourceLabel" class="msg-item__source">{{ sourceLabel }}</span>
+      <!-- 乐观回显（2026-11）：本端已发出、等 Core 回推。给它一个明确的
+           瞬时标记，比让用户对着一条"看起来已经发出去了"的气泡猜要好。 -->
+      <span v-if="message.pending" class="msg-item__pending">发送中…</span>
       <span v-if="timeLabel" class="msg-item__time">{{ timeLabel }}</span>
       <span class="msg-item__spacer" />
       <ChatCopyButton class="msg-item__copy" :text="message.content" />
@@ -296,6 +302,24 @@ const timeLabel = computed(() => {
 }
 .msg-item__spacer {
   flex: 1;
+}
+/* 乐观回显（2026-11 远程访问优化）：本端已发出、等 Core 回推的那一小段。
+   刻意不占用 `msg-item__spacer` 的位置（那一格是复制键的左推手），所以用
+   `flex: none` 并排在时间前面。
+   颜色取 secondary：它是**瞬时**状态，不该和正文抢注意力；回推到达后这个
+   标记直接消失（`pending` 被清除），不做淡出动画——为 100ms 的一次性提示
+   挂 transition 反而制造一次合成层。 */
+.msg-item__pending {
+  flex: none;
+  color: var(--nm-text-secondary);
+  font-size: var(--nm-font-xs, 0.75em);
+  letter-spacing: 0.02em;
+}
+/* 气泡本体淡一档：让"还在路上"与"已经落地"在没有标记的地方也分得出来
+   （气泡是一大块实色，任何读取都先看到它）。只改 opacity——可合成，
+   不触发重排与重绘。 */
+.msg-item--pending .msg-item__bubble {
+  opacity: 0.72;
 }
 .msg-item__copy {
   opacity: 0;

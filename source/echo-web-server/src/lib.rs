@@ -12,3 +12,4 @@ pub mod ssh;
 pub mod static_files;
 pub mod upstreams;
 pub mod upstreams_api;
+pub mod ws_compress;

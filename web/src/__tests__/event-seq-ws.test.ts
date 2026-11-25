@@ -66,6 +66,12 @@ describe('事件流跳号 → 自动补拉 timeline', () => {
   });
 
   async function connect(): Promise<FakeWebSocket> {
+    const { state } = await import('../store');
+    // 跳号补拉是一次**会话命令**（`RequestTrunkTimeline`），而会话命令要求
+    // 先有当前 agent（2026-11：`team-guard` 会暂存缺 team_id 的会话命令，
+    // Core 那边也只会拒绝）。这里给出"正常有 agent 的会话"这一前提。
+    state.activeTeamId = 'Alice';
+    state.teams = [{ id: 'Alice', name: 'Alice', core: null } as never];
     const { startConnection } = await import('../connection');
     startConnection();
     const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;

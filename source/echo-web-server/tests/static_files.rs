@@ -432,3 +432,85 @@ async fn runtime_public_fallback_keeps_spa_but_blocks_traversal() {
     let _ = std::fs::remove_file(&secret);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── brotli 协商（2026-11 远程访问优化）────────────────────────────────────
+//
+// 同一份 JS/CSS 上 brotli 通常比 gzip 再省 15~20%，而远程访问下首屏的
+// 每一个 KB 都直接换算成加载时间。规则：
+//   · 客户端同时接受 br 与 gzip → 用 br（更快到达）；
+//   · br 被显式拒绝（`br;q=0`）或未声明 → 回退 gzip；
+//   · 都不接受 → 明文（绝不因为协商失败而 406）。
+
+fn unbrotli(bytes: &[u8]) -> Vec<u8> {
+    let mut decoder = brotli::Decompressor::new(bytes, 4096);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).unwrap();
+    out
+}
+
+#[tokio::test]
+async fn brotli_is_preferred_when_client_offers_both() {
+    let dir = temp_static_dir("brotli");
+    let body = "const y = 'brotli 对重复结构尤其有效，中文内容同样受益';".repeat(80);
+    std::fs::write(dir.join("assets/app-br.js"), &body).unwrap();
+    let base = spawn_panel(dir.to_string_lossy().into_owned()).await;
+    let client = reqwest::Client::new();
+
+    // 真实浏览器发的头就是这个形状。
+    let resp = client
+        .get(format!("{base}/assets/app-br.js"))
+        .header("accept-encoding", "gzip, deflate, br, zstd")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get("content-encoding")
+            .and_then(|v| v.to_str().ok()),
+        Some("br"),
+        "同时接受时应当选 brotli（更小）"
+    );
+    assert_eq!(
+        resp.headers().get("vary").and_then(|v| v.to_str().ok()),
+        Some("accept-encoding"),
+        "按编码协商的响应必须带 Vary，否则缓存会串表示"
+    );
+    let compressed = resp.bytes().await.unwrap();
+    assert!(
+        compressed.len() < body.len() / 2,
+        "brotli 必须真的缩小载荷（{} → {}）",
+        body.len(),
+        compressed.len()
+    );
+    assert_eq!(unbrotli(&compressed), body.as_bytes());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn brotli_refusal_falls_back_to_gzip() {
+    let dir = temp_static_dir("brotli-fallback");
+    let body = "let z = '某些企业代理会剥掉或拒绝 br，必须能回退到 gzip';".repeat(80);
+    std::fs::write(dir.join("assets/app-fb.js"), &body).unwrap();
+    let base = spawn_panel(dir.to_string_lossy().into_owned()).await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .get(format!("{base}/assets/app-fb.js"))
+        .header("accept-encoding", "br;q=0, gzip")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get("content-encoding")
+            .and_then(|v| v.to_str().ok()),
+        Some("gzip"),
+        "显式拒绝 br 时必须回退 gzip"
+    );
+    assert_eq!(gunzip(&resp.bytes().await.unwrap()), body.as_bytes());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

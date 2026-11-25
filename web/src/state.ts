@@ -1,6 +1,6 @@
 import { oneLine, truncate, summarizeArguments, summarizeTimerEvent } from './state_domains/helpers';
 import { activity, setPhase } from './state_domains/orchestration';
-import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessageAt, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, type SubagentEventInfo } from './state_domains/timeline';
+import { pushTo, finishToolMessage, settleRunningTools, toDisplayMessage, toDisplayMessages, patchToolMessageAt, mergeTimelineEntry, displayContentOf, parseSubagentEvent, startSubagentRun, finishSubagentRun, appendStreamDelta, settleStream, freezeStreams, claimOptimisticUser, type SubagentEventInfo } from './state_domains/timeline';
 import { sendCommand } from './connection';
 import { instanceOpKey, settleInstanceOp } from './instanceOps';
 import { settleInstanceOpsOfCore } from './pending';
@@ -322,6 +322,20 @@ export interface DisplayMessage {
    * `undefined` = 旧版 Core 没下发（回退现有判据）或该事件无身份概念。
    */
   entry?: string;
+  /**
+   * **乐观回显**：本端刚发出、还没收到 Core 回推的用户消息（2026-11）。
+   *
+   * 远程访问下 `SendMessage` 到 `UserInput` 回推要一个完整往返（广域网上
+   * 100~300ms，隧道抖动时更久），此前输入框清空后消息**迟迟不出现**——用户
+   * 会以为没发出去而重复发送。现在发送成功即插入本行，真实事件到达时就地
+   * 认领（`claimOptimisticUser`），视觉上就是"立刻出现"。
+   *
+   * 认领失败（Core 改了内容 / 事件丢失）由 `expirePendingMessages` 兜底
+   * 清理，绝不留下一条永远"发送中"的幽灵行。
+   */
+  pending?: boolean;
+  /** 乐观行的发送时刻（epoch ms）。`time` 只有秒精度，配对要靠它。 */
+  pendingSinceMs?: number;
   source?: {
     instance_name: string;
     platform: string;
@@ -2363,19 +2377,38 @@ function reduceMessage(
       });
     }
   } else {
-    pushTo(state, 'user', displayContentOf(e.content), e.timestamp, {
-      sessionId: e.session_id,
-      source: {
-        instance_name: e.instance_name,
-        platform: e.platform,
-        user_id: e.user_id,
-        user_name: e.user_name,
-        channel: e.channel,
-        group_name: e.group_name,
-      },
-      images: e.images && e.images.length ? e.images : undefined,
-      files: e.files && e.files.length ? e.files : undefined,
-    });
+    const content = displayContentOf(e.content);
+    const source = {
+      instance_name: e.instance_name,
+      platform: e.platform,
+      user_id: e.user_id,
+      user_name: e.user_name,
+      channel: e.channel,
+      group_name: e.group_name,
+    };
+    const images = e.images && e.images.length ? e.images : undefined;
+    const files = e.files && e.files.length ? e.files : undefined;
+    // 乐观行认领（2026-11）：本端刚发出的消息已经在时间线里，**就地升级**
+    // 而不是再 push 一条——否则用户会看到自己发的消息出现两次（一次是
+    // 本地回显、一次是服务端回推）。保留 `key` 意味着 Vue 复用同一个 DOM
+    // 节点，视觉上零跳变。
+    const claimed = claimOptimisticUser(state, e.session_id, content);
+    if (claimed) {
+      claimed.content = content;
+      claimed.time = e.timestamp;
+      claimed.source = source;
+      claimed.images = images;
+      claimed.files = files;
+      // 入场动画已经播过（乐观行插入时），不要重播。
+      claimed.animate = undefined;
+    } else {
+      pushTo(state, 'user', content, e.timestamp, {
+        sessionId: e.session_id,
+        source,
+        images,
+        files,
+      });
+    }
   }
   return state;
 }

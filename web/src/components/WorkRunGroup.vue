@@ -765,13 +765,16 @@ function ariaOf(item: WorkRunItem): string {
   }
 }
 
-/* 展开态：下方浮现的具体内容卡片 */
+/* 展开态：下方浮现的具体内容卡片。
+   材质（2026-11 性能修复）：**不再用 `backdrop-filter`**，理由与上面的 chip
+   完全相同——本卡片坐在消息托盘（`--nm-chat-tray-bg`，实色）上，模糊一块
+   纯色背景在数学上等于原色，所以 blur(16px) 是纯开销：它给每张展开卡建一个
+   合成层，滚动与重绘时都要回读身后的内容（`overflow: auto` 里表现更差）。
+   等价合成色 = 托盘色 + 46% surface-raised，与原来的半透明叠加结果一致。 */
 .work-run-group__detail {
   border-radius: 14px;
   border: 1px solid var(--panel-glass-border);
-  background: color-mix(in srgb, var(--nm-surface-raised) 46%, transparent);
-  backdrop-filter: blur(16px) saturate(1.5);
-  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  background: color-mix(in srgb, var(--nm-surface-raised) 46%, var(--nm-chat-tray-bg));
   box-shadow: var(--panel-glass-shadow-md);
   padding: 8px 10px;
   animation: work-run-enter 0.18s ease-out both;

@@ -41,6 +41,104 @@ export function pushTo(state: AppState, role: MsgRole, content: string, time: nu
   pushMessage(state, { key: nextKey(), role, content, time, ...extra });
 }
 
+// ── 乐观回显（2026-11 远程访问优化）────────────────────────────────────
+//
+// 发送到回推是一个完整往返：`SendMessage` → Core 处理 → `UserInput` 事件
+// 回到浏览器。局域网下这几十毫秒看不见，远程（隧道/广域网）就是
+// 100~300ms 的空白——输入框已经清空，屏幕上什么都没有，用户以为没发出去
+// 又发一遍，于是同一条消息出现两次。
+//
+// 做法：发送成功后立刻插入一条 `pending` 用户行（视觉上就是"立刻出现"），
+// 真实 `UserInput` 到达时[`claimOptimisticUser`]就地认领它，`pending` 标记
+// 清除——DOM 节点与 Vue key 都不变，用户看不到任何"替换"。
+//
+// 认领有两个判据：内容精确相等（绝大多数情况），或该会话只有一条 pending
+// （Core 会规范化内容：图片换成 `[图片#n]` 占位、首尾空白折叠）。**两条都
+// 不命中就不认领**——宁可多一行，也不把另一条消息的行认成自己的。
+
+/** 未收到回推的乐观行最长存活时间：超时即清理（见 [`expirePendingMessages`]）。 */
+export const PENDING_TTL_MS = 60_000;
+
+/** 插入一条乐观用户行（发送成功后立即调用；返回值仅用于测试断言）。 */
+export function pushOptimisticUser(
+  state: AppState,
+  opts: {
+    sessionId: string;
+    content: string;
+    images?: string[];
+    files?: DisplayMessage['files'];
+    /** 覆盖插入时刻（测试用；默认 `Date.now()`）。 */
+    nowMs?: number;
+  },
+): DisplayMessage {
+  const nowMs = opts.nowMs ?? Date.now();
+  const message: DisplayMessage = {
+    key: nextKey(),
+    role: 'user',
+    content: opts.content,
+    time: Math.floor(nowMs / 1000),
+    sessionId: opts.sessionId,
+    // 入场动画要播：这是"我按了发送"的即时反馈，不播就像什么都没发生。
+    animate: true,
+    pending: true,
+    pendingSinceMs: nowMs,
+    images: opts.images && opts.images.length ? opts.images : undefined,
+    files: opts.files && opts.files.length ? opts.files : undefined,
+  };
+  pushMessage(state, message);
+  return message;
+}
+
+/**
+ * 真实 `UserInput` 到达时就地认领乐观行，返回被认领的那条（调用方补
+ * `source` / `images` 等权威字段）；没有可认领的返回 `null`（走普通 push）。
+ */
+export function claimOptimisticUser(
+  state: AppState,
+  sessionId: string,
+  content: string,
+): DisplayMessage | null {
+  let only: DisplayMessage | null = null;
+  let count = 0;
+  for (const message of state.trunk) {
+    if (message.role !== 'user' || !message.pending) continue;
+    // 空 sessionId（全局视图）不限制归属；有归属时必须一致，否则会把 A 会话
+    // 的乐观行认成 B 会话的回推。
+    if (sessionId && message.sessionId && message.sessionId !== sessionId) continue;
+    count += 1;
+    only = message;
+    if (message.content === content) {
+      message.pending = undefined;
+      message.pendingSinceMs = undefined;
+      return message;
+    }
+  }
+  if (count === 1 && only) {
+    only.pending = undefined;
+    only.pendingSinceMs = undefined;
+    return only;
+  }
+  return null;
+}
+
+/**
+ * 清理超时未认领的乐观行（`UserInput` 彻底丢失：断线、Core 拒收且未回推）。
+ *
+ * 返回清理条数。由连接的看门狗周期调用（那里本来就有 30s tick，不必另起
+ * 定时器）；残留的行会一直显示"发送中"，比直接消失更容易让人误判。
+ */
+export function expirePendingMessages(state: AppState, nowMs = Date.now()): number {
+  let removed = 0;
+  for (let i = state.trunk.length - 1; i >= 0; i--) {
+    const message = state.trunk[i];
+    if (message.role !== 'user' || !message.pending) continue;
+    if (nowMs - (message.pendingSinceMs ?? 0) <= PENDING_TTL_MS) continue;
+    state.trunk.splice(i, 1);
+    removed += 1;
+  }
+  return removed;
+}
+
 // ── 流式消息（2026-10）──────────────────────────────────────────────
 //
 // provider 增量（`AgentContentDelta` / `AgentReasoningDelta`）逐段进入主

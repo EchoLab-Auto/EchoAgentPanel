@@ -167,9 +167,10 @@ onBeforeUnmount(detach);
   border: 1px solid var(--panel-glass-border);
   border-radius: 24px;
   background: color-mix(in srgb, var(--nm-surface-raised) 52%, transparent);
-  backdrop-filter: blur(var(--panel-glass-blur, 24px)) saturate(var(--panel-glass-saturate, 1.6));
-  -webkit-backdrop-filter: blur(var(--panel-glass-blur, 24px))
-    saturate(var(--panel-glass-saturate, 1.6));
+  /* 玻璃档位统一走 `--panel-glass-filter`（2026-11）：默认 24px、Retina 自动
+     折半、系统「降低透明度」时整条置 none。见 styles.css 的变量定义。 */
+  backdrop-filter: var(--panel-glass-filter);
+  -webkit-backdrop-filter: var(--panel-glass-filter);
   box-shadow:
     var(--panel-glass-shadow-lg),
     inset 0 1px 0 var(--panel-glass-highlight);

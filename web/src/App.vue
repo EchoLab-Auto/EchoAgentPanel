@@ -11,6 +11,7 @@ import ThemeProvider from '@echolab-auto/ui-frame/components/ThemeProvider';
 import { useTouchDevice } from '@echolab-auto/ui-frame/composables/useTouchDevice';
 import { state } from './store';
 import { cancelSessionWork, coreForTeam, resetManagementState } from './state';
+import { pushOptimisticUser } from './state_domains/timeline';
 import { teamKey } from './keys';
 import { requestActiveRegionManagement, requestTimeline, sendCommand, startConnection } from './connection';
 import { scheduleNode } from './scheduler';
@@ -355,7 +356,7 @@ function send(content: string, images: string[] = [], files: PendingFile[] = [])
     targetMatches.find(s => s.core) ??
     targetMatches[0];
   const scheduled = targetSession?.core ? null : scheduleNode();
-  sendCommand(
+  const sent = sendCommand(
     {
       SendMessage: {
         session_id: target,
@@ -368,6 +369,25 @@ function send(content: string, images: string[] = [], files: PendingFile[] = [])
     },
     scheduled ?? undefined,
   );
+  // 乐观回显（2026-11 远程访问优化）：命令**确实发出去了**才插本地行——
+  // 拒发（多上游下解析不出目标）时插了就是一条永远等不到回推的幽灵行。
+  // `SendMessage` 到 `UserInput` 回推在远程链路上是一个完整往返，
+  // 没有本地回显时输入框已清空、屏幕却空着 100~300ms。
+  if (sent) {
+    pushOptimisticUser(state, {
+      sessionId: target,
+      content,
+      images,
+      // 附件只在输入区预览过（`PendingFile` 是 base64 字节），落盘后的
+      // `path`/`size` 要等 Core 回推才有。这里按 base64 长度估个体积先显示
+      // 文件名——否则用户会以为"附件丢了"（正文已经出现了）。
+      files: files.map((file) => ({
+        name: file.name,
+        size: Math.floor((file.data.length * 3) / 4),
+        path: null,
+      })),
+    });
+  }
 }
 
 function cancelWork() {

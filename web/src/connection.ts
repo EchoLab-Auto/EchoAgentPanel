@@ -9,17 +9,27 @@
 //!   显示 OPEN 也可能半死（设备休眠期间对端已消失而本端未察觉），发探测帧，
 //!   5s 内无任何下行帧则判死、走标准重连。
 
+import { watch } from 'vue';
 import { state, dispatch } from './store';
 import { withBase } from './base';
 import { coreForTeam, currentRegion, pushToast } from './state';
 import { teamKey } from './keys';
 import { trackRequest } from './pending';
+import {
+  dropHeld,
+  heldCount,
+  hold,
+  requiresTeam,
+  takeHeldForTeam,
+} from './team-guard';
 import { resetServiceCalls } from './panel-services';
 import { observeEventSeq, resetEventSeq } from './event-seq';
+import { FRAME_GZIP_PARAM, FrameDecoder, frameGzipQuery } from './ws-codec';
+import { expirePendingMessages } from './state_domains/timeline';
 import {
-  parseEvent,
   serializeCommand,
   type BackendCommand,
+  type BackendEvent,
   type SessionInfo,
 } from './protocol';
 
@@ -101,6 +111,13 @@ function pageVisible(): boolean {
 export function startConnection(): void {
   if (started) return;
   started = true;
+  // 暂存重放的触发器：`activeTeamId` 一旦解析（并且该人格确实在列表里），
+  // 把挂载期积压的会话命令补发出去。注册在 startConnection 而不是模块顶层
+  // ——测试 import 本模块时不该有副作用。
+  watch(
+    () => [state.activeTeamId, state.teams.length] as const,
+    () => flushHeldTeamCommands(),
+  );
   let retryMs = 500;
 
   const connect = () => {
@@ -112,11 +129,24 @@ export function startConnection(): void {
     // Bearer 认证（2026-10）：token 存 localStorage，首访可用
     // ?token=<token> 播种（随后从 URL 擦除防泄漏）。
     const token = ensurePanelToken();
-    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    // 下行帧压缩协商（2026-11 远程访问优化）：只有明确声明支持的连接，
+    // 中继才会发压缩帧——旧前端/不支持的浏览器拿到的仍是明文，行为不变。
+    const params = new URLSearchParams();
+    if (token) params.set('token', token);
+    const frameGzip = frameGzipQuery();
+    if (frameGzip) params.set(FRAME_GZIP_PARAM, frameGzip);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     // 子路径部署时必须是 `/agent-panel/ws`：手写 URL 不会被 vite 的 base 重写，
     // 漏了这一步就是「页面能开、WS 永远连不上」。
     const ws = new WebSocket(`${proto}//${window.location.host}${withBase('/ws')}${qs}`);
+    // 压缩帧是**二进制帧**（魔数 + gzip）：默认 `binaryType` 是 'blob'，
+    // 那样每次都要异步读 Blob 才能判断是不是压缩帧。设成 'arraybuffer'
+    // 后 `onmessage` 里能同步比对 4 字节魔数。
+    ws.binaryType = 'arraybuffer';
     socket = ws;
+    // 每条连接一条解码链（顺序只在同一条连接内有意义；重连换链可避免
+    // 旧连接的挂起解压拖住新连接的帧）。
+    const decoder = new FrameDecoder((reason) => console.warn('[ws]', reason));
 
     ws.onopen = () => {
       if (socket !== ws) {
@@ -206,26 +236,12 @@ export function startConnection(): void {
       // 必须整帧丢弃，否则旧库的高 revision 会在 bootstrap 后污染新基线。
       if (socket !== ws) return;
       lastFrameAt = Date.now();
-      // 多上游信封（聚合视图，2026-10）：`{core: "<上游名>", frame: <WsMessage>}`。
-      // 单上游时中继不加壳，parseEvent 直接命中。
-      const { core, event, seq, entry } = parseFrame(String(message.data));
-      if (event) {
-        // 事件信封只用来登记"已知区域"。activeRegion（当前运行区域）是
-        // **派生量**——由选中的 agent / 会话决定（App.vue 的 teams watcher
-        // 与 onSessionPick），绝不随事件流漂移。
-        if (core) state.knownCores.add(core);
-        dispatch(event, core, entry ?? undefined);
-      }
-      // 事件流连续性校验（2026-10，见 event-seq.ts）：序号跳号 = 中间有帧
-      // 没到。先 dispatch（让本帧先落地、游标更准），再按游标补拉。
-      const observation = observeEventSeq(core, seq);
-      if (observation.kind === 'gap') {
-        console.warn(
-          `[events] 事件流跳号：core=${core ?? '(单上游)'} 缺 ${observation.missed} 条 ` +
-            `(最新 seq=${observation.last})，按游标补拉 timeline`,
-        );
-        requestTimelineResync(core);
-      }
+      // 压缩帧异步解：解码链保证**交付顺序**与到达顺序一致（见 ws-codec 的
+      // 顺序说明）。普通帧在链空闲时同步交付，时序与改前完全相同。
+      decoder.push(message.data, (text) => {
+        if (socket !== ws) return; // 解压期间连接可能已经被替换
+        handleFrameText(text);
+      });
     };
 
     ws.onclose = () => {
@@ -306,6 +322,10 @@ export function startConnection(): void {
   const WATCHDOG_TICK_MS = 30_000;
   const WATCHDOG_IDLE_MS = 45_000;
   window.setInterval(() => {
+    // 顺手清理超时未认领的乐观行（2026-11）：`UserInput` 彻底丢失时（断线、
+    // Core 拒收且未回推），那条"发送中"会一直挂在时间线末尾。借这里已有的
+    // 30s tick 做，不另起定时器；页面隐藏时也无所谓——看不见的东西不急着清。
+    expirePendingMessages(state);
     if (document.visibilityState !== 'visible') return;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     if (Date.now() - lastFrameAt < WATCHDOG_IDLE_MS) return;
@@ -346,27 +366,87 @@ export function sendPending(command: BackendCommand, key: string, targetCore?: s
   trackRequest(key, command, resolveTargetCore(command, targetCore) ?? null);
 }
 
-/** 解一帧下行消息：多上游信封拆壳（core 名 + 内层事件），无壳 = 单上游。 */
+/**
+ * 处理一帧**已解封装**的下行文本：拆壳 → dispatch → 序号连续性校验。
+ *
+ * 从 `onmessage` 里提取出来的原因：压缩帧要经解码链异步交付（见 ws-codec），
+ * 而这里必须是"拿到明文就能直接跑"的纯函数形状，否则那段逻辑要嵌两层闭包。
+ */
+function handleFrameText(text: string): void {
+  // 多上游信封（聚合视图，2026-10）：`{core: "<上游名>", frame: <WsMessage>}`。
+  // 单上游时中继不加壳，事件就在顶层。
+  const { core, event, seq, entry } = parseFrame(text);
+  if (event) {
+    // 事件信封只用来登记"已知区域"。activeRegion（当前运行区域）是
+    // **派生量**——由选中的 agent / 会话决定（App.vue 的 teams watcher
+    // 与 onSessionPick），绝不随事件流漂移。
+    if (core) state.knownCores.add(core);
+    dispatch(event, core, entry ?? undefined);
+  }
+  // 事件流连续性校验（2026-10，见 event-seq.ts）：序号跳号 = 中间有帧
+  // 没到。先 dispatch（让本帧先落地、游标更准），再按游标补拉。
+  const observation = observeEventSeq(core, seq);
+  if (observation.kind === 'gap') {
+    console.warn(
+      `[events] 事件流跳号：core=${core ?? '(单上游)'} 缺 ${observation.missed} 条 ` +
+        `(最新 seq=${observation.last})，按游标补拉 timeline`,
+    );
+    requestTimelineResync(core);
+  }
+}
+
+/**
+ * 解一帧下行消息：多上游信封拆壳（core 名 + 内层事件），无壳 = 单上游。
+ *
+ * **只解析一次**（2026-11 清理）：此前这函数把 `JSON.parse` 的结果重新
+ * `JSON.stringify` 交给 `parseEvent`，再由 `seqOf` / `entryOf` 各自
+ * `JSON.parse` 一遍——一帧 4 次解析。单次成本不大，但流式回答期间每帧都走
+ * 这条路径，且它发生在 `dispatch` 之前（同一帧里的解析延迟会直接推迟首字
+ * 上屏）。现在一次 `JSON.parse` 得到对象，之后全在对象上取字段。
+ */
 function parseFrame(text: string): {
   core: string | null;
-  event: ReturnType<typeof parseEvent>;
+  event: BackendEvent | null;
   seq: number | null;
   entry: string | null;
 } {
+  let value: unknown;
   try {
-    const parsed = JSON.parse(text) as { core?: unknown; frame?: unknown };
-    if (parsed && typeof parsed.core === 'string' && parsed.frame) {
-      return {
-        core: parsed.core,
-        event: parseEvent(JSON.stringify(parsed.frame)),
-        seq: seqOf(parsed.frame),
-        entry: entryOf(parsed.frame),
-      };
-    }
+    value = JSON.parse(text);
   } catch {
-    // 非信封：按单上游原格式解析
+    // 非 JSON 帧（历史遗留/心跳占位）：无从解析，等价于改前的"全部返回 null"。
+    return { core: null, event: null, seq: null, entry: null };
   }
-  return { core: null, event: parseEvent(text), seq: seqOf(text), entry: entryOf(text) };
+  // 多上游信封：`{core, frame}`（`frame` 是内层 WsMessage，可能是对象，
+  // 也可能是被二次编码的字符串——两种都按下面 eventOf 统一处理）。
+  const envelope = value as { core?: unknown; frame?: unknown } | null;
+  if (envelope && typeof envelope.core === 'string' && envelope.frame) {
+    return {
+      core: envelope.core,
+      event: eventOf(envelope.frame),
+      seq: seqOf(envelope.frame),
+      entry: entryOf(envelope.frame),
+    };
+  }
+  return { core: null, event: eventOf(value), seq: seqOf(value), entry: entryOf(value) };
+}
+
+/** 从已解析的帧值里取事件载荷（`{type:'event', payload}`）；非事件返回 null。 */
+function eventOf(frame: unknown): BackendEvent | null {
+  const value = typeof frame === 'string' ? safeParse(frame) : frame;
+  if (!value || typeof value !== 'object') return null;
+  const holder = value as { type?: unknown; payload?: unknown };
+  if (holder.type !== 'event' || !holder.payload) return null;
+  return holder.payload as BackendEvent;
+}
+
+/** `JSON.parse` 的不会抛版本（非字符串/坏 JSON → null）。 */
+function safeParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -493,12 +573,101 @@ export function resolveTargetCore(
 }
 
 /**
- * 发送命令。返回是否已发/已排队（02a S3）：`true` = 已发送或握手期已
+ * `team_id` 未解析时暂存会话命令的宽限期（毫秒）。
+ *
+ * `activeTeamId` 来自 storage，拿不到就等 `TeamsList`（一次往返，正常几十
+ * 毫秒）。宽限期只用来兜住"真的没有可选项"（零人格 / 人格全删）的部署：
+ * 到点仍未解析就把队列丢掉并给一条可操作的提示——**静默留着**会让视图永远
+ * 停在加载态，用户只看到空白。
+ */
+const HELD_TEAM_GRACE_MS = 4_000;
+
+/** 暂存计时器（首次暂存时起算；重放/丢弃时清掉）。 */
+let heldTeamTimer: number | undefined;
+/** 宽限提示是否已经弹过（每个"从未解析到解析"的周期只弹一次）。 */
+let heldTeamWarned = false;
+/** 重放进行中：`sendCommand` 会在重放里被递归调用，避免自我重入。 */
+let flushingHeldTeam = false;
+
+/**
+ * 暂存一条缺 `team_id` 的会话命令（返回是否已暂存）。
+ *
+ * 为什么在 `sendCommand` 一处收口：会话命令的发送方散在组件、`state` 兜底
+ * 路径，以及**扩展仓**的 panel-ui（工作区面板住在 `agent-module-workspace`，
+ * 壳里 grep 不到），逐个加守卫必然漏。
+ */
+function holdTeamCommand(command: BackendCommand): boolean {
+  if (!hold(command)) return false; // 队列封顶：按原路径发，让 Core 说话
+  if (heldTeamTimer === undefined) {
+    heldTeamTimer = window.setTimeout(() => {
+      heldTeamTimer = undefined;
+      if (heldCount() === 0) return;
+      dropHeld();
+      if (heldTeamWarned) return;
+      heldTeamWarned = true;
+      pushToast(
+        state,
+        '还没有可用的智能体：会话命令未发送（请先在「设置 → 智能体」创建或选择一个）',
+        'error',
+      );
+    }, HELD_TEAM_GRACE_MS);
+  }
+  return true;
+}
+
+/**
+ * `activeTeamId` 解析出来后重放暂存的会话命令。
+ *
+ * 判据除了"非空"还要"确实存在于 `state.teams`"：storage 里可能留着已删人格，
+ * 拿它重放只会换个错误（「智能体 X 不存在」）。宁可继续等，让宽限期给那条
+ * 可操作的提示。
+ */
+export function flushHeldTeamCommands(): void {
+  if (flushingHeldTeam || heldCount() === 0) return;
+  const teamId = state.activeTeamId;
+  if (!teamId) return;
+  if (!state.teams.some((team) => team.id === teamId)) return;
+  if (heldTeamTimer !== undefined) {
+    window.clearTimeout(heldTeamTimer);
+    heldTeamTimer = undefined;
+  }
+  heldTeamWarned = false;
+  flushingHeldTeam = true;
+  try {
+    for (const command of takeHeldForTeam(teamId)) sendCommand(command);
+  } finally {
+    flushingHeldTeam = false;
+  }
+}
+
+/** 测试用：清掉暂存与计时器（不重放）。 */
+export function resetHeldTeamCommands(): void {
+  if (heldTeamTimer !== undefined) {
+    window.clearTimeout(heldTeamTimer);
+    heldTeamTimer = undefined;
+  }
+  heldTeamWarned = false;
+  flushingHeldTeam = false;
+  dropHeld();
+}
+
+/**
  * 发送命令。返回是否已发/已排队（02a S3）：`true` = 已发送或握手期已
  * 排队；`false` = 拒发（多上游解析不出目标 / 未连接 / 握手队列已满）。
  * 返回值加宽是兼容变更，既有调用点可忽略（拒发路径仍弹 toast）。
+ *
+ * ## 会话命令的 `team_id` 守卫（2026-11）
+ *
+ * Core 没有"默认人格"：会话类命令缺 `team_id` 一律被拒。而 `activeTeamId`
+ * 是异步解析的（storage → `TeamsList`），挂载期发出的命令正好落在这个窗口
+ * 里——用户看到的是"一直显示该命令必须指定 team_id"。命中即暂存，解析后
+ * 重放（见 `team-guard.ts` 与 [`flushHeldTeamCommands`]），不再让每条命令
+ * 各自撞一次同一堵墙。
  */
 export function sendCommand(command: BackendCommand, targetCore?: string): boolean {
+  // 先把积压补发（这些命令的 team_id 此刻才有效），再判本条。
+  flushHeldTeamCommands();
+  if (requiresTeam(command) && holdTeamCommand(command)) return true;
   const core = resolveTargetCore(command, targetCore);
   // 多上游下解析不出目标 = 没有可路由的 agent/区域：明确提示并拒发，
   // 绝不落到某个隐式的"默认 core"。
@@ -527,7 +696,6 @@ export function sendCommand(command: BackendCommand, targetCore?: string): boole
   pushToast(state, '未连接到 Core，命令未发送', 'error');
   return false;
 }
-
 /** 事件流跳号后的补拉节流窗口（2026-10）。 */
 const RESYNC_MIN_INTERVAL_MS = 4000;
 let lastResyncAtMs = 0;
