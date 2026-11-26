@@ -13,6 +13,7 @@ import { mount } from '@vue/test-utils';
 import { ref } from 'vue';
 import PanelAppearanceSettings from '../PanelAppearanceSettings.vue';
 import { railCollapsed, resetRailCollapseForTests } from '../../rail-collapse';
+import { BG_IMAGE_KEY } from '../../panel-background';
 
 /**
  * 主题替身。
@@ -41,13 +42,48 @@ describe('面板 · 外观', () => {
   afterEach(() => {
     resetRailCollapseForTests();
     themeRef.value = 'auto';
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-panel-bg');
   });
 
-  it('三行都在：主题 / 左侧栏 / 右侧栏', () => {
+  it('四块都在：主题 / 左侧栏 / 右侧栏 / 背景图片', () => {
     const wrapper = mount(PanelAppearanceSettings);
     const labels = wrapper.findAll('.panel-appearance__label').map((el) => el.text());
-    expect(labels).toEqual(['主题', '左侧栏', '右侧栏']);
+    expect(labels).toEqual(['主题', '左侧栏', '右侧栏', '背景图片']);
     wrapper.unmount();
+  });
+
+  it('背景块：没图时只有「选择图片…」，有图时给「更换 / 移除」与三个参数', async () => {
+    localStorage.clear();
+    const wrapper = mount(PanelAppearanceSettings);
+    const block = wrapper.find('.panel-appearance__block');
+    expect(block.exists(), '背景块应存在').toBe(true);
+
+    // 没图：只有一个选图按钮，参数区不渲染（空参数没有意义）
+    // 只取块头那两个动作钮：参数区里还有分段控件自己的按钮
+    // （铺满 / 完整），混进来会让这条断言变成"分段控件的实现细节"。
+    const idle = block.findAll('.panel-appearance__block-actions button').map((b) => b.text());
+    expect(idle).toEqual(['选择图片…']);
+    expect(block.find('.panel-appearance__control').exists()).toBe(false);
+
+    // 造一个"已存图"的状态再挂一次
+    localStorage.setItem(
+      BG_IMAGE_KEY,
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+    );
+    const withImage = mount(PanelAppearanceSettings);
+    const buttons = withImage
+      .findAll('.panel-appearance__block-actions button')
+      .map((b) => b.text());
+    expect(buttons).toEqual(['更换图片…', '移除']);
+    const labels = withImage
+      .findAll('.panel-appearance__control-label')
+      .map((el) => el.text());
+    expect(labels, '适配 / 变暗 / 模糊').toEqual(['适配', '变暗', '模糊']);
+
+    withImage.unmount();
+    wrapper.unmount();
+    localStorage.clear();
   });
 
   it('侧边栏开关读写的是 rail-collapse 那一份状态', async () => {

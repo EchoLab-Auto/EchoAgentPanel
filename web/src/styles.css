@@ -132,6 +132,69 @@ body {
   overscroll-behavior: none;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   自定义背景图（2026-11，设置 · 面板 · 外观）
+   ═══════════════════════════════════════════════════════════════════════
+
+   结构（两层都在内容之下，`z-index: -1` 让它们待在 html 画布之上、body 内容
+   之下——这是"背景层"的标准做法，不需要给应用任何元素加 z-index）：
+
+   - `body::before`：图本身（cover/contain + 可选模糊）；
+   - `body::after` ：主题色蒙版（`--panel-bg-dim`）。单独一层而不是给图叠
+     `linear-gradient` 的原因：蒙版要跟着**主题**走（浅色盖白、深色盖黑），
+     而 `--nm-bg-color` 已经随主题切换，直接用它就不用为两套主题各写一份。
+
+   只在 `<html data-panel-bg="on">` 时生效——变量由 `panel-background.ts`
+   写在同一个元素上，删图时连属性一起摘掉，所有规则立刻失效（不留残余）。
+
+   透明化的四个容器 = "原本涂这个平面的东西"：`body` 自身、库的 `.nm-layout`、
+   面板的 `.panel-layout` 覆盖、聊天区的凹陷井 `.chat-view__list`。**其余一律
+   不动**：输入框 / 代码块 / 日志窗这些"凹陷面"本来就该是实底，透出照片会毁掉
+   可读性。 */
+html[data-panel-bg='on'] body {
+  /* 只有底色让位给图；内容与阴影仍读 --nm-bg-color。 */
+  background: transparent;
+}
+html[data-panel-bg='on'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: var(--panel-bg-image);
+  background-size: var(--panel-bg-size, cover);
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(var(--panel-bg-blur, 0px));
+  /* 模糊会把边缘采样到画布外（出现一圈半透明的亮/暗边），轻微放大裁掉。 */
+  transform: scale(1.04);
+  pointer-events: none;
+}
+html[data-panel-bg='on'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--nm-bg-color, #141414);
+  opacity: var(--panel-bg-dim, 0.35);
+  pointer-events: none;
+}
+/* ThemeProvider 的根 div：**真正涂满整页的那一层**（`.nm-theme-provider`
+   自带 `background-color: var(--nm-bg-color)`）。不透明化它，图就完全看不见
+   ——实测踩过：body / .nm-layout 都透明了，截图像素仍是一片纯色。 */
+html[data-panel-bg='on'] .nm-theme-provider {
+  background-color: transparent;
+}
+/* 库的布局根：原本 `background-color: var(--nm-bg-color)`（带 scoped 属性，
+   0,2,0）。这里 0,2,1 才压得住，且不依赖样式表顺序。 */
+html[data-panel-bg='on'] .nm-layout {
+  background-color: transparent;
+}
+/* 聊天区凹陷井：原本 `--nm-chat-tray-bg`（不透明）。透出图之后，气泡自身
+   仍有实底（`--nm-chat-user-bg` / `--nm-surface-raised`），可读性不受影响。 */
+html[data-panel-bg='on'] .chat-view__list {
+  background-color: transparent;
+}
+
 /* ThemeProvider 渲染的根 div 需要撑满高度 */
 .nm-theme-provider { height: 100%; display: flex; flex-direction: column; }
 
@@ -657,6 +720,11 @@ hr { border: none; border-top: 1px solid var(--nm-border-subtle); margin: 14px 0
 /* ── NeumorphismLayout 覆盖：sider 去背景/边框/阴影，折叠完全隐藏 ── */
 .panel-layout.nm-layout {
   background: var(--nm-bg-color, #141414);
+}
+/* 自定义背景图时让位（这条必须排在上面那条之后：同为 0,2,0 时靠顺序取胜，
+   这里用 html 前缀提到 0,2,1 更稳，顺序无关）。 */
+html[data-panel-bg='on'] .panel-layout.nm-layout {
+  background: transparent;
 }
 /* ── API 设置：编辑上下文横幅 ── */
 .edit-banner {

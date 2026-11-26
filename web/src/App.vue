@@ -26,6 +26,7 @@ import {
   type PanelSlotContext,
 } from './extensions/registry';
 import { startPanelUiLoading } from './extension-loader';
+import { initPanelBackground } from './panel-background';
 import ChatView from './components/ChatView.vue';
 import CompactionIndicator from './components/CompactionIndicator.vue';
 // 首屏瘦身（2026-10 审计修复）：设置视图（3400+ 行，含 5 个子设置页）、
@@ -284,6 +285,9 @@ setupPanelExtensions({
 // `setupPanelExtensions` **之后**——扩展在 import 时就会 `registerPanelExtension`，
 // 那时 app context 必须已经就位（否则 `hooks.setup` 要等下一次注册才跑）。
 startPanelUiLoading();
+// 自定义背景图（2026-11）：同步套一次 CSS 变量。放在 setup 顶层而不是
+// onMounted：`<html>` 上的属性要在首帧绘制前就位，否则会先闪一帧纯色底。
+initPanelBackground();
 startConnection();
 
 /**

@@ -82,14 +82,14 @@ async function reload() {
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  border-radius: var(--nm-radius-md, 12px);
-  background: var(--nm-surface, rgba(255, 255, 255, 0.04));
+  border-radius: var(--nm-border-radius-md, 12px);
+  background: var(--nm-surface-color, rgba(255, 255, 255, 0.04));
 }
 
 .panel-ui-ext--warn {
   /* 失败态用左侧描边而不是整块红底：这页是设置页，红色大面积会盖掉同屏
      其它设置项的可读性。 */
-  border-left: 3px solid var(--nm-danger, #e05a4f);
+  border-left: 3px solid var(--panel-err);
 }
 
 .panel-ui-ext__head {
@@ -141,7 +141,7 @@ async function reload() {
 }
 
 .panel-ui-ext__row--bad .panel-ui-ext__id {
-  color: var(--nm-danger, #e05a4f);
+  color: var(--panel-err);
 }
 
 .panel-ui-ext__id {
