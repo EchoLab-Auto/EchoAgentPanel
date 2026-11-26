@@ -1154,30 +1154,48 @@ const rightRailToggle = computed(
 );
 
 /**
- * 消息滚动区的左右留白（**登记**过卡片且未收起的列 = 列宽）。
+ * 会话区内容与窗口边框的左右净距（2026-11）。
+ *
+ * **口径来自输入区**：`.chat-composer-float` 的 `left/right` 就是这个值——
+ * 用户看到的是「输入区外框离窗口边缘这么远」。消息区、覆盖面板都要落在
+ * 同一条竖线上，否则一眼看出错位（此前消息区在无侧栏时内边距是 0，气泡
+ * 贴着窗口边缘出血，而输入区却缩进 12px）。
+ *
+ * 移动端的左右留白另有来源（`--composer-inset` = 3% 屏宽，随屏角半径联动，
+ * 见窄屏段），那边的 `.chat-view__list` / `.chat-composer-float` 都有对应
+ * 覆盖规则，不读这个常量。
+ */
+const CHAT_SIDE_GAP = 12;
+/** 供 CSS `v-bind` 用（输入区外框的 left/right/bottom 都读它）。 */
+const chatSideGapPx = `${CHAT_SIDE_GAP}px`;
+
+/**
+ * 消息滚动区的左右留白 = 侧栏列宽（若有）+ 与窗口的净距。
+ *
+ * 为什么是**相加**：侧栏容器 324px，卡片自身再内缩 12px（`.rail-stack` 的
+ * padding），卡片内侧边缘在 312px，消息区从 324px 起——那一档 12px 的呼吸
+ * 是既有观感。无侧栏时把这 12px 补回来，于是"有侧栏"与"无侧栏"呼吸宽度
+ * 一致（而不是"有 12px、没有 0px"）。
  *
  * 与列显隐同判据（收起维度一致、拖动维度**刻意不同**——拖动期间留白不变，
  * 正文行宽全程稳定，落位后一次性过渡 0.24s），因此两处永不打架（否则会
- * 出现「列没了但留白还在」或「列在但正文压到卡片底下」）。相对旧实现
- * （按「可见卡片」）的好处：
- * - 门控抖动时留白不跳——此前卡片瞬时门控失败会让正文行宽在 324px 与
- *   0 之间反复闪（用户观感：边栏莫名隐藏）；
- * - 拖动期间也不跳——被拖卡片只是从**所见列表**摘除，登记归属要到落位
- *   才变，正文行宽全程稳定，落位后一次性过渡（0.24s）。
+ * 出现「列没了但留白还在」或「列在但正文压到卡片底下」）。相对更早的实现
+ * （按「可见卡片」）还有一个好处：门控抖动时留白不跳——此前卡片瞬时门控
+ * 失败会让正文行宽在 324px 与 0 之间反复闪（用户观感：边栏莫名隐藏）。
  *
  * 注意返回**带单位的字符串**：`v-bind()` 注入 CSS 变量时数字无单位会被
  * 浏览器丢弃（padding-left: 324 非法）。
  */
-const trayPadLeft = computed(() =>
-  !isMobile.value && railRegistered('left') && !isRailCollapsed('left')
-    ? `${RAIL_WIDTH}px`
-    : '0px',
-);
-const trayPadRight = computed(() =>
-  !isMobile.value && railRegistered('right') && !isRailCollapsed('right')
-    ? `${RAIL_WIDTH}px`
-    : '0px',
-);
+const trayPadLeft = computed(() => {
+  const rail =
+    !isMobile.value && railRegistered('left') && !isRailCollapsed('left') ? RAIL_WIDTH : 0;
+  return `${rail + CHAT_SIDE_GAP}px`;
+});
+const trayPadRight = computed(() => {
+  const rail =
+    !isMobile.value && railRegistered('right') && !isRailCollapsed('right') ? RAIL_WIDTH : 0;
+  return `${rail + CHAT_SIDE_GAP}px`;
+});
 
 /**
  * 是否有覆盖面板打开（入口行七项：会话 / 工作区 / 实例 / 任务 / 清单 /
@@ -2803,7 +2821,9 @@ function mediaSrc(img: string): string {
 
   /* 预留：
      - 底部：按输入框最大高度(5行,约156px) + 边距(12px) + 松量；
-     - 左右：有卡片的边栏列宽（正文不被悬浮卡片压住）；拖动中归零，
+     - 左右：侧栏列宽 **+ 与窗口的净距**（`CHAT_SIDE_GAP`，与输入区外框
+       落在同一条竖线上；无侧栏时就是那 12px——此前是 0，气泡贴着窗口边缘
+       出血，而输入区缩进 12px，一眼就看得出错位）。拖动中留白不跟随，
        避免落位时行宽二次跳变。
 
      行距（2026-09-28 紧凑化）：库默认 12px 对"工作行"（推理块 / 工具行）
@@ -2811,6 +2831,7 @@ function mediaSrc(img: string): string {
      消息气泡用 .chat-view__item--msg 的 3px 边距补回呼吸（气泡间仍约 12px），
      工作行保持 6px 紧排；推理块/工具行自身不再带外边距。 */
   gap: 6px;
+  /* 上下 18px；左右由下面两条 v-bind 覆盖（这里的 var 只是兜底，恒被覆盖）。 */
   padding: 18px var(--nm-spacing-md);
   padding-bottom: 190px;
   padding-left: v-bind(trayPadLeft);
@@ -2905,9 +2926,13 @@ function mediaSrc(img: string): string {
     calc(var(--composer-corner-r) - var(--composer-padding) - var(--composer-border))
   );
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
+  /* 左右与窗口边框的净距 —— 会话区内容的**统一左边线**（2026-11）。
+     消息区的左右内边距读同一个常量（`CHAT_SIDE_GAP`，见 setup 的说明），
+     于是气泡边缘、输入区外框落在同一条竖线上。两处都走 `v-bind` 而不是
+     各写 12px：改一处漏一处，就是"输入区缩进 12、气泡缩进 0"那种错位。 */
+  left: v-bind(chatSideGapPx);
+  right: v-bind(chatSideGapPx);
+  bottom: v-bind(chatSideGapPx);
   z-index: 5;
   /* 外层只剩"定位 + 尺寸"，自己没有形状（背景/描边/裁剪都在子层）。
      必须让命中穿透，否则它那圈**矩形**会在角部拦住点击（消息列表、
