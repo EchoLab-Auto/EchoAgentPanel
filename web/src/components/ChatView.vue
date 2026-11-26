@@ -44,7 +44,8 @@ import { railHasVisibleCards, railRegistered } from '../rail-cards';
 import { mobileCardsDrawerOpen } from '../mobile-cards';
 import { entryOverlay, type BuiltinOverlayId } from '../overlays';
 import { requestSessions } from '../session-list';
-import { railDragEngaged } from '../rail-drag';
+import { railDragEngaged, railDragPending } from '../rail-drag';
+import { isRailCollapsed, toggleRailCollapsed } from '../rail-collapse';
 import { claimReasoningAnimation } from '../reasoning-anim';
 import {
   rememberChatMessage,
@@ -1110,7 +1111,8 @@ function railHasCards(side: 'left' | 'right'): boolean {
 }
 
 /**
- * 列的显隐：该列**登记**过卡片，或拖动进行中（拖动时需要两列都作为投放区）。
+ * 列的显隐：该列**登记**过卡片且未被收起，或拖动进行中（拖动时需要两列都
+ * 作为投放区——收起的列没有 DOM，不临时出列就无处可落）。
  * 移动端恒不渲染——卡片经顶栏「卡片」抽屉（PanelSidebar 复用）访问。
  *
  * 判据是「登记」而不是「当前可见」（2026-10 用户反馈「左侧栏莫名隐藏」）：
@@ -1121,19 +1123,43 @@ function railHasCards(side: 'left' | 'right'): boolean {
  * 登记列表只在用户**拖动落位**时变化，是稳定信号——列不再随业务状态闪烁，
  * 卡片进出改为列内部增删（空列在 RailStack 内显示占位提示）。
  * 用户把最后一张卡拖走时登记变空，列照常消失（显式意图，不算闪烁）。
+ *
+ * 收起（2026-11）是**叠加在登记之上的用户偏好**（见 rail-collapse）：登记
+ * 决定"这一列有没有内容"，收起决定"这一列是否让位给正文"。`railDragEngaged`
+ * 的优先级高于收起——它是短暂的、必须能覆盖偏好的例外。
  */
 const leftRailVisible = computed(
-  () => !isMobile.value && (railRegistered('left') || railDragEngaged.value),
+  () =>
+    !isMobile.value &&
+    ((railRegistered('left') && !isRailCollapsed('left')) || railDragPending.value),
 );
 const rightRailVisible = computed(
-  () => !isMobile.value && (railRegistered('right') || railDragEngaged.value),
+  () =>
+    !isMobile.value &&
+    ((railRegistered('right') && !isRailCollapsed('right')) || railDragPending.value),
 );
 
 /**
- * 消息滚动区的左右留白（**登记**过卡片的列 = 列宽）。
+ * 把手是否显示：该列有内容（登记过卡片）且不在拖动中。
  *
- * 与列显隐同判据，因此两处永不打架（否则会出现「列没了但留白还在」或
- * 「列在但正文压到卡片底下」）。相对旧实现（按「可见卡片」）的好处：
+ * 拖动中隐藏有两个理由：投放区占满整列、把手的命中区会干扰落点判定。
+ * 与列的显隐**必须**用 `railRegistered` 而不是 `*RailVisible`——收起时列
+ * 不存在，而把手正是"把它叫回来"的唯一入口。
+ */
+const leftRailToggle = computed(
+  () => !isMobile.value && railRegistered('left') && !railDragPending.value,
+);
+const rightRailToggle = computed(
+  () => !isMobile.value && railRegistered('right') && !railDragPending.value,
+);
+
+/**
+ * 消息滚动区的左右留白（**登记**过卡片且未收起的列 = 列宽）。
+ *
+ * 与列显隐同判据（收起维度一致、拖动维度**刻意不同**——拖动期间留白不变，
+ * 正文行宽全程稳定，落位后一次性过渡 0.24s），因此两处永不打架（否则会
+ * 出现「列没了但留白还在」或「列在但正文压到卡片底下」）。相对旧实现
+ * （按「可见卡片」）的好处：
  * - 门控抖动时留白不跳——此前卡片瞬时门控失败会让正文行宽在 324px 与
  *   0 之间反复闪（用户观感：边栏莫名隐藏）；
  * - 拖动期间也不跳——被拖卡片只是从**所见列表**摘除，登记归属要到落位
@@ -1143,10 +1169,14 @@ const rightRailVisible = computed(
  * 浏览器丢弃（padding-left: 324 非法）。
  */
 const trayPadLeft = computed(() =>
-  !isMobile.value && railRegistered('left') ? `${RAIL_WIDTH}px` : '0px',
+  !isMobile.value && railRegistered('left') && !isRailCollapsed('left')
+    ? `${RAIL_WIDTH}px`
+    : '0px',
 );
 const trayPadRight = computed(() =>
-  !isMobile.value && railRegistered('right') ? `${RAIL_WIDTH}px` : '0px',
+  !isMobile.value && railRegistered('right') && !isRailCollapsed('right')
+    ? `${RAIL_WIDTH}px`
+    : '0px',
 );
 
 /**
@@ -1195,6 +1225,15 @@ const overlayInset = ref<OverlayInset | null>(null);
  */
 const RAIL_ENTRY_GAP = 45;
 const railEntryGap = `${RAIL_ENTRY_GAP}px`;
+
+/**
+ * 列宽（带单位，供 CSS `v-bind` 用）。
+ *
+ * `.chat-rail` 自己的 `width` 是硬编码的 324px（既有代码），这里再导出一份
+ * 是给**把手**定位用：展开时把手要贴在列的内侧边缘（= 列宽），收起时贴 0。
+ * 两处若各写一遍数字，改列宽时会漏掉一处，把手就会飘到正文里。
+ */
+const railWidthPx = `${RAIL_WIDTH}px`;
 
 function syncOverlayInset() {
   const root = viewRootRef.value;
@@ -2300,9 +2339,49 @@ function mediaSrc(img: string): string {
       </aside>
     </Transition>
 
+    <!-- 侧栏收起/展开把手（2026-11）。
+         为什么必须是**列外**的独立元素：收起的列整块不渲染（`v-if` 为假），
+         列内的任何按钮都跟着消失——没有它，用户收起后就没有任何入口能展开，
+         这个功能等于单向不可逆。
+         位置：展开时贴列的内侧边缘（`left: 324px` / `right: 324px`，正好是
+         列与正文的分界线）；收起时贴视口边缘（`0`）。纵向居中、14×64px 的
+         窄条——只在自身矩形内接管指针，不挡正文的点击与拖选。
+         拖动中不渲染（见 leftRailToggle 的注释）。 -->
+    <button
+      v-if="leftRailToggle"
+      type="button"
+      class="rail-toggle rail-toggle--left"
+      :class="{ 'rail-toggle--collapsed': isRailCollapsed('left') }"
+      :aria-label="isRailCollapsed('left') ? '展开左侧栏' : '收起左侧栏'"
+      :aria-expanded="!isRailCollapsed('left')"
+      :title="isRailCollapsed('left') ? '展开左侧栏' : '收起左侧栏'"
+      data-rail-toggle="left"
+      @click="toggleRailCollapsed('left')"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path :d="isRailCollapsed('left') ? 'M9 6l6 6-6 6' : 'M15 6l-6 6 6 6'" />
+      </svg>
+    </button>
+    <button
+      v-if="rightRailToggle"
+      type="button"
+      class="rail-toggle rail-toggle--right"
+      :class="{ 'rail-toggle--collapsed': isRailCollapsed('right') }"
+      :aria-label="isRailCollapsed('right') ? '展开右侧栏' : '收起右侧栏'"
+      :aria-expanded="!isRailCollapsed('right')"
+      :title="isRailCollapsed('right') ? '展开右侧栏' : '收起右侧栏'"
+      data-rail-toggle="right"
+      @click="toggleRailCollapsed('right')"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path :d="isRailCollapsed('right') ? 'M15 6l-6 6 6 6' : 'M9 6l6 6-6 6'" />
+      </svg>
+    </button>
+
     <!-- 拖动拖影：跟随指针的卡片缩影（Teleport 到 body，fixed 定位） -->
     <RailDragGhost />
-
     <!-- 卡片抽屉（竖屏移动端，2026-10）：双侧边栏在窄屏隐藏（压死正文），
          卡片改经顶栏「卡片」按钮打开的底部 Drawer 访问——复用 PanelSidebar
          （门控/排序/工作区绑定全继承）。仅移动端渲染，桌面零影响。 -->
@@ -2558,7 +2637,9 @@ function mediaSrc(img: string): string {
      ——会话区覆盖面板的上下边界要对齐侧栏，所以两处都读这一个常量。 */
   bottom: calc(v-bind(entryBottom) + v-bind(railEntryGap));
   z-index: 4;
-  width: 324px;
+  /* 列宽：与把手定位同一事实源（`RAIL_WIDTH`）。此前这里写死 324px，
+     而把手要贴在这个宽度上——两处数字各写一遍，改一处就会错位。 */
+  width: v-bind(railWidthPx);
   display: flex;
   flex-direction: column;
 }
@@ -2610,6 +2691,87 @@ function mediaSrc(img: string): string {
   background: color-mix(in srgb, var(--panel-accent) 5%, transparent);
   outline: 1px dashed color-mix(in srgb, var(--panel-accent) 28%, transparent);
   outline-offset: -4px;
+}
+
+/* ── 侧栏收起/展开把手（2026-11）────────────────────────────────────────
+   形态：14×64 的窄条，纵向居中，贴着"列与正文的分界线"。
+   - **展开态**：贴在列的内侧边缘（`left/right: 列宽`），淡到 35% 不抢注意力；
+   - **收起态**：贴到视口边缘（`0`），对比度提高、加一点底色——此刻它是
+     该列**唯一**的入口，必须一眼可见；
+   - 宽度只有 14px 且纵向只有 64px：正文的点击与跨行拖选几乎不受影响
+     （拖选是水平方向的长距离动作，14px 的竖直窄条挡不住）。
+   层级 5：高于两列（4）与消息区，低于覆盖面板（6）与入口行（7）——
+   面板打开时把手被盖住是可接受的（关掉面板即可回来），而把手压在面板
+   内容上会真的挡住东西。 */
+.rail-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 14px;
+  height: 64px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--nm-text-secondary);
+  cursor: pointer;
+  opacity: 0.35;
+  transition:
+    opacity 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+.rail-toggle svg {
+  width: 12px;
+  height: 12px;
+}
+/* 左列：展开贴在列的内侧边缘，收起贴左边缘。圆角朝正文一侧。 */
+.rail-toggle--left {
+  left: v-bind(railWidthPx);
+  border-radius: 0 8px 8px 0;
+}
+.rail-toggle--left.rail-toggle--collapsed {
+  left: 0;
+}
+/* 右列：镜像。 */
+.rail-toggle--right {
+  right: v-bind(railWidthPx);
+  border-radius: 8px 0 0 8px;
+}
+.rail-toggle--right.rail-toggle--collapsed {
+  right: 0;
+}
+/* 收起态：这是该列的唯一入口，给足可见性（底色 + 边框 + 高对比）。 */
+.rail-toggle--collapsed {
+  opacity: 0.9;
+  background: var(--nm-surface-color);
+  border-color: var(--panel-glass-border);
+  color: var(--nm-text-primary);
+  box-shadow: var(--panel-glass-shadow-md);
+}
+/* 悬停：无论哪一态都提升到全不透明（它有明确的动作语义）。 */
+.rail-toggle:hover,
+.rail-toggle:focus-visible {
+  opacity: 1;
+}
+.rail-toggle:focus-visible {
+  outline: 2px solid var(--panel-accent);
+  outline-offset: 1px;
+}
+/* 减少动态效果：不做过渡（与列进出同口径）。 */
+@media (prefers-reduced-motion: reduce) {
+  .rail-toggle {
+    transition: none;
+  }
+}
+/* 触屏（无 hover）：常驻可见，否则 35% 透明度在手指下几乎点不到。 */
+@media (hover: none) {
+  .rail-toggle {
+    opacity: 0.85;
+  }
 }
 
 /* 托盘包装（2026-10-13）：跳转钮的定位上下文（原 ChatTray 根元素的职责）。 */

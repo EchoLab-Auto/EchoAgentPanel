@@ -93,9 +93,27 @@ export const railDrag = reactive({
   arrivingId: null as string | null,
 });
 
-/** 是否处于「拖动进行中」（含起飞与飞行阶段）——控制投放区显隐。 */
+/** 是否处于「拖动进行中」（含起飞与飞行阶段）——控制投放区**样式**显隐。 */
 export const railDragEngaged = computed(
   () => railDrag.active || railDrag.landing,
+);
+
+/**
+ * 是否处于「拖动相关状态」（含**按下未过阈值**的 armed 阶段）。
+ *
+ * 与 [`railDragEngaged`] 的分工：这个决定「两列要不要挂载」，那个决定
+ * 「要不要画投放区高亮」。
+ *
+ * 为什么 armed 也要算进来（2026-11 侧栏收起）：列收起后整块不渲染，
+ * `registerRail` 随之注销，而命中测试（`hitRail`）只看得见**已注册**的列
+ * ——不提前挂载就永远拖不进去。Vue 的响应式刷新在微任务里、pointermove
+ * 是宏任务，所以必须在 `armCardDrag`（按下）那一刻就让列开始挂载，等到
+ * 指针真正移动并越过阈值时列已注册完毕。
+ *
+ * 按下但还没移动时不画投放区高亮：用户只是按住卡片，还没表达"往哪放"。
+ */
+export const railDragPending = computed(
+  () => railDrag.armed || railDrag.active || railDrag.landing,
 );
 
 /** 正在被拖动的卡片 id（源列据此把卡片从布局中摘除）。 */

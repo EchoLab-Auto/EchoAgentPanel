@@ -13,6 +13,7 @@
 
 import { reactive, watch } from 'vue';
 import { panelExtensionsRevision, panelRailCardIds } from './extensions/registry';
+import { setRailCollapsed } from './rail-collapse';
 
 export type RailSide = 'left' | 'right';
 
@@ -186,11 +187,16 @@ export function placeCardAfter(cardId: string, side: RailSide, afterId: string |
   detach(cardId);
   if (afterId === null) {
     railLayout[side].unshift(cardId);
-    return;
+  } else {
+    const index = railLayout[side].indexOf(afterId);
+    if (index === -1) railLayout[side].push(cardId);
+    else railLayout[side].splice(index + 1, 0, cardId);
   }
-  const index = railLayout[side].indexOf(afterId);
-  if (index === -1) railLayout[side].push(cardId);
-  else railLayout[side].splice(index + 1, 0, cardId);
+  // 落位后强制展开目标列（见 rail-collapse 模块头「与拖动/换列的关系」）：
+  // 收起的列没有 DOM，能落进来只可能是拖动（`railDragEngaged` 临时展开）
+  // 或头部换列按钮。若不在这里展开，卡片会"拖进去就消失"——落位成功、
+  // 但列仍处于收起态。
+  setRailCollapsed(side, false);
 }
 
 /** 按序号落位（仅用于内部/测试；可见性与存储列表一致时才可直接用）。 */
@@ -198,6 +204,8 @@ export function placeCard(cardId: string, side: RailSide, index: number): void {
   detach(cardId);
   const clamped = Math.max(0, Math.min(index, railLayout[side].length));
   railLayout[side].splice(clamped, 0, cardId);
+  // 同 placeCardAfter：落位即展开（卡片头部的「移到另一侧」按钮走这条路）。
+  setRailCollapsed(side, false);
 }
 
 /** 移到另一列（追加到列尾）——卡片头部按钮的快捷操作。 */
@@ -207,10 +215,17 @@ export function moveToOtherSide(cardId: string): RailSide {
   return target;
 }
 
-/** 重置为默认布局（全部卡片回右侧）。 */
+/**
+ * 重置为默认布局（全部卡片回右侧，两列都展开）。
+ *
+ * 展开也要一起重置：收起是"当前工作区偏好"，而本函数承诺的是「回到默认」——
+ * 只重置卡片归属、留着某列收起，用户会看到"重置了但右侧还是没回来"。
+ */
 export function resetRailLayout(): void {
   const defaults = defaultLayout();
   railLayout.left = defaults.left;
   railLayout.right = defaults.right;
   fillUnplaced(railLayout, new Set([...railLayout.left, ...railLayout.right]));
+  setRailCollapsed('left', false);
+  setRailCollapsed('right', false);
 }
