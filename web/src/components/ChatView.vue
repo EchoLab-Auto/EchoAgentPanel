@@ -331,10 +331,30 @@ const fileDragActive = ref(false);
  * 用布尔量会在光标划过子元素时闪断。 */
 let fileDragDepth = 0;
 
-// ── 输入条毛玻璃性能策略（2026-09-18）──
-// 跨行拖选文字每帧触发输入条（大面积 backdrop-filter）全量重栅格化，
-// 是拖选卡顿的根治点。策略：聚焦或拖选期间临时关 blur（纯色底撑住视觉），
-// 失去焦点/选择结束且输入为空时恢复毛玻璃——日常展示质感不变。
+// ── 输入条毛玻璃性能策略（2026-09-18 起；2026-11 收窄触发条件）──
+//
+// 跨行拖选文字时，输入条的大面积 `backdrop-filter` 每帧都要重新栅格化身后
+// 的内容，是拖选卡顿的根治点。策略：**真有选区**时临时关 blur（纯色底撑住
+// 视觉），选区结束后恢复。
+//
+// ## 为什么不是"聚焦就关"（2026-11 修复「点输入框会闪」）
+//
+// 原实现挂在 `focusin` 上：聚焦即 `--busy`，CSS 把 `backdrop-filter` 设为
+// `none` 并把 `--nm-glass-bg` 换成不透明实色。而**聚焦本身不产生大面积
+// 重绘**（只有光标闪烁）——这个降级在聚焦路径上毫无收益，代价却是每次点击
+// 输入框都跳两下：
+//
+//   玻璃卡片的 `transition` 含 `background-color 0.5s`，但**不含**
+//   `backdrop-filter`。于是点下去的一瞬间模糊消失、底色还要用半秒慢慢变实，
+//   中间那半秒是「没模糊但还半透明」的浑浊态；失焦 120ms 后又反向来一次。
+//
+// 现在只保留真正需要的触发点：
+// - `selectionchange` + 选区非空（拖选消息区文字）；
+// - 输入框内的选区（`textarea`/`input` 有自己的选区模型，`window.getSelection()`
+//   对它返回 collapsed）——由 `composerHasSelection` 读 selectionStart/End 判。
+//
+// 聚焦 / 失焦不再动 blur。失焦仍保留一个恢复兜底（选区随失焦一起消失时，
+// 不一定还有 selectionchange）。
 const composerBusy = ref(false);
 let blurRestoreTimer: number | undefined;
 
@@ -346,32 +366,59 @@ function suspendComposerBlur() {
   composerBusy.value = true;
 }
 
+/**
+ * 输入条内（textarea / input）是否真有选区。
+ *
+ * 为什么要单独判：`window.getSelection()` 对 `textarea` 返回的是 collapsed
+ * （其内容由元素自己的 selectionStart/End 管理），所以只靠它永远看不到
+ * 用户**在输入框里**拖选文字——那恰恰是最需要降级的场景。
+ *
+ * 限定"焦点在输入条内"：页面其它 textarea（比如设置页）的选区不该影响
+ * 输入条材质。
+ */
+function composerHasSelection(): boolean {
+  const root = composerFloatRef.value;
+  const el = document.activeElement;
+  if (!root || !el || !root.contains(el)) return false;
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    return start !== null && end !== null && start !== end;
+  }
+  return false;
+}
+
+/** 当前是否有任何"值得降级"的选区（消息区拖选 或 输入框内拖选）。 */
+function hasActiveSelection(): boolean {
+  const selection = window.getSelection();
+  if (selection && !selection.isCollapsed) return true;
+  return composerHasSelection();
+}
+
 function restoreComposerBlurSoon() {
-  // 拖选结束时 selection 可能先清空再重设：延迟一拍确认无选择再恢复。
+  // 拖选结束时 selection 可能先清空再重设：延迟一拍确认无选区再恢复。
   if (blurRestoreTimer !== undefined) window.clearTimeout(blurRestoreTimer);
   blurRestoreTimer = window.setTimeout(() => {
     blurRestoreTimer = undefined;
-    const selection = window.getSelection();
-    const hasSelection = !!selection && !selection.isCollapsed;
-    if (!hasSelection) composerBusy.value = false;
+    if (!hasActiveSelection()) composerBusy.value = false;
   }, 120);
 }
 
-function onComposerFocus() {
-  suspendComposerBlur();
-  // 监控是常驻的（见 startKeyboardMonitor），这里不需要启动。
-  // 保留 focus 钩子只为 suspendComposerBlur() 的既有用途。
+/**
+ * 输入条内的选区变化（`select` 事件，textarea/input 专用，会冒泡）。
+ *
+ * 与 `selectionchange` 互为兜底：Safari 对 textarea 的 selectionchange
+ * 派发时机不稳定，`select` 在各浏览器都可靠。
+ */
+function onComposerSelect() {
+  if (composerHasSelection()) suspendComposerBlur();
 }
 
 function onComposerBlur() {
-  restoreComposerBlurSoon();
-  // **不要停监控**：iOS 键盘态里 focus/blur 会抖动（点候选栏、切输入法都会），
-  // 一旦在这里停掉就再也没有人纠偏了 —— 正是上一版「有时贴、有时不贴」的根因。
+  // 失焦时选区随之消失，但浏览器不保证再派发一次 selectionchange → 这里兜底。
+  if (composerBusy.value) restoreComposerBlurSoon();
 }
 
-onBeforeUnmount(() => {
-  if (blurRestoreTimer !== undefined) window.clearTimeout(blurRestoreTimer);
-});
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const connected = computed(() => state.connected);
@@ -982,8 +1029,9 @@ onBeforeUnmount(() => {
 });
 
 function onSelectionChange() {
-  const selection = window.getSelection();
-  if (selection && !selection.isCollapsed) {
+  // 判据统一走 `hasActiveSelection`：它同时看消息区的 `window.getSelection()`
+  // 和输入框自己的 selectionStart/End（textarea 的选区不上 `window.getSelection`）。
+  if (hasActiveSelection()) {
     suspendComposerBlur();
   } else if (composerBusy.value) {
     // 选择清空：延迟一拍恢复（区分拖选换向与真正结束）。
@@ -2431,7 +2479,13 @@ function mediaSrc(img: string): string {
       </div>
     </NeumorphismDrawer>
 
-    <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮 -->
+    <!-- 输入区：作为 flex 子项固定占位（不遮挡消息），视觉上悬浮。
+         选区监听（2026-11）：**不再挂 focusin** —— 聚焦本身不产生大面积重绘，
+         而原实现会在点击时把毛玻璃瞬间换成实色（`backdrop-filter` 的开关不在
+         库卡片的 transition 列表里，底色却要 0.5s 渐变，中间那半秒就是用户
+         看到的闪烁）。真正需要降级的是**拖选文字**，由这里的 `select`
+         （textarea 内选区）与 document 的 `selectionchange`（消息区拖选）
+         共同覆盖；`focusout` 只用于失焦时的恢复兜底。 -->
     <div
       ref="composerFloatRef"
       class="chat-composer-float"
@@ -2444,7 +2498,7 @@ function mediaSrc(img: string): string {
         'chat-composer-float--drop': fileDragActive,
       }"
       :style="composerStyle"
-      @focusin="onComposerFocus"
+      @select="onComposerSelect"
       @focusout="onComposerBlur"
       @dragenter.prevent="onFileDragEnter"
       @dragover="onFileDragOver"
@@ -3026,12 +3080,21 @@ function mediaSrc(img: string): string {
   padding: var(--composer-padding);
 }
 
-/* 聚焦/拖选期间：临时关毛玻璃（纯色底撑住视觉），拖选重绘不再触发
-   大面积 blur 重栅格化。 */
+/* 拖选期间：临时关毛玻璃（纯色底撑住视觉），拖选重绘不再触发大面积 blur
+   重栅格化。触发条件见 setup 里的 composerHasSelection / onSelectionChange
+   ——**只有真有选区时**才进这个状态（聚焦不再触发，那会在每次点击输入框时
+   闪一下，见模板上的注释）。
+
+   `transition: none` 是必须的：库的玻璃卡片对 `background-color` 挂了 0.5s
+   过渡，而 `backdrop-filter` 不在过渡列表里（瞬时）。若不管，进入这个状态
+   时会先"模糊消失、底色还在慢慢变实"，退出时反向再来一次——正是用户报的
+   「样式变化闪烁」。降级态本来就是"为了性能牺牲观感"，干脆硬切，两个方向
+   都在一帧内完成。 */
 .chat-composer-float--busy .chat-composer-float__card {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   --nm-glass-bg: var(--nm-surface-raised);
+  transition: none !important;
 }
 /* clip 生效时必须清掉 border-radius —— 两者是**取交集**关系：留着 24px 圆角
    会把超椭圆轮廓又裁回圆角矩形（实测角部间隙 14→16.6px，等于白改）。
