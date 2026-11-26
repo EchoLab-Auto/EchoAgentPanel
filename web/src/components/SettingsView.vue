@@ -72,6 +72,10 @@ const PanelDeploymentInfo = lazy(
   () => import('./PanelDeploymentInfo.vue'),
   'PanelDeploymentInfo',
 );
+const PanelAppearanceSettings = lazy(
+  () => import('./PanelAppearanceSettings.vue'),
+  'PanelAppearanceSettings',
+);
 /**
  * 面板 UI 扩展的加载状态。
  *
@@ -88,6 +92,45 @@ const TOOL_OTHER = '扩展工具';
 // ── 一级菜单：当前分类 ──
 type CategoryKey = 'api' | 'skill' | 'tool' | 'module' | 'team' | 'cores' | 'panel' | 'system' | 'logs';
 const activeCategory = ref<CategoryKey>('api');
+
+// ── 面板分类的二级菜单：概览 / 外观 / 安全（2026-11）──────────────
+//
+// 「面板」这一页混了三件正交的事，此前纵向挤在一屏里：
+//   ① 我在用的是哪种 Panel、它加载了哪些扩展（概览）
+//   ② 主题与侧边栏显隐（外观）
+//   ③ 谁能访问这个界面（安全）
+// 找安全设置要先滚过前两块近千行内容——而这三件事的读者不同（排障的人看
+// 概览、调观感的人看外观、配令牌的人看安全），没有理由共享一屏。
+//
+// 选中项持久化：这是"我常来哪一节"的偏好。与一级分类不同——一级分类每次进
+// 设置页都从 API 开始（那是最高频入口），而面板的默认节给「概览」，它是这
+// 一页的前置事实（先知道自己在看什么形态的 Panel）。
+type PanelSection = 'overview' | 'appearance' | 'security';
+const PANEL_SECTIONS: Array<{ key: PanelSection; label: string; hint: string }> = [
+  { key: 'overview', label: '概览', hint: '部署方式与已加载的 UI 扩展' },
+  { key: 'appearance', label: '外观', hint: '主题与侧边栏显隐' },
+  { key: 'security', label: '安全', hint: '访问令牌与认证开关' },
+];
+const PANEL_SECTION_KEY = 'echo-panel-settings-panel-section';
+const panelSection = ref<PanelSection>(loadPanelSection());
+
+function loadPanelSection(): PanelSection {
+  try {
+    const raw = localStorage.getItem(PANEL_SECTION_KEY);
+    if (raw === 'overview' || raw === 'appearance' || raw === 'security') return raw;
+  } catch {
+    // 隐私模式等：用默认节
+  }
+  return 'overview';
+}
+
+watch(panelSection, (section) => {
+  try {
+    localStorage.setItem(PANEL_SECTION_KEY, section);
+  } catch {
+    // 存储不可用：仅本次会话生效
+  }
+});
 
 // ── 一级菜单的横向可滚性（2026-11 移动端观感）────────────────────────────
 //
@@ -2457,6 +2500,28 @@ watch(
         />
       </div>
 
+      <!-- 面板分类的二级菜单（2026-11）：概览 / 外观 / 安全。
+           横向 chip 条复用工作台筛选栏的形态与样式（`.caps-filters` +
+           `.caps-chip`）——同一个页面里两种"分段选择"长得不一样只会增加
+           认知成本。`hint` 只在 title 里给，行内不放：三条副标题并排会把
+           这条竖着只有 34px 的带子撑成两行。 -->
+      <div v-if="activeCategory === 'panel'" class="caps-filters caps-subnav">
+        <div class="caps-filters__chips">
+          <button
+            v-for="section in PANEL_SECTIONS"
+            :key="section.key"
+            type="button"
+            class="caps-chip"
+            :class="{ 'caps-chip--active': panelSection === section.key }"
+            :title="section.hint"
+            :aria-current="panelSection === section.key ? 'page' : undefined"
+            @click="panelSection = section.key"
+          >
+            {{ section.label }}
+          </button>
+        </div>
+      </div>
+
       <!-- API 工作区：整页表单（无条目列表） -->
       <div v-if="activeCategory === 'api'" class="caps-workspace">
         <div class="caps-detail-pane">
@@ -2495,15 +2560,22 @@ watch(
            形态的 Panel、谁能打开它"。 -->
       <div v-else-if="activeCategory === 'panel'" class="caps-workspace">
         <div class="caps-detail-pane">
-          <!-- 两块之间要间距：detail-pane 本身不是 flex 列，包一层 `.caps-detail`
-               （display:flex + gap:12px，本文件已定义）。 -->
+          <!-- 三节按二级菜单切换（`v-if` 而不是 `v-show`）：安全那节有自己的
+               异步状态（令牌摘要拉取），藏在 `display: none` 里仍会跑；而且
+               一次性把三块都挂上就等于没分节。 -->
           <div class="caps-detail">
-            <!-- 部署方式在前：它回答"我在看的是哪一种 Panel"，是后面所有设置的前置事实。 -->
-            <PanelDeploymentInfo />
-            <!-- UI 扩展的加载状态放在部署信息之后：先回答"这是什么形态的
-                 Panel"，再说"它加载到了哪些模块界面"。 -->
-            <PanelUiExtensions />
-            <PanelSecuritySettings />
+            <!-- 概览：部署方式在前——它回答"我在看的是哪一种 Panel"，是理解
+                 其余一切（含"为什么这里的更新按钮不一样"）的前置事实。 -->
+            <template v-if="panelSection === 'overview'">
+              <PanelDeploymentInfo />
+              <!-- UI 扩展的加载状态放在部署信息之后：先回答"这是什么形态的
+                   Panel"，再说"它加载到了哪些模块界面"。 -->
+              <PanelUiExtensions />
+            </template>
+            <!-- 外观：主题 + 侧边栏显隐（面板级视觉偏好）。 -->
+            <PanelAppearanceSettings v-else-if="panelSection === 'appearance'" />
+            <!-- 安全：访问令牌与认证开关（这一页唯一会改变"谁能进来"的部分）。 -->
+            <PanelSecuritySettings v-else />
           </div>
         </div>
       </div>
@@ -4415,6 +4487,13 @@ watch(
   flex-wrap: wrap;
   flex: 1;
   min-width: 0;
+}
+/* 二级菜单条（2026-11）：复用筛选栏的容器与 chip 样式，只补一条——它上面紧
+   挨着工具条（自带下边框），两条线贴在一起像虚线；收紧竖向内边距，视觉上
+   归到工具条的延伸。 */
+.caps-subnav {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 .caps-chip {
   display: inline-flex;
