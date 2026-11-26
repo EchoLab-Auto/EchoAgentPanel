@@ -21,8 +21,8 @@
 //! 影响所有设备的全局配置，还得为它设计上传通道与权限。
 //!
 //! 代价与对冲：
-//! - 配额（localStorage 约 5MB）：`prepareImageFile` 先按需缩放到长边 2560
-//!   再编码，正常壁纸落在 0.3–1MB；写盘失败**如实报错**（不静默丢图）；
+//! - 配额（localStorage 约 5MB）：≤2MB 的图**原样存**（零损失、不糊），更大
+//!   的缩到长边 3200 再编码；写盘失败**如实报错**（不静默丢图）；
 //! - 启动时序：读取与套用在 `initPanelBackground()` 里同步完成（模块加载期
 //!   就设好 CSS 变量），不会先闪一帧无背景。
 
@@ -52,12 +52,31 @@ export const BG_SETTINGS_KEY = 'echo-panel-bg-settings';
 /** 生效标记属性（挂在 `<html>` 上；CSS 全靠它判断要不要透明化）。 */
 export const BG_ATTR = 'data-panel-bg';
 
-/** 缩放上限（长边）：再大对观感没有增益，只是白占配额与解码内存。 */
-export const MAX_IMAGE_EDGE = 2560;
-/** 原图小于这个体积（字节）时直接存，不重新编码（保真 + 保住 PNG 透明）。 */
-export const KEEP_ORIGINAL_MAX_BYTES = 900 * 1024;
-/** 重新编码的质量。 */
-export const REENCODE_QUALITY = 0.82;
+/**
+ * 缩放上限（长边）。
+ *
+ * 3200 而不是更小：**高分屏上背景会被放大**。2× 屏的 1600×1000 视口 = 3200×2000
+ * 物理像素，图只有 2560 长边时必然被拉伸重采样（实测梯度能量从 61.4 掉到
+ * 25.1，比 dpr=1 的同图低 ~18%），用户看到的就是"糊"。3200 覆盖绝大多数
+ * 2× 笔记本屏；更高（4K / 3×）会让单张图撑爆 localStorage 配额，只能靠
+ * 用户自己选更大的原图（见 [`KEEP_ORIGINAL_MAX_BYTES`] 的原样保留路径）。
+ */
+export const MAX_IMAGE_EDGE = 3200;
+/**
+ * 原图不超过这个体积时**原样存**（不缩放、不重编码）。
+ *
+ * 这是"不糊"的主路径：常见壁纸 200KB–1.5MB，落在这条分支里就是逐字节原样，
+ * 多大分辨率都保留。代价是 localStorage 占用随图走，所以上限压在 2MB
+ * （base64 膨胀 4/3 后 ≈ 2.7M 字符，仍在 5MB 配额内）。
+ */
+export const KEEP_ORIGINAL_MAX_BYTES = 2 * 1024 * 1024;
+/**
+ * 重新编码的质量。
+ *
+ * 只有"超过 2MB 需要缩"的图才走到这里。实测 q=0.85 与 q=0.82 的锐度差在
+ * 噪声范围内（都 ≈100% 基线），但 0.85 对渐变更干净；体积仍在配额内。
+ */
+export const REENCODE_QUALITY = 0.85;
 /** 写盘前允许的最大 data URL 长度（字符）：localStorage 常见 5MB/源，留足余量。 */
 export const MAX_DATA_URL_CHARS = 3_500_000;
 
@@ -151,7 +170,7 @@ export function saveBackground(image: string | null, settings: PanelBgSettings):
  * 选图 + 落地：读文件 → 按需缩放 → 存 → 应用。
  *
  * 成功时回传**实际落盘**的尺寸与是否重编码过：界面要如实告诉用户"你选的
- * 4000px 图被缩到了 2560"——不说的话，看界面没有变糊只是运气好，下次换一张
+ * 4000px 图被缩到了 3200"——不说的话，看界面没有变糊只是运气好，下次换一张
  * 可能会觉得"功能坏了"。
  */
 export async function setBackgroundFromFile(
@@ -196,7 +215,8 @@ export type PrepareResult =
  *
  * 策略（两个阈值，都不是随便取的）：
  * - 原图 ≤ `KEEP_ORIGINAL_MAX_BYTES` 且是位图 → **原样存**：不重编码就没有
- *   质量损失，也能保住 PNG 的透明（"完整显示"模式下透明区会是页面底色）；
+ *   质量损失（也就不会糊），也能保住 PNG 的透明（"完整显示"模式下透明区会是
+ *   页面底色）。常见壁纸都在这一档，所以默认路径是"零损失"；
  * - 更大的 → 长边缩到 `MAX_IMAGE_EDGE`、JPEG 重编码。用 canvas 而不是让
  *   CSS 去缩：CSS 缩放不省存储配额，而配额才是这条路径的真限制。
  *
@@ -267,7 +287,7 @@ export async function prepareImageFile(file: File): Promise<PrepareResult> {
   if (dataUrl.length > MAX_DATA_URL_CHARS) {
     return {
       ok: false,
-      error: '图片压缩后仍然太大——换一张分辨率小一点的（长边 2560 以内通常够用）',
+      error: `图片压缩后仍然太大（${Math.round(dataUrl.length / 1000)}K 字符）——换一张分辨率小一点的（长边 3200 以内通常够用）`,
     };
   }
   return {

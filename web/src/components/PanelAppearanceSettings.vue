@@ -103,7 +103,7 @@ async function onFileChange(event: Event) {
     hasImage.value = loaded.image !== null;
     bgSettings.value = loaded.settings;
     // 只显示缩放后落盘的实际尺寸：用户看到"我选了 4000px 的图"却发现界面上
-    // 是 2560，会以为被压坏了；这里直接给出真实值（缺字段时不显示，不编造）。
+    // 被缩到了 3200，会以为被压坏了；这里直接给出真实值（缺字段时不显示，不编造）。
     imageSize.value =
       result.width != null && result.height != null
         ? { width: result.width, height: result.height }
@@ -239,8 +239,8 @@ function removeImage() {
         </div>
 
         <p v-if="imageSize" class="panel-appearance__note muted">
-          已保存 {{ imageSize.width }}×{{ imageSize.height }}（长边超过 2560 会等比缩小，
-          避免占满浏览器存储）。
+          已保存 {{ imageSize.width }}×{{ imageSize.height }}。超过长边 3200 会等比缩小
+          （浏览器存储有限）；高分屏上若看着发虚，换一张分辨率更高的原图即可。
         </p>
       </template>
     </div>

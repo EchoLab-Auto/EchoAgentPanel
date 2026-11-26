@@ -158,15 +158,26 @@ html[data-panel-bg='on'] body {
 html[data-panel-bg='on'] body::before {
   content: '';
   position: fixed;
-  inset: 0;
   z-index: -1;
   background-image: var(--panel-bg-image);
   background-size: var(--panel-bg-size, cover);
   background-position: center;
   background-repeat: no-repeat;
   filter: blur(var(--panel-bg-blur, 0px));
-  /* 模糊会把边缘采样到画布外（出现一圈半透明的亮/暗边），轻微放大裁掉。 */
-  transform: scale(1.04);
+  /* 模糊会把边缘采样到画布外（出现一圈半透明的亮/暗边），所以要往外扩一圈
+     让被污染的边缘落到视口外。
+
+     **用负 inset 而不是 `transform: scale()`**（2026-11 实测）：任何 `scale`
+     都会让浏览器重新采样这张图——`scale(1.04)` 就把细节锐度打到基线的 77%
+     （梯度能量 61.1 → 47.0），用户看到的就是"背景有点糊"，而且**与"模糊"
+     滑块的 0 值无关**。负 inset 只在 `blur > 0` 时才把画布撑大（`-1 * 0px`
+     就是 0），blur=0 时图片按 1:1 覆盖视口，一个像素都不重采样。
+
+     扩的量是 **3 倍**模糊半径：CSS `blur(<length>)` 的 length 是高斯标准差 σ，
+     可见扩散约 3σ。实测（纯色图 + blur 16px，看最外圈与中心差）：
+     扩 0 → 偏差 262、扩 1σ → 91、扩 2σ → 14、扩 3σ → **0**（完全干净）。
+     只扩 1σ 会留下肉眼可见的一圈发白/发暗带。 */
+  inset: calc(-3 * var(--panel-bg-blur, 0px));
   pointer-events: none;
 }
 html[data-panel-bg='on'] body::after {

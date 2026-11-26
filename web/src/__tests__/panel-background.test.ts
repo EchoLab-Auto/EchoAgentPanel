@@ -13,6 +13,8 @@
 //!    一个静默的 404 + 没有背景。
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   BG_ATTR,
   BG_IMAGE_KEY,
@@ -137,5 +139,35 @@ describe('背景图：存储与套用', () => {
     const loaded = loadBackground();
     expect(loaded.image).toBe(TINY);
     expect(loaded.settings, '坏 JSON 退默认，不连带丢图').toEqual(DEFAULT_BG_SETTINGS);
+  });
+});
+
+describe('背景层的 CSS 守则（2026-11「背景有点糊」回归）', () => {
+  // 读源码而不是渲染：这条教训是"别用 scale"，而 scale 一出现就是全量重采样，
+  // 单元测试里量不到像素，只能钉住源码里没有它。
+  const css = readFileSync(join(dirname(__filename), '..', 'styles.css'), 'utf8');
+  /**
+   * 取背景层那一段规则，并**剥掉注释**：源码里正解释着"别用 scale"，不剥
+   * 注释的话断言会被自己的说明文字绊倒（第一次写就踩了）。
+   */
+  const bgRule = css
+    .slice(
+      css.indexOf("html[data-panel-bg='on'] body::before"),
+      css.indexOf("html[data-panel-bg='on'] body::after"),
+    )
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
+  it('背景层不得用 transform: scale（会让整张图重采样，锐度掉到 77%）', () => {
+    expect(bgRule).not.toMatch(/transform\s*:\s*scale/);
+  });
+
+  it('blur>0 的边缘靠负 inset 扩 3σ 裁掉（扩 1σ 仍留可见残带）', () => {
+    expect(bgRule).toMatch(/inset\s*:\s*calc\(-3 \* var\(--panel-bg-blur/);
+  });
+
+  it('blur=0 时 inset 必须归零（1:1 覆盖视口，一个像素都不重采样）', () => {
+    // -3 * 0px = 0px：公式本身就保证这点，这里钉住"没有第二个 inset 覆盖它"
+    const insetDecls = bgRule.match(/inset\s*:[^;]+;/g) ?? [];
+    expect(insetDecls.length, '背景层只应有一处 inset 声明').toBe(1);
   });
 });
