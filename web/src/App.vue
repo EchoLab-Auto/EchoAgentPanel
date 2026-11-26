@@ -285,9 +285,10 @@ setupPanelExtensions({
 // `setupPanelExtensions` **之后**——扩展在 import 时就会 `registerPanelExtension`，
 // 那时 app context 必须已经就位（否则 `hooks.setup` 要等下一次注册才跑）。
 startPanelUiLoading();
-// 自定义背景图（2026-11）：同步套一次 CSS 变量。放在 setup 顶层而不是
-// onMounted：`<html>` 上的属性要在首帧绘制前就位，否则会先闪一帧纯色底。
-initPanelBackground();
+// 自定义背景图（2026-11）：**异步**（图存 IndexedDB，读出来要 await）。
+// 放在 setup 顶层而不是 onMounted：越早开始，图越快就位。`initPanelBackground`
+// 自己保证"图没就绪就不设属性"，所以不会出现"透明但没图"的怪帧。
+void initPanelBackground();
 startConnection();
 
 /**

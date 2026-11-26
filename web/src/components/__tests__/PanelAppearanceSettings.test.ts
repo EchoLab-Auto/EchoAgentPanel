@@ -13,7 +13,7 @@ import { mount } from '@vue/test-utils';
 import { ref } from 'vue';
 import PanelAppearanceSettings from '../PanelAppearanceSettings.vue';
 import { railCollapsed, resetRailCollapseForTests } from '../../rail-collapse';
-import { BG_IMAGE_KEY } from '../../panel-background';
+import { BG_IMAGE_KEY, BG_META_KEY } from '../../panel-background';
 
 /**
  * 主题替身。
@@ -66,11 +66,12 @@ describe('面板 · 外观', () => {
     expect(idle).toEqual(['选择图片…']);
     expect(block.find('.panel-appearance__control').exists()).toBe(false);
 
-    // 造一个"已存图"的状态再挂一次
+    // 造一个"已存图"的状态再挂一次（legacy data URL + 原始尺寸 meta）
     localStorage.setItem(
       BG_IMAGE_KEY,
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
     );
+    localStorage.setItem(BG_META_KEY, JSON.stringify({ width: 3200, height: 2000 }));
     const withImage = mount(PanelAppearanceSettings);
     const buttons = withImage
       .findAll('.panel-appearance__block-actions button')

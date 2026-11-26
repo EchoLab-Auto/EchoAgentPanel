@@ -14,7 +14,7 @@
 //! 空壳。卡片高度 / 列内顺序 / 卡片换列是**拖动式**交互，在聊天页直接操作更自然
 //! ——在设置页复刻一套只会有两个真相。
 
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import NeumorphismThemeToggle from '@echolab-auto/ui-frame/components/NeumorphismThemeToggle';
 import NeumorphismSwitch from '@echolab-auto/ui-frame/components/NeumorphismSwitch';
 import NeumorphismButton from '@echolab-auto/ui-frame/components/NeumorphismButton';
@@ -23,11 +23,17 @@ import NeumorphismSlider from '@echolab-auto/ui-frame/components/NeumorphismSlid
 import { useTheme } from '@echolab-auto/ui-frame/composables/useTheme';
 import { railCollapsed, setRailCollapsed } from '../rail-collapse';
 import {
+  applyBackground,
   clearBackground,
-  loadBackground,
-  setBackgroundFromFile,
+  hasStoredImage,
+  initPanelBackground,
+  loadImageUrl,
+  loadMeta,
+  loadSettings,
+  storeImage,
   updateBackgroundSettings,
   type PanelBgFit,
+  type PanelBgMeta,
   type PanelBgSettings,
 } from '../panel-background';
 
@@ -48,17 +54,17 @@ const rightVisible = computed({
 
 // ── 背景图（2026-11）────────────────────────────────────────────────
 //
-// 图与参数存在 localStorage（`panel-background.ts`），与主题/侧栏同族：这是
-// **这台浏览器**的视觉偏好，写进 Core 会让"我换张壁纸"变成影响所有设备的全局
-// 配置。处理流程（读文件 → 按需缩放 → 存 → 套用）全在那边，这里只管交互。
+// 图存 IndexedDB（原图字节，不重编码），参数存 localStorage。这里只管交互；
+// 存储与套用在 `panel-background.ts`。
 
-/** 当前是否有背景图（决定显示"选图"还是"换图/移除"）。 */
-const hasImage = ref(loadBackground().image !== null);
-const bgSettings = ref<PanelBgSettings>(loadBackground().settings);
-/** 图片固有尺寸（选了新图才更新；刷新页面后不知道原图尺寸，不显示）。 */
-const imageSize = ref<{ width: number; height: number } | null>(null);
+const settings = ref<PanelBgSettings>(loadSettings());
+/** 已存过的图的原始尺寸（用于"你的图比屏幕小"这类提示）。 */
+const meta = ref<PanelBgMeta | null>(loadMeta());
+const hasImage = ref(hasStoredImage());
 const busy = ref(false);
 const error = ref('');
+/** 界面上的"需要多大"的实时值（随窗口变化重算）。 */
+const viewport = ref({ w: 0, h: 0, dpr: 1 });
 
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -69,15 +75,70 @@ const FIT_OPTIONS = [
 
 /** 变暗滑块的百分数（0–90），直接绑在 UI 上比绑 0–0.9 的小数稳。 */
 const dimPercent = computed({
-  get: () => Math.round(bgSettings.value.dim * 100),
+  get: () => Math.round(settings.value.dim * 100),
   set: (value: number) => patchSettings({ dim: value / 100 }),
 });
 
+/** 屏幕实际需要的图片像素（CSS 尺寸 × 设备像素比）。 */
+const neededPixels = computed(() => ({
+  w: Math.round(viewport.value.w * viewport.value.dpr),
+  h: Math.round(viewport.value.h * viewport.value.dpr),
+}));
+
+/**
+ * 放大倍率：图要在 `cover` 下盖满屏幕，实际被拉伸多少倍。
+ *
+ * >1 就是"每个源像素被摊到多个设备像素上"——用户看到的颗粒感正是这个。
+ * 用 `max(需要宽/图宽, 需要高/图高)`（cover 取较大的那个方向）。
+ */
+const magnification = computed(() => {
+  const m = meta.value;
+  const need = neededPixels.value;
+  if (!m || !need.w || !need.h) return 1;
+  return Math.max(need.w / m.width, need.h / m.height);
+});
+
+/** 明显偏小才提示（1.15 以内肉眼几乎看不出）。 */
+const tooSmall = computed(() => hasImage.value && magnification.value > 1.15);
+
+function refreshViewport() {
+  viewport.value = {
+    w: window.innerWidth,
+    h: window.innerHeight,
+    dpr: window.devicePixelRatio || 1,
+  };
+}
+
+function onResize() {
+  refreshViewport();
+}
+
+onMounted(() => {
+  refreshViewport();
+  window.addEventListener('resize', onResize);
+  // 主题/侧栏之外的第三种情形：别的窗口改了背景（多标签页），这里不追——
+  // 背景是"本窗口的视觉偏好"，跨窗口同步留待有人真的需要时再做。
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize);
+});
+
 function patchSettings(partial: Partial<PanelBgSettings>) {
-  const next = { ...bgSettings.value, ...partial };
-  bgSettings.value = next;
+  const next = { ...settings.value, ...partial };
+  settings.value = next;
   const saved = updateBackgroundSettings(next);
   error.value = saved.ok ? '' : saved.error;
+  if (saved.ok) {
+    // 参数变了要重新套一次（`--panel-bg-dim` 等变量在 html 上）
+    void applyNow();
+  }
+}
+
+/** 把"当前存储状态"重新套到 DOM（换图 / 改参数后调用）。 */
+async function applyNow() {
+  const url = await loadImageUrl();
+  applyBackground(url, settings.value);
 }
 
 function pickFile() {
@@ -88,36 +149,41 @@ function pickFile() {
 async function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
-  // 选同一个文件两次也要能触发 change（否则第二次点没反应）。
-  input.value = '';
+  input.value = ''; // 同一个文件选两次也要能触发 change
   if (!file) return;
   busy.value = true;
   error.value = '';
   try {
-    const result = await setBackgroundFromFile(file);
+    const result = await storeImage(file);
     if (!result.ok) {
       error.value = result.error;
       return;
     }
-    const loaded = loadBackground();
-    hasImage.value = loaded.image !== null;
-    bgSettings.value = loaded.settings;
-    // 只显示缩放后落盘的实际尺寸：用户看到"我选了 4000px 的图"却发现界面上
-    // 被缩到了 3200，会以为被压坏了；这里直接给出真实值（缺字段时不显示，不编造）。
-    imageSize.value =
-      result.width != null && result.height != null
-        ? { width: result.width, height: result.height }
-        : null;
+    hasImage.value = true;
+    meta.value = { width: result.width, height: result.height };
+    settings.value = loadSettings();
+    await applyNow();
+    if (result.mode === 'shrunk') {
+      // 回落路径（无 IndexedDB）缩了图：如实说明，否则用户会以为功能把图毁了
+      error.value = `浏览器不支持 IndexedDB，这张图被压到 ${result.width}×${result.height} 存储（会略钝）。`;
+    }
   } finally {
     busy.value = false;
   }
 }
 
-function removeImage() {
-  clearBackground();
-  hasImage.value = false;
-  imageSize.value = null;
-  error.value = '';
+async function removeImage() {
+  busy.value = true;
+  try {
+    await clearBackground();
+    hasImage.value = false;
+    meta.value = null;
+    settings.value = loadSettings();
+    error.value = '';
+    await initPanelBackground();
+  } finally {
+    busy.value = false;
+  }
 }
 </script>
 
@@ -200,7 +266,7 @@ function removeImage() {
         <div class="panel-appearance__control">
           <span class="panel-appearance__control-label">适配</span>
           <NeumorphismSegmented
-            :model-value="bgSettings.fit"
+            :model-value="settings.fit"
             :options="FIT_OPTIONS"
             :size="26"
             aria-label="背景图适配方式"
@@ -227,7 +293,7 @@ function removeImage() {
         <div class="panel-appearance__control">
           <span class="panel-appearance__control-label">模糊</span>
           <NeumorphismSlider
-            v-model="bgSettings.blur"
+            v-model="settings.blur"
             :min="0"
             :max="24"
             :step="2"
@@ -235,12 +301,20 @@ function removeImage() {
             class="panel-appearance__slider"
             @update:model-value="(v) => patchSettings({ blur: Number(v) })"
           />
-          <span class="panel-appearance__control-value">{{ bgSettings.blur }}px</span>
+          <span class="panel-appearance__control-value">{{ settings.blur }}px</span>
         </div>
 
-        <p v-if="imageSize" class="panel-appearance__note muted">
-          已保存 {{ imageSize.width }}×{{ imageSize.height }}。超过长边 3200 会等比缩小
-          （浏览器存储有限）；高分屏上若看着发虚，换一张分辨率更高的原图即可。
+        <p v-if="meta" class="panel-appearance__note muted">
+          已保存原图 {{ meta.width }}×{{ meta.height }}（未压缩、未缩放，按原始字节存储）。
+          这块屏幕需要约 {{ neededPixels.w }}×{{ neededPixels.h }} 像素
+          （窗口 {{ viewport.w }}×{{ viewport.h }} × {{ viewport.dpr }} 倍屏）。
+        </p>
+        <!-- 图比屏幕小时必须说清楚：这是"模糊 / 颗粒大"的唯一真实原因，
+             而且只靠 CSS 无法补救（放大只能摊像素，不能造细节）。 -->
+        <p v-if="tooSmall" class="panel-appearance__warn">
+          这张图会被放大 {{ magnification.toFixed(1) }} 倍，所以看着会发虚、颗粒明显。
+          换一张长边不小于 {{ neededPixels.w }} 像素的图片即可清晰；
+          「模糊」调到 0 也不会改善（那是重采样，不是模糊效果）。
         </p>
       </template>
     </div>
@@ -357,6 +431,18 @@ function removeImage() {
   line-height: 1.5;
   color: var(--panel-err);
   overflow-wrap: anywhere;
+}
+/* 「图比屏幕小」提示：警告色但不报错——它说的是"这张图不够大"，
+   不是"保存失败"，用 error 的红会让人以为出故障了。 */
+.panel-appearance__warn {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--nm-border-radius-sm, 8px);
+  background: color-mix(in srgb, var(--panel-warn) 10%, transparent);
+  border-left: 3px solid var(--panel-warn);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--nm-text-primary);
 }
 
 /* 窄屏：块头两行化（说明在上、按钮在下），控件行允许换行。 */

@@ -8,23 +8,27 @@
 //!
 //! 1. 在 `body::before` 上画图（fixed + cover/contain + 可选模糊），
 //!    `body::after` 盖一层 `--nm-bg-color` 蒙版当"变暗"（随主题自动换色）；
-//! 2. 把原本涂这个平面的三个大容器改成透明（`body` / `.nm-layout` /
-//!    `.panel-layout`，以及聊天区的凹陷井 `.chat-view__list`）。
+//! 2. 把原本涂这个平面的容器改成透明（`body` / `.nm-theme-provider` /
+//!    `.nm-layout` / `.panel-layout` / `.chat-view__list`）。
 //!
-//! 小控件（输入框、代码块、日志窗）继续用 `--nm-bg-color` 画"凹陷面"——它们
-//! 本来就该是一块实底，透出照片会直接毁掉可读性。
+//! ## 图存 IndexedDB，参数存 localStorage（2026-11 第二轮）
 //!
-//! ## 为什么存在 localStorage 而不是 Core 配置
+//! 第一版把图存 localStorage（上限约 5MB，base64 还要膨胀 4/3），于是任何
+//! 稍大的壁纸都得**缩到长边 2560 + JPEG 0.82**。用户看到的就是「模糊 / 颗粒
+//! 很大」——那不是分辨率不够，是我们的存储策略把原图毁了。
 //!
-//! 这是**这台浏览器**的视觉偏好，与主题（`echo-panel-theme`）、侧栏显隐
-//! （`echo-panel-rail-collapsed`）同族。写进 Core 会让"我换张壁纸"变成
-//! 影响所有设备的全局配置，还得为它设计上传通道与权限。
+//! 现在：**原图按字节存进 IndexedDB（Blob，配额通常几百 MB）**，一张 20MB 的
+//! 4K 壁纸也不掉一个像素；localStorage 只留三个数字（fit / dim / blur）与图的
+//! 原始尺寸（给"你的图比屏幕小"这类提示用）。
 //!
-//! 代价与对冲：
-//! - 配额（localStorage 约 5MB）：≤2MB 的图**原样存**（零损失、不糊），更大
-//!   的缩到长边 3200 再编码；写盘失败**如实报错**（不静默丢图）；
-//! - 启动时序：读取与套用在 `initPanelBackground()` 里同步完成（模块加载期
-//!   就设好 CSS 变量），不会先闪一帧无背景。
+//! 浏览器不支持 IDB（隐私模式的部分实现 / 极老内核）时回落到第一版的行为
+//! （data URL 进 localStorage），保持功能可用，只是受配额限制。
+//!
+//! ## 一个真实教训：不要用 scale 裁边缘
+//!
+//! 宁可让 `::before` 用负 inset 扩出去，也**绝不能** `transform: scale()`——
+//! 任何 scale 都会让浏览器重采样整张图（实测把细节锐度打到基线的 77%），
+//! 与"模糊"滑块是 0 还是 24 无关。
 
 /** 背景图的适配方式（CSS `background-size` 的两个值）。 */
 export type PanelBgFit = 'cover' | 'contain';
@@ -45,40 +49,33 @@ export const DEFAULT_BG_SETTINGS: PanelBgSettings = {
   blur: 0,
 };
 
-/** 图片本身的存储键（data URL）。 */
+/** 旧版（data URL）图片的存储键；现在只用于**回落到 localStorage** 的分支。 */
 export const BG_IMAGE_KEY = 'echo-panel-bg-image';
 /** 参数的存储键（JSON）。 */
 export const BG_SETTINGS_KEY = 'echo-panel-bg-settings';
+/** 原始尺寸的存储键（JSON：`{width, height}`，给"图太小"的提示用）。 */
+export const BG_META_KEY = 'echo-panel-bg-meta';
 /** 生效标记属性（挂在 `<html>` 上；CSS 全靠它判断要不要透明化）。 */
 export const BG_ATTR = 'data-panel-bg';
 
+/** IndexedDB：库名 / 仓名 / 键名。 */
+export const IDB_NAME = 'echo-panel';
+export const IDB_STORE = 'assets';
+export const IDB_KEY = 'background';
+
 /**
- * 缩放上限（长边）。
+ * 回落到 localStorage 时允许的最大 data URL 长度（字符）。
  *
- * 3200 而不是更小：**高分屏上背景会被放大**。2× 屏的 1600×1000 视口 = 3200×2000
- * 物理像素，图只有 2560 长边时必然被拉伸重采样（实测梯度能量从 61.4 掉到
- * 25.1，比 dpr=1 的同图低 ~18%），用户看到的就是"糊"。3200 覆盖绝大多数
- * 2× 笔记本屏；更高（4K / 3×）会让单张图撑爆 localStorage 配额，只能靠
- * 用户自己选更大的原图（见 [`KEEP_ORIGINAL_MAX_BYTES`] 的原样保留路径）。
+ * localStorage 常见上限 5MB/源；留足余量（JS 字符串按 UTF-16 计，1 字符 ≈ 2B）。
  */
-export const MAX_IMAGE_EDGE = 3200;
-/**
- * 原图不超过这个体积时**原样存**（不缩放、不重编码）。
- *
- * 这是"不糊"的主路径：常见壁纸 200KB–1.5MB，落在这条分支里就是逐字节原样，
- * 多大分辨率都保留。代价是 localStorage 占用随图走，所以上限压在 2MB
- * （base64 膨胀 4/3 后 ≈ 2.7M 字符，仍在 5MB 配额内）。
- */
-export const KEEP_ORIGINAL_MAX_BYTES = 2 * 1024 * 1024;
-/**
- * 重新编码的质量。
- *
- * 只有"超过 2MB 需要缩"的图才走到这里。实测 q=0.85 与 q=0.82 的锐度差在
- * 噪声范围内（都 ≈100% 基线），但 0.85 对渐变更干净；体积仍在配额内。
- */
-export const REENCODE_QUALITY = 0.85;
-/** 写盘前允许的最大 data URL 长度（字符）：localStorage 常见 5MB/源，留足余量。 */
 export const MAX_DATA_URL_CHARS = 3_500_000;
+
+/** 缩图的最后手段门槛（仅当 IDB 不可用、且图大到 localStorage 放不下时才用）。 */
+export const FALLBACK_SHRINK_EDGE = 2560;
+/** 回落路径的重编码质量。 */
+export const FALLBACK_QUALITY = 0.85;
+
+// ── 参数：纯函数 ────────────────────────────────────────────────────
 
 /** 参数归一化（导出以便直接测）：任何坏值都退回缺省，不抛。 */
 export function normalizeSettings(raw: unknown): PanelBgSettings {
@@ -93,22 +90,272 @@ export function normalizeSettings(raw: unknown): PanelBgSettings {
   return out;
 }
 
-/** 读当前背景（图 + 参数）。读不到就是没有背景。 */
-export function loadBackground(): { image: string | null; settings: PanelBgSettings } {
-  let image: string | null = null;
-  let settings = { ...DEFAULT_BG_SETTINGS };
+/** 读参数（同步；坏 JSON 退默认，绝不抛在启动路径上）。 */
+export function loadSettings(): PanelBgSettings {
+  try {
+    const raw = localStorage.getItem(BG_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_BG_SETTINGS };
+    return normalizeSettings(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_BG_SETTINGS };
+  }
+}
+
+/** 写参数（同步；配额满等异常由调用方决定怎么报）。 */
+export function storeSettings(settings: PanelBgSettings): void {
+  localStorage.setItem(BG_SETTINGS_KEY, JSON.stringify(normalizeSettings(settings)));
+}
+
+/** 图已存的原始尺寸（没存过 / 旧版没写过 → null）。 */
+export interface PanelBgMeta {
+  width: number;
+  height: number;
+}
+
+export function loadMeta(): PanelBgMeta | null {
+  try {
+    const raw = localStorage.getItem(BG_META_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PanelBgMeta>;
+    const width = Number(parsed.width);
+    const height = Number(parsed.height);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return null;
+    }
+    return { width, height };
+  } catch {
+    return null;
+  }
+}
+
+export function storeMeta(meta: PanelBgMeta | null): void {
+  try {
+    if (meta) localStorage.setItem(BG_META_KEY, JSON.stringify(meta));
+    else localStorage.removeItem(BG_META_KEY);
+  } catch {
+    // meta 只是提示用，写不进去不影响功能
+  }
+}
+
+// ── 图片：IndexedDB 优先，localStorage 回落 ─────────────────────────
+
+/** IDB 是否可用（jsdom / 老内核 / 隐私模式下可能没有）。 */
+function idbAvailable(): boolean {
+  return typeof indexedDB !== 'undefined' && indexedDB !== null;
+}
+
+/** 打开库（每次调用都 `open`，浏览器内部会复用连接；本模块调用频率极低）。 */
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(IDB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB 打开失败'));
+  });
+}
+
+function idbPut(value: unknown, key = IDB_KEY): Promise<void> {
+  return openDb().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put(value, key);
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error ?? new Error('写入 IndexedDB 失败'));
+        };
+      }),
+  );
+}
+
+function idbGet<T>(key = IDB_KEY): Promise<T | undefined> {
+  return openDb().then(
+    (db) =>
+      new Promise<T | undefined>((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const request = tx.objectStore(IDB_STORE).get(key);
+        request.onsuccess = () => {
+          const result = request.result as T | undefined;
+          db.close();
+          resolve(result);
+        };
+        request.onerror = () => {
+          db.close();
+          reject(request.error ?? new Error('读取 IndexedDB 失败'));
+        };
+      }),
+  );
+}
+
+function idbDelete(key = IDB_KEY): Promise<void> {
+  return openDb().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).delete(key);
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error ?? new Error('删除 IndexedDB 条目失败'));
+        };
+      }),
+  );
+}
+
+/**
+ * 当前生效的图片地址。
+ *
+ * 两件事必须一起管：
+ * - **对象 URL 的生命周期**：`URL.createObjectURL` 建立的引用不会自动回收，
+ *   换图/删图时必须 `revokeObjectURL`，否则一次会话里换十张图就泄漏十份 Blob。
+ * - **data URL 回落的兼容**：旧版本把图存在 `BG_IMAGE_KEY`，升级后第一次启动
+ *   要能读出来（否则用户会看到"我的背景没了"）。
+ */
+let currentObjectUrl: string | null = null;
+
+function revokeCurrent(): void {
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = null;
+  }
+}
+
+/** 旧版残留的 data URL（迁移源；也可能是当前回落路径的存储）。 */
+function legacyDataUrl(): string | null {
   try {
     const raw = localStorage.getItem(BG_IMAGE_KEY);
-    // 只认 data: 开头的图：这条路径写进去的一定是 data URL，别的值出现在这里
-    // 只可能是手改/污染，塞进 CSS 会被当成相对 URL 去请求一个不存在的文件。
-    if (raw && raw.startsWith('data:image/')) image = raw;
-    const rawSettings = localStorage.getItem(BG_SETTINGS_KEY);
-    if (rawSettings) settings = normalizeSettings(JSON.parse(rawSettings));
+    // 只认 data: 开头的图：别的值（相对路径/网址）塞进 CSS 会被当相对 URL 去
+    // 请求一个不存在的文件，表现为静默 404 + 没有背景。
+    if (raw && raw.startsWith('data:image/')) return raw;
   } catch {
-    // 隐私模式 / 坏 JSON：当作没有背景（宁可不生效，也不要抛在启动路径上）
+    // 隐私模式等
   }
-  return { image, settings };
+  return null;
 }
+
+/** 读出可用的图片地址（没有图 → null）。 */
+export async function loadImageUrl(): Promise<string | null> {
+  revokeCurrent();
+  if (idbAvailable()) {
+    try {
+      const blob = await idbGet<Blob>();
+      if (blob instanceof Blob && blob.size > 0) {
+        currentObjectUrl = URL.createObjectURL(blob);
+        return currentObjectUrl;
+      }
+    } catch {
+      // IDB 不可用/被清空：落到下面的旧版 data URL
+    }
+  }
+  const legacy = legacyDataUrl();
+  return legacy;
+}
+
+/** 保存结果：成功时带回**实际存储方式**与尺寸（给界面如实汇报）。 */
+export type StoreImageResult =
+  | { ok: true; width: number; height: number; mode: 'indexeddb' | 'local' | 'shrunk' }
+  | { ok: false; error: string };
+
+/**
+ * 存图：IndexedDB 优先（**原图字节，不重编码**），放不下才缩。
+ *
+ * 为什么不无脑缩到某个长边：背景图是**全屏铺开**的，任何分辨率损失都会被
+ * 放大成"模糊 + 颗粒"。IDB 的配额通常是几百 MB，一张 4K 壁纸完全放得下。
+ */
+export async function storeImage(file: Blob): Promise<StoreImageResult> {
+  // 尺寸只用于"你的图比屏幕小"这类提示，解不出来不该拦住保存——某些环境下
+  // 解码能力缺失（老 WebView），但浏览器自己画背景图没问题。
+  const size = await readImageSize(file);
+  storeMeta(size);
+
+  if (idbAvailable()) {
+    try {
+      await idbPut(file);
+      try {
+        localStorage.removeItem(BG_IMAGE_KEY); // 清掉旧版残留，避免双份占配额
+      } catch {
+        /* ignore */
+      }
+      return {
+        ok: true,
+        width: size?.width ?? 0,
+        height: size?.height ?? 0,
+        mode: 'indexeddb',
+      };
+    } catch {
+      // 配额/隐私模式 → 走下面的回落
+    }
+  }
+
+  // 回落：localStorage + data URL（受 ~5MB 配额限制，必要时缩图）
+  const dataUrl = await blobToDataUrl(file);
+  if (dataUrl && dataUrl.length <= MAX_DATA_URL_CHARS) {
+    try {
+      localStorage.setItem(BG_IMAGE_KEY, dataUrl);
+      return { ok: true, width: size?.width ?? 0, height: size?.height ?? 0, mode: 'local' };
+    } catch {
+      /* 落到缩图 */
+    }
+  }
+  const shrunk = await shrinkToDataUrl(file, FALLBACK_SHRINK_EDGE, FALLBACK_QUALITY);
+  if (!shrunk) return { ok: false, error: '图片无法处理（解码或编码失败）' };
+  if (shrunk.dataUrl.length > MAX_DATA_URL_CHARS) {
+    return {
+      ok: false,
+      error: `这幅图太大，浏览器本地存储放不下（压缩后仍 ${Math.round(shrunk.dataUrl.length / 1000)}K 字符）。换一张小一点的，或换用支持 IndexedDB 的浏览器。`,
+    };
+  }
+  try {
+    localStorage.setItem(BG_IMAGE_KEY, shrunk.dataUrl);
+    storeMeta({ width: shrunk.width, height: shrunk.height });
+    return { ok: true, width: shrunk.width, height: shrunk.height, mode: 'shrunk' };
+  } catch (error) {
+    const name = (error as { name?: string } | null)?.name ?? '';
+    return {
+      ok: false,
+      error:
+        name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED'
+          ? '浏览器本地存储已满——换一张小一点的图，或先移除现有背景'
+          : `保存失败：${(error as { message?: string } | null)?.message ?? String(error)}`,
+    };
+  }
+}
+
+/** 移除图片（IDB + localStorage 两处都清，并回收对象 URL）。 */
+export async function removeImage(): Promise<void> {
+  revokeCurrent();
+  if (idbAvailable()) {
+    try {
+      await idbDelete();
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    localStorage.removeItem(BG_IMAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  storeMeta(null);
+}
+
+/** 是否已存过图（同步判定：看 meta，IDB/localStorage 的真实性由加载时确认）。 */
+export function hasStoredImage(): boolean {
+  if (loadMeta()) return true;
+  return legacyDataUrl() !== null;
+}
+
+// ── DOM：把状态套上 ─────────────────────────────────────────────────
 
 /**
  * 把当前设置套到 DOM 上（唯一的写样式出口）。
@@ -126,8 +373,8 @@ export function applyBackground(image: string | null, settings: PanelBgSettings)
     root.style.removeProperty('--panel-bg-blur');
     return;
   }
-  // data URL 里不会有双引号，但手改过就把引号转义掉——拼坏 CSS 会让整条规则失效，
-  // 表现为"图选了、界面没反应"，比报错更难查。
+  // URL 可能来自 data:（含 base64）或 blob:；双引号一律转义——拼坏 CSS 会让
+  // 整条规则失效，表现为"图选了、界面没反应"，比报错更难查。
   root.style.setProperty('--panel-bg-image', `url("${image.replace(/"/g, '%22')}")`);
   root.style.setProperty('--panel-bg-size', settings.fit);
   root.style.setProperty('--panel-bg-dim', String(settings.dim));
@@ -135,200 +382,152 @@ export function applyBackground(image: string | null, settings: PanelBgSettings)
   root.setAttribute(BG_ATTR, 'on');
 }
 
-export type SaveResult = { ok: true } | { ok: false; error: string };
-
-/**
- * 存图 + 参数。**先写图再写参数**：图失败时参数不该单独生效（否则界面会出现
- * "变暗了但没有图"的怪状态）。
- */
-export function saveBackground(image: string | null, settings: PanelBgSettings): SaveResult {
+/** 只改参数（适配 / 变暗 / 模糊），不动图。 */
+export function updateBackgroundSettings(next: PanelBgSettings): { ok: true } | { ok: false; error: string } {
   try {
-    if (image) {
-      if (image.length > MAX_DATA_URL_CHARS) {
-        return { ok: false, error: '图片太大，浏览器存储放不下——换一张小一点的（建议 2MB 以内的 JPEG）' };
-      }
-      localStorage.setItem(BG_IMAGE_KEY, image);
-    } else {
-      localStorage.removeItem(BG_IMAGE_KEY);
-    }
-    localStorage.setItem(BG_SETTINGS_KEY, JSON.stringify(settings));
+    storeSettings(next);
     return { ok: true };
   } catch (error) {
-    // 配额超限（QuotaExceededError）最常见：如实说清楚，别让用户以为功能坏了。
-    const name = (error as { name?: string } | null)?.name ?? '';
     return {
       ok: false,
-      error:
-        name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED'
-          ? '浏览器存储已满（背景图约占几 MB）——换一张小一点的图，或先清掉旧背景'
-          : `保存失败：${(error as { message?: string } | null)?.message ?? String(error)}`,
+      error: `保存设置失败：${(error as { message?: string } | null)?.message ?? String(error)}`,
     };
   }
 }
 
-/**
- * 选图 + 落地：读文件 → 按需缩放 → 存 → 应用。
- *
- * 成功时回传**实际落盘**的尺寸与是否重编码过：界面要如实告诉用户"你选的
- * 4000px 图被缩到了 3200"——不说的话，看界面没有变糊只是运气好，下次换一张
- * 可能会觉得"功能坏了"。
- */
-export async function setBackgroundFromFile(
-  file: File,
-): Promise<SaveResult & { width?: number; height?: number; reencoded?: boolean }> {
-  const prepared = await prepareImageFile(file);
-  if (!prepared.ok) return prepared;
-  const current = loadBackground().settings;
-  const saved = saveBackground(prepared.dataUrl, current);
-  if (!saved.ok) return saved;
-  applyBackground(prepared.dataUrl, current);
-  return {
-    ok: true,
-    width: prepared.width,
-    height: prepared.height,
-    reencoded: prepared.reencoded,
-  };
-}
-
-/** 只改参数（适配 / 变暗 / 模糊），不动图。 */
-export function updateBackgroundSettings(next: PanelBgSettings): SaveResult {
-  const settings = normalizeSettings(next);
-  const { image } = loadBackground();
-  const saved = saveBackground(image, settings);
-  if (!saved.ok) return saved;
-  applyBackground(image, settings);
-  return { ok: true };
-}
-
-/** 移除背景（回到纯色平面）。 */
-export function clearBackground(): void {
-  saveBackground(null, loadBackground().settings);
+/** 删图 + 复位参数 + 摘掉 DOM 上的属性（三者缺一都会留残余）。 */
+export async function clearBackground(): Promise<void> {
+  await removeImage();
+  try {
+    localStorage.removeItem(BG_SETTINGS_KEY);
+  } catch {
+    /* ignore */
+  }
   applyBackground(null, DEFAULT_BG_SETTINGS);
 }
 
-export type PrepareResult =
-  | { ok: true; dataUrl: string; width: number; height: number; bytes: number; reencoded: boolean }
-  | { ok: false; error: string };
-
 /**
- * 读一个图片文件并压到可存的体积。
+ * 启动时套用一次（`App.vue` 的 setup 里 `void initPanelBackground()`）。
  *
- * 策略（两个阈值，都不是随便取的）：
- * - 原图 ≤ `KEEP_ORIGINAL_MAX_BYTES` 且是位图 → **原样存**：不重编码就没有
- *   质量损失（也就不会糊），也能保住 PNG 的透明（"完整显示"模式下透明区会是
- *   页面底色）。常见壁纸都在这一档，所以默认路径是"零损失"；
- * - 更大的 → 长边缩到 `MAX_IMAGE_EDGE`、JPEG 重编码。用 canvas 而不是让
- *   CSS 去缩：CSS 缩放不省存储配额，而配额才是这条路径的真限制。
- *
- * 失败一律给人能读懂的原因（不是图片 / 太大 / 解码失败）。
+ * 设置是同步的（先让蒙版/模糊就位），图片是异步的（IDB 读 + 对象 URL），
+ * 所以**属性要等图真正就绪才设**——否则会先出现"透明但没图"的怪帧（露出
+ * 浏览器默认白底，比纯色界面更难看）。
  */
-export async function prepareImageFile(file: File): Promise<PrepareResult> {
-  if (!file.type.startsWith('image/')) {
-    return { ok: false, error: '这不是图片文件（支持 PNG / JPEG / WebP 等）' };
-  }
-  const readAsDataUrl = () =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result ?? ''));
-      reader.onerror = () => reject(new Error('读取文件失败'));
-      reader.readAsDataURL(file);
-    });
-
-  let original: string;
+export async function initPanelBackground(): Promise<void> {
+  const settings = loadSettings();
+  let url: string | null = null;
   try {
-    original = await readAsDataUrl();
-  } catch (error) {
-    return { ok: false, error: (error as Error).message || '读取文件失败' };
-  }
-  if (!original.startsWith('data:image/')) {
-    return { ok: false, error: '这个文件的类型不是图片' };
-  }
-
-  const bitmap = await decodeImage(original);
-  if (!bitmap) {
-    return { ok: false, error: '图片解码失败（文件可能已损坏）' };
-  }
-  const { width, height } = bitmap;
-
-  // 小图原样存（无损 + 保透明）。
-  if (file.size <= KEEP_ORIGINAL_MAX_BYTES) {
-    if (original.length <= MAX_DATA_URL_CHARS) {
-      return {
-        ok: true,
-        dataUrl: original,
-        width,
-        height,
-        bytes: file.size,
-        reencoded: false,
-      };
-    }
-  }
-
-  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(width, height));
-  const targetW = Math.max(1, Math.round(width * scale));
-  const targetH = Math.max(1, Math.round(height * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = targetW;
-  canvas.height = targetH;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return { ok: false, error: '浏览器不支持画布缩放，无法处理这张图片' };
-  }
-  ctx.drawImage(bitmap, 0, 0, targetW, targetH);
-  let dataUrl = '';
-  try {
-    dataUrl = canvas.toDataURL('image/jpeg', REENCODE_QUALITY);
+    url = await loadImageUrl();
   } catch {
-    return { ok: false, error: '图片编码失败（可能是跨域或格式不受支持）' };
+    url = null;
   }
-  if (!dataUrl.startsWith('data:image/')) {
-    return { ok: false, error: '图片编码失败（浏览器没有给出可用结果）' };
-  }
-  if (dataUrl.length > MAX_DATA_URL_CHARS) {
-    return {
-      ok: false,
-      error: `图片压缩后仍然太大（${Math.round(dataUrl.length / 1000)}K 字符）——换一张分辨率小一点的（长边 3200 以内通常够用）`,
-    };
-  }
-  return {
-    ok: true,
-    dataUrl,
-    width: targetW,
-    height: targetH,
-    // base64 的 UTF-16 字符数 → 近似字节（只用于展示，不参与判断）
-    bytes: Math.round(dataUrl.length * 0.75),
-    reencoded: true,
-  };
+  applyBackground(url, settings);
 }
 
-/** 解码成可绘制的位图（优先 `createImageBitmap`，回落 `Image`）。 */
-async function decodeImage(
-  dataUrl: string,
-): Promise<{ width: number; height: number } & CanvasImageSource | null> {
-  try {
-    if (typeof createImageBitmap === 'function') {
-      const blob = await (await fetch(dataUrl)).blob();
-      const bitmap = await createImageBitmap(blob);
-      return bitmap as unknown as { width: number; height: number } & CanvasImageSource;
+// ── 图像工具 ────────────────────────────────────────────────────────
+
+/**
+ * 给"可能永远不结算"的解码加个上限。
+ *
+ * 为什么必须有：不是所有环境都真的会触发 `onload` / `reject`——测试用的
+ * happy-dom 里 `createImageBitmap` 是个**永不 resolve 的函数**，某些老 WebView
+ * 对损坏的 JPEG 也会静默卡住。没有这个上限时表现是"选了图，界面一直转圈"。
+ */
+export const DECODE_TIMEOUT_MS = 1200;
+
+function withTimeout<T>(task: Promise<T>, ms = DECODE_TIMEOUT_MS): Promise<T | null> {
+  return Promise.race([
+    task,
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), ms);
+    }),
+  ]);
+}
+
+/** 读出图片的天然尺寸（解码失败 / 超时 → null）。 */
+export async function readImageSize(blob: Blob): Promise<PanelBgMeta | null> {
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await withTimeout(
+      createImageBitmap(blob).catch(() => null),
+    );
+    if (bitmap) {
+      const size = { width: bitmap.width, height: bitmap.height };
+      bitmap.close?.();
+      return size;
     }
-  } catch {
-    // 回落下面的 Image 路径
   }
+  if (typeof Image !== 'function') return null;
+  const url = URL.createObjectURL(blob);
+  try {
+    return await withTimeout(
+      new Promise<PanelBgMeta | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => resolve(null);
+        img.src = url;
+      }),
+    );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string | null> {
   return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () =>
-      resolve(img as unknown as { width: number; height: number } & CanvasImageSource);
-    img.onerror = () => resolve(null);
-    img.src = dataUrl;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? '');
+      resolve(result.startsWith('data:image/') ? result : null);
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
   });
 }
 
-/**
- * 启动时套用一次（`App.vue` 的 setup 里调用；同步完成，不留闪帧）。
- *
- * 幂等：重复调用只是把同样的变量再写一遍。
- */
-export function initPanelBackground(): void {
-  const { image, settings } = loadBackground();
-  applyBackground(image, settings);
+/** 缩图 + 重编码（**只有回落路径才会用到**：IDB 存不下时）。 */
+async function shrinkToDataUrl(
+  blob: Blob,
+  maxEdge: number,
+  quality: number,
+): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  const size = await readImageSize(blob);
+  if (!size) return null;
+  let bitmap: ImageBitmap | HTMLImageElement;
+  try {
+    if (typeof createImageBitmap === 'function') {
+      bitmap = await createImageBitmap(blob);
+    } else {
+      const url = URL.createObjectURL(blob);
+      bitmap = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve(img);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('图片加载失败'));
+        };
+        img.src = url;
+      });
+    }
+  } catch {
+    return null;
+  }
+  const scale = Math.min(1, maxEdge / Math.max(size.width, size.height));
+  const width = Math.max(1, Math.round(size.width * scale));
+  const height = Math.max(1, Math.round(size.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(bitmap as CanvasImageSource, 0, 0, width, height);
+  (bitmap as ImageBitmap).close?.();
+  try {
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    return dataUrl.startsWith('data:image/') ? { dataUrl, width, height } : null;
+  } catch {
+    return null;
+  }
 }
