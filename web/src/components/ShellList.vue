@@ -74,8 +74,21 @@ onUnmounted(() => releasePending('shell:sessions'));
 <template>
   <div class="shell-list">
     <div class="shell-list__actions">
-      <NeumorphismButton :size="32" variant="glass" :disabled="!state.connected" @click="startShell">
-        新建
+      <!-- 新建：改图标钮（2026-11 用户要求「也使用图标并对齐刷新按钮的样式」）。
+           与刷新钮同一档：`ghost` + `square` 26px —— 此前这里是 `glass` 32px
+           带文字的按钮，比刷新钮高一档也宽一截，同一排里两个控件不成套。
+           图标用 `plus`（ui-frame 注册表里已有，与 ChatTabs 的「+」同一个）。 -->
+      <NeumorphismButton
+        :size="26"
+        variant="ghost"
+        shape="square"
+        :disabled="!state.connected"
+        title="新建 Shell 会话"
+        aria-label="新建 Shell 会话"
+        data-shell-new
+        @click="startShell"
+      >
+        <PanelIcon name="plus" size="sm" />
       </NeumorphismButton>
       <!-- 图标钮走库的 `ghost` + `square`（2026-11）：透明底跟随卡片底色、
            26px 方钮，与侧栏其它卡头图标钮同一档。此前是 `variant="glass"` 32px
@@ -87,6 +100,7 @@ onUnmounted(() => releasePending('shell:sessions'));
         :disabled="!state.connected"
         title="刷新 Shell 会话"
         aria-label="刷新 Shell 会话"
+        data-shell-refresh
         @click="refresh"
       >
         <PanelIcon name="refresh" size="sm" />
