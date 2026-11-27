@@ -77,4 +77,28 @@ describe('拖动边栏卡片时全局禁选', () => {
     const stop = divider.match(/const stop = \(\) => \{([\s\S]*?)\n  \};/)?.[1] ?? '';
     expect(stop).toContain('dropSelectionLock()');
   });
+
+  // 真实交互（不读源码文本）：按下卡头即挂类，pointerup 收音时摘掉。
+  // 这条是接线的兜底——上面的文本契约只能证明「代码写了」，不能证明「跑起来对」。
+  it('mount 后按卡头 / 松手：类真的挂上又摘掉', async () => {
+    const { mount } = await import('@vue/test-utils');
+    const RailStack = (await import('../components/RailStack.vue')).default;
+    const { __resetRailsForTest } = await import('../rail-drag');
+    const { resetRailLayout } = await import('../rail-layout');
+    localStorage.clear();
+    resetRailLayout();
+    __resetRailsForTest();
+    const wrapper = mount(RailStack, {
+      props: { cards: [{ id: 'shell', title: 'Shell' }], side: 'right' },
+      attachTo: document.body,
+    });
+    const head = wrapper.find('.rail-stack__head');
+    head.element.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1 }),
+    );
+    expect(hasClass()).toBe(true);
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+    expect(hasClass()).toBe(false);
+    wrapper.unmount();
+  });
 });
