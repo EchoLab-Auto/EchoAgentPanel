@@ -132,6 +132,17 @@ body {
   overscroll-behavior: none;
 }
 
+/* 边栏卡片拖动中：整页禁选（2026-11-27）。
+   卡头自带 user-select: none，但拖动时指针会划过主会话区和其他卡片，浏览器按
+   指针坐标扩展选区（与 pointer capture 的事件目标无关），把聊天正文一起框进去。
+   类由 rail-selection-lock.ts 的引用计数挂/摘；!important 用于压掉各组件自己的
+   user-select，拖动结束移除类即恢复。 */
+html.rail-dragging,
+html.rail-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    自定义背景图（2026-11，设置 · 面板 · 外观）
    ═══════════════════════════════════════════════════════════════════════

@@ -36,6 +36,11 @@ import {
   updateCardDrag,
 } from '../rail-drag';
 import { moveToOtherSide, type RailSide } from '../rail-layout';
+import {
+  lockRailSelection,
+  resetRailSelectionLock,
+  unlockRailSelection,
+} from '../rail-selection-lock';
 import PanelIcon from './PanelIcon.vue';
 
 export interface RailCardDef {
@@ -173,6 +178,25 @@ function flexOf(id: string): number {
   return flexMap.value[id] ?? 1;
 }
 
+/**
+ * 拖动期间全局禁选的配对句柄（实现见 rail-selection-lock.ts）。
+ * 拖卡头与拖分隔条不会同时发生，所以每个实例只需一个布尔：解锁永远不多于
+ * 加锁，不会把另一列持有的锁解掉。
+ */
+let selectionLocked = false;
+
+function ensureSelectionLock() {
+  if (selectionLocked) return;
+  selectionLocked = true;
+  lockRailSelection();
+}
+
+function dropSelectionLock() {
+  if (!selectionLocked) return;
+  selectionLocked = false;
+  unlockRailSelection();
+}
+
 /** 进行中的分隔条拖动清理函数（卸载时兜底，避免监听泄漏）。 */
 let stopDividerDrag: (() => void) | null = null;
 
@@ -186,6 +210,7 @@ function onDividerDragStart(event: MouseEvent, aboveId: string, belowId: string)
   const rail = (event.target as HTMLElement).closest('.rail-stack') as HTMLElement | null;
   if (!rail) return;
   stopDividerDrag?.(); // 理论上不会重入；防御性兜底
+  ensureSelectionLock(); // 分隔条同理：斜向拖动时指针可能扫过主会话区
   const startY = event.clientY;
   const a0 = flexOf(aboveId);
   const b0 = flexOf(belowId);
@@ -222,6 +247,7 @@ function onDividerDragStart(event: MouseEvent, aboveId: string, belowId: string)
     window.removeEventListener('mouseup', stop);
     window.removeEventListener('keydown', onKey);
     if (stopDividerDrag === stop) stopDividerDrag = null;
+    dropSelectionLock();
     save();
   };
   const onKey = (e: KeyboardEvent) => {
@@ -260,6 +286,9 @@ function onHeadPointerDown(event: PointerEvent, card: RailCardDef) {
     { x: event.clientX, y: event.clientY },
     { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
   );
+  // 按下即禁选：此刻浏览器尚未锚定选区；一旦进入拖动，指针会划过主会话区和
+  // 其他卡片，若不提前压住 user-select，正文会被一起框进去（见 rail-selection-lock）。
+  ensureSelectionLock();
   // 指针捕获：指针移出窗口/压到别的元素上时仍能收到 up——否则拖动会卡死
   // （卡片已被摘出布局、拖影留在半空）。不支持捕获的环境退回 window 监听。
   if (typeof target.setPointerCapture === 'function') {
@@ -352,11 +381,15 @@ function detachPointerListeners() {
   window.removeEventListener('pointercancel', onPointerCancel);
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('blur', onPointerCancel);
+  dropSelectionLock();
 }
 
 onBeforeUnmount(() => {
   detachPointerListeners();
   stopDividerDrag?.(); // 拖动分隔条时切视图：window 监听必须回收
+  // 兜底：异常路径若漏了解锁，卸载时必须把 <html> 上的禁选类摘掉，
+  // 否则整页永久不可选文字（比原缺陷严重得多）。
+  resetRailSelectionLock();
 });
 
 /** 拖动刚结束时抑制紧随其后的 click（否则会误触发折叠）。 */
